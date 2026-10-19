@@ -575,9 +575,13 @@ static void ghost_tick(CPU *c){
     }
 }
 
-/* Who changes the ghost car's driver type or physics mode (NFSU2_ROAM_PROBE). */
+/* Who changes the ghost car's driver type or physics mode (NFSU2_ROAM_PROBE);
+ * a friend's car (free-roam multiplayer) is not woken into physics when
+ * a car comes near it (roam_game.c, roam_game_inert). */
 void sub_005f46a0_orig(CPU *c);   /* Car::SetPhysicsMode(this, mode) */
+int roam_game_inert(uint32_t car, uint32_t mode, uint32_t from);
 void sub_005f46a0(CPU *c){
+    if (roam_game_inert(c->ecx, MR32(c->esp + 4u), MR32(c->esp))){ POP32(c->eip); c->esp += 4u; return; }   /* thiscall, ret 4 */
     if (G.on && c->ecx == G.car && probe())
         fprintf(stderr, "[roam] f=%ld ghost SetPhysicsMode(%u) from 0x%08x (was %u)\n", autotest_frame(),
                 MR32(c->esp + 4u), MR32(c->esp), MR32(G.car + 0x28u));

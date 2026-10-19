@@ -222,12 +222,13 @@ static void io_broadcast(void *u, uint16_t port, const uint8_t *buf, int len){
 void roam_game_event(int ev, int peer, const char *text);    /* roam_game.c provides the log */
 
 /* ---- notices: what the page shows over the game ----------------------------------
- * A friend joining or leaving, and where a friend is (free roam, a race, a shop,
- * the menus), as NET_KIND_NOTICE lines on the TX ring; the page never sends them
- * on.  Pausing is free roam here (a window in the background pauses), loading is
- * in between, and a place is told once it has held for 1.5 s, so a friend
- * passing through a menu or a loading screen is not announced.  All with the
- * lock held. */
+ * A friend joining or leaving, and where a friend is (free roam or a race), as
+ * NET_KIND_NOTICE lines on the TX ring; the page never sends them on.  Pausing
+ * is free roam here (a window in the background pauses; the name over the car
+ * says "paused"), and the menus, a shop and loading are in between: a friend
+ * who goes into the menus or a shop and comes back is not announced.  A place
+ * is told once it has held for 1.5 s, so a friend passing through a loading
+ * screen is not announced either.  All with the lock held. */
 #define NOTICE_HOLD_US 1500000
 static struct { uint32_t id; uint8_t told, cand; int64_t since; } g_where[RC_TABLE];
 /* the players whose joining was told: once each (with the hub, a player
@@ -251,13 +252,12 @@ static void where_watch(int64_t now){
         const rc_peer *p = &g_s->peer[i];
         if (p->state != RC_PS_EST || p->lost){ if (p->state != RC_PS_EST) g_where[i].id = 0; continue; }
         uint8_t st = place(p);
-        if (st == RC_ST_LOADING) continue;
+        if (st == RC_ST_LOADING || st == RC_ST_MENUS || st == RC_ST_SHOP) continue;
         if (g_where[i].id != p->id){ g_where[i].id = p->id; g_where[i].told = g_where[i].cand = st; g_where[i].since = now; continue; }
         if (st != g_where[i].cand){ g_where[i].cand = st; g_where[i].since = now; }
         if (g_where[i].cand == g_where[i].told || now - g_where[i].since < NOTICE_HOLD_US) continue;
         g_where[i].told = g_where[i].cand;
-        notice(p->name, st == RC_ST_EVENT ? " is in a race" : st == RC_ST_SHOP ? " is in a shop" :
-                        st == RC_ST_MENUS ? " is in the menus" : " is in free roam");
+        notice(p->name, st == RC_ST_EVENT ? " is in a race" : " is in free roam");
     }
 }
 static void io_event(void *u, int ev, int peer, const char *text){

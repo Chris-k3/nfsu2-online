@@ -227,6 +227,8 @@ typedef struct {
     uint32_t look;                            /* hash of the record the car shows (0: none) */
     int64_t  load_t0; long load_f0;
     int      hidden;
+    int      paused;                          /* the friend is paused (for a second now): so says the name over the car */
+    int64_t  paused_since;
     int      ghost;                           /* solid cars: no collision body until clear of the player's car */
     float    drawn[3];                        /* where the car was drawn last frame (+0x60) */
     float    com[3];                          /* centre-of-mass offset in the car's frame (forward, left, up) */
@@ -234,7 +236,7 @@ typedef struct {
     int64_t  release_after;
     char     carname[RC_CFG_TYPE_NAME + 1];
     /* statistics */
-    uint32_t loads, remode, pose_frames;
+    uint32_t loads, remode, pose_frames, wakes;   /* wakes: the game's wake-ups refused (roam_game_inert) */
 } Slot;
 static Slot g_sl[NSLOT];
 static uint32_t g_world_seen;
@@ -876,7 +878,8 @@ static void apply_pose(CPU *c, Slot *s, const rc_pose *P){
 #define FN_FE_HIDE      0x0050ca00u   /* cdecl (object) */
 #define FN_VIEW_SCREEN  0x005bc4a0u   /* thiscall view (out*, in*): world -> view pixels, z > 0 in front */
 #define TAG_SCR         0x100u        /* g_gmem scratch: +0 in, +0x10 out, +0x20 vectors, +0x40 "%s", +0x48 text */
-static struct { uint32_t hud, obj[NSLOT]; uint8_t looked[NSLOT], shown[NSLOT]; char text[NSLOT][RC_NAME_MAX + 1]; } g_tag;
+#define TAG_TEXT_MAX    (RC_NAME_MAX + 10)  /* "<name> (paused)" */
+static struct { uint32_t hud, obj[NSLOT]; uint8_t looked[NSLOT], shown[NSLOT]; char text[NSLOT][TAG_TEXT_MAX]; } g_tag;
 static void gstr(uint32_t a, const char *s, uint32_t cap){
     uint32_t i = 0;
     for (; s[i] && i + 1 < cap; i++) MR8(a + i) = (uint8_t)s[i];
@@ -908,7 +911,7 @@ static void tag_text(CPU *c, int k, uint32_t obj, const char *name){
     uint32_t ac[2] = { col, 0 }; rh_call(c, FN_FE_COLOR, obj, 0, 2, ac);
     MR32(obj + 0x6cu) = (MR32(obj + 0x6cu) & ~0xfu) | 5u;                     /* centred */
     MR32(obj + 0x1cu) |= 0x100u;
-    gstr(fmt, "%s", 4); gstr(txt, name, RC_NAME_MAX + 1);
+    gstr(fmt, "%s", 4); gstr(txt, name, TAG_TEXT_MAX);
     uint32_t ap[3] = { obj, fmt, txt }; rh_call(c, FN_FE_PRINTF, 0, 0, 3, ap);
 }
 static void tags_update(CPU *c){
@@ -941,7 +944,9 @@ static void tags_update(CPU *c){
         if (!(z > 0.f) || !(x >= 0.f) || !(x <= w) || !(y >= 0.f) || !(y <= h)){ tag_hide(c, k); continue; }
         float hx = x / w * 640.f, hy = y / h * 480.f;
         rh_hud_marker(&hx, &hy);
-        tag_text(c, k, obj, s->name);
+        char t[TAG_TEXT_MAX];
+        snprintf(t, sizeof t, s->paused ? "%s (paused)" : "%s", s->name);
+        tag_text(c, k, obj, t);
         uint32_t ap[2] = { gvec(g_gmem + TAG_SCR + 0x20u, hx - 320.f, hy - 240.f, z), 0 };
         rh_call(c, FN_FE_POS, obj, 0, 2, ap);
         float sc = 25.f / rc_sqrtf(d2);
@@ -955,7 +960,7 @@ static void tags_update(CPU *c){
 }
 
 /* ---- per-frame --------------------------------------------------------------------------------- */
-typedef struct { int idx; uint32_t id; char name[RC_NAME_MAX + 1]; int visible; float dist; uint32_t cfg_gen;
+typedef struct { int idx; uint32_t id; char name[RC_NAME_MAX + 1]; int visible, paused; float dist; uint32_t cfg_gen;
                  int has_cfg;          /* a complete car record is held */
                  int cfg_len;          /* > 0: the record is copied here (a slot needs it) */
                  uint8_t cfg[RC_CFG_MAX]; int have_pose; rc_pose pose; float err; uint32_t look; } PeerView;
@@ -1331,6 +1336,7 @@ void roam_game_frame(CPU *c){
             v->visible = !p->lost && p->mo.n > 0 &&
                          (p->status == RC_ST_PAUSED ||
                           (p->status == RC_ST_ROAM && host - p->last_snap_rx < 2000000));
+            v->paused = p->status == RC_ST_PAUSED;
             v->cfg_gen = p->cfg_gen; v->cfg_len = 0; v->has_cfg = p->cfg_len > 0; v->err = 0;
             int slotted = -1;
             for (int k = 0; k < NSLOT; k++) if (g_sl[k].st != SL_FREE && g_sl[k].st != SL_PARKED && g_sl[k].peer == i && g_sl[k].peer_id == p->id) slotted = k;
@@ -1375,6 +1381,10 @@ void roam_game_frame(CPU *c){
             PeerView *v = 0;
             for (int i = 0; i < g_npv; i++) if (g_pv[i].idx == s->peer && g_pv[i].id == s->peer_id) v = &g_pv[i];
             if (!v) continue;
+            /* a second first: a hitch in the friend's game (streaming) is a pause too */
+            if (!v->paused) s->paused_since = 0;
+            else if (!s->paused_since) s->paused_since = host;
+            s->paused = s->paused_since && host - s->paused_since >= 1000000;
             if (s->st == SL_CREATING){
                 int r = finish_create(c, k);
                 if (r < 0){ release(c, k, "could not create a car"); continue; }
@@ -1621,6 +1631,25 @@ static void run_job(CPU *c, const char *job){
 #endif /* ROAM_HOST_SCRIPT */
 
 #ifndef ROAM_HOST_WIN
+/* roam.c, Car::SetPhysicsMode (0x5F46A0): refuse the null brain's wake-up
+ * (0x404890, returning to 0x4048B6 for mode 3 or 0x4048C0 for mode 1) of a
+ * friend's car.  The game wakes a car in mode 0 into its AI physics on every
+ * frame another car is near it (within some 10 m in the tests, touching or
+ * not); for a friend's car that physics then ran on
+ * a ride built without its physics pass (build_ride), drove the car for the
+ * rest of the timestep and left its wheel and suspension state in the car
+ * (+0x340..+0x38C), which nothing of ours puts back.  Kept in mode 0 the car
+ * is still solid: a car that hits it is pushed in its owner's game as before.
+ * Other callers (Car::Activate, SetRideInfo) are not refused: make_inert puts
+ * their mode back to 0, as it always did.  1: refused. */
+int roam_game_inert(uint32_t car, uint32_t mode, uint32_t from){
+    if (!mode || !car || (from != 0x004048b6u && from != 0x004048c0u)) return 0;
+    for (int k = 0; k < NSLOT; k++) if (g_sl[k].car == car && (g_sl[k].st == SL_ACTIVE || g_sl[k].st == SL_LOADING)){
+        if (!g_sl[k].wakes++) rlog("[roam] f=%ld slot %d: %s's car stays without physics when a car comes near\n", rh_frame(), k, g_sl[k].name);
+        return 1;
+    }
+    return 0;
+}
 /* lifecycle.c, on the guest thread, when the app parks the game in the
  * background (Cmd-Tab, hidden: WM_ACTIVATEAPP(FALSE), then the game waits in
  * GetMessageA) and when it lets it run again (lifecycle_game_parked(): not

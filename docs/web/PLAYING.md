@@ -144,7 +144,8 @@ Good to know:
   Solid cars; off: you drive through them). A car that appears on top of yours, at a garage or after a jump, lets you
   through until you are apart. Each player's own game moves their car: a car you hit is pushed in its owner's game,
   and moves on your screen as it does there.
-- **Names over the cars** follow the game's own player-names option, as in its LAN races.
+- **Names over the cars** follow the game's own player-names option, as in its LAN races. A player who paused shows
+  as "paused" there.
 - **Rooms:** set the same "Room" to see only some of the players' cars. A room is a filter between players, not
   privacy: every browser on the server still sees your name ("Your name", or the profile name), whether you are in
   the menus or driving, and the room, and someone with their own tools could join it. Play on a server only with
@@ -153,10 +154,10 @@ Good to know:
   on, everyone on the server sees your name and status, and players in free roam with you see your car and where it
   is. The server reads where your car is, to pick the players near you, and keeps nothing of it. Nobody sees your
   real address: the server gives each player a virtual one (`10.77.0.x`).
-- **A tab in the background** (or another window in front) pauses your game. The others see you as paused: your car stays where you stopped until you come back.
+- **A tab in the background** (or another window in front) pauses your game. The others see you as paused: your car stays where you stopped, with "paused" after your name, until you come back.
 - **Closing the tab:** the others see your car disappear after a few seconds.
-- **Messages over the game** say when a player comes online, goes into a race or a shop, is back in free roam, or
-  leaves.
+- **Messages over the game** say when a player comes online, goes into a race, is back in free roam after it, or
+  leaves. The menus and the shops are not announced.
 - **The game's own LAN races** (its LAN menu) work between players on the same server too, with free roam on or off.
 
 ## 7. The game's Online mode
