@@ -1,7 +1,7 @@
 // The container image (Dockerfile) never holds the game or anything made from it: .dockerignore lets only the
 // server's and the page's sources into the build, the Dockerfile copies nothing else from the checkout, and none
 // of those files has a game file's name or is a link out of its folder.  The image itself, built and run with
-// Caddy in Chrome: node web/tools/deploy-e2e.mjs --mode docker (docs/web/DOCKER.md).
+// Caddy in Chrome: node web/tools/deploy-e2e.mjs --mode docker (docs/web/VPS.md).
 //   node --test web/test/docker.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -25,7 +25,7 @@ test('.dockerignore: everything is left out, then only the allowed sources are l
 });
 
 test('Dockerfile: copies from the checkout only what .dockerignore lets in', () => {
-  const copies = fs.readFileSync(path.join(REPO, 'Dockerfile'), 'utf8').split('\n')
+  const copies = fs.readFileSync(path.join(REPO, 'Dockerfile'), 'utf8').split(/\r?\n/)
     .filter(l => /^COPY\s/.test(l) && !/--from=/.test(l))
     .flatMap(l => l.replace(/^COPY\s+/, '').split(/\s+/).filter(w => !w.startsWith('--')).slice(0, -1));
   assert.ok(copies.length > 0);

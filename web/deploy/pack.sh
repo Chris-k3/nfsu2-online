@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds the bundle that runs the server on a VPS (docs/web/VPS.md):
+# Builds the bundle that runs the server on a VPS without Docker (docs/web/VPS.md, "Without Docker"):
 #
 #   web/deploy/pack.sh [--out <dir>] [--no-build] [--data "<game folder>"]
 #

@@ -71,8 +71,8 @@ async function startServer(args) {
   return { stop: () => new Promise(r => { c.once('exit', r); c.kill('SIGTERM'); }) };
 }
 
-// the shipped stack, but Caddy serves the test certificate (the shipped Caddyfile plus a tls line) on
-// 127.0.0.1:<port> only, without its http -> https port
+// the shipped stack, but Caddy serves the test certificate on 127.0.0.1:<port> only, without its http -> https
+// port, with a Caddyfile of its own (the proxy and header -Server; compose.yml's other directives are not in it)
 async function startDocker() {
   const override = path.join(OUT, 'compose.e2e.yml');
   fs.writeFileSync(override, `services:

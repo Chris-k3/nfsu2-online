@@ -1,20 +1,21 @@
-# NFS Underground 2 in the browser on a VPS, with Docker (docs/web/DOCKER.md): the server's image (Dockerfile)
+# NFS Underground 2 in the browser on a VPS, with Docker (docs/web/VPS.md): the server's image (Dockerfile)
 # and Caddy, which does HTTPS with a Let's Encrypt certificate it gets and renews by itself.  Both use the VPS's
-# own network, as Caddy and the server do without Docker (docs/web/VPS.md, A): Caddy on ports 80 and 443,
-# forwarding to the server on 127.0.0.1:8080, which nothing outside the VPS can reach.  So Caddy sees every
-# player's real address, over IPv6 too, and the VPS's firewall (ufw, nftables) decides who can play.  (Ports
-# published from a Docker network would pass by that firewall, and would give every IPv6 player the same
-# address, which the server's per-address limits then count as one.)
+# own network, as Caddy and the server do without Docker: Caddy on ports 80 and 443, forwarding to the server on
+# 127.0.0.1:8080, which nothing outside the VPS can reach.  So Caddy sees every player's real address, over IPv6
+# too, and the VPS's firewall (ufw, nftables) decides who can play.  (Ports published from a Docker network
+# would pass by that firewall, and would give every IPv6 player the same address, which the server's
+# per-address limits then count as one.)
 #
 # In .env next to this file (or the environment):
-#   NFSU2_HOST=game.example.com      the name players open; its DNS record points at this VPS
+#   NFSU2_HOST=game.example.com      the name players open (one name); its DNS record points at this VPS
 #   NFSU2_DATA=/srv/nfsu2/game       your NFS Underground 2 folder (default ./game), readable by everyone
 #   NFSU2_MODULE=/srv/nfsu2/module   nfsu2.wasm and nfsu2.json from web/build.sh (default ./module)
 #   NFSU2_IMAGE=<image>              the server's image (default ghcr.io/th0mk/nfsu2-web:latest)
 #   NFSU2_HTTP_PORT=8080             the server's port on 127.0.0.1, if 8080 is taken on the VPS
 #   NFSU2_REAL_IP_HEADER=cf-connecting-ip    only with Cloudflare's proxy (orange cloud) in front of Caddy
 # then:  docker compose up -d && docker compose logs -f server
-# A Cloudflare Tunnel instead of Caddy: compose.tunnel.yml.
+# Port 80 taken by something else on the VPS: compose.443.yml.  A Cloudflare Tunnel instead of Caddy:
+# compose.tunnel.yml.
 name: nfsu2-web
 services:
   caddy:
@@ -23,6 +24,7 @@ services:
     network_mode: host
     configs: [{ source: caddyfile, target: /etc/caddy/Caddyfile }]
     volumes: [caddy-data:/data, caddy-config:/config]
+    logging: { driver: local }
   server:
     image: ${NFSU2_IMAGE:-ghcr.io/th0mk/nfsu2-web:latest}
     restart: unless-stopped
@@ -44,16 +46,48 @@ services:
     mem_limit: 3g
     memswap_limit: 3g
     ulimits: { nofile: 8192 }
+    # the console, kept by Docker in files it rotates (5 of 20 MB), so the log never fills the VPS's disk
+    logging: { driver: local }
 configs:
   caddyfile:
-    # Caddy's admin API (127.0.0.1:2019) stays off: nothing reconfigures Caddy while it runs
+    # web/deploy/Caddyfile for NFSU2_HOST.  Caddy names no software (no Server or Via header, also not on its
+    # redirects and errors), closes a connection for any other name (the bare address, a scanner's made-up name)
+    # without an answer, and opens at most 1900 connections to the server (it takes 2000 with 250 players).
+    # Behind Cloudflare's proxy it believes CF-Connecting-IP only from Cloudflare's addresses
+    # (web/server/cloudflare-ips.txt, as of 2026-10-18) and hands the server the address it decided on, so a
+    # client that reaches the VPS directly cannot claim another; the server reads that header only with
+    # NFSU2_REAL_IP_HEADER=cf-connecting-ip.  The admin API (127.0.0.1:2019) stays off: nothing reconfigures
+    # Caddy while it runs.
     content: |
       {
       	admin off
+      	servers {
+      		trusted_proxies static 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
+      		client_ip_headers CF-Connecting-IP
+      	}
+      }
+      http://${NFSU2_HOST:-} {
+      	header -Server
+      	redir https://{host}{uri} 308
+      }
+      :80 {
+      	abort
+      }
+      :443 {
+      	abort
       }
       ${NFSU2_HOST:-} {
-      	reverse_proxy 127.0.0.1:${NFSU2_HTTP_PORT:-8080}
+      	reverse_proxy 127.0.0.1:${NFSU2_HTTP_PORT:-8080} {
+      		header_up CF-Connecting-IP {client_ip}
+      		transport http {
+      			max_conns_per_host 1900
+      		}
+      	}
       	header -Server
+      	header -Via
+      	handle_errors {
+      		header -Server
+      	}
       }
 volumes:
   state:

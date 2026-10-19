@@ -1,95 +1,509 @@
 # The game server on a VPS
 
-Status: **2026-10-19** (with the fixes of a security and privacy review).
+Status: **2026-10-19**, with Docker (the server's image and Caddy from one compose file). Without Docker (the
+bundle and a systemd unit): [the last section](#without-docker).
 
 Use a VPS when other PCs should play: on the Mac at home the server serves only that Mac (`http://localhost`). The
-VPS runs the same server (`web/server/server.mjs`) with HTTPS in front, so friends anywhere open
-`https://<your name>/` in Chrome and play from there.
+VPS runs the same server (`web/server/server.mjs`) in a container, with Caddy in front for HTTPS, so friends
+anywhere open `https://<your name>/` in Chrome and play from there.
 
-With Docker instead (the server's image and Caddy from one compose file): [DOCKER.md](DOCKER.md).
+## Setup
 
-- **Nothing changes in how it behaves.** Only TLS differs: a certificate or a proxy provides HTTPS.
-- **What it serves:** the page, the game module, the game's own files from your game folder (read-only) and the
-  multiplayer switch. Of the game folder it serves only `SPEED2.EXE`, `server.dll`, `server.cfg` and the game's data
-  folders (`CARS`, `CREDITS`, `FRONTEND`, `GLOBAL`, `LANGUAGES`, `memcard`, `MOVIES`, `NIS`, `pfdata`, `SOUND`,
-  `speech`, `SUBTITLES`, `TRACKS`), compared without case; never an installer's log (`unins000.dat` names the PC,
-  the Windows account and the install time), a `SAVE` folder, mod plugins and their settings, or anything else you
-  keep there.
-- **What it never shows:** anything about the VPS or the other players (`web/test/deploy.test.mjs` checks what is
-  and is not exposed).
+**What you need:**
+
+- **A Linux VPS** (Debian or Ubuntu, say) that you reach as root over SSH. 2 vCPU and 4 GB of memory are plenty for
+  friends; see [Sizing](#sizing) for more players.
+- **A domain name** (or a subdomain) with an `A` record pointing at the VPS, and an `AAAA` record if it has IPv6.
+- **Your own NFS Underground 2 folder** (the one with `SPEED2.EXE`).
+- **The game module**, built on the Mac with `web/build.sh` (`out/web/nfsu2.wasm` and `out/web/nfsu2.json`).
+- **The image, public:** `ghcr.io/th0mk/nfsu2-web` is private, like the repository, so the VPS cannot pull it.
+  Make it public once: on GitHub, the package's settings, "Change visibility". It holds the server and the page,
+  never the game. To keep it private instead: [The image](#the-image).
+
+**1. On the VPS**, as root: Docker, the ports, two folders and your name.
+
+```sh
+docker compose version || curl -fsSL https://get.docker.com | sh    # Docker and its compose plugin, if not there yet
+ss -ltn | grep -E ':(80|443|8080) '                                  # nothing: the ports are free
+mkdir -p /srv/nfsu2/game /srv/nfsu2/module
+echo NFSU2_HOST=game.example.com > /srv/nfsu2/.env                  # your name
+```
+
+- **Docker there already** (other containers on the VPS): keep it. Installing it again would restart Docker, and
+  with it every container. The game's containers and volumes are its own (`nfsu2-web-…`), and `docker compose` in
+  `/srv/nfsu2` touches only those.
+- **8080 in use** (on any address): pick a free port for the server, `echo NFSU2_HTTP_PORT=8090 >> /srv/nfsu2/.env`.
+  It listens on 127.0.0.1 only; Caddy follows it.
+- **80 in use, 443 free** (an API or site that Docker publishes on port 80, say): Caddy does without 80. Copy
+  `compose.443.yml` too (step 2) and `echo COMPOSE_FILE=compose.yml:compose.443.yml >> /srv/nfsu2/.env`. What
+  that changes: [Port 80 taken](#port-80-taken).
+- **443 in use:** this Caddy cannot start next to it. Use [the Cloudflare Tunnel](#a-cloudflare-tunnel-instead-of-caddy),
+  which needs no port at all, or put the game behind the proxy you have
+  ([A proxy you already have](#a-proxy-you-already-have)).
+
+**2. From the Mac**, in the checkout: the compose file and the module, then the game's own files from inside the
+game folder.
+
+```sh
+scp web/deploy/compose.yml root@<vps>:/srv/nfsu2/
+scp web/deploy/compose.443.yml root@<vps>:/srv/nfsu2/              # only when port 80 is taken (step 1)
+scp out/web/nfsu2.wasm out/web/nfsu2.json root@<vps>:/srv/nfsu2/module/
+cd "<your game folder>"
+rsync -rlt SPEED2.EXE server.dll server.cfg CARS CREDITS FRONTEND GLOBAL LANGUAGES memcard MOVIES NIS pfdata \
+  SOUND speech SUBTITLES TRACKS root@<vps>:/srv/nfsu2/game/
+ssh root@<vps> chmod -R u=rwX,go=rX /srv/nfsu2/game /srv/nfsu2/module
+```
+
+The game takes about 3 GB. Why these lines: [Copying the game](#copying-the-game).
+
+**3. The firewall** must let in HTTP and HTTPS (443 for TCP and for HTTP/3's UDP; with `compose.443.yml` only
+443). On the VPS, `ufw status`:
+
+- `active`: `ufw allow 80/tcp && ufw allow 443` (with `compose.443.yml`: `ufw allow 443`);
+- `inactive` or no ufw: nothing to do on the VPS. Do not turn a firewall on just for the game: one that is new on
+  a VPS with other services blocks those that listen without Docker publishing their ports (on the host's network,
+  say) until you allow them too;
+- a firewall in your provider's web panel: open 80/TCP and 443/TCP+UDP there.
+
+**4. Start it:**
+
+```sh
+cd /srv/nfsu2 && docker compose up -d && docker compose logs -f server
+```
+
+- Caddy gets a Let's Encrypt certificate for your name within seconds and renews it by itself
+  (`docker compose logs caddy` says `certificate obtained successfully`).
+- `docker compose ps` shows the server `healthy` once it serves the module. Docker starts both containers again
+  after a reboot.
+
+**5. Play:** open `https://game.example.com/` in Chrome. The start page says it is ready, and Play starts the game.
+
+**Updating:** copy the new module (step 2, the `nfsu2.wasm` line and the `chmod` line), then on the VPS
+`cd /srv/nfsu2 && docker compose pull && docker compose up -d`. The players' browsers notice the new module by its
+ETag and download it once. The module and the image must come from the same commit: [The image](#the-image).
+
+**When something is wrong:**
+
+| What you see | Why |
+|---|---|
+| `docker compose up` says `set NFSU2_HOST in .env` | `/srv/nfsu2/.env` is missing, or not next to `compose.yml` |
+| pulling the image says `unauthorized` | the image is private: make it public, or [log in](#the-image) |
+| the server keeps `Restarting`, its log says `usage: ... (got: /game)` | `/srv/nfsu2/game` has no `SPEED2.EXE` |
+| the server stays `health: starting`, then `unhealthy` (after about 2½ minutes) | `/srv/nfsu2/module` has no `nfsu2.wasm` and `nfsu2.json` |
+| Caddy keeps `Restarting`, its log says `listen tcp :80: bind: address already in use` | something else has port 80: `compose.443.yml` (step 1) |
+| the same for `:443` | something else has port 443: [the tunnel](#a-cloudflare-tunnel-instead-of-caddy) |
+| Caddy's log says `challenge failed` | the DNS record does not point at the VPS yet, or 80 and 443 are closed (with `compose.443.yml`: 443) |
+| the server keeps `Restarting`, its log says `EACCES: permission denied, scandir '/game/…'`; or a game file gets a 502 | the game folder is not readable by everyone: run the `chmod` line again |
 
 > **Who can play.** The server has no accounts, passwords or allowlist. Anyone who can reach it can play and
 > download the game files from it, so your firewall decides who that is. Behind Cloudflare's proxy the VPS only
 > sees Cloudflare's addresses.
 >
 > **What players see of each other:** the names they chose and, with free roam on, their status, car and position;
-> never another player's real address. The server answers only for its own name (`--host`, or the certificate's):
-> a page of another site whose name points at the VPS gets nothing, and a scanner that connects to the VPS's bare
-> address gets no certificate and no page.
+> never another player's real address. The server answers only for its own name (`NFSU2_HOST`): a page of another
+> site whose name points at the VPS gets nothing, and a scanner that connects to the VPS's bare address gets no
+> certificate and no page.
 
-## What you need
+The rest of this guide is reference.
 
-- **A Linux VPS.** A small one is enough for friends; for up to 250 players at once, 2–4 vCPU, 4 GB of memory,
-  40 GB of disk and a 1 Gbit/s port with a few TB of traffic a month:
-  - the server relays and serves files; it used about 110 MB of memory here, plus up to 8 MB queued towards each
-    player who falls behind;
-  - the game folder takes about 3 GB of disk;
-  - each new player downloads the 7 MB module and then the game data they play (about 70 MB for a quick race, up
-    to the whole 3 GB over a career), once: the browser keeps it;
-  - free roam is about 25 KB/s each way per player in a full group of 8, so 250 players roaming at once are about
-    50 Mbit/s each way through the VPS. More than a handful of players at once is **UNVERIFIED**.
-- **A domain name** (or a subdomain) pointing at the VPS. Cloudflare can provide it (see below).
-- **Node.js 20 or newer.** The current LTS is 24. The server was tested on 24.22.0 (LTS) and 23.9.0.
-- **Your own NFS Underground 2 folder** (the one with `SPEED2.EXE`).
-- **The bundle**, built on the Mac:
+## What it serves
+
+- **Nothing changes in how it behaves.** Only TLS differs: Caddy (or Cloudflare) provides HTTPS.
+- **What it serves:** the page, the game module, the game's own files from your game folder (read-only) and the
+  multiplayer switch. Of the game folder it serves only `SPEED2.EXE`, `server.dll`, `server.cfg` and the game's
+  data folders (`CARS`, `CREDITS`, `FRONTEND`, `GLOBAL`, `LANGUAGES`, `memcard`, `MOVIES`, `NIS`, `pfdata`, `SOUND`,
+  `speech`, `SUBTITLES`, `TRACKS`), compared without case, and everything in those folders except dot files.
+  Nothing else at the top of the folder: never an installer's log (`unins000.dat` names the PC, the Windows account
+  and the install time), a `SAVE` folder, mod plugins and their settings, or anything else you keep there.
+- **What it never shows:** anything about the VPS or the other players (`web/test/deploy.test.mjs` checks what is
+  and is not exposed).
+
+## Sizing
+
+For up to 250 players at once: 2–4 vCPU, 4 GB of memory, 40 GB of disk and a 1 Gbit/s port with a few TB of
+traffic a month.
+
+- The server relays and serves files. It used about 110 MB of memory here, plus up to 10 MB queued towards each
+  player who falls behind (8 MB on the connection, 2 MB more of LAN-race data in the switch's own queue).
+- The game folder takes about 3 GB of disk.
+- Each new player downloads the 7 MB module and then the game data they play (about 70 MB for a quick race, up to
+  the whole 3 GB over a career), once: the browser keeps it.
+- Free roam is about 25 KB/s each way per player in a full group of 8, so 250 players roaming at once are about
+  50 Mbit/s each way through the VPS. More than a handful of players at once is **UNVERIFIED**.
+
+## The image
+
+- **What it holds:** the server, its one dependency (`ws`) and the page: about 62 MB to download, on Node.js 24
+  (Alpine). **Never the game**, or anything made from it: the build sees only the server's and the page's sources
+  (`.dockerignore`, checked by `web/test/docker.test.mjs`), so a public image cannot carry the game. What it needs
+  is mounted when it runs:
+
+  | In the container | What | On the VPS (default) | |
+  |---|---|---|---|
+  | `/game` | your game folder | `/srv/nfsu2/game` | read-only |
+  | `/module` | `nfsu2.wasm` and `nfsu2.json` | `/srv/nfsu2/module` | read-only |
+  | `/state` | the server's keys and the Online mode's records | the volume `nfsu2-web_state` | |
+
+- **From GitHub's registry:** `.github/workflows/image.yml` builds `ghcr.io/th0mk/nfsu2-web` for amd64 and arm64
+  on every push: `latest` from `main`, `sha-<commit>` from every push, and `<version>` and `<major>.<minor>` from a
+  `v*` tag. A package is private while its repository is, and then the VPS needs one of:
+  - **public:** the package's settings on GitHub, "Change visibility";
+  - **a login:** a GitHub token that may read packages (a classic personal access token with `read:packages`),
+    once on the VPS: `docker login ghcr.io -u th0mk`, with the token as the password. Docker keeps it in
+    `/root/.docker/config.json`;
+  - **built yourself** (below).
+- **Built yourself**, with no registry at all: on any machine with Docker, in the checkout, then into the VPS's
+  Docker over SSH.
 
   ```sh
-  web/build.sh            # the game module, if out/web/nfsu2.wasm is not there yet
-  web/deploy/pack.sh      # -> out/web/deploy/nfsu2-web-<rev>.tar.gz (about 11 MB)
+  docker build --platform linux/amd64 -t nfsu2-web .         # linux/arm64 for an Arm VPS
+  docker save nfsu2-web | ssh root@<vps> docker load
+  ssh root@<vps> 'echo NFSU2_IMAGE=nfsu2-web >> /srv/nfsu2/.env'
   ```
 
-  - **What is in it:** the server and its one dependency (`ws`), the page without its test pages, the game module,
-    a systemd unit, example Caddy and cloudflared configurations, and a short README.
-  - **What is never in it: the game.** `pack.sh` refuses to build the bundle if any file in it has a game file's
-    name, or the name and size of a file in your game folder. It also refuses if a file names this Mac (host name,
-    home folder).
+  It needs BuildKit (the buildx plugin; Docker Desktop has it). Building for the other architecture needs no
+  emulation: the image's own stage only copies. To update, build and load again, then `docker compose up -d`
+  (without `pull`: there is nothing to pull).
+- **The module must come from the image's commit.** The page in the image and the module meet at the module's
+  imports, and nothing checks that the two come from the same revision. `nfsu2.json`'s `rev` (the short commit,
+  with `+` if the checkout had changes) and the image's tag `sha-<commit>` should name the same commit. On the VPS:
 
-## 1. Install
+  ```sh
+  grep -o '"rev":"[^"]*"' /srv/nfsu2/module/nfsu2.json
+  docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' ghcr.io/th0mk/nfsu2-web
+  ```
 
-```sh
-# on the VPS, as root
-node --version                                    # 20 or newer
-mkdir -p /opt /srv/nfsu2
-tar -C /opt -xzf nfsu2-web-<rev>.tar.gz           # -> /opt/nfsu2-web
-```
+  A self-built image has no revision label: build it and the module from the same checkout.
 
-From the Mac, copy the bundle and the game's own files from inside the game folder:
+## Copying the game
 
-```sh
-scp out/web/deploy/nfsu2-web-<rev>.tar.gz root@<vps>:
-cd "Need for Speed - Underground 2"
-rsync -rlt SPEED2.EXE server.dll server.cfg CARS CREDITS FRONTEND GLOBAL LANGUAGES memcard MOVIES NIS pfdata \
-  SOUND speech SUBTITLES TRACKS root@<vps>:/srv/nfsu2/game/
-ssh root@<vps> chmod -R u=rwX,go=rX /srv/nfsu2/game
-```
-
-- **Only the game.** The list is what the server serves; nothing else of the folder needs to be on the VPS (an
-  installer's log, saves, mod settings). `pack.sh` lists what your folder holds besides these. On a folder whose
-  names differ in case (`Sound`), use the names it has.
-- **Owned by root, readable by everyone on the VPS.** `-rlt` copies the files, folders and their times, not their
-  owner, group or modes: on the VPS they belong to root (`rsync -a` as root would keep your Mac's uid 501, which
-  another account may get one day). The service runs as a throwaway user (systemd `DynamicUser`), so the game
-  folder must be world-readable: the `chmod` does that (folders 755, files 644). Run both lines again after every
-  copy: new files arrive with the Mac's modes.
+- **Only the game.** The `rsync` line lists what the server serves; nothing else of the folder needs to be on the
+  VPS (an installer's log, saves, mod settings). `web/deploy/pack.sh --data "<your game folder>"` lists what your
+  folder holds besides these. On a folder whose names differ in case (`Sound`), use the names it has.
+- **The times are kept** (`-t`). A file's time is part of its ETag, so a copy that changes the times makes every
+  player's browser download the game data again.
+- **Owned by root, readable by everyone.** `-rlt` copies the files, folders and their times, not their owner,
+  group or modes: on the VPS they belong to root (`rsync -a` as root would keep your Mac's uid 501). The server
+  runs as the image's user `node` (uid 1000), so the game folder and the module must be world-readable: the
+  `chmod` does that (folders 755, files 644). Run it again after every copy: new files arrive with the Mac's modes.
 - **Not `--chmod`.** The Mac's own `rsync` (openrsync) applies `--chmod` only to the files named on its command line,
   not to what is inside the folders (`TRACKS/` stayed 700, its files 600), and it refuses `D755,F644`. Checked:
   the lines above from the Mac's openrsync to rsync 3.5.0 on Debian, and with rsync 3.5.0 on both ends.
+- **From Windows:** the same lines in WSL, with the game folder under `/mnt/<drive>/`.
+- **Elsewhere:** set `NFSU2_DATA` (the game folder) and `NFSU2_MODULE` (the module's folder) in `.env`. By default
+  they are `./game` and `./module` next to `compose.yml`.
 - **Copyright.** The game folder is EA's copyrighted content, and the server hands it to anyone who can reach it.
   That is one more reason to keep the firewall tight.
 
-## 2. TLS: pick one
+## How it runs
 
-Chrome runs the game only on a secure page, so TLS is required. Each choice below sets the server's command line in
+- **The VPS's own network.** Caddy and the server use the VPS's network (`network_mode: host`), as they would
+  without Docker: Caddy on 80 and 443, the server on 127.0.0.1:8080, which nothing outside the VPS can reach.
+  Ports published from a Docker network would have two problems:
+  - they pass by the VPS's firewall (ufw, nftables), which is what decides who can play here;
+  - IPv6 players come in through Docker's proxy and all get the same address. The switch allows 8 connections per
+    address, so only 8 of them could play.
+
+  If 8080 is taken on the VPS, set `NFSU2_HTTP_PORT` in `.env`: Caddy follows it.
+- **Caddy** runs with `compose.yml`'s own Caddyfile, the directives of `web/deploy/Caddyfile` for `NFSU2_HOST`. It:
+  - gets and renews the certificate (Let's Encrypt's HTTP or TLS challenge, on 80 or 443);
+  - redirects http to https;
+  - passes WebSockets (the multiplayer switch) and the client's address (`X-Forwarded-For`) on; the server trusts
+    those headers only from this machine;
+  - names no software: no `Server` or `Via` header, also not on its redirects and errors (a 502 while the server
+    restarts);
+  - closes, without an answer, a connection that asks for another name (the bare address, a scanner's made-up
+    name), on 80 and on 443; a TLS handshake without your name fails, so the certificate is not shown;
+  - opens at most 1900 connections to the server (one per request in progress; with 250 players the server takes
+    2000);
+  - has its admin API off: nothing reconfigures it while it runs, and a changed `.env` takes `docker compose up -d`.
+- **NFSU2_HOST is one name.** For a second name, or a wildcard, edit the Caddyfile in `compose.yml` and the
+  server's `NFSU2_HOST` (a comma list; `*.example.com` for one label under it). A wildcard certificate needs Let's
+  Encrypt's DNS challenge, which the stock Caddy image cannot do.
+- **The server's container** runs as the user `node`, with a read-only root, no capabilities, `no-new-privileges`,
+  3 GB of memory without swap and 8192 open files. Those are the systemd unit's limits, as far as a container has
+  them. It writes only to `/state`. At the memory limit the kernel stops the server and Docker starts it again.
+- **Keep the state volume.** It holds the ETag key (a new key makes every player's browser download the game data
+  again), the switch's addresses (`lan-addresses.json`: a player who reconnects gets the same one back) and the
+  Online mode's records (`online/`). `docker compose down` keeps it; `down -v` deletes it.
+- **In every mode the server:**
+  - answers only `GET` and `HEAD`, and only for its own names (any other `Host` gets 421);
+  - sends HSTS when the page arrived over https for its name (not for `localhost` or an IP address);
+  - keeps proxies and CDNs from storing anything (`Cache-Control: private`, `CDN-Cache-Control: no-store`);
+  - limits what one client can make it hold (`web/test/deploy.test.mjs`, `web/test/audit.test.mjs`). A client is
+    an IPv4 address or an IPv6 /56; all clients of one IPv6 /48 (a site) together get twice one client's share:
+    - 64 connections at once per client and 128 per site, for TCP peers that are not a trusted proxy (a proxy
+      carries many clients);
+    - 64 requests in progress per client and 128 per site, also when they come through a proxy or tunnel (more get
+      429; the page waits and tries again);
+    - the last quarter of its connections and requests only for clients that hold none yet, so the others can never
+      lock a newcomer out;
+    - a response must move at least 64 KB every 20 s (a client that stopped reading, or reads a trickle, is let go)
+      and may take 15 minutes at most;
+    - 15 s for a TLS handshake and for the request headers, at most 4 requests queued on one connection;
+    - WebSocket pings at 10 a second (a burst of 20); a connection that sends more is closed.
+
+## Port 80 taken
+
+With `compose.443.yml` (`COMPOSE_FILE=compose.yml:compose.443.yml` in `.env`), Caddy uses only port 443, for TCP
+and HTTP/3's UDP, and port 80 stays with whatever has it (another API, say), which it never sees.
+
+- **The certificate** comes with Let's Encrypt's TLS challenge, on 443. The HTTP challenge, on 80, is off.
+- **No redirect from http.** `http://<your name>` reaches what has port 80, which answers its own way (an API with
+  a 404, say). Share the `https://` link: Chrome tries https first for an address typed without it, and once a
+  browser has been there, HSTS keeps it on https.
+- **Not behind Cloudflare's proxy** (orange cloud): Cloudflare lets neither challenge through to the VPS then. For
+  a name on Cloudflare, the [tunnel](#a-cloudflare-tunnel-instead-of-caddy) needs no port at all.
+- **Everything else** is as in [How it runs](#how-it-runs): the names, the headers, the closed connections for
+  other names (on 443), the server.
+
+## What the log keeps
+
+`docker compose logs server` is the server's console: start-up, players joining (by virtual address, `10.77.0.x`)
+and leaving (by virtual address and nickname), refused requests and connections, and errors (method, path and the
+server's own stack, never the client's details).
+
+- **No player's real IP address** is written, and the page sends the server nothing about the player but the
+  nickname.
+- **`--access-log`** adds a line per request with the client's IP address and the URL. It is off by default, for
+  debugging only: add it to the server's `command` in `compose.yml` (`["--behind-proxy", "--access-log"]`), and
+  the log then holds your friends' addresses for as long as Docker keeps it.
+- **What one client can cause** is limited per minute: 2 lines about its refused requests, 2 about its refused
+  `/lan` connections, 20 joins and leaves, 30 lines of Online mode and 3000 access-log lines; then one line saying
+  how many were left out. Errors are written in full.
+- **Docker keeps the console** in files it rotates (the `local` log driver: 5 files of 20 MB per container), so
+  the log never fills the disk.
+
+The console names paths and addresses: it is yours.
+
+## Cloudflare
+
+### Cloudflare's proxy (orange cloud), in front of Caddy
+
+1. **DNS:** a proxied (orange) `A` record for your name, pointing at the VPS, and an `AAAA` record if the VPS has
+   IPv6 (Cloudflare may connect to either).
+2. **The client's address:** add `NFSU2_REAL_IP_HEADER=cf-connecting-ip` to `.env` and run `docker compose up -d`.
+   Caddy believes `CF-Connecting-IP` only from Cloudflare's addresses (`compose.yml` lists them, from
+   `web/server/cloudflare-ips.txt` as of 2026-10-18) and overwrites it otherwise, so a client that reaches the VPS
+   directly cannot choose the address the server logs and limits by.
+3. **Firewall:** let only Cloudflare's addresses reach 80 and 443, or anyone who finds the VPS's address bypasses
+   Cloudflare. Instead of step 3 of the setup:
+
+   ```sh
+   ufw delete allow 80/tcp && ufw delete allow 443
+   for r in $(curl -s https://www.cloudflare.com/ips-v4) $(curl -s https://www.cloudflare.com/ips-v6); do
+     ufw allow proto tcp from "$r" to any port 80,443
+   done
+   ```
+
+4. **SSL/TLS mode: Full (strict).** Cloudflare connects to the VPS over TLS and checks Caddy's certificate.
+5. **The certificate.** Caddy gets it over port 80 (the HTTP challenge; the TLS challenge cannot pass Cloudflare's
+   proxy), which Cloudflare passes on as long as it does not redirect it to https itself: leave "Always Use HTTPS"
+   off (Caddy redirects already). The safe order is to start with the record DNS only (grey cloud) and turn the
+   proxy on once Caddy has its certificate.
+6. **Turn off what rewrites pages:**
+   - **Rocket Loader** (Speed, Optimization);
+   - **Email Obfuscation** (Scrape Shield);
+   - anything else that injects scripts, such as Web Analytics' automatic setup or Zaraz.
+
+   The page's Content-Security-Policy blocks injected scripts, and Rocket Loader would also rewrite the page's own
+   module scripts.
+7. **Caching:** add a Cache Rule "Bypass cache" for your hostname. The server's headers already say `no-store` to
+   Cloudflare (`Cloudflare-CDN-Cache-Control`); the rule makes it explicit.
+8. **WebSockets** are on by default on every plan. The server pings each connection every 25 s, well inside
+   Cloudflare's idle limit.
+
+Through a real Cloudflare: **UNVERIFIED**. The client's address was checked with a stand-in Cloudflare address
+([What was tested](#what-was-tested)).
+
+### A Cloudflare Tunnel, instead of Caddy
+
+`cloudflared` on the VPS connects out to Cloudflare, so the VPS opens no port for the game at all (only SSH).
+`compose.tunnel.yml` puts `cloudflared` where Caddy was.
+
+1. In Cloudflare's dashboard (Zero Trust, Networks, Tunnels), create a tunnel with the Docker connector and copy
+   its token. Give it a public hostname: your name, service `http://127.0.0.1:8080`.
+2. Copy `web/deploy/compose.tunnel.yml` next to `compose.yml`, and add to `.env`:
+
+   ```sh
+   TUNNEL_TOKEN=<the token>
+   COMPOSE_FILE=compose.yml:compose.tunnel.yml
+   ```
+
+3. Run `docker compose up -d`. Skip the setup's firewall step for 80 and 443 (`ufw allow 22/tcp && ufw --force
+   enable`).
+
+What follows from this setup:
+
+- **cloudflared and the server share one network namespace**, on a Docker network, held by a small `pause`
+  container (`net`), so either can restart on its own. cloudflared reaches the server on 127.0.0.1:8080; nothing
+  else can.
+- **The client's address** comes from Cloudflare's `CF-Connecting-IP`, and only from `cloudflared`. It opens a
+  connection to the server for each request in progress and has no limit of its own per client: the server's own
+  limits per client address hold.
+- **Settings:** 6 to 8 of the proxy's list above apply too.
+
+A real tunnel was **not** opened here (**UNVERIFIED**). The layout was: `cloudflared` stood in by a container that
+reaches the server on 127.0.0.1, crashes of either side, a reboot.
+
+## A proxy you already have
+
+With Caddy or nginx already on the VPS, run the server alone on the VPS's network and forward your name to
+127.0.0.1:8080, as `web/deploy/Caddyfile` or the nginx block in [Without Docker](#without-docker) do:
+
+```sh
+docker run -d --name nfsu2-web --restart unless-stopped --network host \
+  --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --memory 3g --memory-swap 3g --ulimit nofile=8192 --log-driver local \
+  -e NFSU2_HOST=game.example.com \
+  -v /srv/nfsu2/game:/game:ro -v /srv/nfsu2/module:/module:ro -v nfsu2-state:/state \
+  ghcr.io/th0mk/nfsu2-web
+```
+
+The proxy must keep `Host`, pass WebSocket upgrades on, set `X-Forwarded-For` and `X-Forwarded-Proto`, and wait
+longer than the 25 s ping interval for an answer. The image's command is the server's options, `--behind-proxy` by
+default. Options with a value can also be set as `NFSU2_<OPTION>` (`web/server/server.mjs`).
+
+## Multiplayer over the internet
+
+The server's switch relays every packet: player → VPS → player. The delay between two players is the sum of both
+paths to the VPS, so pick a VPS location between you.
+
+- **Free roam** draws a friend's car `roam_delay` milliseconds (100 by default) behind its newest snapshot. That
+  delay hides the 50 ms between snapshots, jitter and the odd lost snapshot. Network delay comes on top of it.
+  - **Measured with impairment on a local switch:** 100 ± 10 ms one way and 5 % loss.
+    98.1 % of frames were interpolated, 1.9 % extrapolated, and none were held.
+  - **For 50–150 ms round trips, the default is enough.** If friends' cars stutter (Wi-Fi or mobile jitter), set
+    `roam_delay = 150` in Settings (settings.ini). It only adds display delay.
+  - **There is no automatic raise from the measured ping.** The runtime reads `roam_delay` once at start; making it
+    follow the ping is a runtime change for the net track.
+  - **Over the real internet:** **UNVERIFIED**.
+- **Traffic:** free roam sends 20 snapshots a second of about 180 bytes to each friend, about 3.6 KB/s per friend
+  in each direction.
+- **Keepalive:** the switch pings every connection every 25 s. Proxies and Cloudflare then never cut a quiet player,
+  and the switch finds players whose connection died.
+- **Limits:**
+  - 250 players on the switch with the image (`NFSU2_MAX_PEERS=250`; the server's own default is 16, and 250 is the
+    most its virtual network has addresses for);
+  - 8 connections at once per client address and 16 per IPv6 /48; opening them is rate limited per client
+    address (a burst of 20, then one a second), so a client that opens and closes connections as fast as it can
+    gets 429;
+  - frames up to 8 KB; 1000 frames and 256 KB a second per connection, 2000 and 512 KB for all of one client
+    address's connections together, 4000 and 1 MB for all of one IPv6 /48 (a 3-player LAN race's host sent at
+    most 100 frames and 7.7 KB a second; free roam is 3.6 KB a second per friend). A broadcast counts once for
+    every player it reaches;
+  - datagrams to a player whose connection is 256 KB behind are dropped, as a full link would. LAN-race stream data
+    is never dropped. A player with more than 2 MB of it waiting, or more than 1 MB of it from one client, is
+    disconnected if it stopped reading (nothing went out for a second while data waited); otherwise the client
+    that queued the most for it is, all its connections (so a flood does not get a player who reads cut; only many
+    clients that together outrun that player's link for a long time could). Only a player that stops reading
+    altogether (8 MB behind) is disconnected for that;
+  - a player who drops gets the same address back when it reconnects: the switch keeps the address a minute for
+    that player alone (a token only that browser has), also across a restart of the server, and never gives it to
+    anyone else. At most 8 such addresses are kept per client address (16 per /48; past that its own oldest goes;
+    the ones kept across a restart do not count). When every address is held or kept, a newcomer gets "LAN full"
+    until one frees.
+- **LAN races** (the game's own LAN mode, from the LAN-play track) use the same switch. Over the internet they are
+  **UNVERIFIED**.
+- **The game's Online mode** is served by the server itself, at the switch's reserved address 10.77.0.1 (on by
+  default; `--online off` in the server's `command` turns it off, and the game then cannot connect). Any name of 3
+  to 15 letters, digits, `-` and `_` logs in; there are no accounts.
+  - **Kept in the state volume:** `online/stats.json` (race results and best times per persona) and
+    `online/buddies.json` (EA Messenger friends lists, persona names only), each with the month a persona was last
+    seen, written atomically. No passwords (the server never reads them), CD keys, addresses or chat.
+  - **The console** names online players by persona and virtual address (10.77.0.x) only, and shows at most 30
+    Online lines a minute caused by one client address (then one line saying how many were left out).
+  - **Who plays now:** `/players` answers anyone who reaches the server with two numbers for the start page:
+    `{"players":3,"online":1}`, the games on the switch and how many of them are in Online mode (logged in, or in
+    an online race; `null` with `--online off`). Nothing else: no names, addresses or times, never cached. The
+    game's own lobby shows its players to anyone who logs in anyway.
+  - **Limits:** 300 lobby sessions, 3 per browser, 8 per client address, 32 per IPv6 /48, and the last quarter
+    only for a client that holds none; 100 games of at most 4, 2 open and 2 started per browser (4 and 8 per client
+    address), one browser one player of a race; 20 lobby messages a second per session (a flood ends the session);
+    games created one every 2 s (a burst of 3), games joined, rooms entered and car descriptions published one a
+    second (a burst of 4; a car description over that is not passed on); chat 1 a second with a burst of 5 (then
+    10 s muted), 255 characters; a silent session goes after 120 s; a race whose players' browsers left the switch
+    ends after 2 minutes. EA Messenger: 10 messages a second per connection (a flood closes it), the lists and the
+    search 1 a second, a presence at most once a second; 50 friends each, 5000 friends lists (the least recently
+    seen go), 20 new ones an hour per client address. Results: 100,000 personas (the least recently seen go), a
+    race counts once two of its players in different browsers sent the same result.
+  - **What one client costs the others:** what the online host sends because of a client's message (its answer,
+    and what the others hear of it: room chat, a game's players) comes out of that client's switch budget; over
+    it, the connection that message came on closes, and the client must pay the overspend back before its next
+    message gets through. A game's record goes only to players looking at the game list, at most once a second; a
+    room's population at most once a second. A player too far behind (1 MB queued) loses its online connection,
+    not its place on the switch.
+  - **Measured on the Mac** (`web/tools/online-load.mjs`): 200 simulated players logging in, chatting and racing
+    in groups of four for 90 s took the server to 230 MB and 14.7 s of CPU; chat arrived in 1.1 ms (p50).
+  - Race traffic goes from browser to browser through the switch, as LAN races do (**UNVERIFIED** over the
+    internet).
+
+## What was tested
+
+- **2026-10-19, Docker 29.9 (a Docker-in-Docker container on Docker Desktop for Windows as the VPS), compose 5.6,
+  Caddy 2.11.7, the image built from the checkout (amd64), the real game folder** and a stand-in module:
+  - the setup's steps as written, with `scp` and rsync 3.5.0 on both ends: the game copied in 25 s, owned by root
+    and readable by everyone;
+  - the certificate, with Pebble (Let's Encrypt's test server) instead of Let's Encrypt: obtained over the HTTP
+    challenge, and in a second run over the TLS challenge alone;
+  - through Caddy: the headers (HSTS, isolation, CSP, `no-store`, no `Server` or `Via`), the redirect to https (no
+    `Server`), no answer for the bare address or another name on 80 and 443, no TLS handshake without the name,
+    a 502 without `Server` while the server is stopped, the `/lan` WebSocket (101), `/players`, a 404 for a file
+    outside the game's folders;
+  - the client's address the server sees, with `X-Forwarded-For` and `CF-Connecting-IP` faked by the client: its
+    own address by default and with `NFSU2_REAL_IP_HEADER=cf-connecting-ip`, and Cloudflare's `CF-Connecting-IP`
+    only from a stand-in address in Cloudflare's range;
+  - the ETag key kept when the server's container is recreated; a read-only root, no capabilities, 3 GB, 8192 open
+    files, user `node`; `healthy`, `health: starting` then `unhealthy` without a module, the restart loop without a
+    game folder; both containers back after a reboot of the VPS;
+  - the tunnel's layout, `cloudflared` stood in by a container on 127.0.0.1: crashes of either side, a reboot; the
+    real `cloudflared` image with an invalid token (the server keeps running);
+  - port 80 taken by a stand-in API that Docker publishes on 80 (`0.0.0.0:80->5282`): `compose.yml` alone keeps
+    Caddy restarting (`address already in use`); with `compose.443.yml`, Caddy on 443 only, the certificate over
+    the TLS challenge, the page, the WebSocket and a 502 as above, the API still answering on 80, and all three
+    back after a reboot;
+  - the `docker run` line of [A proxy you already have](#a-proxy-you-already-have); the `ufw` lines in Ubuntu 24.04.
+- **2026-10-19 on the Mac**, Docker 29.5 (Colima, an arm64 Linux VM), compose 5.6, Caddy 2.11.7, with the earlier
+  `compose.yml` (its Caddyfile had only the proxy and `header -Server`):
+  `node web/tools/deploy-e2e.mjs --mode docker --menu`, Caddy with a test certificate. In Chrome: the headers, a
+  secure and cross-origin isolated page, the start page, Play, then the main menu with the renderer, and no CSP
+  violation. Two runs of three reached the main menu, in 71 and 81 s; the third was still at the profile prompt when
+  the test's two minutes ran out (the same test without Docker reached it in 42 s: every file went through Colima's
+  VM). The amd64 image built on the arm64 Mac without emulation, and ran.
+- **Not tested:** a real VPS, real Let's Encrypt, a real domain, Cloudflare (proxy and tunnel), the game in Chrome
+  through the current `compose.yml` (no module on the Windows PC), more than one player at once (**UNVERIFIED**).
+
+## Without Docker
+
+The same server from a bundle, as a systemd service, with Node.js and Caddy installed on the VPS. The behaviour,
+the limits and the firewall are the same as above.
+
+**You need** Node.js 20 or newer on the VPS (the current LTS is 24; tested on 24.22.0 and 23.9.0), and the bundle,
+built on the Mac:
+
+```sh
+web/build.sh            # the game module, if out/web/nfsu2.wasm is not there yet
+web/deploy/pack.sh      # -> out/web/deploy/nfsu2-web-<rev>.tar.gz (about 11 MB)
+```
+
+- **What is in it:** the server and its one dependency (`ws`), the page without its test pages, the game module,
+  a systemd unit, example Caddy and cloudflared configurations, and a short README.
+- **What is never in it: the game.** `pack.sh` refuses to build the bundle if any file in it has a game file's
+  name, or the name and size of a file in your game folder. It also refuses if a file names this Mac (host name,
+  home folder).
+
+**Install:**
+
+```sh
+scp out/web/deploy/nfsu2-web-<rev>.tar.gz root@<vps>:
+ssh root@<vps> 'mkdir -p /opt /srv/nfsu2 && tar -C /opt -xzf nfsu2-web-<rev>.tar.gz'   # -> /opt/nfsu2-web
+```
+
+Then copy the game to `/srv/nfsu2/game/` as in step 2 of the setup (the module is in the bundle).
+
+### TLS: pick one
+
+Chrome runs the game only on a secure page, so TLS is required. Each choice sets the server's command line in
 `/opt/nfsu2-web/deploy/nfsu2-web.service`.
 
 | | TLS done by | Server command line | Open on the VPS |
@@ -100,143 +514,44 @@ Chrome runs the game only on a secure page, so TLS is required. Each choice belo
 | **D** | a Cloudflare Tunnel (`cloudflared` on the VPS) | `--behind-proxy --http-port 8080 --host game.example.com --real-ip-header cf-connecting-ip` | none |
 
 `--host` is the name players open (a comma list for more; `*.example.com` for one label under it). Behind a proxy
-the server cannot know it and refuses to start without it. It then answers only for that name and for `localhost`,
-so a web page of another site whose name points at the VPS (DNS rebinding) gets nothing. With a certificate (B) the
-names come from the certificate.
+the server cannot know it and refuses to start without it. With a certificate (B) the names come from the
+certificate.
 
-In every mode the server:
+**A: Caddy.** Install Caddy (caddyserver.com, "Install"), copy `deploy/Caddyfile` to `/etc/caddy/Caddyfile`,
+replace `game.example.com` with your name everywhere in it (and in the unit's `--host`), and run
+`systemctl reload caddy`. It does what Caddy does in Docker ([How it runs](#how-it-runs)).
 
-- answers only `GET` and `HEAD`, and only for its own names (any other `Host` gets 421);
-- with a certificate (B), completes a TLS handshake only for a name in it: a connection to the bare address without
-  a name (an internet-wide scanner) or with another name gets no certificate, so the VPS's address is not tied to
-  your domain that way (a certificate for an IP address is shown without a name too);
-- sends HSTS when the page arrived over https;
-- keeps proxies and CDNs from storing anything (`Cache-Control: private`, `CDN-Cache-Control: no-store`);
-- limits what one client can make it hold (`web/test/deploy.test.mjs`, `web/test/audit.test.mjs`). A client is an
-  IPv4 address or an IPv6 /56; all clients of one IPv6 /48 (a site) together get twice one client's share:
-  - 64 connections at once per client and 128 per site, for TCP peers that are not a trusted proxy (a proxy carries
-    many clients);
-  - 64 requests in progress per client and 128 per site, also when they come through a proxy or tunnel (more get
-    429; the page waits and tries again);
-  - the last quarter of its connections and requests only for clients that hold none yet, so the others can never
-    lock a newcomer out;
-  - a response must move at least 64 KB every 20 s (a client that stopped reading, or reads a trickle, is let go)
-    and may take 15 minutes at most;
-  - 15 s for a TLS handshake and for the request headers, a few queued requests per connection, WebSocket pings
-    answered at most 10 a second;
-- writes at most a few console lines a minute for what one client causes (refused requests and connections, joins
-  and leaves), then one line saying how many it left out, so one client cannot flood the journal.
+**B: the server does TLS itself.**
 
-**IPv4 and IPv6.** With the server doing TLS itself (B), it listens on IPv6 and IPv4 (`::`), so an `A` and an
-`AAAA` record both work; on a VPS without IPv6 it falls back to IPv4 by itself, and then only an `A` record belongs
-in DNS. `--bind 0.0.0.0` keeps it to IPv4. With Caddy (A) or a Tunnel (D), the server listens on 127.0.0.1 only and
-Caddy or cloudflared take both address families.
+- **Let's Encrypt:** get the certificate with certbot, and let it restart the server after each renewal:
+  `certbot certonly --standalone -d game.example.com --deploy-hook "systemctl restart nfsu2-web"`. In the unit, use
+  variant B: systemd hands the certificate files to the service (`LoadCredential`), so they stay readable by root
+  only, and `AmbientCapabilities=CAP_NET_BIND_SERVICE` lets the server bind port 443.
+- **A Cloudflare Origin CA certificate** (only with the orange cloud, C): create one under SSL/TLS, Origin Server,
+  save the certificate and the key on the VPS and point `LoadCredential` at them.
+- Outside systemd credentials, the server reloads its certificate on `SIGHUP`, and by itself within a minute of the
+  file changing.
+- A TLS handshake succeeds only for a name in the certificate: a connection to the bare address without a name (an
+  internet-wide scanner) or with another name gets no certificate (a certificate for an IP address is shown
+  without a name too).
+- **IPv4 and IPv6:** the server listens on `::`, so an `A` and an `AAAA` record both work; on a VPS without IPv6
+  it falls back to IPv4 by itself, and then only an `A` record belongs in DNS. `--bind 0.0.0.0` keeps it to IPv4.
+  With Caddy (A) or a tunnel (D), the server listens on 127.0.0.1 only.
 
-### A: Caddy (Let's Encrypt)
+**C: Cloudflare's proxy.** As in [Cloudflare](#cloudflare), and:
 
-1. Install Caddy (caddyserver.com, "Install").
-2. Copy `deploy/Caddyfile` to `/etc/caddy/Caddyfile` and replace `game.example.com` with your name everywhere in it
-   (and in the unit's `--host`).
-3. Run `systemctl reload caddy`.
+- with Caddy (A): the `Caddyfile`'s Cloudflare variant, with its global block at the top (Caddy then believes
+  `CF-Connecting-IP` only from Cloudflare's addresses) and a Cloudflare Origin CA certificate; the server needs
+  `--real-ip-header cf-connecting-ip`;
+- with the server itself (B): the Origin CA certificate, plus `--trusted-proxies cloudflare`. Then only connections
+  from Cloudflare's published ranges (`web/server/cloudflare-ips.txt`) may say who the client is.
 
-What Caddy then does:
+**D: a Cloudflare Tunnel.** `cloudflared tunnel login`, `cloudflared tunnel create nfsu2`,
+`cloudflared tunnel route dns nfsu2 game.example.com`; copy `deploy/cloudflared.yml` to
+`/etc/cloudflared/config.yml` and fill in the tunnel id; `cloudflared service install`. The unit's variant D.
+`cloudflared tunnel ingress validate` accepts the example (cloudflared 2026.9.3); a real tunnel is **UNVERIFIED**.
 
-- gets and renews the certificate;
-- redirects http to https;
-- passes WebSockets (the multiplayer switch) and the client's address (`X-Forwarded-For`) on;
-- the server trusts those headers only from this machine;
-- names no software: no `Server` or `Via` header, also not on its redirects and errors (a 502 while the server
-  restarts);
-- closes, without an answer, a connection that asks for another name (the bare address, a scanner's made-up name),
-  on 80 and on 443;
-- opens at most 1900 connections to the server (one per request in progress; with `--max-peers 250` the server
-  takes 2000).
-
-Tested locally with Caddy 2.11.7: the Caddyfile's site block, in front of the server, passed the page, isolation
-and policy checks in Chrome; both variants of this Caddyfile also ran in front of the unit under systemd, in a container.
-
-### B: the server does TLS itself
-
-**Let's Encrypt:**
-
-1. Get the certificate with certbot, and let it restart the server after each renewal:
-
-   ```sh
-   certbot certonly --standalone -d game.example.com --deploy-hook "systemctl restart nfsu2-web"
-   ```
-
-2. In the unit, use variant B. systemd hands the certificate files to the service (`LoadCredential`), so they stay
-   readable by root only. `AmbientCapabilities=CAP_NET_BIND_SERVICE` lets the server bind port 443.
-
-**Cloudflare Origin CA certificate** (only with the orange cloud, C): create one under SSL/TLS, Origin Server.
-Save the certificate and the key on the VPS and point `LoadCredential` at them.
-
-Outside systemd credentials, the server also reloads its certificate:
-
-- on `SIGHUP`;
-- by itself within a minute of the file changing.
-
-### C: Cloudflare's proxy (orange cloud)
-
-1. **DNS:** a proxied (orange) `A` record for your name, pointing at the VPS, and an `AAAA` record if the VPS has
-   IPv6 (Cloudflare may connect to either: see "IPv4 and IPv6" above).
-2. **Firewall:** let only Cloudflare's addresses (`web/server/cloudflare-ips.txt`, or
-   https://www.cloudflare.com/ips/) reach 443 and 80. Otherwise anyone who finds the VPS's address bypasses
-   Cloudflare.
-3. **SSL/TLS mode: Full (strict).** Cloudflare connects to the VPS over TLS and checks the certificate:
-   - with Caddy (A): Caddy's own Let's Encrypt certificate, or the Origin CA certificate. The `Caddyfile`'s
-     Cloudflare variant shows how, with its global block at the top: Caddy then believes `CF-Connecting-IP` only
-     from Cloudflare's addresses and overwrites it otherwise, so a client that reaches the VPS directly cannot
-     choose the address the server logs and limits by. The server needs `--real-ip-header cf-connecting-ip`.
-   - with the server itself (B): the Origin CA certificate, plus `--trusted-proxies cloudflare`. Then only
-     connections from Cloudflare's published ranges (`web/server/cloudflare-ips.txt`) may say who the client is.
-4. **Turn off what rewrites pages:**
-   - **Rocket Loader** (Speed, Optimization);
-   - **Email Obfuscation** (Scrape Shield);
-   - anything else that injects scripts, such as Web Analytics' automatic setup or Zaraz.
-
-   The page's Content-Security-Policy blocks injected scripts, and Rocket Loader would also rewrite the page's own
-   module scripts.
-5. **Caching:** add a Cache Rule "Bypass cache" for your hostname. The server's headers already say `no-store` to
-   Cloudflare (`Cloudflare-CDN-Cache-Control`); the rule makes it explicit.
-6. **WebSockets** are on by default on every plan. The server pings each connection every 25 s, well inside
-   Cloudflare's idle limit.
-
-### D: a Cloudflare Tunnel
-
-`cloudflared` on the VPS connects out to Cloudflare, so the VPS needs no open port for the game at all.
-
-1. Set up the tunnel:
-
-   ```sh
-   cloudflared tunnel login
-   cloudflared tunnel create nfsu2
-   cloudflared tunnel route dns nfsu2 game.example.com
-   ```
-
-2. Copy `deploy/cloudflared.yml` to `/etc/cloudflared/config.yml` and fill in the tunnel id.
-3. Run `cloudflared service install`.
-
-What follows from this setup:
-
-- **Server command line:** `--behind-proxy --http-port 8080 --host game.example.com --real-ip-header cf-connecting-ip`
-  (the unit's variant D).
-- **The client's address** comes from Cloudflare's `CF-Connecting-IP`, and only from `cloudflared` on this machine.
-  `cloudflared` opens a connection to the server for each request in progress and has no limit of its own per
-  client: the server's own limits per client address hold.
-- **Settings and terms:** the same as for C.
-
-`cloudflared tunnel ingress validate` accepts the example (cloudflared 2026.9.3). A real tunnel was **not** opened
-from the dev machine, so the tunnel itself is **UNVERIFIED**.
-
-### nginx instead of Caddy
-
-The server (with `--host game.example.com`) needs four things from nginx:
-
-- `Host` kept;
-- WebSocket upgrades passed on;
-- `X-Forwarded-For` and `X-Forwarded-Proto` set;
-- a read timeout above the 25 s ping interval.
+**nginx instead of Caddy** (with `--host game.example.com`; this configuration was not run here, **UNVERIFIED**):
 
 ```nginx
 map $http_upgrade $connection_upgrade { default upgrade; '' close; }
@@ -257,9 +572,7 @@ server {
 }
 ```
 
-This configuration was not run here (**UNVERIFIED**).
-
-## 3. Start the service
+### The service
 
 ```sh
 cp /opt/nfsu2-web/deploy/nfsu2-web.service /etc/systemd/system/
@@ -268,113 +581,20 @@ systemctl daemon-reload && systemctl enable --now nfsu2-web
 journalctl -u nfsu2-web -f
 ```
 
-**What the log keeps.** The journal gets the server's console: start-up, players joining and leaving by virtual
-address (`10.77.0.x`) and nickname, refused connections, and errors (method, path and the server's own stack, never
-the client's details). No player's real IP address is written, and the page sends the server nothing about the
-player but the nickname. `--access-log` adds a line per request with the client's IP address and the URL: off by
-default, for debugging only, and then the journal holds your friends' addresses for as long as it keeps logs. One
-client can cause only a few lines a minute of each kind (refusals, joins and leaves; 3000 access-log lines), then
-one line saying how many were left out, and the unit caps the service at 2000 lines per 30 s
-(`LogRateLimitBurst`), so the journal keeps the rest of the VPS's logs whatever a client does.
-
-The unit runs the server as a fresh unprivileged user:
+The unit runs the server as a fresh unprivileged user (`DynamicUser`):
 
 - the system, `/opt/nfsu2-web` and the game folder are read-only to it;
-- it may write only in its state folder `/var/lib/nfsu2-web`;
-- it has no capabilities, except `CAP_NET_BIND_SERVICE` in variant B, for port 443;
-- it may use at most 3 GB of memory (`MemoryMax`, reclaimed from above 2 GB; it uses about 110-250 MB, plus what
-  queues towards players who fall behind), so whatever a client does, the rest of the VPS keeps its memory: at the
-  limit the kernel stops the server and systemd starts it again.
+- it may write only in its state folder `/var/lib/nfsu2-web` and its own `/tmp`;
+- `NoNewPrivileges` leaves it no capabilities, except `CAP_NET_BIND_SERVICE` in variant B, for port 443;
+- it may use at most 3 GB of memory (`MemoryMax`, reclaimed from above 2 GB), so whatever a client does, the rest
+  of the VPS keeps its memory: at the limit the kernel stops the server and systemd starts it again;
+- the journal takes at most 2000 of its lines per 30 s (`LogRateLimitBurst`), so it keeps the rest of the VPS's
+  logs whatever a client does.
 
 The unit was run under systemd 257 (Debian trixie, Node 20) in a container, variants A, D and B: it starts, stays
 up (no restarts) and serves. `LoadCredential` could not be exercised in a container (**UNVERIFIED**; B ran with the
-certificate by path).
+certificate by path). Without `--tls-cert` or `--behind-proxy` the server listens on 127.0.0.1 only and says so on
+start: nothing outside the VPS can reach it.
 
-The console names paths and addresses: it is yours. Without `--tls-cert` or `--behind-proxy` the server listens on
-127.0.0.1 only and says so on start: nothing outside the VPS can reach it.
-
-## 4. Check it
-
-```sh
-curl -sI https://game.example.com/ | grep -iE 'strict-transport|content-security|cdn-cache'
-curl -s -o /dev/null -w '%{http_code}\n' https://game.example.com/game.json   # 200: the game module is there
-```
-
-Then open the address in Chrome. The start page says it is ready, and Play starts the game.
-
-## 5. Updating
-
-1. Build a new bundle on the Mac.
-2. Unpack it over `/opt/nfsu2-web`.
-3. Run `systemctl restart nfsu2-web`.
-
-The players' browsers notice the new module by its ETag and download it once.
-
-## Multiplayer over the internet
-
-The server's switch relays every packet: player → VPS → player. The delay between two players is the sum of both
-paths to the VPS, so pick a VPS location between you.
-
-- **Free roam** draws a friend's car `roam_delay` milliseconds (100 by default) behind its newest snapshot. That
-  delay hides the 50 ms between snapshots, jitter and the odd lost snapshot. Network delay comes on top of it.
-  - **Measured with impairment on a local switch:** 100 ± 10 ms one way and 5 % loss.
-    98.1 % of frames were interpolated, 1.9 % extrapolated, and none were held.
-  - **For 50–150 ms round trips, the default is enough.** If friends' cars stutter (Wi-Fi or mobile jitter), set
-    `roam_delay = 150` in Settings (settings.ini). It only adds display delay.
-  - **There is no automatic raise from the measured ping.** The runtime reads `roam_delay` once at start; making it
-    follow the ping is a runtime change for the net track.
-  - **Over the real internet:** **UNVERIFIED**.
-- **Traffic:** free roam measured about 153 bytes per snapshot at 20 per second, so about 3 KB/s per friend in each
-  direction. That is two browsers through the Cloudflare stand-in on this Mac.
-- **Keepalive:** the switch pings every connection every 25 s. Proxies and Cloudflare then never cut a quiet player,
-  and the switch finds players whose connection died.
-- **Limits:**
-  - 250 players on the switch with the shipped unit (`--max-peers 250`; the server's own default is 16, and 250 is
-    the most its virtual network has addresses for);
-  - 8 connections at once per client address and 16 per IPv6 /48; opening them is rate limited per client
-    address (a burst of 20, then one a second), so a client that opens and closes connections as fast as it can
-    gets 429;
-  - frames up to 8 KB; 1000 frames and 256 KB a second per connection, 2000 and 512 KB for all of one client
-    address's connections together, 4000 and 1 MB for all of one IPv6 /48 (a 3-player LAN race's host sent at
-    most 100 frames and 8 KB a second; free roam
-    is 3.6 KB a second per friend). A broadcast counts once for every player it reaches;
-  - datagrams to a player whose connection is 256 KB behind are dropped, as a full link would. LAN-race stream data
-    is never dropped: a player with more than 2 MB of it waiting is disconnected if it stopped reading, and
-    otherwise the client that queued the most for it is, all its connections (so a flood does not get a player who
-    reads cut; only many clients that together outrun that player's link for a long time could). Only a player
-    that stops reading altogether (8 MB behind) is disconnected for that;
-  - a player who drops gets the same address back when it reconnects: the switch keeps the address a minute for
-    that player alone (a token only that browser has), also across a restart of the server, and never gives it to
-    anyone else. At most 8 such addresses are kept per client address (16 per /48; past that its own oldest goes).
-    When every address is held or kept, a newcomer gets "LAN full" until one frees.
-- **LAN races** (the game's own LAN mode, from the LAN-play track) use the same switch. Over the internet they are
-  **UNVERIFIED**.
-- **The game's Online mode** is served by the server itself, at the switch's reserved address 10.77.0.1 (on by
-  default; `--online off` turns it off, and the game then cannot connect). Any name logs in; there are no accounts.
-  - **Kept in the state folder:** `online/stats.json` (race results per persona) and `online/buddies.json` (EA
-    Messenger friends lists, persona names only), written atomically. Nothing else: no passwords (the server never
-    reads them), CD keys, addresses or chat.
-  - **The console** names online players by persona and virtual address (10.77.0.x) only, and shows at most 30
-    Online lines a minute caused by one client address (then one line saying how many were left out).
-  - **Who plays now:** `/players` answers anyone who reaches the server with two numbers for the start page:
-    `{"players":3,"online":1}`, the games on the switch and how many of them are in Online mode (`null` with
-    `--online off`). Nothing else: no names, addresses or times, never cached. The game's own lobby shows its
-    players to anyone who logs in anyway.
-  - **Limits:** 300 lobby sessions, 3 per browser, 8 per client address, 32 per IPv6 /48, and the last quarter
-    only for a client that holds none; 100 games of at most 4, 2 open and 2 started per browser (4 and 8 per client
-    address), one browser one player of a race; 20 lobby messages a second per session (a flood ends the session),
-    games created, joined and car descriptions published a few a second; chat 1 a second with a burst of 5 (then
-    10 s muted), 255 characters; a silent session goes after 120 s; a race whose players' browsers left the switch
-    ends after 2 minutes. EA Messenger: 10 messages a second per connection (a flood closes it), the lists and the
-    search 1 a second, a presence at most once a second; 50 friends each, 5000 friends lists (the least recently
-    seen go), 20 new ones an hour per client address. Results: 100,000 personas (the least recently seen go), a
-    race counts once two of its players in different browsers sent the same result.
-  - **What one client costs the others:** what the online host sends because of a client's message (its answer,
-    and what the others hear of it: room chat, a game's players) comes out of that client's switch budget; over
-    it, that client's connection to the online host closes. A game's record goes only to players looking at the
-    game list, at most once a second; a room's population at most once a second. A player too far behind (1 MB
-    queued) loses its online connection, not its place on the switch.
-  - **Measured on this Mac** (`web/tools/online-load.mjs`): 200 simulated players logging in, chatting and racing
-    in groups of four for 90 s took the server to 230 MB and 14.7 s of CPU; chat arrived in 1.1 ms (p50).
-  - Race traffic goes from browser to browser through the switch, as LAN races do (**UNVERIFIED** over the
-    internet).
+**Updating:** build a new bundle on the Mac, unpack it over `/opt/nfsu2-web`, and run
+`systemctl restart nfsu2-web`.

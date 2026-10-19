@@ -35,8 +35,8 @@ web/start.sh --data "/path/to/Need for Speed Underground 2"
 Open **http://localhost:8080/** in Chrome and press **Play**. The start page has the settings, your saves and the
 controls. The player's guide is [docs/web/PLAYING.md](docs/web/PLAYING.md).
 
-To play with friends, run the server behind HTTPS, for example on a small VPS: [docs/web/VPS.md](docs/web/VPS.md),
-or in Docker: [docs/web/DOCKER.md](docs/web/DOCKER.md).
+To play with friends, run the server behind HTTPS, for example on a small VPS with Docker:
+[docs/web/VPS.md](docs/web/VPS.md).
 Everyone who plays from the same server can meet in free roam.
 
 ## How it works

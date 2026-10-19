@@ -1,4 +1,4 @@
-# The server's container image (Dockerfile, docs/web/DOCKER.md) -> ghcr.io/<owner>/<repo>, for amd64 and arm64.
+# The server's container image (Dockerfile, docs/web/VPS.md) -> ghcr.io/<owner>/<repo>, for amd64 and arm64.
 # Tags: latest (the default branch), <version> and <major>.<minor> (a v* tag), sha-<commit> (every push).
 # Pull requests build it without pushing.  The image never holds the game or the game module: the build sees only
 # the server's and the page's sources (.dockerignore), and those are all a checkout has.

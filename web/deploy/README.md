@@ -1,8 +1,9 @@
 # NFS Underground 2 in the browser: the server bundle
 
 This folder runs the game's web server on a Linux VPS, with HTTPS in front, so
-friends can play with you in Chrome. The full guide, with the TLS and Cloudflare
-options, is `docs/web/VPS.md` in the repository; this is the short version.
+friends can play with you in Chrome, without Docker. The full guide, with the TLS
+and Cloudflare options, is `docs/web/VPS.md` in the repository ("Without Docker");
+this is the short version.
 
 It holds the server, the page and the game module. **It does not hold the game.**
 You copy your own NFS Underground 2 folder to the VPS yourself.
