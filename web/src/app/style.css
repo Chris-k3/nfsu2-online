@@ -200,7 +200,8 @@ summary:hover { color: var(--text); }
 .profiles .meta { color: var(--muted); font-size: 14px; line-height: 20px; align-self: center; }
 #saves .hint + .row { margin-top: 12px; }
 #saves h3 + .hint { margin-bottom: 0; }
-#cache-info { margin-bottom: 12px; }
+#cache-info { margin-bottom: 12px; font-variant-numeric: tabular-nums; }
+#data-bar + .row { margin-top: 16px; }
 .msg { font-size: 14px; line-height: 20px; margin-top: 12px; }
 .msg:empty { display: none; }
 .msg.warn { color: var(--warn); }

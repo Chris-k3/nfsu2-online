@@ -127,7 +127,8 @@ traffic a month.
   player who falls behind (8 MB on the connection, 2 MB more of LAN-race data in the switch's own queue).
 - The game folder takes about 3 GB of disk.
 - Each new player downloads the 7 MB module and then the game data they play (about 70 MB for a quick race, up to
-  the whole 3 GB over a career), once: the browser keeps it.
+  the whole 3 GB over a career), once: the browser keeps it. "Download all game data" on the start page fetches all
+  3 GB at once, 4 requests at a time, so a player on a slow line never waits on a loading screen.
 - Free roam is at most about 25 KB/s each way per player: the server's free-roam hub pairs each player with the 7
   nearest, and snapshots go between those only. 250 players roaming at once are about 50 Mbit/s each way through
   the VPS. Measured with 62 simulated players and 2 real pages on one server (`web/tools/roam-crowd.mjs`, a Ryzen 9

@@ -99,7 +99,9 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
 - **Files:** WASI preview1 calls go to the I/O worker over per-thread RPC slots (SAB + `Atomics.wait`). Results are
   written straight into wasm memory. Mounts:
   - `/data`: the install folder. Manifest from the server, case-insensitive lookup, 1 MiB range blocks, memory LRU,
-    persistent OPFS block cache.
+    persistent OPFS block cache (`web/src/host/datacache.ts`). Saves, "Download all game data" fills the whole cache
+    ahead of play from its own worker (`predownload-worker.ts`, 4 requests of up to 8 blocks at once). It runs only
+    while no game runs in the tab: Play pauses it, and the game's end resumes it.
   - `/save`: OPFS save overlay. Holds saves, `registry.txt`, `settings.ini` and logs. Closing a file the game wrote
     there posts `{ t: 'saved', path }` to the page (the "Progress saved" note, F9's last save, the end screen). Before
     each Play the page sets every profile still on the game's Save = Prompt to Autosave, once per profile
@@ -187,6 +189,8 @@ struct VOut { @builtin(position) pos: vec4f; @location(0) col0: vec4f; @location
   - `cd web && node --test test/*.test.mjs`: the unit tests (the LAN backend `lan_unit.c`, free roam, the C ns* key
     driver against the page's key path, `settings.ts` against `bundle.m`, the alias guard and test, the server,
     deployment, the security and privacy audit's regressions: `audit.test.mjs`, `page-audit.test.mjs`). They build their wasm programs with wasi-sdk from `deps/`.
+- `node web/tools/predownload-test.mjs` checks "Download all game data" in Chrome against its own server and a
+  made-up game folder: byte-exact cache, stop and resume, retries, a refused file, Play pausing it, a second tab.
 - `node web/tools/run-page.mjs <url> <ms>` drives Chrome 155 (`channel: 'chrome'`, headless, WebGPU works) and streams
   the console.
 - Test page: `/test/hostcheck.html?wasm=/game.wasm&pages=16384&arg=/data/SPEED2.EXE&env=K=V&...&save=<opfs dir>&fresh`

@@ -10,6 +10,7 @@ import {
   type AudioSubsystem, type InputSubsystem, type NetSubsystem, type RendererSubsystem, type Subsystem,
 } from './subsystems';
 import { StatusReader } from './status';
+import { DATA_BASE, MANIFEST_URL } from '../host/datacache';
 import type { GameInfo } from './loader';
 
 export interface SessionOptions {
@@ -54,7 +55,7 @@ export class GameSession {
     s.proc = await startProcess({
       module: o.module,
       initialPages: o.info.pages || undefined,
-      cfg: { args: ['nfsu2', '/data/SPEED2.EXE'], env: o.env, dataBase: '/data/', manifestUrl: '/data-manifest', saveDir: o.saveDir },
+      cfg: { args: ['nfsu2', '/data/SPEED2.EXE'], env: o.env, dataBase: DATA_BASE, manifestUrl: MANIFEST_URL, saveDir: o.saveDir },
       onLog: (line, fd, t) => o.log(`${tid(t, fd)} ${line}`),
       onSaved: o.onSaved,
     });

@@ -119,9 +119,14 @@
       <p class="msg warn" id="storage-note" hidden></p>
       <h3>Game data on this PC</h3>
       <p class="hint" id="cache-info">Counting…</p>
+      <div class="bar" id="data-bar" role="progressbar" aria-label="Game data download" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
+        <div class="bar-fill"></div>
+      </div>
       <div class="row">
+        <button type="button" class="btn" id="fetch-all" hidden>Download all game data</button>
         <button type="button" class="btn" id="clear-cache">Delete the downloaded game data</button>
       </div>
+      <p class="msg" id="data-msg" role="status"></p>
     </section>
 
     <section class="panel" id="settings" aria-labelledby="settings-title">

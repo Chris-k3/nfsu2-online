@@ -31,6 +31,7 @@ import { watchPlayers } from './players';
 import { SavesPanel } from './saves-ui';
 import { FpsOverlay, FPS_MODES, type FpsMode } from './overlay';
 import { GameSession } from './game';
+import { Predownload } from './predownload';
 
 type Phase = 'boot' | 'ready' | 'error' | 'waiting' | 'starting' | 'playing' | 'exited';
 
@@ -83,6 +84,7 @@ let fps: FpsOverlay;
 let settings: SettingsPanel;
 let players: { now(): void } | null = null;
 let saves: SavesPanel;
+let download: Predownload;
 /** the profile the running (or last) game saved last, when, and how often it saved one */
 let saved: { name: string; at: number; count: number } | null = null;
 
@@ -263,6 +265,8 @@ async function startGame() {
     log.add(`[app] input script ${q.get('script')}`);
   }
 
+  // the download of all the game data writes the files the game's I/O worker opens: it waits for the game
+  await download.pause();
   // the server's virtual LAN: the game's own LAN races and Online mode (network = on, the default) and free
   // roam all need it; only network = off stays off it (the game then shows its own network error)
   const net = !/^(off|0|none)$/i.test(r.env.NFSU2_NET?.trim() ?? '');
@@ -286,6 +290,7 @@ async function startGame() {
     endStage();
     setPhase('exited', 'Did not start', `The game could not start: ${e}`);
     $('#log-btn').hidden = false;
+    download.resume();
     return;
   }
   setPhase('playing', 'Playing', '');
@@ -359,6 +364,7 @@ function onExit(s: GameSession, code: number) {
   lastExit = { code, seconds };
   endStage();
   players?.now();
+  download.resume();
   $('#log-btn').hidden = false;
   const mins = seconds >= 120 ? `${Math.floor(seconds / 60)} min` : `${seconds.toFixed(0)} s`;
   if (fatal) setPhase('exited', 'Did not start', `The game was stopped: ${fatal}. Download the log to see why; ` +
@@ -576,9 +582,10 @@ export async function boot() {
   });
   // who plays on this server now (Settings, Multiplayer): only while no game runs here
   players = watchPlayers(line => settings.setStatus(line), () => !session && !starting);
+  download = new Predownload(s => saves.showData(s), logLine);
   saves = new SavesPanel($('#saves'), {
-    saveDir: SAVE, busy: () => !!session || !instance.owner, confirm: confirmBox,
-    onRestored: () => { void loadSettings(); void settings.refresh(); },
+    saveDir: SAVE, busy: () => !!session || starting || !instance.owner, confirm: confirmBox,
+    onRestored: () => { void loadSettings(); void settings.refresh(); }, download,
   });
   $<HTMLButtonElement>('#play').onclick = () => void play();
   $<HTMLButtonElement>('#retry').onclick = () => void loadModule();
@@ -631,7 +638,7 @@ export async function boot() {
   evaluate();
   (window as any).__nfsu2 = {
     get phase() { return phase; }, get lastExit() { return lastExit; }, get fps() { return { game: fps.gameFps, page: fps.pageFps, source: $('#fps').dataset.source }; },
-    get session() { return session; }, log, save: SAVE, displayHz: () => displayHz, retryModule: () => loadModule(),
+    get session() { return session; }, log, save: SAVE, download: () => download.status, displayHz: () => displayHz, retryModule: () => loadModule(),
     env: () => resolved().env, settingsText: () => settingsText, checks: () => [...checks.values()],
     fpsMode: (m?: FpsMode) => { if (m && FPS_MODES.includes(m)) fps.set(m); return fps.mode; },
     quitTimes: { forcedCloseMaxMs: FORCED_CLOSE_MAX_MS, stopAfterMs: STOP_AFTER_MS },

@@ -6,6 +6,8 @@
 // Writes from the page happen only while no game runs in this tab (the
 // shell enforces it), so they never race the I/O worker's sync handles.
 
+import { BLOCK, CACHE_DIR } from '../host/datacache';
+
 export const PROFILES_DIR = 'NFS Underground 2';   // what the game creates under the save root
 
 async function root(): Promise<FileSystemDirectoryHandle> { return navigator.storage.getDirectory(); }
@@ -119,21 +121,22 @@ export async function listProfiles(saveDir: string, files?: Entry[]): Promise<Pr
 }
 
 /**
- * Game data the browser keeps locally (OPFS "cache/", io-worker.ts): every
- * file there is sparse, with a ".have" map of one byte per 1 MiB block, so
- * the cached amount is the number of blocks present (the last block of a
- * file may be shorter; the file size bounds it).
+ * Game data the browser keeps locally (OPFS "cache/", host/datacache.ts), of
+ * any version of the server's files: every file there is sparse, with a
+ * ".have" map of one byte per 1 MiB block, so the cached amount is the number
+ * of blocks present (the last block of a file may be shorter; the file size
+ * bounds it).
  */
 export async function cacheBytes(): Promise<{ bytes: number; files: number }> {
   let bytes = 0, files = 0;
   try {
-    const d = await (await root()).getDirectoryHandle('cache');
+    const d = await (await root()).getDirectoryHandle(CACHE_DIR);
     for await (const [name, h] of (d as any).entries() as AsyncIterable<[string, FileSystemHandle]>) {
       if (h.kind !== 'file' || !name.endsWith('.have')) continue;
       const have = new Uint8Array(await (await (h as FileSystemFileHandle).getFile()).arrayBuffer());
       let n = 0; for (const b of have) n += b ? 1 : 0;
       if (!n) continue;
-      let size = n * (1 << 20);
+      let size = n * BLOCK;
       try { size = Math.min(size, (await (await d.getFileHandle(name.slice(0, -5))).getFile()).size); } catch { /* data file gone */ }
       bytes += size; files++;
     }
@@ -142,5 +145,5 @@ export async function cacheBytes(): Promise<{ bytes: number; files: number }> {
 }
 
 export async function clearCache(): Promise<void> {
-  try { await (await root()).removeEntry('cache', { recursive: true }); } catch { /* absent */ }
+  try { await (await root()).removeEntry(CACHE_DIR, { recursive: true }); } catch { /* absent */ }
 }

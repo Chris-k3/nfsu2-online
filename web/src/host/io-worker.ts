@@ -6,17 +6,18 @@
 // Mounts (preopened directories, in this order: fd 3, fd 4):
 //   /data  the NFSU2 install folder on the local server, read-only.  Read in
 //          1 MiB blocks with HTTP range requests, kept in memory, and
-//          persisted in OPFS ("cache/") so the next launch reads locally.
+//          persisted in OPFS ("cache/", datacache.ts) so the next launch reads
+//          locally (Saves, "Download all game data" fills all of it ahead).
 //   /save  the save overlay: OPFS directory, read/write (saves, registry,
 //          settings.ini, logs).  Closing a file the game wrote there tells
 //          the page ({ t: 'saved', path }: "Progress saved", F9's last save).
 import {
   CTL_IO_DOORBELL, E, MAX_THREADS, Op, RPC_DONE, RPC_POSTED, RPC_SLOT, RPC_TAKEN, type BootConfig,
 } from './proto';
+import { BLOCK, CACHE_DIR, cacheKey, dataUrl, openCacheFile, putBlock, type CacheFile, type Manifest } from './datacache';
 
 interface Init { memory: WebAssembly.Memory; ctl: SharedArrayBuffer; rpc: SharedArrayBuffer; cfg: BootConfig }
 
-const BLOCK = 1 << 20;
 const FT_DIR = 3, FT_FILE = 4;
 const td = new TextDecoder(), te = new TextEncoder();
 
@@ -33,7 +34,7 @@ function mkdirNode(name: string, path: string): DNode { return { name, dir: true
 async function loadManifest() {
   const r = await fetch(cfg.manifestUrl, { cache: 'no-cache' });
   if (!r.ok) throw new Error(`manifest: HTTP ${r.status}`);
-  const m = await r.json() as { files: { p: string; d?: number; s?: number; m?: number }[] };
+  const m = await r.json() as Manifest;
   dataRoot = mkdirNode('', '');
   for (const f of m.files) {
     const parts = f.p.split('/');
@@ -64,26 +65,14 @@ let memBytes = 0;
 const MEM_BUDGET = 768 << 20;
 const inflight = new Map<string, Promise<Uint8Array>>();
 let cacheDir: FileSystemDirectoryHandle | null = null;
-const cacheFiles = new Map<string, Promise<{ h: FileSystemSyncAccessHandle; have: Uint8Array; haveH: FileSystemSyncAccessHandle } | null>>();
+const cacheFiles = new Map<string, Promise<CacheFile | null>>();
 
-function cacheKey(n: DNode) { return `${n.path.replace(/[^A-Za-z0-9._-]/g, '_')}.${n.size}.${n.mtime}`; }
 async function cacheFile(n: DNode) {
   if (!cacheDir) return null;
   const k = cacheKey(n);
   let p = cacheFiles.get(k);
   if (!p) {
-    p = (async () => {
-      try {
-        const fh = await cacheDir!.getFileHandle(k, { create: true });
-        const mh = await cacheDir!.getFileHandle(k + '.have', { create: true });
-        const h = await (fh as any).createSyncAccessHandle({ mode: 'readwrite-unsafe' }) as FileSystemSyncAccessHandle;
-        const haveH = await (mh as any).createSyncAccessHandle({ mode: 'readwrite-unsafe' }) as FileSystemSyncAccessHandle;
-        const nb = Math.ceil(n.size / BLOCK);
-        const have = new Uint8Array(nb);
-        if (haveH.getSize() === nb) haveH.read(have, { at: 0 }); else { haveH.truncate(0); haveH.write(have, { at: 0 }); }
-        return { h, have, haveH };
-      } catch (e) { console.warn('cache disabled for', n.path, e); return null; }
-    })();
+    p = openCacheFile(cacheDir, n).catch(e => { console.warn('cache disabled for', n.path, e); return null; });
     cacheFiles.set(k, p);
   }
   return p;
@@ -124,9 +113,9 @@ async function getBlock(n: DNode, bi: number): Promise<Uint8Array> {
     if (cf && cf.have[bi]) {
       const b = new Uint8Array(len); cf.h.read(b, { at: start }); memPut(key, b); return b;
     }
-    const b = await fetchRange(cfg.dataBase + n.path.split('/').map(encodeURIComponent).join('/'), start, len, n.path);
+    const b = await fetchRange(dataUrl(cfg.dataBase, n.path), start, len, n.path);
     if (b.length !== len) throw new Error(`short read ${n.path} block ${bi}: ${b.length}/${len}`);
-    if (cf) { cf.h.write(b, { at: start }); cf.have[bi] = 1; cf.haveH.write(cf.have.subarray(bi, bi + 1), { at: bi }); }
+    if (cf) putBlock(cf, bi, b);
     memPut(key, b);
     return b;
   })();
@@ -408,7 +397,7 @@ onmessage = async (e: MessageEvent<Init>) => {
   try {
     const opfs = await navigator.storage.getDirectory();
     saveRoot = await opfs.getDirectoryHandle(cfg.saveDir, { create: true });
-    try { cacheDir = await opfs.getDirectoryHandle('cache', { create: true }); } catch { cacheDir = null; }
+    try { cacheDir = await opfs.getDirectoryHandle(CACHE_DIR, { create: true }); } catch { cacheDir = null; }
     await loadManifest();
     fds.set(3, { mount: 'data', kind: 'dir', path: '', pos: 0, append: false, node: dataRoot, preopen: '/data' });
     fds.set(4, { mount: 'save', kind: 'dir', path: '', pos: 0, append: false, dh: saveRoot, preopen: '/save' });

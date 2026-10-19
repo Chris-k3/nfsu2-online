@@ -36,7 +36,9 @@ the ways to set that up. Each player then opens that `https://` address in the l
 **Firefox** and presses **Play**.
 
 The first start on a PC downloads about 7 MB of game code and, while playing, the game data it needs. That PC keeps
-the data, so later starts are quick.
+the data, so later starts are quick. To download all of it up front (about 3 GB), press **Download all game data**
+under Saves, Game data on this PC. After that no loading screen waits on the network, which matters on a slow line
+to a remote server.
 
 ## 3. Controls
 
@@ -116,6 +118,10 @@ is saved at once and applies the next time you press Play.
 - **Backups are your safety net.** The browser may clear a site's storage when the disk runs low; the Saves section
   says so when the browser has not promised to keep it. Firefox asks first, by the address bar: allow it. Make a
   backup now and then.
+- **Downloading all game data:** "Download all game data" in Saves fetches the whole game folder into this browser,
+  with its progress and the time left. You can play meanwhile: the download pauses while the game runs and goes on
+  when it ends. Stop it whenever you like; what came is kept, and "Download the rest" goes on from there, also after
+  a reload. It needs about 3 GB of free disk space. The page says so before it starts when the browser has less room.
 - **Downloaded game data:** "Delete the downloaded game data" in Saves frees disk space on this PC. Your saves stay;
   the data downloads again when needed.
 

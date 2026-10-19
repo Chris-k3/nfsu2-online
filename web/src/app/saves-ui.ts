@@ -1,13 +1,15 @@
 // The saves section of the start page: the profiles in this browser, a backup of the whole save
 // overlay as a zip (profiles, registry.txt, settings.ini, screenshots) and
-// restoring one, and the downloaded game data on this PC.  The game data
-// itself is never part of a backup and never written: it stays on the server.
+// restoring one, and the downloaded game data on this PC: how much of it, all
+// of it downloaded ahead (predownload.ts), or deleted.  The game data is never
+// part of a backup and never written back: it stays on the server.
 
 import { cacheBytes, clearCache, clearSaveDir, listFiles, listProfiles, PROFILES_DIR, readBytes, writeFile } from './savefs';
 import { listZip, unzip, zip, ZipError, type ZipEntry } from './zip';
 import { downloadBlob, stamp } from './logs';
 import { fmtBytes } from './checks';
 import { resolveEnv } from './settings';
+import { gameDataKept, type DownloadState, type DownloadStatus, type Predownload } from './predownload';
 
 export interface SavesDeps {
   saveDir: string;
@@ -16,6 +18,8 @@ export interface SavesDeps {
   confirm(title: string, body: Node | string, ok: string, danger?: boolean): Promise<boolean>;
   /** after a restore: settings.ini may have changed */
   onRestored(): void;
+  /** the download of all the game data ahead of play */
+  download: Predownload;
 }
 
 // Limits for a restore, judged by each entry's declared size before anything is
@@ -102,15 +106,31 @@ export async function restoreSaves(saveDir: string, r: Restore) {
   for (const e of r.entries) await writeFile(saveDir, e.path, e.data);
 }
 
+/** "about 3 min left" */
+function eta(s: number): string {
+  if (!isFinite(s)) return '';
+  if (s < 60) return 'less than a minute left';
+  if (s < 3600) return `about ${Math.round(s / 60)} min left`;
+  return `about ${(s / 3600).toFixed(1)} h left`;
+}
+
 export class SavesPanel {
   constructor(private root: HTMLElement, private deps: SavesDeps) {
     root.querySelector<HTMLButtonElement>('#export')!.onclick = () => void this.doExport();
     const inp = root.querySelector<HTMLInputElement>('#import')!;
     inp.onchange = () => { const f = inp.files?.[0]; inp.value = ''; if (f) void this.doImport(f); };
     root.querySelector<HTMLButtonElement>('#clear-cache')!.onclick = () => void this.doClearCache();
+    root.querySelector<HTMLButtonElement>('#fetch-all')!.onclick = () => void this.doDownload();
   }
 
   private msg(s: string) { this.root.querySelector('#saves-msg')!.textContent = s; }
+  private dataMsg(s: string, warn = false) { const m = this.root.querySelector('#data-msg')!; m.textContent = s; m.classList.toggle('warn', warn); }
+
+  /** the game data in this browser: of the server's files (null: their list did not load), and all that is kept */
+  private data: { have: number; total: number } | null = null;
+  private kept = { bytes: 0, files: 0 };
+  private counted = 0;                     // the latest count wins (one may start while the data is deleted)
+  private shownState: DownloadState = 'idle';
 
   /** Show the profiles and the downloaded game data as they are now. */
   async refresh() {
@@ -134,13 +154,62 @@ export class SavesPanel {
     this.root.querySelector<HTMLLabelElement>('.file-btn')!.toggleAttribute('aria-disabled', busy);
     this.root.querySelector<HTMLInputElement>('#import')!.disabled = busy;
     this.root.querySelector<HTMLButtonElement>('#clear-cache')!.disabled = busy;
-    if (busy) this.msg('Quit the game (or close the other tab that runs it) to restore a backup or delete game data.');
+    if (busy) this.msg('Quit the game (or close the other tab that runs it) to restore a backup or change the game data.');
     else if (/^Quit the game \(or close/.test(this.root.querySelector('#saves-msg')!.textContent ?? '')) this.msg('');
-    const c = await cacheBytes();
-    this.root.querySelector('#cache-info')!.textContent = c.bytes
-      ? `${fmtBytes(c.bytes)} from ${c.files} files is kept in this browser, so the game loads from this PC instead of the network. Deleting it only means downloading it again.`
-      : 'Nothing downloaded yet. The game streams its data from the server the first time and keeps it here.';
     this.root.dataset.files = String(files.length);
+    if (this.deps.download.running) { this.showData(); return; }     // it counts as it goes
+    const n = ++this.counted;
+    const [kept, data] = await Promise.all([cacheBytes(), gameDataKept().catch(() => null)]);
+    if (n !== this.counted) return;
+    this.kept = kept; this.data = data;
+    this.showData();
+  }
+
+  /** The download's progress (Predownload's onChange), or what is kept when none runs. */
+  showData(st: DownloadStatus = this.deps.download.status) {
+    const active = st.state === 'running' || st.state === 'paused';
+    if (active && st.total) this.data = { have: st.have, total: st.total };
+    if (st.state !== this.shownState) {
+      this.shownState = st.state;
+      if (st.state === 'done') { this.data = { have: st.have, total: st.total }; this.dataMsg('All of the game data is on this PC now.'); }
+      if (st.state === 'error') this.dataMsg(`The download stopped: ${st.error}. What it downloaded is kept.`, true);
+      if (!active) void this.refresh();                         // counted again; shown now with what is known
+    }
+    const info = this.root.querySelector('#cache-info')!, bar = this.root.querySelector<HTMLElement>('#data-bar')!;
+    const fetchBtn = this.root.querySelector<HTMLButtonElement>('#fetch-all')!;
+    const d = this.data, rest = d ? d.total - d.have : 0;
+    bar.hidden = !active;
+    fetchBtn.disabled = this.deps.busy() && !active;
+    if (active) {
+      const f = d?.total ? d.have / d.total : 0;
+      (bar.firstElementChild as HTMLElement).style.width = `${(f * 100).toFixed(1)}%`;
+      bar.setAttribute('aria-valuenow', String(Math.floor(f * 100)));
+      fetchBtn.hidden = false;
+      fetchBtn.textContent = 'Stop the download';
+      fetchBtn.disabled = st.state === 'paused';
+      info.textContent = st.state === 'paused' ? `Download paused while the game runs: ${d ? `${fmtBytes(d.have)} of ${fmtBytes(d.total)}` : 'counting'}. It goes on when the game ends.`
+        : !d ? 'Downloading all of the game data: counting what is here already.'
+        : `Downloading all of the game data: ${fmtBytes(d.have)} of ${fmtBytes(d.total)} (${Math.floor(f * 100)} %)${st.rate ? `, ${fmtBytes(st.rate)}/s, ${eta(rest / st.rate)}` : ''}. ` +
+          'Play whenever you like: the download pauses while the game runs and goes on after it.';
+      return;
+    }
+    fetchBtn.textContent = d && d.have ? `Download the rest (${fmtBytes(rest)})` : `Download all game data${d ? ` (${fmtBytes(d.total)})` : ''}`;
+    fetchBtn.hidden = !!d && rest <= 0;
+    if (d && rest <= 0)
+      info.textContent = `All of the game data (${fmtBytes(d.total)}) is kept in this browser: the game loads it from this PC, never the network. Deleting it only means downloading it again.`;
+    else if (d ? d.have : this.kept.bytes)
+      info.textContent = `${d ? `${fmtBytes(d.have)} of the game's ${fmtBytes(d.total)}` : fmtBytes(this.kept.bytes)} is kept in this browser, so the game loads that from this PC instead of the network. ` +
+        'Download the rest too, and no loading screen waits on the network. Deleting it only means downloading it again.';
+    else
+      info.textContent = 'Nothing downloaded yet. The game streams its data from the server as it needs it and keeps it here, or download all of it now and no loading screen waits on the network.';
+  }
+
+  private async doDownload() {
+    const dl = this.deps.download;
+    if (dl.running) { await dl.stop(); this.dataMsg('Download stopped. What it downloaded is kept: Download the rest goes on from there.'); return; }
+    if (this.deps.busy()) return;
+    this.dataMsg('');
+    dl.start();
   }
 
   private async doExport() {
@@ -183,9 +252,11 @@ export class SavesPanel {
 
   private async doClearCache() {
     if (this.deps.busy()) return;
-    if (!await this.deps.confirm('Delete the downloaded game data?', 'The game will stream it from the server again the next time, which is slower once. Your saves are not touched.', 'Delete game data', true)) return;
+    const dl = this.deps.download;
+    if (!await this.deps.confirm('Delete the downloaded game data?', `${dl.running ? 'This stops the download. ' : ''}The game will stream it from the server again the next time, which is slower once. Your saves are not touched.`, 'Delete game data', true)) return;
+    await dl.stop();
     await clearCache();
     await this.refresh();
-    this.msg('Downloaded game data deleted.');
+    this.dataMsg('Downloaded game data deleted.');
   }
 }
