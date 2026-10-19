@@ -395,8 +395,9 @@ paths to the VPS, so pick a VPS location between you.
   - **There is no automatic raise from the measured ping.** The runtime reads `roam_delay` once at start; making it
     follow the ping is a runtime change for the net track.
   - **Over the real internet:** **UNVERIFIED**.
-- **Traffic:** free roam sends 20 snapshots a second of about 180 bytes to each friend, about 3.6 KB/s per friend
-  in each direction.
+- **Traffic:** free roam sends 20 snapshots a second of about 95 bytes to each friend, about 1.9 KB/s per friend
+  in each direction (7 friends: about 13 KB/s). A snapshot carries only the newest position, because the
+  WebSocket loses none; on a real LAN (the Mac, Windows) it carries the last three, about 180 bytes.
 - **Keepalive:** the switch pings every connection every 25 s. Proxies and Cloudflare then never cut a quiet player,
   and the switch finds players whose connection died.
 - **Limits:**
@@ -409,10 +410,11 @@ paths to the VPS, so pick a VPS location between you.
     gets 429;
   - frames up to 8 KB; 1000 frames and 256 KB a second per connection, 2000 and 512 KB for all of one client
     address's connections together, 4000 and 1 MB for all of one IPv6 /48 (a 3-player LAN race's host sent at
-    most 100 frames and 7.7 KB a second; free roam is 3.6 KB a second per friend). A broadcast counts once for
+    most 100 frames and 7.7 KB a second; free roam is 1.9 KB a second per friend). A broadcast counts once for
     every player it reaches;
-  - datagrams to a player whose connection is 256 KB behind are dropped, as a full link would. LAN-race stream data
-    is never dropped. A player with more than 2 MB of it waiting, or more than 1 MB of it from one client, is
+  - datagrams to a player whose connection is 256 KB behind are dropped, as a full link would; free roam's already
+    at 16 KB (about a second of them), so a player whose link falls behind gets the newest positions as soon as it
+    catches up, not seconds of old ones first. LAN-race stream data is never dropped. A player with more than 2 MB of it waiting, or more than 1 MB of it from one client, is
     disconnected if it stopped reading (nothing went out for a second while data waited); otherwise the client
     that queued the most for it is, all its connections (so a flood does not get a player who reads cut; only many
     clients that together outrun that player's link for a long time could). Only a player that stops reading

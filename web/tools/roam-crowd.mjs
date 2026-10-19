@@ -3,15 +3,16 @@
 // driving along a track.  Real game pages (web/tools/roam-pair.mjs) can join the same server meanwhile.
 //
 //   node web/tools/roam-crowd.mjs [--base http://localhost:8655] [--n 62] [--seconds 120] [--room <name>]
-//        [--track <pose.csv>] [--speed 15] [--car 350Z] [--stagger 50] [--out <summary.json>]
+//        [--track <pose.csv>] [--speed 15] [--car 350Z] [--stagger 50] [--states 1] [--out <summary.json>]
 //
+// --states the car states in each SNAP: 1 as the browsers send them (roam_web.c), 3 as a LAN does.
 // --track  a pose log (NFSU2_ROAM_POSELOG): the first player's L rows, a real drive; every simulated player
 //          follows it from its own point along it, so they spread over the route.  Without one: circles of 20 to
 //          120 m around the new career's start (1695, -884, 24).
 // Each player is its own client address for the server's per-address limits (X-Forwarded-For, which the
 // server takes from this machine, its trusted proxy).  Every 10 s one line: players on the switch, their peers
 // (min, mean, max: the hub gives each at most 7), datagrams a second in and out, joins and "out of range"
-// leaves.  Needs wasi-sdk in deps/ (its clang) and the ws package (web/node_modules).
+// leaves, and their bytes.  Needs wasi-sdk in deps/ (its clang) and the ws package (web/node_modules).
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -23,6 +24,7 @@ const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && i + 1 < argv.length ? argv[i + 1] : d; };
 const BASE = opt('base', 'http://localhost:8655'), N = +opt('n', 62), SECONDS = +opt('seconds', 120), ROOM = opt('room', '');
 const SPEED = +opt('speed', 15), CAR = opt('car', '350Z'), STAGGER = +opt('stagger', 50), TRACK = opt('track', ''), OUTF = opt('out', '');
+const STATES = +opt('states', 1);
 const HUB = 0x0A4D00FD, PORT = 47210;
 
 // the core for wasm: no C library, bulk memory for the copies
@@ -60,7 +62,7 @@ if (TRACK) {
   };
 }
 
-const st = { inDg: 0, outDg: 0, joins: 0, outOfRange: 0, otherLeaves: 0, notes: 0 }, why = {};
+const st = { inDg: 0, outDg: 0, inB: 0, outB: 0, joins: 0, outOfRange: 0, otherLeaves: 0, notes: 0 }, why = {};
 const tally = t => { const k = t.replace(/^Bot\d+/, '<bot>').replace(/\d+(\.\d+)*(:\d+)?/g, '#'); why[k] = (why[k] ?? 0) + 1; };
 class Bot {
   constructor(i) {
@@ -89,13 +91,13 @@ class Bot {
           this.vip = m.vip >>> 0; ws.send(JSON.stringify({ t: 'hello', name: this.name }));
           const io = this.x.crowd_io(), m8 = this.mem();
           const b = Buffer.from(`${this.name}\0${CAR}\0`, 'latin1'); m8.set(b, io);
-          this.x.crowd_init(this.id, fnv1a(ROOM), HUB, PORT, bhash(CAR), nowUs());
+          this.x.crowd_init(this.id, fnv1a(ROOM), HUB, PORT, bhash(CAR), STATES, nowUs());
           this.ready = true;
         }
         return;
       }
       if (d.length < 16 || d[0] !== 1 || d.readUInt16BE(14) !== PORT || d.length - 16 > 1200) return;
-      st.inDg++;
+      st.inDg++; st.inB += d.length;
       this.mem().set(d.subarray(16), this.x.crowd_io());
       this.x.crowd_recv(d.readUInt32BE(4), d.readUInt16BE(12), d.length - 16, nowUs());
     });
@@ -106,7 +108,7 @@ class Bot {
     const f = Buffer.alloc(16 + n);
     f[0] = 1; f.writeUInt32BE(this.vip, 4); f.writeUInt32BE(ip >>> 0, 8); f.writeUInt16BE(PORT, 12); f.writeUInt16BE(port, 14);
     f.set(this.mem().subarray(ptr, ptr + n), 16);
-    this.ws.send(f); st.outDg++;
+    this.ws.send(f); st.outDg++; st.outB += f.length;
   }
   tick(t) {
     if (!this.ready) return;
@@ -126,9 +128,11 @@ const report = setInterval(() => {
   const dt = (performance.now() - lastT) / 1000, on = bots.filter(b => b.ready), peers = on.map(b => b.x.crowd_peers());
   const s = { t: Math.round((performance.now() - t0) / 1000), players: on.length, peersMin: Math.min(...peers), peersMean: +(peers.reduce((a, b) => a + b, 0) / Math.max(1, peers.length)).toFixed(2),
     peersMax: Math.max(...peers), inPerS: Math.round((st.inDg - last.inDg) / dt), outPerS: Math.round((st.outDg - last.outDg) / dt),
+    inKBs: +((st.inB - last.inB) / dt / 1024).toFixed(1), outKBs: +((st.outB - last.outB) / dt / 1024).toFixed(1),
     joins: st.joins - last.joins, outOfRange: st.outOfRange - last.outOfRange, otherLeaves: st.otherLeaves - last.otherLeaves };
   samples.push(s);
-  console.log(`roam-crowd: t=${s.t}s players ${s.players}, peers ${s.peersMin}/${s.peersMean}/${s.peersMax}, datagrams ${s.inPerS}/s in ${s.outPerS}/s out, ` +
+  console.log(`roam-crowd: t=${s.t}s players ${s.players}, peers ${s.peersMin}/${s.peersMean}/${s.peersMax}, datagrams ${s.inPerS}/s in ${s.outPerS}/s out ` +
+    `(${s.inKBs} / ${s.outKBs} KB/s with the switch's 16-byte header), ` +
     `joins ${s.joins}, out of range ${s.outOfRange}, other leaves ${s.otherLeaves}`);
   last = { ...st }; lastT = performance.now();
 }, 10_000);

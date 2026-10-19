@@ -788,6 +788,39 @@ static void t_guard(void){
     rc_name_clean(nm, "abcdefghijklmnopqrstuvwxyz0123", 30); CHECK(strlen(nm) == RC_NAME_MAX, "name cut at 24");
 }
 
+/* ---- 4d. states per SNAP (rc_config.snap_states): 3 on a LAN, 1 over the browser's WebSocket -- */
+static int g_cap_len, g_cap_n;
+static void cap_send(void *u, uint32_t ip, uint16_t port, const uint8_t *b, int n){
+    (void)u; (void)ip; (void)port;
+    if (n > 20 && b[5] == RC_MSG_SNAP){ g_cap_len = n; g_cap_n = b[20]; }
+}
+static void t_snapstates(void){
+    for (int want = 0; want <= 1; want++){
+        rc_session p; rc_config cf; memset(&cf, 0, sizeof cf);
+        cf.self_id = 9; cf.port = 1; cf.max_players = 8; cf.rate_hz = 20; cf.snap_states = want;
+        cf.hub_ip = 0x0A4D00FDu; cf.hub_port = 1;               /* the hub gets a SNAP twice a second */
+        rc_io io = { 0, cap_send, 0, 0 }; rc_session_init(&p, &cf, &io);
+        g_cap_len = g_cap_n = 0;
+        for (int64_t t = 0; t <= 2000000; t += 50000){
+            rc_state st; memset(&st, 0, sizeof st); st.q[3] = 1; st.t_us = (uint32_t)t;
+            rc_set_status(&p, RC_ST_ROAM); rc_push_state(&p, &st, t);
+        }
+        int n = want ? 1 : RC_SNAP_STATES, len = RC_HDR + 6 + n * RC_STATE_BYTES + RC_CRC;
+        CHECK(g_cap_n == n && g_cap_len == len, "snap_states %d: SNAP with %d state(s), %d bytes (%d, %d bytes)", want, n, len, g_cap_n, g_cap_len);
+    }
+    /* a peer that sends one state per SNAP: its car moves as smoothly, through 5 % loss */
+    mesh(2, 8);
+    g_n[0].conf.snap_states = 1;
+    rc_add_peer(&g_n[0], node_ip(1), node_port(1), 1, g_now); rc_add_peer(&g_n[1], node_ip(0), node_port(0), 1, g_now);
+    net_run(g_now + 2000000, 2);
+    g_loss_pct = 5;
+    drive(2, g_now + 4000000);
+    g_loss_pct = 0;
+    int k = peer_of(1, 0x500);
+    CHECK(k >= 0 && g_n[1].peer[k].rx_snap >= 60 && g_n[1].peer[k].mo.n >= 20 && g_n[1].peer[k].mo.n_dup == 0,
+          "one state per SNAP: %u snapshots, %d buffered, no duplicates", k >= 0 ? g_n[1].peer[k].rx_snap : 0, k >= 0 ? g_n[1].peer[k].mo.n : 0);
+}
+
 int main(int argc, char **argv){
     long fuzz = argc > 1 ? atol(argv[1]) : 200000;
     printf("roam_unit: core %d, protocol %d\n", RC_CORE_VER, RC_PROTO_VER);
@@ -797,6 +830,7 @@ int main(int argc, char **argv){
     t_session();
     t_review();
     t_hub();
+    t_snapstates();
     t_interp();
     t_guard();
     printf("roam_unit: %d passed, %d failed\n", g_pass, g_fail);

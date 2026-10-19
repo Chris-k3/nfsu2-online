@@ -50,6 +50,9 @@
  *            a real network: the switch forwards only to browsers attached to
  *            the same server.
  *
+ * A SNAP carries one state here, not three (rc_config.snap_states): the
+ * WebSocket loses nothing, so the older two only doubled the traffic.
+ *
  * The clock is CLOCK_MONOTONIC, which the host takes from
  * performance.timeOrigin + performance.now(): one clock in every worker of
  * the page (and comparable between pages of one browser).  Random numbers come
@@ -446,6 +449,11 @@ int roam_plat_start(const roam_plat_cfg *cfg, rc_session *s){
     roam_plat_lock();
     s->io = io;
     if (use_hub){ s->conf.hub_ip = NET_ROAM_HUB; s->conf.hub_port = g_cfg.port; }
+    /* the WebSocket loses no datagram, so a SNAP carries only the newest
+     * state: half the bytes (a receiver the switch sheds for, see lan.mjs
+     * roamQueue, interpolates over the gap).  The impairment knob stands for
+     * a lossy link: all three there, as on a LAN */
+    s->conf.snap_states = IMP.on ? RC_SNAP_STATES : 1;
     roam_plat_unlock();
     atomic_store(&g_stop, 0);
     if (pthread_create(&g_thr, 0, net_main, 0) != 0){ st(&MB->mode, NET_MODE_CLOSED); return -1; }

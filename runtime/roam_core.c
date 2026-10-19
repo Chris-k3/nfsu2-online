@@ -663,6 +663,7 @@ void rc_session_init(rc_session *s, const rc_config *cfg, const rc_io *io){
     if (s->conf.max_players > RC_MAX_PLAYERS) s->conf.max_players = RC_MAX_PLAYERS;
     if (s->conf.rate_hz < 10) s->conf.rate_hz = 10;
     if (s->conf.rate_hz > 60) s->conf.rate_hz = 60;
+    if (s->conf.snap_states < 1 || s->conf.snap_states > RC_SNAP_STATES) s->conf.snap_states = RC_SNAP_STATES;
     if (!s->conf.self_id) s->conf.self_id = 1;
     rc_name_clean(s->conf.name, cfg->name, RC_NAME_MAX + 1);
     for (int i = 0; i < RC_TABLE; i++) rc_interp_reset(&s->peer[i].mo);
@@ -1021,8 +1022,8 @@ int rc_push_state(rc_session *s, const rc_state *st, int64_t now){
     s->seq++;
     rc_msg m; hdr(s, &m, RC_MSG_SNAP);
     m.u.snap.status = s->status; m.u.snap.epoch = s->epoch; m.u.snap.clock = s->clock; m.u.snap.cfg_rev = s->cfg_rev;
-    m.u.snap.n = (uint8_t)s->nlast;
-    for (int k = 0; k < s->nlast; k++) m.u.snap.s[k] = s->last[k];
+    m.u.snap.n = (uint8_t)(s->nlast < s->conf.snap_states ? s->nlast : s->conf.snap_states);
+    for (int k = 0; k < m.u.snap.n; k++) m.u.snap.s[k] = s->last[k];
     uint8_t b[RC_MAX_DGRAM]; int n = rc_encode(&m, b, sizeof b);
     if (n <= 0) return 0;
     for (int i = 0; i < RC_TABLE; i++){

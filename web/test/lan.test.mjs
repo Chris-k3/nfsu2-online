@@ -623,6 +623,33 @@ test('a flood of datagrams never gets a slower receiver cut: they are dropped fo
   } finally { await sw.close(); }
 });
 
+test('free roam\'s datagrams (kind 1) are dropped at a much shorter queue than the others: no seconds of old positions', async () => {
+  const sw = await startSwitch({ sendBuffer: 4 << 20, shedQueue: 256 << 10, roamQueue: 16 << 10, byteRate: 64 << 20, frameRate: 100000,
+    groupByteRate: 64 << 20, groupFrameRate: 100000 });
+  try {
+    const victim = await rawPeer(sw.port, 'Victim');
+    victim.pause();
+    const sender = new Client(sw.port, 'Sender');
+    await sender.welcome();
+    await sleep(100);
+    const pv = [...sw.lan.peers.values()].find(p => p.name === 'Victim');
+    // free roam: past the kernel's buffers, then the switch's queue stops at roamQueue
+    for (let i = 0; i < 400; i++) { sender.udp(pv.vip, 1, 2, Buffer.alloc(8000), 1); if (i % 50 === 49) await sleep(5); }
+    await sleep(300);
+    const roamQ = pv.ws.bufferedAmount, roamShed = sw.lan.info().shed;
+    // LAN play's datagrams (kind 3) still queue up to shedQueue
+    for (let i = 0; i < 60; i++) { sender.udp(pv.vip, 1, 2, Buffer.alloc(8000), 3); if (i % 20 === 19) await sleep(5); }
+    await sleep(300);
+    const lanQ = pv.ws.bufferedAmount;
+    console.log(`kind 1 queue ${roamQ} bytes (shed ${roamShed}), then kind 3 queue ${lanQ} bytes`);
+    assert.ok(roamShed > 0, 'free-roam datagrams dropped');
+    assert.ok(roamQ > 0 && roamQ <= (16 << 10) + 8192, `free roam stops at roamQueue (${roamQ})`);
+    assert.ok(lanQ > (16 << 10) + 8192 && lanQ <= (256 << 10) + 8192, `LAN play's datagrams go on to shedQueue (${lanQ})`);
+    assert.ok(sw.lan.peers.has(pv.vip), 'the receiver is still on the switch');
+    victim.destroy(); await sender.close();
+  } finally { await sw.close(); }
+});
+
 // a raw peer that reads about `rate` bytes a second
 // (it takes at least one chunk, up to 64 KB, every 250 ms)
 function throttle(s, rate) {

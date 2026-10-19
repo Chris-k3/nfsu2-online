@@ -228,6 +228,10 @@ typedef struct {
     int      test_mode;            /* only 127/8 peers are accepted */
     int      max_players;          /* 2 .. RC_MAX_PLAYERS */
     int      rate_hz;              /* snapshots per second (10 .. 60) */
+    /* states per SNAP, newest first (1 .. RC_SNAP_STATES; 0 = all): the
+     * older ones stand in for a SNAP lost on the way.  A link that loses
+     * none (the browser's WebSocket to the server's switch) sends 1 */
+    int      snap_states;
     /* a free-roam hub (the browser's server, web/server/roam-hub.mjs), or 0:
      * it gets a HELLO every second and a SNAP twice a second, and answers
      * every second with a PEERS list of the players near us.  While it
@@ -309,7 +313,7 @@ void rc_set_status(rc_session *s, uint8_t status);
 /* the local car-look record; a change bumps cfg_rev and pushes it */
 void rc_set_cfg(rc_session *s, const uint8_t *rec, int len, int64_t now_us);
 /* the local car state, every frame: a SNAP goes out when one is due
- * (rate_hz, host clock), with the last RC_SNAP_STATES states */
+ * (rate_hz, host clock), with the last snap_states states */
 int  rc_push_state(rc_session *s, const rc_state *st, int64_t now_us);
 void rc_bump_epoch(rc_session *s);       /* teleport: receivers snap */
 void rc_bump_clock(rc_session *s);       /* stamps re-anchored: receivers re-sync, blended */
