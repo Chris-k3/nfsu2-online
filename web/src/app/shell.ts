@@ -579,11 +579,11 @@ export async function boot() {
     saveDir: SAVE, environment: ENVIRONMENT, onSaved: t => { settingsText = t; },
     // the tab that owns the saves is the one whose Play reads the file: another tab only looks
     readOnly: () => !instance.owner, say: pageToast,
-  });
-  // who plays on this server now (Settings, Multiplayer): only while no game runs here
+  }, $('#online'));
+  // who plays on this server now (Online): only while no game runs here
   players = watchPlayers(line => settings.setStatus(line), () => !session && !starting);
   download = new Predownload(s => saves.showData(s), logLine);
-  saves = new SavesPanel($('#saves'), {
+  saves = new SavesPanel($('#saves'), $('#game-data'), {
     saveDir: SAVE, busy: () => !!session || starting || !instance.owner, confirm: confirmBox,
     onRestored: () => { void loadSettings(); void settings.refresh(); }, download,
   });

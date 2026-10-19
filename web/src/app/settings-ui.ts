@@ -1,4 +1,5 @@
-// The settings on the start page: a form over settings.ini.  Every change
+// The settings on the start page: a form over settings.ini, in Settings and,
+// for the Online group, in a section of its own under Saves.  Every change
 // rewrites the one line of that key (settingsPut, bundle.m's settings_put), so
 // the file stays the source of truth and keeps the player's own comments;
 // "Reset" puts the template's commented-out line back.  Native controls
@@ -15,11 +16,12 @@ type Control =
   | { t: 'text'; placeholder?: string };
 
 interface Item { key: string; label: string; help: string; c: Control; more?: boolean }
-/** status: the group shows a line of the page's own under its title (Multiplayer: who plays on this server now) */
-interface Group { title: string; items: Item[]; status?: boolean }
+/** status: the group shows a line of the page's own under its title (Online: who plays on this server now);
+ *  own: the group is a section of the page of its own (#online, under Saves), named by that section's heading */
+interface Group { title: string; items: Item[]; status?: boolean; own?: boolean }
 
 const GROUPS: Group[] = [
-  { title: 'Multiplayer', status: true, items: [
+  { title: 'Online', status: true, own: true, items: [
     { key: 'roam', label: 'Free roam with others', help: 'Everyone on this server who turns this on sees your car in career free roam, and you see theirs, with their names over them.', c: { t: 'switch' } },
     { key: 'roam_name', label: 'Your name', help: 'What other players see over your car in free roam, and your name in the Online menu (there only letters, digits, - and _, at most 15). Empty uses your profile name.', c: { t: 'text', placeholder: 'profile name' } },
     { key: 'roam_room', label: 'Room', help: 'Only players in the same room see each other\'s cars. A filter, not privacy: everyone on this server still sees your name and whether you play.', c: { t: 'text', placeholder: 'none' } },
@@ -124,8 +126,9 @@ export class SettingsPanel {
   private saves = 0;                       // writes so far (tests wait on data-saved)
   private openMore = new Set<string>();    // "More ... settings" kept open across re-renders
   private note0: string;                   // the section's own note, back once the tab owns the saves
-  private status = '';                     // the Multiplayer group's line (setStatus)
-  constructor(private root: HTMLElement, private deps: SettingsDeps) {
+  private status = '';                     // the Online group's line (setStatus)
+  /** root: the Settings section; online: the section of the group that is its own (Online, under Saves) */
+  constructor(private root: HTMLElement, private deps: SettingsDeps, private online: HTMLElement) {
     this.note0 = root.querySelector('#settings-note')!.textContent ?? '';
     root.querySelector<HTMLButtonElement>('#settings-text-save')!.onclick = () => void this.saveRaw();
   }
@@ -180,26 +183,35 @@ export class SettingsPanel {
     const ro = this.ro();
     this.root.toggleAttribute('data-readonly', ro);
     this.root.querySelector('#settings-note')!.textContent = ro ? READ_ONLY : this.note0;
-    const body = this.root.querySelector('#settings-body')!;
+    this.online.toggleAttribute('data-readonly', ro);
+    const note = this.online.querySelector<HTMLElement>('#online-note')!;
+    note.textContent = ro ? READ_ONLY : ''; note.hidden = !ro;
     const focusKey = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.set')?.dataset.key;
-    body.replaceChildren(...GROUPS.map(g => this.group(g)), ...this.others());
+    this.root.querySelector('#settings-body')!.replaceChildren(...GROUPS.filter(g => !g.own).map(g => this.group(g)), ...this.others());
+    this.online.querySelector('#online-body')!.replaceChildren(...GROUPS.filter(g => g.own).map(g => this.group(g)));
     this.syncRaw();
-    const row = focusKey ? body.querySelector<HTMLElement>(`.set[data-key="${focusKey}"]`) : null;
+    const row = focusKey ? this.find<HTMLElement>(`.set[data-key="${focusKey}"]`) : null;
     if (row) this.focusRow(row);
   }
 
-  /** The Multiplayer group's line under its title ('' hides it); kept across re-renders. */
+  /** an element of the Settings section or of the Online one */
+  private find<T extends Element>(sel: string): T | null { return this.root.querySelector<T>(sel) ?? this.online.querySelector<T>(sel); }
+
+  /** The Online group's line under its title ('' hides it); kept across re-renders. */
   setStatus(line: string) {
     this.status = line;
-    const p = this.root.querySelector<HTMLElement>('#group-status');
+    const p = this.find<HTMLElement>('#group-status');
     if (p) { p.textContent = line; p.hidden = !line; }
   }
 
   private group(g: Group): HTMLElement {
     const box = document.createElement('div'); box.className = 'group';
-    const h = document.createElement('h3'); h.id = `group-${g.title.toLowerCase().replace(/\W+/g, '-')}`; h.textContent = g.title;
-    box.setAttribute('role', 'group'); box.setAttribute('aria-labelledby', h.id);
-    box.append(h);
+    // a group in its own section has that section's heading
+    if (!g.own) {
+      const h = document.createElement('h3'); h.id = `group-${g.title.toLowerCase().replace(/\W+/g, '-')}`; h.textContent = g.title;
+      box.setAttribute('role', 'group'); box.setAttribute('aria-labelledby', h.id);
+      box.append(h);
+    }
     if (g.status) {
       const p = document.createElement('p'); p.className = 'hint group-status'; p.id = 'group-status';
       p.textContent = this.status; p.hidden = !this.status;
@@ -246,7 +258,7 @@ export class SettingsPanel {
 
   /** One row again, after its key changed (the rest of the panel, and the focus, stay where they are). */
   private rerow(key: string) {
-    const old = this.root.querySelector<HTMLElement>(`.set[data-key="${key}"]`);
+    const old = this.find<HTMLElement>(`.set[data-key="${key}"]`);
     const it = ITEMS.get(key);
     if (!old || !it) { this.render(); return; }
     const focused = old.contains(document.activeElement);

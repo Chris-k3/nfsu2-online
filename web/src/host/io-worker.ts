@@ -7,7 +7,7 @@
 //   /data  the NFSU2 install folder on the local server, read-only.  Read in
 //          1 MiB blocks with HTTP range requests, kept in memory, and
 //          persisted in OPFS ("cache/", datacache.ts) so the next launch reads
-//          locally (Saves, "Download all game data" fills all of it ahead).
+//          locally ("Download all game data" fills all of it ahead).
 //   /save  the save overlay: OPFS directory, read/write (saves, registry,
 //          settings.ini, logs).  Closing a file the game wrote there tells
 //          the page ({ t: 'saved', path }: "Progress saved", F9's last save).

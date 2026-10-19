@@ -37,7 +37,7 @@ the ways to set that up. Each player then opens that `https://` address in the l
 
 The first start on a PC downloads about 7 MB of game code and, while playing, the game data it needs. That PC keeps
 the data, so later starts are quick. To download all of it up front (about 3 GB), press **Download all game data**
-under Saves, Game data on this PC. After that no loading screen waits on the network, which matters on a slow line
+in Game data on this PC, at the bottom of the start page. After that no loading screen waits on the network, which matters on a slow line
 to a remote server.
 
 ## 3. Controls
@@ -75,12 +75,12 @@ The start page shows these keys under **Controls**, and F9, Controls shows them 
 
 ## 4. Settings
 
-**Settings** on the start page holds this browser's `settings.ini`, the same file and keys as the Mac app. Each change
-is saved at once and applies the next time you press Play.
+**Online** (under Saves) and **Settings** on the start page hold this browser's `settings.ini`, the same file and
+keys as the Mac app. Each change is saved at once and applies the next time you press Play.
 
 | Group | Settings |
 |---|---|
-| Multiplayer | how many play on this server now, free roam with others, your name (in free roam and online), room, the game's Online mode (on by default); more: solid cars and the free-roam network |
+| Online | its own section under Saves: how many play on this server now, free roam with others, your name (in free roam and online), room, the game's Online mode (on by default); more: solid cars and the free-roam network |
 | Game | movies, autosave; more: startup movies (skippable, original or off), sound, pause or keep running in the background, sound output latency |
 | Display | full screen on Play (off: the game plays in the browser window), resolution scale, frame rate (auto follows the screen: 120 on a 120 Hz display; 60 or 120); more: HUD layout, movie framing, cutscene bars, frame-rate counter |
 | Controller | rumble; more: controller on or off, menu buttons, dead zones |
@@ -118,18 +118,18 @@ is saved at once and applies the next time you press Play.
 - **Backups are your safety net.** The browser may clear a site's storage when the disk runs low; the Saves section
   says so when the browser has not promised to keep it. Firefox asks first, by the address bar: allow it. Make a
   backup now and then.
-- **Downloading all game data:** "Download all game data" in Saves fetches the whole game folder into this browser,
+- **Downloading all game data:** "Download all game data" in Game data on this PC fetches the whole game folder into this browser,
   with its progress and the time left. You can play meanwhile: the download pauses while the game runs and goes on
   when it ends. Stop it whenever you like; what came is kept, and "Download the rest" goes on from there, also after
   a reload. It needs about 3 GB of free disk space. The page says so before it starts when the browser has less room.
-- **Downloaded game data:** "Delete the downloaded game data" in Saves frees disk space on this PC. Your saves stay;
+- **Downloaded game data:** "Delete the downloaded game data" in Game data on this PC frees disk space on this PC. Your saves stay;
   the data downloads again when needed.
 
 ## 6. Free roam with other players
 
 Free roam is shared with **everyone** on the server who turns it on. Use a Room to keep to a group.
 
-1. Each player turns on **Settings, Multiplayer, Free roam with others**. **Settings, Multiplayer, Your name** is
+1. Each player turns on **Online, Free roam with others** on the start page. **Online, Your name** is
    the name the others see (empty: your profile name).
 2. Everyone plays from the same server's address.
 3. Each player starts or loads a career and drives in free roam. Players find each other by themselves, and their
@@ -140,7 +140,7 @@ Good to know:
 - **How many:** up to 64 players on a server (its owner can change that). The server pairs each player with the 7
   players nearest to them, and your game shows the 5 nearest cars at once; as you drive, nearer cars take the place
   of farther ones.
-- **Solid cars:** you collide with the other players' cars (Settings, Multiplayer, More multiplayer settings,
+- **Solid cars:** you collide with the other players' cars (Online, More online settings,
   Solid cars; off: you drive through them). A car that appears on top of yours, at a garage or after a jump, lets you
   through until you are apart. Each player's own game moves their car: a car you hit is pushed in its owner's game,
   and moves on your screen as it does there.
@@ -164,8 +164,8 @@ Good to know:
 The game's own **Online** menu works again, against this server instead of EA's long-gone one: everyone who plays
 from the same server address can meet there.
 
-1. Main menu, **Online**. You go straight to the Online Main Menu under your name: **Settings, Multiplayer, Your
-   name**, or your profile name when that is empty. There are no EA accounts, so the game's EA Login screens are
+1. Main menu, **Online**. You go straight to the Online Main Menu under your name: **Online, Your name** on the
+   start page, or your profile name when that is empty. There are no EA accounts, so the game's EA Login screens are
    skipped.
 2. **Lobby** shows the games. **Create Game** (race type, track, options; Game Type Unranked), or **Refresh** and
    **Join Game**. In the game room, chat, press **Ready**; the creator presses **Start Race**.
@@ -195,9 +195,9 @@ Good to know:
   friend request (the other's request shows the asker in your list: open them, Send Friend Request).
 - **Not yet:** game passwords (a password game is joined like an open one); the points table after a ranked race
   stays empty (the race still counts in Rankings).
-- **Who is on:** Settings, Multiplayer shows how many play on this server now, and how many of them are in Online
+- **Who is on:** Online on the start page shows how many play on this server now, and how many of them are in Online
   mode (in its menus or racing). Only the two numbers: no names.
-- Turning it off: Settings, Multiplayer, Online mode (the game then cannot connect).
+- Turning it off: Online, Online mode on the start page (the game then cannot connect).
 
 ## 8. When something is wrong
 

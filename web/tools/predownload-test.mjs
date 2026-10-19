@@ -1,4 +1,4 @@
-// "Download all game data" (Saves, Game data on this PC) in headless Chrome,
+// "Download all game data" (Game data on this PC) in headless Chrome,
 // against a server of its own over a made-up game folder of random bytes, in
 // sizes that hit the edges of the 1 MiB blocks and the 8-block requests:
 //   node web/tools/predownload-test.mjs [--port 8657] [--out <dir>] [--headed]

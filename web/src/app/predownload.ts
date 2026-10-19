@@ -1,7 +1,8 @@
-// All of the game data onto this PC ahead of play (Saves, "Game data on this
-// PC"): the predownload worker fills the cache the game reads from.  It only
-// runs while no game runs in this tab, because the game's I/O worker writes
-// the same cache files.  A game pauses it, and it goes on after the game ends.
+// All of the game data onto this PC ahead of play ("Game data on this PC", at
+// the bottom of the start page): the predownload worker fills the cache the
+// game reads from.  It only runs while no game runs in this tab, because the
+// game's I/O worker writes the same cache files.  A game pauses it, and it
+// goes on after the game ends.
 
 import type { FromPredownload, ToPredownload } from '../host/predownload-worker';
 import { DATA_BASE, MANIFEST_URL, manifestFiles, scanCache, type Manifest } from '../host/datacache';

@@ -99,7 +99,7 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
 - **Files:** WASI preview1 calls go to the I/O worker over per-thread RPC slots (SAB + `Atomics.wait`). Results are
   written straight into wasm memory. Mounts:
   - `/data`: the install folder. Manifest from the server, case-insensitive lookup, 1 MiB range blocks, memory LRU,
-    persistent OPFS block cache (`web/src/host/datacache.ts`). Saves, "Download all game data" fills the whole cache
+    persistent OPFS block cache (`web/src/host/datacache.ts`). "Download all game data" (Game data on this PC, at the bottom of the start page) fills the whole cache
     ahead of play from its own worker (`predownload-worker.ts`, 4 requests of up to 8 blocks at once). It runs only
     while no game runs in the tab: Play pauses it, and the game's end resumes it.
   - `/save`: OPFS save overlay. Holds saves, `registry.txt`, `settings.ini` and logs. Closing a file the game wrote

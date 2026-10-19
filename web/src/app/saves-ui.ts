@@ -1,8 +1,9 @@
 // The saves section of the start page: the profiles in this browser, a backup of the whole save
 // overlay as a zip (profiles, registry.txt, settings.ini, screenshots) and
-// restoring one, and the downloaded game data on this PC: how much of it, all
-// of it downloaded ahead (predownload.ts), or deleted.  The game data is never
-// part of a backup and never written back: it stays on the server.
+// restoring one.  And the section at the bottom of the page, the game data on
+// this PC: how much of it, all of it downloaded ahead (predownload.ts), or
+// deleted.  The game data is never part of a backup and never written back:
+// it stays on the server.
 
 import { cacheBytes, clearCache, clearSaveDir, listFiles, listProfiles, PROFILES_DIR, readBytes, writeFile } from './savefs';
 import { listZip, unzip, zip, ZipError, type ZipEntry } from './zip';
@@ -115,16 +116,17 @@ function eta(s: number): string {
 }
 
 export class SavesPanel {
-  constructor(private root: HTMLElement, private deps: SavesDeps) {
+  /** root: the Saves section; dataPanel: Game data on this PC */
+  constructor(private root: HTMLElement, private dataPanel: HTMLElement, private deps: SavesDeps) {
     root.querySelector<HTMLButtonElement>('#export')!.onclick = () => void this.doExport();
     const inp = root.querySelector<HTMLInputElement>('#import')!;
     inp.onchange = () => { const f = inp.files?.[0]; inp.value = ''; if (f) void this.doImport(f); };
-    root.querySelector<HTMLButtonElement>('#clear-cache')!.onclick = () => void this.doClearCache();
-    root.querySelector<HTMLButtonElement>('#fetch-all')!.onclick = () => void this.doDownload();
+    dataPanel.querySelector<HTMLButtonElement>('#clear-cache')!.onclick = () => void this.doClearCache();
+    dataPanel.querySelector<HTMLButtonElement>('#fetch-all')!.onclick = () => void this.doDownload();
   }
 
   private msg(s: string) { this.root.querySelector('#saves-msg')!.textContent = s; }
-  private dataMsg(s: string, warn = false) { const m = this.root.querySelector('#data-msg')!; m.textContent = s; m.classList.toggle('warn', warn); }
+  private dataMsg(s: string, warn = false) { const m = this.dataPanel.querySelector('#data-msg')!; m.textContent = s; m.classList.toggle('warn', warn); }
 
   /** the game data in this browser: of the server's files (null: their list did not load), and all that is kept */
   private data: { have: number; total: number } | null = null;
@@ -153,9 +155,13 @@ export class SavesPanel {
     const busy = this.deps.busy();
     this.root.querySelector<HTMLLabelElement>('.file-btn')!.toggleAttribute('aria-disabled', busy);
     this.root.querySelector<HTMLInputElement>('#import')!.disabled = busy;
-    this.root.querySelector<HTMLButtonElement>('#clear-cache')!.disabled = busy;
-    if (busy) this.msg('Quit the game (or close the other tab that runs it) to restore a backup or change the game data.');
-    else if (/^Quit the game \(or close/.test(this.root.querySelector('#saves-msg')!.textContent ?? '')) this.msg('');
+    this.dataPanel.querySelector<HTMLButtonElement>('#clear-cache')!.disabled = busy;
+    const waiting = /^Quit the game \(or close/;
+    if (busy) { this.msg('Quit the game (or close the other tab that runs it) to restore a backup.'); this.dataMsg('Quit the game (or close the other tab that runs it) to change the game data.'); }
+    else {
+      if (waiting.test(this.root.querySelector('#saves-msg')!.textContent ?? '')) this.msg('');
+      if (waiting.test(this.dataPanel.querySelector('#data-msg')!.textContent ?? '')) this.dataMsg('');
+    }
     this.root.dataset.files = String(files.length);
     if (this.deps.download.running) { this.showData(); return; }     // it counts as it goes
     const n = ++this.counted;
@@ -175,8 +181,8 @@ export class SavesPanel {
       if (st.state === 'error') this.dataMsg(`The download stopped: ${st.error}. What it downloaded is kept.`, true);
       if (!active) void this.refresh();                         // counted again; shown now with what is known
     }
-    const info = this.root.querySelector('#cache-info')!, bar = this.root.querySelector<HTMLElement>('#data-bar')!;
-    const fetchBtn = this.root.querySelector<HTMLButtonElement>('#fetch-all')!;
+    const info = this.dataPanel.querySelector('#cache-info')!, bar = this.dataPanel.querySelector<HTMLElement>('#data-bar')!;
+    const fetchBtn = this.dataPanel.querySelector<HTMLButtonElement>('#fetch-all')!;
     const d = this.data, rest = d ? d.total - d.have : 0;
     bar.hidden = !active;
     fetchBtn.disabled = this.deps.busy() && !active;

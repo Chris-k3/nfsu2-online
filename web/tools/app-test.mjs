@@ -150,7 +150,7 @@ try {
     await page.click('.set[data-key="fps_counter"] .opt:has-text("Detailed")'); await settle(page, n0++);
     await page.click('.set[data-key="roam"] .switch'); await settle(page, n0++);            // roam on (validated bool)
     await page.fill('#set-roam_name', 'Tester ; a comment'); await page.press('#set-roam_name', 'Tab'); await settle(page, n0++);
-    await page.click('#settings summary:has-text("More multiplayer")');
+    await page.click('#online summary:has-text("More online")');
     await page.fill('#set-roam_port', '99'); await page.press('#set-roam_port', 'Tab');   // out of range: refused, not written
     const refusedMsg = await page.locator('.set[data-key="roam_port"] .set-state').textContent();
     await page.click('.set[data-key="roam"] .switch'); await settle(page, n0);              // roam back off
@@ -652,7 +652,7 @@ try {
       .map(async u => [u, (await fetch(u, { cache: 'no-store' })).status]))));
     const a11y = await s.evaluate(() => {
       const unnamed = [], undescribed = [];
-      for (const el of document.querySelectorAll('#settings-body .set input, #settings-body .set [role="radiogroup"]')) {
+      for (const el of document.querySelectorAll(':is(#settings-body, #online-body) .set :is(input, [role="radiogroup"])')) {
         if (el.type === 'radio') continue;                           // named by its own label, the group by the row's
         const named = el.labels?.length || el.getAttribute('aria-labelledby') && document.getElementById(el.getAttribute('aria-labelledby'))?.textContent;
         if (!named) unnamed.push(el.id || el.outerHTML.slice(0, 60));

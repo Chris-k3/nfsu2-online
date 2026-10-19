@@ -66,7 +66,7 @@ h1 { font-size: 32px; line-height: 40px; }
 h2 { font-size: 20px; line-height: 28px; color: var(--lime); margin-bottom: 16px; }
 h3 { font-size: 16px; line-height: 24px; color: var(--lime); margin: 32px 0 8px; }
 .panel > h2 + .hint { margin: -12px 0 16px; }
-#settings[data-readonly] #settings-note { color: var(--warn); }
+#settings[data-readonly] #settings-note, #online[data-readonly] #online-note { color: var(--warn); }
 
 /* the game's slider bar under its header, here the download */
 .bar { margin-top: 12px; height: 8px; border-radius: 4px; background: #585858; overflow: hidden; }
@@ -132,6 +132,7 @@ kbd {
 .group h3 { margin-top: 32px; }
 .group:first-child h3 { margin-top: 0; }
 .group-status { margin-bottom: 4px; }
+#online .group-status { margin-top: -12px; }          /* the section's subtitle, as Settings' note: 4px under its heading */
 .set {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "label ctl" "help ctl";
   column-gap: 16px; padding: 12px 0; align-items: center;
@@ -200,8 +201,8 @@ summary:hover { color: var(--text); }
 .profiles .meta { color: var(--muted); font-size: 14px; line-height: 20px; align-self: center; }
 #saves .hint + .row { margin-top: 12px; }
 #saves h3 + .hint { margin-bottom: 0; }
-#cache-info { margin-bottom: 12px; font-variant-numeric: tabular-nums; }
-#data-bar + .row { margin-top: 16px; }
+#cache-info { font-variant-numeric: tabular-nums; }
+#data-bar { margin: 0 0 16px; }
 .msg { font-size: 14px; line-height: 20px; margin-top: 12px; }
 .msg:empty { display: none; }
 .msg.warn { color: var(--warn); }

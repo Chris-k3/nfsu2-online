@@ -1,6 +1,6 @@
 // The predownload worker: all of the install folder into the game data cache
 // (datacache.ts) ahead of play, so a game never waits on the network for its
-// data.  The page starts it (Saves, "Download all game data") and stops it
+// data.  The page starts it ("Download all game data") and stops it
 // before a game starts, since the I/O worker writes the same files.
 //
 // Page -> worker: { t: 'start', manifestUrl, dataBase }, { t: 'stop' }
