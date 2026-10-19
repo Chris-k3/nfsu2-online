@@ -83,7 +83,7 @@ is saved at once and applies the next time you press Play.
 | Sound | output latency |
 | Controller | controller, rumble, menu buttons, dead zones |
 | Multiplayer | how many play on this server now, your name (in free roam and online), the game's Online mode (on by default) |
-| Free roam | play with friends, room |
+| Free roam | play with others, room, solid cars |
 
 - **More settings:** each group's "More … settings" has the less common ones. **Reset** next to a changed setting
   puts its default back.
@@ -120,26 +120,33 @@ is saved at once and applies the next time you press Play.
 - **Downloaded game data:** "Delete the downloaded game data" in Saves frees disk space on this PC. Your saves stay;
   the data downloads again when needed.
 
-## 6. Free roam with friends
+## 6. Free roam with other players
 
-1. Every player turns on **Settings, Free roam, Play with friends**. **Settings, Multiplayer, Your name** is the name
+Free roam is shared with **everyone** on the server who turns it on. Use a Room to keep to a group.
+
+1. Each player turns on **Settings, Free roam, Play with others**. **Settings, Multiplayer, Your name** is the name
    the others see (empty: your profile name).
 2. Everyone plays from the same server's address.
-3. Each player starts or loads a career and drives in free roam. Friends find each other by themselves, and their
-   cars appear in your city.
+3. Each player starts or loads a career and drives in free roam. Players find each other by themselves, and their
+   cars appear in your city with their names over them, as in the game's own LAN races.
 
 Good to know:
 
-- **Rooms:** set the same "Room" to see only some of the players' cars. A room is a filter between friends, not
+- **Solid cars:** you collide with the other players' cars (Settings, Free roam, More free roam settings, Solid
+  cars; off: you drive through them). A car that appears on top of yours, at a garage or after a jump, lets you
+  through until you are apart. Each player's own game moves their car: a car you hit is pushed in its owner's game,
+  and moves on your screen as it does there.
+- **Names over the cars** follow the game's own player-names option, as in its LAN races.
+- **Rooms:** set the same "Room" to see only some of the players' cars. A room is a filter between players, not
   privacy: every browser on the server still sees your name ("Your name", or the profile name), whether you are in
   the menus or driving, and the room, and someone with their own tools could join it. Play on a server only with
   people you would show your name and car to.
 - **Who sees what:** with free roam off (the default), the game does not join the server's network at all. With it
   on, everyone on the server sees your name and status, and players in free roam with you see your car and where it
   is. Nobody sees your real address: the server gives each player a virtual one (`10.77.0.x`).
-- **A tab in the background** (or another window in front) pauses your game. Friends see you as paused: your car stays where you stopped until you come back.
-- **Closing the tab:** friends see your car disappear after a few seconds.
-- **Messages over the game** say when a friend comes online, goes into a race or a shop, is back in free roam, or
+- **A tab in the background** (or another window in front) pauses your game. The others see you as paused: your car stays where you stopped until you come back.
+- **Closing the tab:** the others see your car disappear after a few seconds.
+- **Messages over the game** say when a player comes online, goes into a race or a shop, is back in free roam, or
   leaves.
 - **The game's own LAN races** (its LAN menu) work between players on the same server too, with free roam on or off.
 

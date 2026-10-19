@@ -284,14 +284,15 @@ export const TEMPLATE = `# NFSU2 settings, read at every launch.
 
 # ---- Free roam ------------------------------------------------------------
 
-# Friends playing from this server, each in their own career free roam, see
-# each other's cars: model, parts and paint, about 0.1 s behind, with an
-# arrow on the minimap; you drive through them.  Traffic, races and money
-# stay your own.  Your name (above) is what they see.  For these options a
-# ';' or '#' after a blank starts a comment.  [NFSU2_ROAM]
+# Everyone playing from this server with this on, each in their own career
+# free roam, sees the others' cars: model, parts and paint, with the
+# player's name over it and an arrow on the minimap.
+# Traffic, races and money stay your own.  Your name (above) is what they
+# see.  For these options a ';' or '#' after a blank starts a comment.
+# [NFSU2_ROAM]
 #roam = off
-# Friends' addresses, if the automatic search does not find them: a.b.c.d or
-# a.b.c.d:port, separated by commas.  [NFSU2_ROAM_PEERS]
+# Other players' addresses, if the automatic search does not find them:
+# a.b.c.d or a.b.c.d:port, separated by commas.  [NFSU2_ROAM_PEERS]
 #roam_peers =
 # Only players with the same room name see each other's cars.  A filter, not
 # privacy: everyone on the server still sees your name and status.
@@ -299,23 +300,25 @@ export const TEMPLATE = `# NFSU2 settings, read at every launch.
 #roam_room =
 # Port, the same for every player (1024 to 65535).  [NFSU2_ROAM_PORT]
 #roam_port = 47210
-# Look for friends with a broadcast every 2 s.  [NFSU2_ROAM_DISCOVERY]
+# Look for players with a broadcast every 2 s.  [NFSU2_ROAM_DISCOVERY]
 #roam_discovery = on
-# Largest group, you included (2 to 8), and friends' cars shown at once
-# (0 to 5, the nearest).  [NFSU2_ROAM_MAX_PLAYERS, NFSU2_ROAM_MAX_CARS]
+# Largest group, you included (2 to 8), and other players' cars shown at
+# once (0 to 5, the nearest).  [NFSU2_ROAM_MAX_PLAYERS, NFSU2_ROAM_MAX_CARS]
 #roam_max_players = 8
 #roam_max_cars = 5
-# on = friends' cars are solid (experimental; they do not move when hit).
+# on = the other players' cars are solid: drawn where they are now, and one
+# that appears on your car lets you through until you are apart.
+# off = you drive through them.
 # [NFSU2_ROAM_COLLIDE]
-#roam_collide = off
-# Snapshots per second (10 to 60), the delay friends' cars are shown with in
-# ms (0 to 1000) and the longest they are extrapolated in ms (0 to 1000).
+#roam_collide = on
+# Snapshots per second (10 to 60), the delay ghost cars are shown with in
+# ms (0 to 1000) and the longest cars are extrapolated in ms (0 to 1000).
 # [NFSU2_ROAM_RATE, NFSU2_ROAM_DELAY, NFSU2_ROAM_EXTRAP]
 #roam_rate = 20
 #roam_delay = 100
 #roam_extrap = 250
-# The free-roam car memory pool in KB, raised for friends' cars (the game's
-# own is 11000; it is never lowered).  [NFSU2_ROAM_CARPOOL_KB]
+# The free-roam car memory pool in KB, raised for other players' cars (the
+# game's own is 11000; it is never lowered).  [NFSU2_ROAM_CARPOOL_KB]
 #roam_carpool_kb = 20000
 `;
 

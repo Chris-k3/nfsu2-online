@@ -1,8 +1,9 @@
 # Free-roam multiplayer collisions: new career -> prologue free roam; a
 # stand-in friend drives a straight line at 8 m/s right through the parked
 # player's car (tests/roam_fakepeer.c --track, a line ending behind it).
-# Ghost cars (the default): it passes through and the player stays put;
-# NFSU2_ROAM_COLLIDE=1: whatever the game makes of a solid kinematic car.
+# Solid cars (the default): it appears as a ghost and turns solid once it
+# is 6 m from the player's car, then hits it; NFSU2_ROAM_COLLIDE=0: it
+# passes through and the player stays put.
 0     tapuntil RETURN MC_Background.fng 120 4000
 +120  tap LEFT
 +30   tap RETURN

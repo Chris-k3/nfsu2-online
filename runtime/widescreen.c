@@ -218,6 +218,14 @@ static void movie_quad(uint32_t sp){
     MRF32(sp) = -hx; MRF32(sp + 4u) = -hy; MRF32(sp + 8u) = hx; MRF32(sp + 12u) = hy;
 }
 
+void ws_hud_marker(float *x, float *y){
+    ws_init();
+    if (g_fov != FOV_GAME) return;
+    float ux = ws_ui_x(), uy = ws_ui_y();
+    if (ux < 1.f) *x = 320.f + (*x - 320.f) / ux;
+    if (uy < 1.f) *y = 240.f + (*y - 240.f) / uy;
+}
+
 int ws_hook(CPU *c, uint32_t ip){
     ws_init();
     switch (ip){

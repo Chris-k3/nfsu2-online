@@ -29,6 +29,12 @@ double ws_render_factor(void);
  * still bounds 5K/6K displays.  Thread-safe (reads the environment). */
 #define WS_MAX_PIXELS_DEFAULT 9.0e6
 double ws_max_pixels(void);
+/* A HUD marker over a world position, in 640x480 HUD units from the view's
+ * pixels (x / width * 640, y / height * 480): moved out to where the
+ * position is shown on a screen wider than the 4:3 HUD (the game's own
+ * marker, sub_004ebec0, gets this at its hook sites; roam_game.c's names
+ * over friends' cars call it). */
+void  ws_hud_marker(float *x, float *y);
 /* 1 if the hook at ip was a widescreen site (guest_hook returns then). */
 int   ws_hook(CPU *c, uint32_t ip);
 void  ws_report(void);

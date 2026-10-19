@@ -41,6 +41,7 @@ uint64_t    roam_win_ns(void);
 #define rh_opt(k)        roam_opt(k)
 #define rh_frame()       roam_win_frame_no()
 #define rh_heap_mb()     0u
+#define rh_hud_marker(x, y) ((void)(x), (void)(y))   /* the HUD as the game shows it */
 #define rh_ns()          roam_win_ns()
 
 /* the pose log (test aid, PoseLog in the .ini) */

@@ -13,6 +13,9 @@
 //        [--page app]  each instance is the player's start page (web/index.html): Play is clicked, the
 //                    renderer, audio, input and network are the app's (free roam from the page address's
 //                    NFSU2_ROAM=1); the default is test/hostcheck.html (null renderer, net=<name>)
+//        [--page play [--size 960x540] [--play-only Bob]]   the renderer's test page (test/play.html, WebGPU)
+//                    instead: frame dumps go to the server's /artifacts/ as <name>-*.png (a server of our own
+//                    gets --artifacts <out>); --play-only: only that instance renders, the others run hostcheck
 //        [--hide Bob:60:8]  that page reports itself hidden (document.hidden + visibilitychange, as when
 //                    its tab goes to the background; headless pages are never really hidden) at 60 s
 //                    after the first page opened, for 8 s
@@ -57,6 +60,7 @@ const SPECS = [opt('a', 'Alice:roam_mp_drive.txt'), opt('b', 'Bob:roam_mp_watch.
   .filter(Boolean).map(x => x.split(':'));
 const N = SPECS.length;
 const APP = opt('page', 'test') === 'app';
+const PLAY = opt('page', 'test') === 'play', SIZE = opt('size', '960x540').split('x').map(Number), PLAY_ONLY = opt('play-only', '');
 const HIDE = opts('hide').map(x => { const [n, at, dur] = x.split(':'); return { name: n, at: +at * 1000, dur: +(dur ?? 8) * 1000 }; });
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -78,8 +82,10 @@ function url(i, name, script) {
     ? new URLSearchParams({ reg: '/tests/web/seed/registry_perf4_native.txt', script: `/tests/scripts/${script}`, save: `roam-${name}` })
     : new URLSearchParams({ wasm: '/game.wasm', pages: '16384', arg: '/data/SPEED2.EXE',
       reg: '/tests/web/seed/registry_perf4_native.txt', script: `/tests/scripts/${script}`, save: `roam-${name}`, net: name });
+  const play = PLAY && (!PLAY_ONLY || PLAY_ONLY === name);
+  if (play) { q.set('w', String(SIZE[0])); q.set('h', String(SIZE[1])); q.set('artifacts', `/artifacts/${name}-`); q.set('dumpscale', '1'); }
   for (const [k, v] of Object.entries(env)) if (!(APP && (k === 'NFSU2_SAVEDIR'))) q.append('env', `${k}=${v}`);
-  return APP ? `${BASE}/?${q}&fresh` : `${BASE}/test/hostcheck.html?${q}&fresh`;
+  return APP ? `${BASE}/?${q}&fresh` : `${BASE}/test/${play ? 'play' : 'hostcheck'}.html?${q}&fresh`;
 }
 
 // our own server (stopped by its child handle only)
@@ -89,7 +95,7 @@ async function startServer() {
   const certs = HTTPS ? makeTestCerts(path.join(OUT, 'certs')) : null;
   const c = spawn(process.execPath, [path.join(REPO, 'web/server/server.mjs'), '--data', DATA,
     ...(certs ? ['--port', String(HTTPS_PORT), '--tls-cert', certs.cert, '--tls-key', certs.key] : []),
-    '--http-port', String(HTTP_PORT), '--dev'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    '--http-port', String(HTTP_PORT), '--dev', ...(PLAY ? ['--artifacts', OUT] : [])], { stdio: ['ignore', 'pipe', 'pipe'] });
   c.stdout.pipe(serverLog, { end: false }); c.stderr.pipe(serverLog, { end: false });
   await new Promise((res, rej) => {
     let out = '';

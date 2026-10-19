@@ -21,6 +21,8 @@
  *   rh_heap_mb()            guest heap in use (live blocks), MB (0 when not known)
  *   rh_ns()                 a monotonic clock in ns (frame cost)
  *   rh_file, rh_fopen/rh_fprintf/rh_fflush   the pose log (test aid)
+ *   rh_hud_marker(&x, &y)   a HUD marker's position (640x480 units from the
+ *                           view's pixels) as the screen shows the HUD
  *   ROAM_HOST_SCRIPT        defined when the input-script commands exist
  */
 #ifndef ROAM_HOST_H
@@ -35,6 +37,7 @@
 void dispatch_indirect(CPU *c, uint32_t addr);
 long autotest_frame(void);
 uint32_t win32_heap_live(void);          /* win32.c: bytes in live heap blocks */
+void ws_hud_marker(float *x, float *y);  /* widescreen.c */
 
 #define ROAM_HOST_SCRIPT 1
 #define ROAM_HOOK_RET    0x00581475u     /* the return address guest calls see */
@@ -44,6 +47,7 @@ uint32_t win32_heap_live(void);          /* win32.c: bytes in live heap blocks *
 #define rh_opt(k)        getenv(k)
 #define rh_frame()       autotest_frame()
 #define rh_heap_mb()     (win32_heap_live() >> 20)
+#define rh_hud_marker(x, y) ws_hud_marker((x), (y))
 typedef FILE rh_file;
 #ifdef __wasm__
 /* The pose log (a test aid) in the browser: every stdio flush is a
