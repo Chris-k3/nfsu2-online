@@ -91,19 +91,18 @@ export async function checkGpu(): Promise<Check & { adapter?: string }> {
  * Firefox asks the player before it keeps a site's data for good (a prompt by
  * the address bar), and persist() waits for the answer: the check does not.
  * It says so then, and `answer` is the check again once the player answered.
+ * Without that promise the data stays until the disk is nearly full, which the
+ * page cannot see: Chrome's estimate() tells such a site usage + 10 GiB (since
+ * Chrome 133), whatever the disk has.  So that is no warning: backups are the
+ * safety net (docs/web/PLAYING.md).
  */
 export async function checkStorage(): Promise<Check & { answer?: Promise<Check> }> {
   const label = 'Browser storage';
   try { await navigator.storage.getDirectory(); }
   catch { return { id: 'storage', label, state: 'fail', detail: 'This browser window cannot store files (a guest or private window?). Saves need the origin private file system.' }; }
-  let free = '';
-  try {
-    const e = await navigator.storage.estimate();
-    if (e.quota !== undefined && e.usage !== undefined) free = `, ${fmtBytes(e.quota - e.usage)} free`;
-  } catch { /* fine */ }
-  const verdict = (persisted: boolean): Check => ({ id: 'storage', label, state: persisted ? 'ok' : 'warn',
-    detail: persisted ? `Saves and cached game data are kept${free}.`
-      : `${upper(browserName())} may clear this site's storage when the disk runs low${free}. Download a backup of your saves now and then.` });
+  const verdict = (persisted: boolean): Check => ({ id: 'storage', label, state: 'ok',
+    detail: persisted ? 'Saves and cached game data are kept for good.'
+      : `Saves and cached game data are kept until the disk is nearly full, when ${browserName()} may clear them.` });
   const ask = (async () => await navigator.storage.persisted() || await navigator.storage.persist())()
     .catch(() => false);                 // not decisive
   const quick = await Promise.race([ask, new Promise<null>(res => setTimeout(() => res(null), 500))]);

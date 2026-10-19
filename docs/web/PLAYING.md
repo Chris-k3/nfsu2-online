@@ -122,9 +122,9 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
   has, after showing what is in the zip, including what its `settings.ini` would change on the network (free roam
   on, the name others see). A very large backup keeps every save and settings file. Only screenshots past 512 MB
   are left out. Restore only backups you made yourself or trust.
-- **Backups are your safety net.** The browser may clear a site's storage when the disk runs low; the Saves section
-  says so when the browser has not promised to keep it. Firefox asks first, by the address bar: allow it. Make a
-  backup now and then.
+- **Backups are your safety net.** When the disk is nearly full, the browser may clear a site's storage unless it
+  promised to keep it. Chrome decides that by itself, and the page cannot see how full the disk is, so it does not warn.
+  Firefox asks by the address bar (the Saves section says so while it asks): allow it. Make a backup now and then.
 - **Downloading the game data:** "Download the game data" in Game data on this PC fetches the game folder but the
   movies into this browser, compressed on the way, with its progress and the time left. You can play meanwhile: the download pauses while the game runs and goes on
   when it ends. Stop it whenever you like; what came is kept, and "Download the rest" goes on from there, also after
