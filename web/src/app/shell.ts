@@ -27,11 +27,11 @@ import { HOST_FIXED, pageOnly, resolveEnv, settingsUpgrade, TEMPLATE, type Resol
 import { exists, filesOf, listProfiles, PROFILES_DIR, readText, removeSaveDir, writeFile } from './savefs';
 import { turnOnAutosave } from './profile';
 import { SettingsPanel } from './settings-ui';
-import { watchPlayers } from './players';
+import { serverAnswers, watchPlayers } from './players';
 import { SavesPanel } from './saves-ui';
 import { FpsOverlay, FPS_MODES, type FpsMode } from './overlay';
 import { GameSession } from './game';
-import { Predownload } from './predownload';
+import { moviesKept, Predownload } from './predownload';
 
 type Phase = 'boot' | 'ready' | 'error' | 'waiting' | 'starting' | 'playing' | 'exited';
 
@@ -85,6 +85,9 @@ let settings: SettingsPanel;
 let players: { now(): void } | null = null;
 let saves: SavesPanel;
 let download: Predownload;
+/** the server does not answer: the page and the module came from this browser's copies (sw.ts), and a game
+ *  runs from the game data on this PC */
+let offline = false;
 /** the profile the running (or last) game saved last, when, and how often it saved one */
 let saved: { name: string; at: number; count: number } | null = null;
 
@@ -152,7 +155,8 @@ function evaluate() {
   }
   if (pending) { if (phase !== 'exited') setPhase('boot', 'Loading', `${pending.label}: ${pending.detail}`); return; }
   if (phase === 'exited') { updatePlay(); return; }
-  setPhase('ready', 'Ready', 'Press Play or Enter to start.');
+  setPhase('ready', 'Ready', offline ? 'Offline: the game runs from this PC, without free roam or Online. Press Play or Enter to start.'
+    : 'Press Play or Enter to start.');
 }
 
 function updatePlay() {
@@ -233,6 +237,18 @@ async function startGame() {
     NFSU2_WIDTH: String(size.w & ~1), NFSU2_HEIGHT: String(size.h & ~1), NFSU2_DISPLAY_HZ: String(displayHz),
   };
   const r = resolved(host);
+  // offline mode: the server does not answer.  The movies stream from it, so unless every one of them is in this
+  // browser they are off for this game (a movie the game could not read would stop it).
+  setReach(await serverAnswers(2000));
+  let offlineNote = '';
+  if (offline) {
+    log.add('[app] offline: the server does not answer, the game runs from this PC (no free roam or Online)');
+    if (r.env.NOMOVIES !== '1' && !await moviesKept().catch(() => false)) {
+      r.env.NOMOVIES = '1';
+      log.add('[app] offline: not every movie is on this PC, so the movies are off for this game');
+      offlineNote = 'Offline: the movies are off for this game. ';
+    }
+  }
   // the log is for sharing when asking for help: it names neither the server (a private server's address) nor
   // more of this browser than its major version and system (the audit's PRIV-5)
   log.add(`=== NFSU2 web, ${new Date().toISOString()}, game ${loaded!.info.rev}, server ${serverKind()} ===`);
@@ -299,7 +315,7 @@ async function startGame() {
   const st = session;
   const waitStatus = setInterval(() => { if (st.status) { fps.reader = st.status; clearInterval(waitStatus); } }, 100);
   fps.set((r.env.NFSU2_FPS_COUNTER as FpsMode) in { off: 1, on: 1, detailed: 1 } ? r.env.NFSU2_FPS_COUNTER as FpsMode : 'off');
-  const hint = fsNote || (full ? 'F9 opens the menu. Hold Esc to leave full screen.' : 'F9 opens the menu: full screen, controls, quit.');
+  const hint = offlineNote + (fsNote || (full ? 'F9 opens the menu. Hold Esc to leave full screen.' : 'F9 opens the menu: full screen, controls, quit.'));
   if (autosaved.length) toast(`Autosave is now on for ${autosaved.join(', ')}: the game saves by itself (Options, Gameplay, Save). ${hint}`, 9000);
   else toast(hint, 6000);
   void st.exited.then(code => { clearInterval(waitStatus); onExit(st, code); });
@@ -313,6 +329,20 @@ async function startGame() {
 }
 
 function logLine(s: string) { log.add(s); }
+/** whether the server answered (the start page's /players, or the check at Play): offline mode when not */
+function setReach(ok: boolean) {
+  if (offline === !ok) return;
+  offline = !ok;
+  log.add(ok ? '[app] the server answers again' : '[app] the server does not answer: offline');
+  if (!ok) settings.setStatus('Not connected to the server: free roam and Online need it.');
+  evaluate();
+}
+/** Offline mode (sw.ts) keeps the page, its scripts, the module and the list of game files in this browser.  Asked
+ *  for once the module has loaded, so a first visit downloads the module once (the copy is the HTTP cache's). */
+function keepForOffline() {
+  if (!('serviceWorker' in navigator) || !isSecureContext) return;
+  navigator.serviceWorker.register('/sw.js').catch(e => log.add(`[app] offline mode is not available here: ${e}`));
+}
 /** where the server is, without its name or address */
 function serverKind(): string {
   const h = location.hostname.replace(/^\[|\]$/g, '').toLowerCase();
@@ -539,6 +569,7 @@ async function loadModule() {
     moduleFails = 0;
     moduleLoading = false;
     setCheck({ id: 'module', label: `Game module ${loaded.info.rev}`, state: 'ok', detail: `${fmtBytes(loaded.info.size)}, ready.` });
+    keepForOffline();
   } catch (e) {
     moduleFails++;
     const wait = Math.min(30, 2 ** moduleFails);
@@ -581,7 +612,8 @@ export async function boot() {
     readOnly: () => !instance.owner, say: pageToast,
   }, $('#online'));
   // who plays on this server now (Online): only while no game runs here
-  players = watchPlayers(line => settings.setStatus(line), () => !session && !starting);
+  players = watchPlayers(line => settings.setStatus(line), () => !session && !starting, setReach);
+  window.addEventListener('online', () => players?.now());
   download = new Predownload(s => saves.showData(s), logLine);
   saves = new SavesPanel($('#saves'), $('#game-data'), {
     saveDir: SAVE, busy: () => !!session || starting || !instance.owner, confirm: confirmBox,
@@ -638,7 +670,7 @@ export async function boot() {
   evaluate();
   (window as any).__nfsu2 = {
     get phase() { return phase; }, get lastExit() { return lastExit; }, get fps() { return { game: fps.gameFps, page: fps.pageFps, source: $('#fps').dataset.source }; },
-    get session() { return session; }, log, save: SAVE, download: () => download.status, displayHz: () => displayHz, retryModule: () => loadModule(),
+    get session() { return session; }, log, save: SAVE, download: () => download.status, offline: () => offline, displayHz: () => displayHz, retryModule: () => loadModule(),
     env: () => resolved().env, settingsText: () => settingsText, checks: () => [...checks.values()],
     fpsMode: (m?: FpsMode) => { if (m && FPS_MODES.includes(m)) fps.set(m); return fps.mode; },
     quitTimes: { forcedCloseMaxMs: FORCED_CLOSE_MAX_MS, stopAfterMs: STOP_AFTER_MS },

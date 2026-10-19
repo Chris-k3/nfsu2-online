@@ -202,7 +202,8 @@ export class SavesPanel {
     fetchBtn.textContent = d && d.have ? `Download the rest (${fmtBytes(rest)})` : `Download the game data${d ? ` (${fmtBytes(d.total)})` : ''}`;
     fetchBtn.hidden = !!d && rest <= 0;
     if (d && rest <= 0)
-      info.textContent = `The game data (${fmtBytes(d.total)}) is kept in this browser: the game loads it from this PC, not the network. Only the movies stream from the server, as they play. Deleting it only means downloading it again.`;
+      info.textContent = `The game data (${fmtBytes(d.total)}) is kept in this browser: the game loads it from this PC, not the network. Only the movies stream from the server, as they play` +
+        `${'serviceWorker' in navigator ? ', and the game starts without the server too (offline, with the movies off)' : ''}. Deleting it only means downloading it again.`;
     else if (d ? d.have : this.kept.bytes)
       info.textContent = `${d ? `${fmtBytes(d.have)} of the game's ${fmtBytes(d.total)} (without the movies)` : fmtBytes(this.kept.bytes)} is kept in this browser, so the game loads that from this PC instead of the network. ` +
         'Download the rest too, and no loading screen waits on the network. Deleting it only means downloading it again.';

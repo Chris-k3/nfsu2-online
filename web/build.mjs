@@ -14,6 +14,7 @@ const opts = {
     'host/game-worker': 'src/host/game-worker.ts',
     'host/io-worker': 'src/host/io-worker.ts',
     'host/predownload-worker': 'src/host/predownload-worker.ts',
+    'sw': 'src/sw.ts',
     'test/hostcheck': 'src/test/hostcheck.ts',
     'test/play': 'src/test/play.ts',
     'test/shadercheck': 'src/test/shadercheck.ts',

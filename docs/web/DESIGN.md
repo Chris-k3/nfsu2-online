@@ -106,6 +106,12 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
     "Download the game data" (Game data on this PC, at the bottom of the start page) fills the cache with all but the
     movies ahead of play from its own worker (`predownload-worker.ts`, 4 runs at once). It runs only while no game
     runs in the tab: Play pauses it, and the game's end resumes it.
+  - Offline mode: a service worker (`web/src/sw.ts`, registered once the module has loaded) keeps the start page,
+    its scripts, the module, `game.json` and the manifest in Cache Storage, network first: the server's answer when
+    there is one (the copy replaced when its ETag changes; after each start page from the server the workers and the
+    manifest are brought up to date too, so the copies are one version), the copies when it fails, answers 5xx or
+    keeps the start page waiting 4 s, and then for 30 s first. Nothing else passes through it. At Play the page asks
+    the server (`/players`, 2 s); without an answer the movies are off for that game unless all of them are cached.
   - `/save`: OPFS save overlay. Holds saves, `registry.txt`, `settings.ini` and logs. Closing a file the game wrote
     there posts `{ t: 'saved', path }` to the page (the "Progress saved" note, F9's last save, the end screen). Before
     each Play the page sets every profile still on the game's Save = Prompt to Autosave, once per profile
@@ -196,6 +202,9 @@ struct VOut { @builtin(position) pos: vec4f; @location(0) col0: vec4f; @location
 - `node web/tools/predownload-test.mjs` checks "Download the game data" in Chrome against its own server and a
   made-up game folder: byte-exact cache, no movies, zstd where the bytes compress, stop and resume, retries, a refused
   file, Play pausing it, a second tab. `web/test/data-blocks.test.mjs` checks the server's `/data-blocks/`.
+- `node web/tools/offline-test.mjs` checks offline mode with the real game folder and a server it starts and stops:
+  the copies kept, Play to the title screen with the server gone, behind a proxy answering 502, and with a server
+  that never answers, then online again.
 - `node web/tools/run-page.mjs <url> <ms>` drives Chrome 155 (`channel: 'chrome'`, headless, WebGPU works) and streams
   the console.
 - Test page: `/test/hostcheck.html?wasm=/game.wasm&pages=16384&arg=/data/SPEED2.EXE&env=K=V&...&save=<opfs dir>&fresh`

@@ -19,6 +19,14 @@ export interface DownloadStatus {
 
 const STOP_WAIT_MS = 3000;
 
+/** Whether every movie is in this browser's cache (they are not downloaded ahead: only one that played is). */
+export async function moviesKept(): Promise<boolean> {
+  const r = await fetch(MANIFEST_URL, { cache: 'no-cache' });
+  if (!r.ok) return false;
+  const s = await scanCache(manifestFiles(await r.json() as Manifest).filter(f => !fetchedAhead(f)));
+  return s.have >= s.total;
+}
+
 /** How much of what the download fetches (all but the movies) this browser keeps: bytes in the cache, of their total. */
 export async function gameDataKept(): Promise<{ have: number; total: number }> {
   const r = await fetch(MANIFEST_URL, { cache: 'no-cache' });

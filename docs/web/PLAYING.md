@@ -41,6 +41,12 @@ in Game data on this PC, at the bottom of the start page: 2 GB (all but the movi
 After that no loading screen waits on the network, which matters on a slow line to a remote server. The movies
 stream from the server as they play; with Movies off (Settings, Game) the game never asks for them.
 
+**Offline:** a PC that has opened the page once also starts the game when the server cannot be reached (no
+network, or the server is down): the page keeps its own copy of itself and of the game code, updated each time the
+server answers. The start page then says **Offline**, and the game runs from the game data on that PC, so download
+it first. The movies are off for such a game unless every one of them is on the PC already. Free roam and Online
+need the server; your saves are in the browser either way.
+
 ## 3. Controls
 
 | Key or button | What it does |
