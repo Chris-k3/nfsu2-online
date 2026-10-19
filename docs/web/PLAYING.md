@@ -56,7 +56,7 @@ need the server; your saves are in the browser either way.
 | Space | Handbrake |
 | Shift, Ctrl | Gear up, gear down (manual gearbox) |
 | C, B | Camera, look back |
-| R | Back on the road |
+| R | Respawn |
 | M, Tab | Map, messages |
 | Esc or P | Pause; Esc also goes back in menus |
 | Enter | Choose (menus) |
