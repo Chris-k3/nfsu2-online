@@ -121,10 +121,9 @@ kbd {
 
 /* ------------------------------------------------------- the key sheet */
 .panel > #keys > h3:first-child, #help-body > h3:first-child { margin-top: 0; }
-.keys { display: grid; gap: 8px; }
-.keys > div { display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: 16px; align-items: center; }
-.keys dt { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; color: var(--muted); font-size: 14px; line-height: 20px; }
-.keys dd { font-size: 14px; line-height: 20px; }
+/* a row as in Settings and the game's Controls menu: what it does, its keys on the right */
+.keys > div { display: flex; align-items: center; gap: 16px; padding: 8px 0; }
+.keys dt { order: 1; flex: none; margin-left: auto; display: flex; align-items: center; gap: 4px; color: var(--muted); }
 #keys > .hint, #help-body > .hint { margin-top: 24px; }
 
 /* ------------------------------------------- changes from the original */
@@ -140,7 +139,7 @@ kbd {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "label ctl" "help ctl";
   column-gap: 16px; padding: 12px 0; align-items: center;
 }
-.set + .set, .more { box-shadow: inset 0 1px var(--line); }   /* a divider that adds no height */
+.set + .set, .more, .keys > div + div { box-shadow: inset 0 1px var(--line); }   /* a divider that adds no height */
 .set-label { grid-area: label; font-size: 16px; line-height: 24px; }
 .set-help { grid-area: help; color: var(--muted); font-size: 14px; line-height: 20px; }
 .set-state { grid-column: 1 / -1; font-size: 14px; line-height: 20px; margin-top: 8px; }
@@ -276,7 +275,6 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.64); }
   .set-control { justify-content: flex-start; margin-top: 8px; flex-wrap: wrap; }
   .set-control > .seg { display: flex; flex: 1; }
   .opt { flex: 1; justify-content: center; padding: 0 8px; }
-  .keys > div { grid-template-columns: 112px minmax(0, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
