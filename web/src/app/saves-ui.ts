@@ -19,7 +19,7 @@ export interface SavesDeps {
   confirm(title: string, body: Node | string, ok: string, danger?: boolean): Promise<boolean>;
   /** after a restore: settings.ini may have changed */
   onRestored(): void;
-  /** the download of all the game data ahead of play */
+  /** the download of the game data (all but the movies) ahead of play */
   download: Predownload;
 }
 
@@ -177,7 +177,7 @@ export class SavesPanel {
     if (active && st.total) this.data = { have: st.have, total: st.total };
     if (st.state !== this.shownState) {
       this.shownState = st.state;
-      if (st.state === 'done') { this.data = { have: st.have, total: st.total }; this.dataMsg('All of the game data is on this PC now.'); }
+      if (st.state === 'done') { this.data = { have: st.have, total: st.total }; this.dataMsg('The game data is on this PC now.'); }
       if (st.state === 'error') this.dataMsg(`The download stopped: ${st.error}. What it downloaded is kept.`, true);
       if (!active) void this.refresh();                         // counted again; shown now with what is known
     }
@@ -194,20 +194,20 @@ export class SavesPanel {
       fetchBtn.textContent = 'Stop the download';
       fetchBtn.disabled = st.state === 'paused';
       info.textContent = st.state === 'paused' ? `Download paused while the game runs: ${d ? `${fmtBytes(d.have)} of ${fmtBytes(d.total)}` : 'counting'}. It goes on when the game ends.`
-        : !d ? 'Downloading all of the game data: counting what is here already.'
-        : `Downloading all of the game data: ${fmtBytes(d.have)} of ${fmtBytes(d.total)} (${Math.floor(f * 100)} %)${st.rate ? `, ${fmtBytes(st.rate)}/s, ${eta(rest / st.rate)}` : ''}. ` +
+        : !d ? 'Downloading the game data: counting what is here already.'
+        : `Downloading the game data: ${fmtBytes(d.have)} of ${fmtBytes(d.total)} (${Math.floor(f * 100)} %)${st.rate ? `, ${fmtBytes(st.rate)}/s, ${eta(rest / st.rate)}` : ''}. ` +
           'Play whenever you like: the download pauses while the game runs and goes on after it.';
       return;
     }
-    fetchBtn.textContent = d && d.have ? `Download the rest (${fmtBytes(rest)})` : `Download all game data${d ? ` (${fmtBytes(d.total)})` : ''}`;
+    fetchBtn.textContent = d && d.have ? `Download the rest (${fmtBytes(rest)})` : `Download the game data${d ? ` (${fmtBytes(d.total)})` : ''}`;
     fetchBtn.hidden = !!d && rest <= 0;
     if (d && rest <= 0)
-      info.textContent = `All of the game data (${fmtBytes(d.total)}) is kept in this browser: the game loads it from this PC, never the network. Deleting it only means downloading it again.`;
+      info.textContent = `The game data (${fmtBytes(d.total)}) is kept in this browser: the game loads it from this PC, not the network. Only the movies stream from the server, as they play. Deleting it only means downloading it again.`;
     else if (d ? d.have : this.kept.bytes)
-      info.textContent = `${d ? `${fmtBytes(d.have)} of the game's ${fmtBytes(d.total)}` : fmtBytes(this.kept.bytes)} is kept in this browser, so the game loads that from this PC instead of the network. ` +
+      info.textContent = `${d ? `${fmtBytes(d.have)} of the game's ${fmtBytes(d.total)} (without the movies)` : fmtBytes(this.kept.bytes)} is kept in this browser, so the game loads that from this PC instead of the network. ` +
         'Download the rest too, and no loading screen waits on the network. Deleting it only means downloading it again.';
     else
-      info.textContent = 'Nothing downloaded yet. The game streams its data from the server as it needs it and keeps it here, or download all of it now and no loading screen waits on the network.';
+      info.textContent = 'Nothing downloaded yet. The game streams its data from the server as it needs it and keeps it here. Download it now (all but the movies, compressed on the way) and no loading screen waits on the network.';
   }
 
   private async doDownload() {

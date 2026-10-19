@@ -175,6 +175,9 @@ function crawlRequests(mode) {
   add('manifest gz', req('GET', '/data-manifest', { headers: { 'Accept-Encoding': 'gzip' } }), { gz: true });
   add('manifest', req('GET', '/data-manifest')); add('manifest refresh', req('GET', '/data-manifest?refresh'));
   add('data range', req('GET', '/data/SPEED2.EXE', { headers: { Range: 'bytes=0-4095' } }), { binary: true });
+  add('data blocks', req('GET', '/data-blocks/SPEED2.EXE?b=0&n=2', { headers: { 'Accept-Encoding': 'gzip, br' } }), { binary: true, br: true, gz: true });
+  add('data blocks bad', req('GET', '/data-blocks/SPEED2.EXE?b=0&n=99'));
+  add('data blocks past', req('GET', '/data-blocks/SPEED2.EXE?b=999999&n=1'));
   add('data 416', req('GET', '/data/SPEED2.EXE', { headers: { Range: 'bytes=999999999999-' } }));
   add('data missing', req('GET', '/data/no/such/file.bin')); add('data dir', req('GET', '/data/')); add('data dir2', req('GET', '/data/FRONTEND'));
   // gone: what the page used to be told about the server, and the built-in certificate authority
@@ -801,6 +804,11 @@ test('Cloudflare simulation: client address, cache headers, ranges, brotli, the 
     const rg = await rawRequest({ ...edge, data: req('GET', '/data/SPEED2.EXE', { host: 'nfsu2.test', headers: { Range: 'bytes=100-199' } }) });
     assert.equal(rg.status, 206); assert.equal(rg.headers['content-range'], `bytes 100-199/${file.length}`);
     assert.ok(rg.body.equals(file.subarray(100, 200)));
+    // a run of compressed blocks through the proxy, as the edge asks for it (gzip, br): the exact bytes
+    const run = await rawRequest({ ...edge, data: req('GET', '/data-blocks/SPEED2.EXE?b=1&n=2', { host: 'nfsu2.test', headers: { 'Accept-Encoding': 'gzip, br' } }) });
+    assert.equal(run.status, 200); assert.equal(run.headers['content-encoding'], 'br');
+    assert.match(run.headers['cache-control'], /private, no-store, no-transform/);
+    assert.ok(zlib.brotliDecompressSync(run.body).equals(file.subarray(1 << 20, 3 << 20)));
     // the module, brotli end to end, and a 304 for the browser's copy
     const mod = await rawRequest({ ...edge, data: req('GET', '/game.wasm', { host: 'nfsu2.test', headers: { 'Accept-Encoding': 'br' } }), timeout: 180_000 });
     assert.equal(mod.status, 200); assert.equal(mod.headers['content-encoding'], 'br');

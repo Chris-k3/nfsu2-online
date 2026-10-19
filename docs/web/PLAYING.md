@@ -35,10 +35,11 @@ from a server behind HTTPS: a certificate on the server, or a proxy or tunnel in
 the ways to set that up. Each player then opens that `https://` address in the latest **Google Chrome** or
 **Firefox** and presses **Play**.
 
-The first start on a PC downloads about 7 MB of game code and, while playing, the game data it needs. That PC keeps
-the data, so later starts are quick. To download all of it up front (about 3 GB), press **Download all game data**
-in Game data on this PC, at the bottom of the start page. After that no loading screen waits on the network, which matters on a slow line
-to a remote server.
+The first start on a PC downloads about 7 MB of game code and, while playing, the game data it needs, compressed on
+the way. That PC keeps the data, so later starts are quick. To download it up front, press **Download the game data**
+in Game data on this PC, at the bottom of the start page: 2 GB (all but the movies), about 1.4 GB over the network.
+After that no loading screen waits on the network, which matters on a slow line to a remote server. The movies
+stream from the server as they play; with Movies off (Settings, Game) the game never asks for them.
 
 ## 3. Controls
 
@@ -118,10 +119,10 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
 - **Backups are your safety net.** The browser may clear a site's storage when the disk runs low; the Saves section
   says so when the browser has not promised to keep it. Firefox asks first, by the address bar: allow it. Make a
   backup now and then.
-- **Downloading all game data:** "Download all game data" in Game data on this PC fetches the whole game folder into this browser,
-  with its progress and the time left. You can play meanwhile: the download pauses while the game runs and goes on
+- **Downloading the game data:** "Download the game data" in Game data on this PC fetches the game folder but the
+  movies into this browser, compressed on the way, with its progress and the time left. You can play meanwhile: the download pauses while the game runs and goes on
   when it ends. Stop it whenever you like; what came is kept, and "Download the rest" goes on from there, also after
-  a reload. It needs about 3 GB of free disk space. The page says so before it starts when the browser has less room.
+  a reload. It needs about 2 GB of free disk space. The page says so before it starts when the browser has less room.
 - **Downloaded game data:** "Delete the downloaded game data" in Game data on this PC frees disk space on this PC. Your saves stay;
   the data downloads again when needed.
 

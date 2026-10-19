@@ -127,8 +127,12 @@ traffic a month.
   player who falls behind (8 MB on the connection, 2 MB more of LAN-race data in the switch's own queue).
 - The game folder takes about 3 GB of disk.
 - Each new player downloads the 7 MB module and then the game data they play (about 70 MB for a quick race, up to
-  the whole 3 GB over a career), once: the browser keeps it. "Download all game data" on the start page fetches all
-  3 GB at once, 4 requests at a time, so a player on a slow line never waits on a loading screen.
+  the whole 3 GB over a career), once: the browser keeps it. The data is compressed on the way (zstd, or br through
+  Cloudflare): all but the movies is 1.37 GB on the network for 1.98 GB, the tracks about 40 %; the movies' video
+  does not compress and goes as it is. "Download the game data" on the start page fetches all but the movies at
+  once, 4 requests at a time, so a player on a slow line never waits on a loading screen.
+- Compressing costs the server about 5 s of one core per player for that whole download (zstd; br about 1.5 times
+  that). At most 16 answers are compressed at once (8 per player); past that they go as they are, never held up.
 - Free roam is at most about 25 KB/s each way per player: the server's free-roam hub pairs each player with the 7
   nearest, and snapshots go between those only. 250 players roaming at once are about 50 Mbit/s each way through
   the VPS. Measured with 62 simulated players and 2 real pages on one server (`web/tools/roam-crowd.mjs`, a Ryzen 9

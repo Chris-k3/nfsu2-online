@@ -1,11 +1,11 @@
-// All of the game data onto this PC ahead of play ("Game data on this PC", at
+// The game data (all but the movies) onto this PC ahead of play ("Game data on this PC", at
 // the bottom of the start page): the predownload worker fills the cache the
 // game reads from.  It only runs while no game runs in this tab, because the
 // game's I/O worker writes the same cache files.  A game pauses it, and it
 // goes on after the game ends.
 
 import type { FromPredownload, ToPredownload } from '../host/predownload-worker';
-import { DATA_BASE, MANIFEST_URL, manifestFiles, scanCache, type Manifest } from '../host/datacache';
+import { DATA_BASE, MANIFEST_URL, fetchedAhead, manifestFiles, scanCache, type Manifest } from '../host/datacache';
 
 export type DownloadState = 'idle' | 'running' | 'paused' | 'done' | 'error';
 export interface DownloadStatus {
@@ -19,11 +19,11 @@ export interface DownloadStatus {
 
 const STOP_WAIT_MS = 3000;
 
-/** How much of the server's game data this browser keeps (bytes of its files in the cache, of their total). */
+/** How much of what the download fetches (all but the movies) this browser keeps: bytes in the cache, of their total. */
 export async function gameDataKept(): Promise<{ have: number; total: number }> {
   const r = await fetch(MANIFEST_URL, { cache: 'no-cache' });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const s = await scanCache(manifestFiles(await r.json() as Manifest));
+  const s = await scanCache(manifestFiles(await r.json() as Manifest).filter(fetchedAhead));
   return { have: s.have, total: s.total };
 }
 

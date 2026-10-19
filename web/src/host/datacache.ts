@@ -10,12 +10,26 @@ export const CACHE_DIR = 'cache';
 /** where the server has the manifest and the install folder (web/server/server.mjs) */
 export const MANIFEST_URL = '/data-manifest', DATA_BASE = '/data/';
 
-/** the server's /data-manifest: every file and folder of the install folder it serves */
-export interface Manifest { files: { p: string; d?: number; s?: number; m?: number }[] }
+/** the server's /data-manifest: every file and folder of the install folder it serves, and where it serves runs
+ *  of their blocks compressed (an older server has no "blocks": byte ranges of /data/ then) */
+export interface Manifest {
+  files: { p: string; d?: number; s?: number; m?: number }[];
+  blocks?: { url: string; size: number; max: number };
+}
+/** The manifest's compressed runs, if it has them in this cache's block size: [url, most blocks a request]. */
+export function blockRuns(m: Manifest): { url: string; max: number } | null {
+  const b = m.blocks;
+  return b && typeof b.url === 'string' && b.url.startsWith('/') && b.size === BLOCK && b.max >= 1 ? { url: b.url, max: b.max } : null;
+}
+/** blocks first .. first+n-1 of a file, compressed: a 200 whose body (decoded by the browser) is exactly their bytes */
+export const runUrl = (base: string, path: string, first: number, n: number) => `${dataUrl(base, path)}?b=${first}&n=${n}`;
 export interface DataFile { path: string; size: number; mtime: number }
 export interface CacheFile { h: FileSystemSyncAccessHandle; have: Uint8Array; haveH: FileSystemSyncAccessHandle }
 
 export const manifestFiles = (m: Manifest): DataFile[] => m.files.filter(f => !f.d).map(f => ({ path: f.p, size: f.s ?? 0, mtime: f.m ?? 0 }));
+/** What "Download all game data" fetches: all but the movies (MOVIES/, a third of the folder in VP6 video that
+ *  does not compress).  They stream as they play, and with Movies off the game never opens them. */
+export const fetchedAhead = (f: DataFile) => f.path.split('/')[0].toLowerCase() !== 'movies';
 export const dataUrl = (base: string, path: string) => base + path.split('/').map(encodeURIComponent).join('/');
 export function cacheKey(f: DataFile) { return `${f.path.replace(/[^A-Za-z0-9._-]/g, '_')}.${f.size}.${f.mtime}`; }
 export const blockCount = (size: number) => Math.ceil(size / BLOCK);

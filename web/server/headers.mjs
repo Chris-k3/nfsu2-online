@@ -5,6 +5,7 @@
 //                      nosniff, no referrer, no framing, a Permissions-Policy
 //                      with only what the game uses, noindex, and HSTS when
 //                      the server asks for it (see server.mjs)
+//   pickEncoding()     the Content-Encoding for an Accept-Encoding header
 //   cacheHeaders()     no shared cache (a reverse proxy, Cloudflare's edge)
 //                      ever keeps a response; the browser keeps only what it
 //                      revalidates (the game module, the page's scripts)
@@ -99,6 +100,17 @@ export function cacheHeaders(kind = 'store') {
     'cdn-cache-control': 'no-store',
     'cloudflare-cdn-cache-control': 'no-store',
   };
+}
+
+/** Of the encodings the server has (in its order of preference), the first that an Accept-Encoding header takes
+ *  (a q=0 refuses one; "*" is not read as taking any), or null. */
+export function pickEncoding(header, have) {
+  const ok = new Set();
+  for (const part of String(header ?? '').toLowerCase().split(',')) {
+    const [name, ...params] = part.split(';').map(x => x.trim());
+    if (!params.some(x => /^q=0(\.0{0,3})?$/.test(x.replace(/\s+/g, '')))) ok.add(name);
+  }
+  return have.find(e => ok.has(e)) ?? null;
 }
 
 /** If-None-Match against an ETag, as a browser or a proxy (which may make it weak) sends it */

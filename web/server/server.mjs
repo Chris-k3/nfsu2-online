@@ -9,6 +9,9 @@
 //                      what the game reads (GAME_ENTRIES below), never the rest
 //                      of the folder (an installer's log, saves, mod settings)
 //   /data-manifest     those files: path, size, mtime
+//   /data-blocks/<path>?b=<first>&n=<count>
+//                      a run of 1 MiB blocks of one of them, compressed (zstd,
+//                      br or gzip, whichever the client takes)
 //   /lan               WebSocket: the virtual LAN switch for multiplayer, with
 //                      the game's Online mode served on its 10.77.0.1 (online/;
 //                      --online off: none, the game then cannot connect) and
@@ -80,7 +83,7 @@ import { OnlineHost } from './online/index.mjs';
 import { RoamHub } from './roam-hub.mjs';
 import { LobbyTrace } from './online/trace.mjs';
 import { securityHeaders, cacheHeaders, etagMatches, makeProxyTrust,
-  clientIp, viaHttps, forwardedHost, isLocalOrIp, bareIp, addressKey, siteKey, makeHostCheck, hostName } from './headers.mjs';
+  clientIp, viaHttps, forwardedHost, isLocalOrIp, bareIp, addressKey, siteKey, makeHostCheck, hostName, pickEncoding } from './headers.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '../..');
@@ -369,7 +372,7 @@ async function buildManifest() {
     }
   }
   await walk(DATA, '');
-  const body = JSON.stringify({ v: 1, files });
+  const body = JSON.stringify({ v: 1, files, blocks: { url: '/data-blocks/', size: BLOCK, max: BLOCKS_MAX } });
   manifest = { body, gz: zlib.gzipSync(body), etag: etagOf('manifest', crypto.createHash('sha256').update(body).digest('hex')), count: files.length };
   manifestAt = Date.now();
   return manifest;
@@ -442,6 +445,70 @@ async function sendFile(q, s, root, file, { type, cache = 'store', extra = {}, f
   conn.once('close', stop);
   rs.once('close', () => { s.off('close', stop); conn.off('close', stop); });
   rs.pipe(s);
+}
+
+// ---- the game's files in blocks, compressed ----
+// /data-blocks/<path>?b=<first>&n=<count>: blocks first .. first+count-1 of a game file (BLOCK bytes each, the
+// last one shorter; BLOCKS_MAX at most) as one 200 answer, compressed with what the client takes (zstd, br or
+// gzip as Content-Encoding, which the browser undoes by itself).  The game data then crosses the network in
+// about 70 % of its size, the tracks in about 40 %.  The page's I/O and predownload workers ask for these when
+// the manifest names them (its "blocks"), and for byte ranges of /data/ otherwise.  The compressor streams, so a
+// client that stops reading holds no more than its buffers.  Sent as they are, never queued or refused: a run
+// whose first PROBE bytes do not compress (the movies' VP6 video, most car textures; judged per run, not per
+// file: the music's first megabyte does not compress, the rest does), and an answer while the compressors are
+// taken (COMPRESSORS: per client, per site, in all).
+const BLOCK = 1 << 20, BLOCKS_MAX = 8, PROBE = 64 << 10;
+const COMPRESSORS = { perClient: 8, perSite: 16, total: 16 };
+const compressors = new Budget(COMPRESSORS.perClient, COMPRESSORS.perSite, COMPRESSORS.total);
+// fast settings: within a few percent of the best ratio for this data, at a fraction of the CPU (zstd 3:
+// about 260 MB/s on one core; Node has zstd from 22.15 and 23.8)
+const ENCODERS = {
+  ...(zlib.createZstdCompress ? { zstd: () => zlib.createZstdCompress({ params: { [zlib.constants.ZSTD_c_compressionLevel]: 3 } }) } : {}),
+  br: () => zlib.createBrotliCompress({ params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 3, [zlib.constants.BROTLI_PARAM_LGWIN]: 21 } }),
+  gzip: () => zlib.createGzip({ level: 4 }),
+};
+/** whether the bytes from start compress, judged from the first PROBE of them (deflate 1: about 0.3 ms) */
+async function compresses(real, start, end) {
+  const fh = await fsp.open(real, 'r');
+  try {
+    const buf = Buffer.alloc(Math.min(PROBE, end - start));
+    const { bytesRead } = await fh.read(buf, 0, buf.length, start);
+    const z = await new Promise((res, rej) => zlib.deflateRaw(buf.subarray(0, bytesRead), { level: 1 }, (e, b) => e ? rej(e) : res(b)));
+    return z.length < bytesRead * 0.97;
+  } finally { await fh.close(); }
+}
+async function sendBlocks(q, s, file, u) {
+  const f = await locate(DATA, file);
+  if (!f) return notFound(q, s);
+  const { real, st } = f;
+  const b = u.searchParams.get('b') ?? '', n = u.searchParams.get('n') ?? '';
+  if (!/^\d{1,7}$/.test(b) || !/^\d{1,2}$/.test(n) || +n < 1 || +n > BLOCKS_MAX) return plain(q, s, 400, 'Bad request');
+  const start = +b * BLOCK, end = Math.min(st.size, (+b + +n) * BLOCK);
+  if (start >= st.size) return plain(q, s, 416, 'Range not satisfiable');
+  const ip = clientIp(q, trust, REAL_IP), key = addressKey(ip), site = siteKey(ip);
+  const enc = pickEncoding(q.headers['accept-encoding'], Object.keys(ENCODERS));
+  let held = q.method !== 'HEAD' && !!enc && compressors.take(key, site);
+  const free = () => { if (held) { held = false; compressors.give(key, site); } };
+  if (held && !await compresses(real, start, end).catch(() => false)) free();
+  const z = held;
+  s.writeHead(200, headers(q, { 'content-type': 'application/octet-stream', vary: 'accept-encoding',
+    ...(z ? { 'content-encoding': enc } : { 'content-length': end - start }) }));
+  if (q.method === 'HEAD') return s.end();
+  const flow = mustFlow(s);
+  // the file and the compressor live as long as the answer and the connection (sendFile)
+  const conn = q.socket;
+  if (!conn || conn.destroyed) { free(); return; }
+  const rs = fs.createReadStream(real, { start, end: end - 1 });
+  const zs = z ? ENCODERS[enc]() : null;
+  const out = zs ? rs.pipe(zs) : rs;
+  out.on('data', c => { flow.bytes += c.length; });
+  const stop = () => { rs.destroy(); zs?.destroy(); free(); };
+  rs.on('error', () => s.destroy());
+  zs?.on('error', () => s.destroy());
+  s.once('close', stop); s.once('finish', free);
+  conn.once('close', stop);
+  out.once('close', () => { s.off('close', stop); conn.off('close', stop); free(); });
+  out.pipe(s);
 }
 
 // A response that does not move is let go: fewer than progressBytes in progressMs, or longer than
@@ -554,6 +621,7 @@ async function handler(q, s) {
   }
   // the game's files are bytes for the game, whatever their names say
   if (p.startsWith('/data/')) return sendFile(q, s, DATA, resolveGame(p.slice(5)), { type: 'application/octet-stream' });
+  if (p.startsWith('/data-blocks/')) return sendBlocks(q, s, resolveGame(p.slice(12)), u);
   if (p === '/game.wasm') {
     // 65 MB of code compresses to ~7 MB: other PCs start much sooner
     if (!q.headers.range && /\bbr\b/.test(q.headers['accept-encoding'] || '')) {

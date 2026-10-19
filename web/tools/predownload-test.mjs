@@ -1,10 +1,12 @@
-// "Download all game data" (Game data on this PC) in headless Chrome,
-// against a server of its own over a made-up game folder of random bytes, in
-// sizes that hit the edges of the 1 MiB blocks and the 8-block requests:
+// "Download the game data" (Game data on this PC) in headless Chrome,
+// against a server of its own over a made-up game folder, in sizes that hit
+// the edges of the 1 MiB blocks and the 8-block requests: random bytes (they
+// go as they are) and bytes that compress (they go compressed):
 //   node web/tools/predownload-test.mjs [--port 8657] [--out <dir>] [--headed]
 // Steps (each prints PASS/FAIL with evidence):
-//   fresh     the page offers the whole folder (the game's files only) and says nothing is here yet
-//   full      the download ends with every file in the cache, byte for byte, and the page says so
+//   fresh     the page offers the folder but the movies (the game's files only) and says nothing is here yet
+//   full      the download ends with every file but the movies in the cache, byte for byte, and the page says
+//             so; it came in compressed runs of blocks, zstd where the bytes compress, as they are where not
 //   resume    with slow answers: Stop keeps what came, a reload offers the rest, and the rest completes
 //   retry     busy answers (503) and bodies cut short are tried again, and the result is still exact
 //   fail      a server that refuses one file (404): the download stops and says why, keeping the files before it
@@ -15,6 +17,7 @@
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
+import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,25 +34,29 @@ const DATA = path.join(OUT, 'data');
 fs.rmSync(OUT, { recursive: true, force: true });
 const files = new Map();                  // path -> sha256 of what the server holds
 let seed = 1;
-function make(rel, size) {
+/** random bytes, or (packs) bytes of 2 bits each that compress to about a quarter */
+function make(rel, size, packs = false) {
   const p = path.join(DATA, rel);
   fs.mkdirSync(path.dirname(p), { recursive: true });
-  const b = crypto.createHash('sha256').update(String(seed++)).digest();
-  const buf = Buffer.alloc(size);
-  for (let o = 0; o < size; o += 32) { b.copy(buf, o); b.writeUInt32LE((b.readUInt32LE(0) * 2654435761 + o) >>> 0, 0); }
+  // AES-128-CTR over zeros, keyed by a counter: random-looking, the same every run
+  const key = crypto.createHash('sha256').update(String(seed++)).digest().subarray(0, 16);
+  const buf = crypto.createCipheriv('aes-128-ctr', key, Buffer.alloc(16)).update(Buffer.alloc(size));
+  if (packs) for (let i = 0; i < size; i++) buf[i] = (buf[i] & 3) * 0x41;
   fs.writeFileSync(p, buf);
   files.set(rel, crypto.createHash('sha256').update(buf).digest('hex'));
 }
 make('SPEED2.EXE', 3 * M + 17);
 make('FRONTEND/EMPTY.BIN', 0);
-make('GLOBAL/ONEBLOCK.BIN', M);
-make('TRACKS/RUNPLUSONE.BIN', 8 * M + 1);
+make('GLOBAL/ONEBLOCK.BIN', M, true);
+make('TRACKS/RUNPLUSONE.BIN', 8 * M + 1, true);
 make('MOVIES/BIG.VP6', 40 * M + 123);
 make('SOUND/TINY.BIN', 100);
 make('SOUND/SFX/Name With Space & #.bin', 2 * M - 1);
-for (let i = 0; i < 24; i++) make(`CARS/CAR${String(i).padStart(2, '0')}/GEOMETRY.BIN`, 1 + (i * 397_000) % (3 * M));
+for (let i = 0; i < 24; i++) make(`CARS/CAR${String(i).padStart(2, '0')}/GEOMETRY.BIN`, 1000 + (i * 397_000) % (3 * M), i % 2 === 0);
 fs.writeFileSync(path.join(DATA, 'NOTES.TXT'), 'not the game: never served');
-const TOTAL = [...files.keys()].reduce((a, f) => a + fs.statSync(path.join(DATA, f)).size, 0);
+// what the download fetches: all but the movies
+const AHEAD = [...files.keys()].filter(f => !f.startsWith('MOVIES/'));
+const TOTAL = AHEAD.reduce((a, f) => a + fs.statSync(path.join(DATA, f)).size, 0);
 
 // ---- the server ----
 const server = spawn(process.execPath, [path.join(ROOT, 'web/server/server.mjs'), '--data', DATA, '--http-port', String(PORT), '--dev',
@@ -74,7 +81,26 @@ const pc = await chromium.launchPersistentContext(path.join(OUT, 'profile'), { c
   viewport: { width: 1280, height: 900 }, args: ['--enable-unsafe-webgpu'] });
 // requests for the game's files, whoever makes them (the page's workers too)
 let dataRequests = 0;
-pc.on('request', r => { if (new URL(r.url()).pathname.startsWith('/data/')) dataRequests++; });
+pc.on('request', r => { if (/^\/data(-blocks)?\//.test(new URL(r.url()).pathname)) dataRequests++; });
+// the runs of blocks the page asked for, with the encoding they came in (Playwright reports a worker's
+// responses, not their sizes: onWire() asks for the same runs again, as Chrome does, and counts the bytes)
+const wire = [];
+pc.on('response', r => {
+  const u = new URL(r.url());
+  if (u.pathname.startsWith('/data-blocks/') && r.status() === 200)
+    wire.push({ url: u.pathname + u.search, path: decodeURIComponent(u.pathname.slice(13)), b: +u.searchParams.get('b'), n: +u.searchParams.get('n'),
+      enc: r.headers()['content-encoding'] ?? 'none' });
+});
+const onWire = async () => {
+  let n = 0;
+  for (const w of wire) {
+    n += await new Promise((res, rej) => http.get({ host: '127.0.0.1', port: PORT, path: w.url, headers: { host: `localhost:${PORT}`, 'accept-encoding': 'gzip, deflate, br, zstd' } },
+      r => { let k = 0; r.on('data', d => { k += d.length; }); r.on('end', () => res(k)); }).on('error', rej));
+  }
+  return n;
+};
+const ranges = [];
+pc.on('request', r => { if (new URL(r.url()).pathname.startsWith('/data/') && r.headers().range) ranges.push(r.url()); });
 const page = pc.pages()[0] ?? await pc.newPage();
 page.on('pageerror', e => console.log(`  PAGEERROR ${e}`));
 const status = () => page.evaluate(() => window.__nfsu2.download());
@@ -88,7 +114,8 @@ async function until(f, ms = 60000) {
   const t0 = Date.now();
   for (;;) { const s = await status(); if (f(s)) return s; if (Date.now() - t0 > ms) return s; await page.waitForTimeout(50); }
 }
-/** every file of the folder, as the cache holds it: all blocks marked and the bytes the server has */
+/** every file of the folder but the movies, as the cache holds it: all blocks marked and the bytes the server
+ *  has; and no movie */
 async function cacheMatches() {
   const got = await page.evaluate(async () => {
     const m = await (await fetch('/data-manifest')).json();
@@ -106,8 +133,8 @@ async function cacheMatches() {
     return out;
   });
   // an empty file needs nothing in the cache (a read of it never asks)
-  const bad = [...files].filter(([p, hex]) => got[p] ? !got[p].full || got[p].hex !== hex : fs.statSync(path.join(DATA, p)).size > 0).map(([p]) => p);
-  const extra = Object.keys(got).filter(p => !files.has(p));
+  const bad = AHEAD.filter(p => got[p] ? !got[p].full || got[p].hex !== files.get(p) : fs.statSync(path.join(DATA, p)).size > 0);
+  const extra = Object.keys(got).filter(p => got[p] && (!files.has(p) || p.startsWith('MOVIES/')));
   return { ok: !bad.length && !extra.length && Object.keys(got).length === files.size, bad, extra };
 }
 async function clearData() {
@@ -115,7 +142,7 @@ async function clearData() {
   await page.click('#confirm-ok');
   await page.waitForFunction(() => /deleted/.test(document.querySelector('#data-msg').textContent), null, { timeout: 15000 });
 }
-const slow = ms => pc.route('**/data/**', async r => { await new Promise(res => setTimeout(res, ms)); await r.continue().catch(() => { /* unrouted meanwhile */ }); });
+const slow = ms => pc.route('**/data-blocks/**', async r => { await new Promise(res => setTimeout(res, ms)); await r.continue().catch(() => { /* unrouted meanwhile */ }); });
 const unroute = () => pc.unrouteAll({ behavior: 'ignoreErrors' });
 
 try {
@@ -123,20 +150,30 @@ try {
   await open();
   {
     const btn = await text('#fetch-all'), info = await text('#cache-info');
-    const want = `Download all game data (${(TOTAL / 1e6).toFixed(1)} MB)`;
+    const want = `Download the game data (${(TOTAL / 1e6).toFixed(1)} MB)`;
     report('fresh', btn === want && /^Nothing downloaded yet/.test(info) && await page.locator('#data-bar').isHidden(), { btn, want, info });
   }
 
   // ------------------------------------------------------------- full --
   {
     const before = dataRequests;
+    wire.length = 0;
     await page.click('#fetch-all');
     const s = await until(s => s.state === 'done' || s.state === 'error');
-    await page.waitForFunction(() => /^All of the game data/.test(document.querySelector('#cache-info').textContent), null, { timeout: 15000 }).catch(() => {});
+    await page.waitForFunction(() => /^The game data \(/.test(document.querySelector('#cache-info').textContent), null, { timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(300);                                   // the last requestfinished events
     const c = await cacheMatches();
     const info = await text('#cache-info'), msg = await text('#data-msg');
-    report('full', s.state === 'done' && s.have === TOTAL && s.total === TOTAL && c.ok && await page.locator('#fetch-all').isHidden() && /^All of the game data/.test(info),
-      { state: s.state, have: s.have, total: TOTAL, requests: dataRequests - before, mismatched: c.bad, extra: c.extra, info, msg });
+    // each run went compressed exactly when its bytes compress (made with packs, and more than a few of them: the
+    // last byte of TRACKS/RUNPLUSONE.BIN does not), and the whole took fewer bytes
+    const packed = p => /^(GLOBAL|TRACKS)\//.test(p) || /^CARS\/CAR(\d\d)\//.test(p) && +/CAR(\d\d)/.exec(p)[1] % 2 === 0;
+    const runBytes = w => Math.min(fs.statSync(path.join(DATA, w.path)).size, (w.b + w.n) * M) - w.b * M;
+    const wrongEnc = wire.filter(w => (w.enc === 'zstd') !== (packed(w.path) && runBytes(w) > 16)).map(w => `${w.path}#${w.b}:${w.enc}`);
+    const bytesOnWire = await onWire();
+    report('full', s.state === 'done' && s.have === TOTAL && s.total === TOTAL && c.ok && await page.locator('#fetch-all').isHidden() && /^The game data \(/.test(info) &&
+      !ranges.length && wire.length > 0 && !wrongEnc.length && bytesOnWire < TOTAL * 0.8,
+      { state: s.state, have: s.have, total: TOTAL, requests: dataRequests - before, runs: wire.length, rangeRequests: ranges.length, wrongEncoding: wrongEnc,
+        onWireMB: +(bytesOnWire / 1e6).toFixed(1), ofMB: +(TOTAL / 1e6).toFixed(1), mismatched: c.bad, extra: c.extra, info, msg });
   }
 
   // ----------------------------------------------------------- resume --
@@ -164,13 +201,14 @@ try {
   {
     await clearData();
     let busy = 0, cut = 0;
-    await pc.route('**/data/**', async r => {
+    await pc.route('**/data-blocks/**', async r => {
       if (busy < 3) { busy++; return r.fulfill({ status: 503, body: 'busy' }); }
       if (cut < 3) {
         cut++;                                       // taken before the await: handlers run side by side
-        const res = await r.fetch();
+        // the bytes themselves (identity), cut in half: what a dropped connection leaves
+        const res = await r.fetch({ headers: { ...r.request().headers(), 'accept-encoding': 'identity' } });
         const body = await res.body();
-        if (res.status() === 206 && body.length > 1000) return r.fulfill({ status: 206, headers: res.headers(), body: body.subarray(0, body.length >> 1) });
+        if (res.status() === 200 && body.length > 1000) return r.fulfill({ status: 200, contentType: 'application/octet-stream', body: body.subarray(0, body.length >> 1) });
         cut--;
         return r.fulfill({ response: res, body });
       }
@@ -186,7 +224,7 @@ try {
   // ------------------------------------------------------------- fail --
   {
     await clearData();
-    await pc.route('**/data/MOVIES/**', r => r.fulfill({ status: 404, body: 'no' }));
+    await pc.route('**/data-blocks/SOUND/**', r => r.fulfill({ status: 404, body: 'no' }));
     await page.click('#fetch-all');
     const s = await until(s => s.state === 'done' || s.state === 'error');
     await unroute();

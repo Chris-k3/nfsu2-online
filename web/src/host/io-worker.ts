@@ -5,7 +5,8 @@
 //
 // Mounts (preopened directories, in this order: fd 3, fd 4):
 //   /data  the NFSU2 install folder on the local server, read-only.  Read in
-//          1 MiB blocks with HTTP range requests, kept in memory, and
+//          1 MiB blocks (compressed from a server that offers it, else
+//          HTTP range requests), kept in memory, and
 //          persisted in OPFS ("cache/", datacache.ts) so the next launch reads
 //          locally ("Download all game data" fills all of it ahead).
 //   /save  the save overlay: OPFS directory, read/write (saves, registry,
@@ -14,7 +15,7 @@
 import {
   CTL_IO_DOORBELL, E, MAX_THREADS, Op, RPC_DONE, RPC_POSTED, RPC_SLOT, RPC_TAKEN, type BootConfig,
 } from './proto';
-import { BLOCK, CACHE_DIR, cacheKey, dataUrl, openCacheFile, putBlock, type CacheFile, type Manifest } from './datacache';
+import { BLOCK, CACHE_DIR, blockRuns, cacheKey, dataUrl, openCacheFile, putBlock, runUrl, type CacheFile, type Manifest } from './datacache';
 
 interface Init { memory: WebAssembly.Memory; ctl: SharedArrayBuffer; rpc: SharedArrayBuffer; cfg: BootConfig }
 
@@ -29,12 +30,14 @@ const dv = () => new DataView(memory.buffer);
 interface DNode { name: string; dir: boolean; size: number; mtime: number; kids?: Map<string, DNode>; byLower?: Map<string, DNode>; path: string; ino: number }
 let dataRoot: DNode;
 let inoNext = 16;
+let runs: { url: string; max: number } | null = null;     // the server's compressed blocks (datacache.ts blockRuns)
 function mkdirNode(name: string, path: string): DNode { return { name, dir: true, size: 0, mtime: 0, kids: new Map(), byLower: new Map(), path, ino: inoNext++ }; }
 
 async function loadManifest() {
   const r = await fetch(cfg.manifestUrl, { cache: 'no-cache' });
   if (!r.ok) throw new Error(`manifest: HTTP ${r.status}`);
   const m = await r.json() as Manifest;
+  runs = blockRuns(m);
   dataRoot = mkdirNode('', '');
   for (const f of m.files) {
     const parts = f.p.split('/');
@@ -84,20 +87,22 @@ function memPut(key: string, b: Uint8Array) {
 }
 // At most FETCHES block requests in flight (the server holds each client address to 64 requests at once, so a
 // household of players behind one address stays well inside it), and a busy answer (429, 503) is tried again
-// after a pause instead of failing the game's read.
+// after a pause instead of failing the game's read.  A block comes compressed when the server offers it (the
+// browser undoes the Content-Encoding), else as a byte range of the file.
 const FETCHES = 8;
 let fetching = 0;
 const fetchWait: (() => void)[] = [];
-async function fetchRange(url: string, start: number, len: number, what: string): Promise<Uint8Array> {
+async function fetchBlock(n: DNode, bi: number, start: number, len: number): Promise<Uint8Array> {
   while (fetching >= FETCHES) await new Promise<void>(r => fetchWait.push(r));
   fetching++;
   try {
+    const url = runs ? runUrl(runs.url, n.path, bi, 1) : dataUrl(cfg.dataBase, n.path);
     for (let attempt = 0, wait = 250; ; attempt++, wait = Math.min(wait * 2, 4000)) {
-      const r = await fetch(url, { headers: { Range: `bytes=${start}-${start + len - 1}` }, cache: 'no-store' });
+      const r = await fetch(url, { headers: runs ? {} : { Range: `bytes=${start}-${start + len - 1}` }, cache: 'no-store' });
       if ((r.status === 429 || r.status === 503) && attempt < 12) { await r.body?.cancel(); await new Promise(res => setTimeout(res, wait)); continue; }
-      if (r.status !== 206 && r.status !== 200) throw new Error(`HTTP ${r.status} for ${what}`);
+      if (r.status !== 206 && r.status !== 200) throw new Error(`HTTP ${r.status} for ${n.path}`);
       const b = new Uint8Array(await r.arrayBuffer());
-      return r.status === 200 ? b.slice(start, start + len) : b;      // the whole file: our block of it
+      return r.status === 200 && !runs ? b.slice(start, start + len) : b;      // a range answered with the whole file: our block of it
     }
   } finally { fetching--; fetchWait.shift()?.(); }
 }
@@ -113,7 +118,7 @@ async function getBlock(n: DNode, bi: number): Promise<Uint8Array> {
     if (cf && cf.have[bi]) {
       const b = new Uint8Array(len); cf.h.read(b, { at: start }); memPut(key, b); return b;
     }
-    const b = await fetchRange(dataUrl(cfg.dataBase, n.path), start, len, n.path);
+    const b = await fetchBlock(n, bi, start, len);
     if (b.length !== len) throw new Error(`short read ${n.path} block ${bi}: ${b.length}/${len}`);
     if (cf) putBlock(cf, bi, b);
     memPut(key, b);

@@ -1,17 +1,18 @@
-// The predownload worker: all of the install folder into the game data cache
-// (datacache.ts) ahead of play, so a game never waits on the network for its
-// data.  The page starts it ("Download all game data") and stops it
+// The predownload worker: the install folder but the movies (datacache.ts
+// fetchedAhead) into the game data cache ahead of play, so a game never waits
+// on the network for its data.  Runs of blocks come compressed from a server
+// that offers it, else as byte ranges.  The page starts it ("Download all game data") and stops it
 // before a game starts, since the I/O worker writes the same files.
 //
 // Page -> worker: { t: 'start', manifestUrl, dataBase }, { t: 'stop' }
 // Worker -> page: { t: 'progress', have, total }   (bytes in the cache; at most every 250 ms)
-//                 { t: 'done', have, total }       (the whole folder is in the cache)
+//                 { t: 'done', have, total }       (all of it is in the cache)
 //                 { t: 'stopped' }                 (after 'stop')
 //                 { t: 'error', msg }
 // Every file is closed before 'done', 'stopped' or 'error'.  What was written
 // stays: a stopped or failed download goes on from there the next time.
 import {
-  BLOCK, CACHE_DIR, blockCount, blockLen, dataUrl, manifestFiles, openCacheFile, putBlock, scanCache,
+  BLOCK, CACHE_DIR, blockCount, blockLen, blockRuns, dataUrl, fetchedAhead, manifestFiles, openCacheFile, putBlock, runUrl, scanCache,
   type CacheFile, type DataFile, type Manifest,
 } from './datacache';
 import { fmtBytes } from '../app/checks';
@@ -22,7 +23,8 @@ export type FromPredownload =
   | { t: 'stopped' } | { t: 'error'; msg: string };
 
 // Requests at once (over HTTP/1.1 Chrome holds 6 connections to a server: the page keeps the rest), and
-// blocks per request: a few seconds on a slow line, so a stop is quick and little is fetched twice.
+// blocks per request (at most what the server's runs take): a few seconds on a slow line, so a stop is quick
+// and little is fetched twice.
 const LANES = 4, RUN = 8;
 const ATTEMPTS = 8;
 
@@ -42,7 +44,9 @@ function closeFile(cf: CacheFile | null) { if (cf) { cf.h.flush(); cf.h.close();
 async function download(cfg: { manifestUrl: string; dataBase: string }): Promise<{ have: number; total: number } | null> {
   const r = await fetch(cfg.manifestUrl, { cache: 'no-cache', signal: abort.signal });
   if (!r.ok) throw new Error(`the list of game files did not download (HTTP ${r.status})`);
-  const scan = await scanCache(manifestFiles(await r.json() as Manifest));
+  const m = await r.json() as Manifest;
+  const served = blockRuns(m), runMax = Math.min(RUN, served?.max ?? RUN);
+  const scan = await scanCache(manifestFiles(m).filter(fetchedAhead));
   const total = scan.total;
   let have = scan.have, shown = 0;
   const progress = (now = false) => {
@@ -64,7 +68,7 @@ async function download(cfg: { manifestUrl: string; dataBase: string }): Promise
     for (let bi = 0; bi < blockCount(f.size); bi++) {
       if (m?.[bi]) continue;
       const prev = runs[runs.length - 1];
-      if (prev?.f === f && prev.end === bi && prev.end - prev.first < RUN) prev.end++;
+      if (prev?.f === f && prev.end === bi && prev.end - prev.first < runMax) prev.end++;
       else { runs.push({ f, first: bi, end: bi + 1, file }); file.runs++; }
     }
   }
@@ -81,10 +85,12 @@ async function download(cfg: { manifestUrl: string; dataBase: string }): Promise
     while (first < run.end && cf.have[first]) first++;
     if (first === run.end) return;
     const start = first * BLOCK, end = Math.min(run.f.size, run.end * BLOCK);
-    const res = await fetch(dataUrl(cfg.dataBase, run.f.path), { headers: { Range: `bytes=${start}-${end - 1}` }, cache: 'no-store', signal: abort.signal });
+    // compressed runs (the browser undoes the Content-Encoding), or a byte range
+    const res = served ? await fetch(runUrl(served.url, run.f.path, first, run.end - first), { cache: 'no-store', signal: abort.signal })
+      : await fetch(dataUrl(cfg.dataBase, run.f.path), { headers: { Range: `bytes=${start}-${end - 1}` }, cache: 'no-store', signal: abort.signal });
     if (res.status === 429 || res.status >= 500) { await res.body?.cancel(); throw new Retry(`HTTP ${res.status}`); }
     if (res.status !== 206 && res.status !== 200) throw new Error(`the server answered HTTP ${res.status} for ${run.f.path}`);
-    let at = res.status === 206 ? start : 0;           // a 200 is the whole file, from its first block
+    let at = served || res.status === 206 ? start : 0;   // a 200 to a range is the whole file, from its first block
     const buf = new Uint8Array(BLOCK);
     let fill = 0;
     const rd = res.body!.getReader();
