@@ -88,7 +88,10 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
   written straight into wasm memory. Mounts:
   - `/data`: the install folder. Manifest from the server, case-insensitive lookup, 1 MiB range blocks, memory LRU,
     persistent OPFS block cache.
-  - `/save`: OPFS save overlay. Holds saves, `registry.txt`, `settings.ini` and logs.
+  - `/save`: OPFS save overlay. Holds saves, `registry.txt`, `settings.ini` and logs. Closing a file the game wrote
+    there posts `{ t: 'saved', path }` to the page (the "Progress saved" note, F9's last save, the end screen). Before
+    each Play the page sets every profile still on the game's Save = Prompt to Autosave, once per profile
+    (`web/src/app/profile.ts`, settings.ini `autosave`).
   - `/dev`: `null`, `zero`, `urandom`.
 
   The runtime runs as on the Mac with `NFSU2_SAVEDIR=/save` and `NFSU2_READONLY_DATA=1`.

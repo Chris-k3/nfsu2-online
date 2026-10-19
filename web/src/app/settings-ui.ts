@@ -23,6 +23,7 @@ const GROUPS: Group[] = [
     { key: 'movies', label: 'Movies', help: 'Intro, story and FMV movies.', c: { t: 'switch' } },
     { key: 'intro', label: 'Startup movies', help: 'The EA and THX logos, the PSA and the intro. Skippable: Enter, Esc, Space, a left click, or A, B or Start ends each one. Original: as in the game, where only the intro ends early.', c: { t: 'seg', opts: [['skippable', 'Skippable'], ['original', 'Original'], ['off', 'Off']] } },
     { key: 'sound', label: 'Sound', help: 'All sound output.', c: { t: 'switch' } },
+    { key: 'autosave', label: 'Autosave', help: 'Sets each profile\'s Save option in the game to Autosave once, so races, purchases and changes are saved without asking. Prompt or Off chosen afterwards in the game\'s Options, Gameplay stays.', c: { t: 'switch' } },
     { key: 'background', label: 'When the tab is in the background', help: 'Pause freezes the game and its sound, as alt-tab does on Windows. In LAN and Online play it keeps running, without sound.', c: { t: 'seg', opts: [['pause', 'Pause'], ['run', 'Keep running']] } },
     { key: 'seed_registry', label: 'Highest graphics for a new save', help: 'The game\'s own graphics options at their highest, at this screen\'s resolution. Off lets the game run its own hardware check.', c: { t: 'switch' }, more: true },
     { key: 'quit_grace', label: 'Time to quit', help: 'Seconds the game gets to shut down after Quit game before it is stopped.', c: { t: 'num', min: 0, step: 1, unit: 's' }, more: true },

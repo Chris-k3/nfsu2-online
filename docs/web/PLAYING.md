@@ -53,7 +53,7 @@ the data, so later starts are quick.
 | Enter | Choose (menus) |
 | F12 | The game's screenshot, kept with your saves |
 | **F8** | Frame-rate counter: off, on, detailed |
-| **F9** | The page menu: full screen, counter, controls, log, **Quit game** |
+| **F9** | The page menu: when the game last saved, full screen, counter, controls, log, **Quit game** |
 | **Hold Esc** | Leave full screen (a short press still goes to the game) |
 
 The start page shows these keys under **Controls**, and F9, Controls shows them while you play.
@@ -77,7 +77,7 @@ is saved at once and applies the next time you press Play.
 
 | Group | Settings |
 |---|---|
-| Game | movies, startup movies (skippable, original or off), sound, pause or keep running in the background |
+| Game | movies, startup movies (skippable, original or off), sound, autosave, pause or keep running in the background |
 | Display | full screen on Play (off: the game plays in the browser window), resolution scale, HUD layout, movie framing, cutscene bars |
 | Frame rate | auto (follows the screen: 120 on a 120 Hz display), 60 or 120, and the counter |
 | Sound | output latency |
@@ -102,6 +102,13 @@ is saved at once and applies the next time you press Play.
 
 - **Where they are:** your profiles and career are saved **in this browser, on this PC** (Chrome's site storage for
   the server's address). They are not on the server. Each address keeps its own save store, so stick to one.
+- **Autosave:** the game saves your progress by itself after races, purchases and changed options. The game starts
+  every profile on Save = Prompt, whose "save?" question opens on No, so Enter through the results skips the save;
+  the page sets each profile to Autosave once (the game's Options, Gameplay, Save), at the first Play after the
+  profile was saved. Pick Prompt or Off there and it stays. Settings, Game, Autosave off leaves the game's own setting
+  alone.
+- **When it saved:** "Progress saved" shows over the game each time it saves your profile, F9 shows the last save, and
+  after the game closes the start page says when it last saved (or that nothing was saved during that game).
 - **Backup:** Saves, Download a backup gives one zip with your profiles, the game's options (`registry.txt`),
   `settings.ini` and F12 screenshots.
 - **Restore:** Saves, Restore a backup puts a zip back, on this PC or on another one. It replaces what this browser

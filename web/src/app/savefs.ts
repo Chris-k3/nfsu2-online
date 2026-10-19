@@ -75,6 +75,14 @@ export async function readBytes(saveDir: string, path: string): Promise<Uint8Arr
   return new Uint8Array(await (await (await d.getFileHandle(p[p.length - 1])).getFile()).arrayBuffer());
 }
 
+/** The save dir's file functions, bound to it (profile.ts turnOnAutosave). */
+export function filesOf(saveDir: string) {
+  return {
+    listFiles: () => listFiles(saveDir), readBytes: (path: string) => readBytes(saveDir, path),
+    readText: (path: string) => readText(saveDir, path), writeFile: (path: string, data: string | Uint8Array) => writeFile(saveDir, path, data),
+  };
+}
+
 /** Remove everything inside the save dir (the dir itself stays). */
 export async function clearSaveDir(saveDir: string): Promise<void> {
   const d = await saveRoot(saveDir);

@@ -24,7 +24,8 @@ import { claimInstance } from './instance';
 import { LogRing, downloadBlob, stamp } from './logs';
 import { enterFullscreen, exitFullscreen, isFullscreen, measureRefresh, settledSize, trackCanvasSize } from './display';
 import { HOST_FIXED, pageOnly, resolveEnv, settingsUpgrade, TEMPLATE, type Resolved } from './settings';
-import { exists, readText, removeSaveDir, writeFile } from './savefs';
+import { exists, filesOf, listProfiles, PROFILES_DIR, readText, removeSaveDir, writeFile } from './savefs';
+import { turnOnAutosave } from './profile';
 import { SettingsPanel } from './settings-ui';
 import { watchPlayers } from './players';
 import { SavesPanel } from './saves-ui';
@@ -82,6 +83,8 @@ let fps: FpsOverlay;
 let settings: SettingsPanel;
 let players: { now(): void } | null = null;
 let saves: SavesPanel;
+/** the profile the running (or last) game saved last, when, and how often it saved one */
+let saved: { name: string; at: number; count: number } | null = null;
 
 // ------------------------------------------------------------- progress --
 function setProgress(f: number) {
@@ -241,6 +244,19 @@ async function startGame() {
     if (r.env.NFSU2_SEED_REGISTRY === '0') log.add('[app] no registry yet, the game will run its first-run check');
     else { await writeFile(SAVE, reg, registryDefaults); log.add(`[app] first launch, registry seeded with the built-in defaults (/save/${reg})`); }
   }
+  // the game's Save option at Autosave, once per profile (settings.ini autosave, profile.ts); an input script
+  // plays the game as it was recorded (on the Mac, where nothing changes the profiles) unless the page address
+  // asks for autosave itself
+  let autosaved: string[] = [];
+  const scripted = !!q.get('script') && ENVIRONMENT.NFSU2_AUTOSAVE === undefined;
+  if (scripted) log.add('[app] autosave: an input script drives this game, the profiles are left as they are');
+  else if (r.env.NFSU2_AUTOSAVE !== '0') {
+    try {
+      const a = await turnOnAutosave(filesOf(SAVE), PROFILES_DIR);
+      autosaved = a.turnedOn;
+      for (const n of a.notes) log.add(`[app] autosave: ${n}`);
+    } catch (e) { log.add(`[app] autosave: the profiles were not checked: ${e}`); }
+  }
   if (q.get('script')) {
     await writeFile(SAVE, 'autotest-script.txt', await (await fetch(q.get('script')!, { cache: 'no-store' })).text());
     if (!('NFSU2_INPUT_SCRIPT' in r.env)) r.env.NFSU2_INPUT_SCRIPT = '/save/autotest-script.txt';
@@ -253,13 +269,14 @@ async function startGame() {
   const netName = net ? (r.env.NFSU2_ROAM_NAME?.trim() || 'Player') : null;
   fatal = null;
   quitAt = null;
+  saved = null;
   try {
     // the callbacks are module-level functions, not closures made here: the
     // session's subsystems keep them (some, like a closed AudioContext, a little
     // longer than the game), and a closure from this function would keep its
     // scope, and with it this game, reachable
     session = await GameSession.start({
-      module: loaded!.module, info: loaded!.info, saveDir: SAVE, env: r.env, canvas, stage, audio, displayHz, netName, notice,
+      module: loaded!.module, info: loaded!.info, saveDir: SAVE, env: r.env, canvas, stage, audio, displayHz, netName, notice, onSaved,
       artifacts: q.get('artifacts') ?? undefined, dumpScale: q.get('dumpscale') ? +q.get('dumpscale')! : undefined,
       toggleFullscreen, log: logLine, onFatal: stopFatal,
     });
@@ -277,7 +294,9 @@ async function startGame() {
   const st = session;
   const waitStatus = setInterval(() => { if (st.status) { fps.reader = st.status; clearInterval(waitStatus); } }, 100);
   fps.set((r.env.NFSU2_FPS_COUNTER as FpsMode) in { off: 1, on: 1, detailed: 1 } ? r.env.NFSU2_FPS_COUNTER as FpsMode : 'off');
-  toast(fsNote || (full ? 'F9 opens the menu. Hold Esc to leave full screen.' : 'F9 opens the menu: full screen, controls, quit.'), 6000);
+  const hint = fsNote || (full ? 'F9 opens the menu. Hold Esc to leave full screen.' : 'F9 opens the menu: full screen, controls, quit.');
+  if (autosaved.length) toast(`Autosave is now on for ${autosaved.join(', ')}: the game saves by itself (Options, Gameplay, Save). ${hint}`, 9000);
+  else toast(hint, 6000);
   void st.exited.then(code => { clearInterval(waitStatus); onExit(st, code); });
   // Chrome may keep the sound off until a click or a key press (its autoplay
   // rule); a controller button does not count, so say what does
@@ -343,9 +362,37 @@ function onExit(s: GameSession, code: number) {
   $('#log-btn').hidden = false;
   const mins = seconds >= 120 ? `${Math.floor(seconds / 60)} min` : `${seconds.toFixed(0)} s`;
   if (fatal) setPhase('exited', 'Did not start', `The game was stopped: ${fatal}. Download the log to see why; chrome://gpu shows what Chrome thinks of the graphics.`);
-  else if (code === 0) setPhase('exited', 'See you', `The game closed normally after ${mins}. Your progress is saved in this browser.`);
-  else setPhase('exited', 'Stopped', code === -1 ? `The game was stopped after ${mins}.` : `The game stopped with error code ${code} after ${mins}. Download the log to see why.`);
+  else {
+    const base = code === 0 ? `The game closed normally after ${mins}.` : code === -1 ? `The game was stopped after ${mins}.`
+      : `The game stopped with error code ${code} after ${mins}. Download the log to see why.`;
+    // what is kept: the game's last profile save, never a claim it did not make
+    const sv = saved;
+    setPhase('exited', code === 0 ? 'See you' : 'Stopped', !sv ? base : code === 0 ? `${base} Progress saved in this browser at ${when(sv.at)} (${sv.name}).`
+      : `${base} Your progress up to the last save, at ${when(sv.at)} (${sv.name}), is kept.`);
+    if (!sv) void newestProfile().then(p => {
+      const sub = $('#status-sub');
+      if (phase === 'exited' && !session && sub.textContent === base)
+        sub.textContent = `${base} ${p ? `Nothing was saved during this game; the last save is from ${when(p.mtime)} (${p.name}).` : 'No profile is saved in this browser yet.'}`;
+    });
+  }
   void saves.refresh();               // new or changed profiles
+}
+
+/** the game finished writing a file of the save folder: a profile is the player's progress */
+function onSaved(path: string) {
+  const p = path.split('/');
+  if (p.length !== 3 || p[0] !== PROFILES_DIR || p[2].toLowerCase() !== p[1].toLowerCase()) return;
+  saved = { name: p[1], at: Date.now(), count: (saved?.count ?? 0) + 1 };
+  log.add(`[app] the game saved profile ${p[1]} (${saved.count} this game)`);
+  if (session) toast(`Progress saved (${p[1]}).`, 2500);
+  if ($<HTMLDialogElement>('#menu').open) $('#menu-save').textContent = `Last saved at ${when(saved.at)} (${saved.name}).`;
+}
+/** the newest profile in this browser (listProfiles sorts by time), or null */
+async function newestProfile() { return (await listProfiles(SAVE).catch(() => []))[0] ?? null; }
+/** a save's time: the clock today, the day too before today */
+function when(t: number): string {
+  const d = new Date(t), time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString([], { day: 'numeric', month: 'short' })}, ${time}`;
 }
 
 /** a short message at the bottom of the start page (a status region: read out too) */
@@ -388,6 +435,14 @@ function openMenu() {
   m.querySelector<HTMLButtonElement>('[data-act="fullscreen"]')!.textContent = isFullscreen() ? 'Leave full screen' : 'Full screen';
   m.querySelector<HTMLButtonElement>('[data-act="fps"]')!.textContent = `Frame-rate counter: ${fps.mode}`;
   m.querySelector<HTMLButtonElement>('[data-act="quit"]')!.textContent = quitLabel();
+  const line = $('#menu-save');
+  if (saved) line.textContent = `Last saved at ${when(saved.at)} (${saved.name}).`;
+  else {
+    line.textContent = 'Nothing saved during this game yet.';
+    void newestProfile().then(p => {
+      if (!saved && m.open) line.textContent = p ? `Nothing saved during this game yet. Last save: ${when(p.mtime)} (${p.name}).` : 'No profile is saved in this browser yet.';
+    });
+  }
   $('#stage').classList.add('cursor');
   m.showModal();
 }

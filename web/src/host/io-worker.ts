@@ -8,7 +8,8 @@
 //          1 MiB blocks with HTTP range requests, kept in memory, and
 //          persisted in OPFS ("cache/") so the next launch reads locally.
 //   /save  the save overlay: OPFS directory, read/write (saves, registry,
-//          settings.ini, logs).
+//          settings.ini, logs).  Closing a file the game wrote there tells
+//          the page ({ t: 'saved', path }: "Progress saved", F9's last save).
 import {
   CTL_IO_DOORBELL, E, MAX_THREADS, Op, RPC_DONE, RPC_POSTED, RPC_SLOT, RPC_TAKEN, type BootConfig,
 } from './proto';
@@ -179,6 +180,7 @@ interface Fd {
   mount: 'data' | 'save' | 'dev'; kind: 'dir' | 'file'; path: string; pos: number; append: boolean;
   node?: DNode;                                   // /data
   sh?: FileSystemSyncAccessHandle; dh?: FileSystemDirectoryHandle; fh?: FileSystemFileHandle;   // /save
+  wrote?: boolean;                                // /save: written or truncated since it was opened
   preopen?: string; dirents?: { name: string; type: number; ino: number }[];
 }
 const fds = new Map<number, Fd>();
@@ -259,14 +261,17 @@ async function op(o: Op, a: bigint[]): Promise<number> {
       let sh: FileSystemSyncAccessHandle;
       try { sh = await (fh as any).createSyncAccessHandle({ mode: 'readwrite-unsafe' }); } catch { return E.ACCES; }
       if (oflags & 8) sh.truncate(0);
-      const fd = allocFd({ mount: 'save', kind: 'file', path: rel, pos: 0, append: !!(fdflags & 1), sh, fh });
+      const fd = allocFd({ mount: 'save', kind: 'file', path: rel, pos: 0, append: !!(fdflags & 1), sh, fh, wrote: !!(oflags & 8) });
       dv().setUint32(n(8), fd, true); return 0;
     }
     case Op.FdClose: {
       const f = fds.get(n(0)); if (!f) return E.BADF;
       if (f.preopen) return 0;
       if (f.sh) { f.sh.flush(); f.sh.close(); }
-      fds.delete(n(0)); return 0;
+      fds.delete(n(0));
+      // posted before the call returns, so the page hears of a save before the game can exit after it
+      if (f.wrote) (self as unknown as Worker).postMessage({ t: 'saved', path: f.path });
+      return 0;
     }
     case Op.FdRead: case Op.FdPread: {
       const f = fds.get(n(0)); if (!f) return E.BADF; if (f.kind === 'dir') return E.ISDIR;
@@ -289,6 +294,7 @@ async function op(o: Op, a: bigint[]): Promise<number> {
       if (f.mount === 'dev') { dv().setUint32(pw ? n(4) : n(3), src.reduce((a, x) => a + x.len, 0), true); return 0; }
       let pos = pw ? n(3) : (f.append ? f.sh!.getSize() : f.pos), put = 0;
       for (const s of src) { const k = f.sh!.write(u8().slice(s.ptr, s.ptr + s.len), { at: pos }); pos += k; put += k; }
+      if (put) f.wrote = true;
       if (!pw) f.pos = pos;
       dv().setUint32(pw ? n(4) : n(3), put, true); return 0;
     }
@@ -315,7 +321,7 @@ async function op(o: Op, a: bigint[]): Promise<number> {
       if (f.kind === 'dir') { writeFilestat(n(1), inoOf(f.path), FT_DIR, 0, 0); return 0; }
       writeFilestat(n(1), inoOf(f.path), FT_FILE, f.sh!.getSize(), Date.now() / 1000); return 0;
     }
-    case Op.FdFilestatSetSize: { const f = fds.get(n(0)); if (!f) return E.BADF; if (!f.sh) return E.ROFS; f.sh.truncate(n(1)); return 0; }
+    case Op.FdFilestatSetSize: { const f = fds.get(n(0)); if (!f) return E.BADF; if (!f.sh) return E.ROFS; f.sh.truncate(n(1)); f.wrote = true; return 0; }
     case Op.FdAllocate: { const f = fds.get(n(0)); if (!f?.sh) return E.BADF; const need = n(1) + n(2); if (f.sh.getSize() < need) f.sh.truncate(need); return 0; }
     case Op.FdFilestatSetTimes: case Op.PathFilestatSetTimes: return 0;
     case Op.PathFilestatGet: {

@@ -25,6 +25,8 @@ export interface SessionOptions {
   netName: string | null;
   /** free roam: a line for the player (a friend joined, left, went into a race) */
   notice?(text: string): void;
+  /** the game finished writing a file of the save overlay (path relative to /save) */
+  onSaved?(path: string): void;
   /** tests: where frame dumps go, and their scale */
   artifacts?: string; dumpScale?: number;
   toggleFullscreen(): void;
@@ -54,6 +56,7 @@ export class GameSession {
       initialPages: o.info.pages || undefined,
       cfg: { args: ['nfsu2', '/data/SPEED2.EXE'], env: o.env, dataBase: '/data/', manifestUrl: '/data-manifest', saveDir: o.saveDir },
       onLog: (line, fd, t) => o.log(`${tid(t, fd)} ${line}`),
+      onSaved: o.onSaved,
     });
     s.exited = s.proc.exited.then(code => { s.exitCode = code; s.detach(); return code; });
     void s.proc.registered(HostKind.Status).then(r => { if (!s.detached) s.status = new StatusReader(s.proc.memory, r.ptr); });

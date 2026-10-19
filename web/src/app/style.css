@@ -256,6 +256,8 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.64); }
 .dlg-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 .dlg-head h2 { margin: 0; }
 .menu-actions { display: grid; gap: 8px; }
+#menu-save { margin-top: -12px; }
+#menu-save:empty { display: none; }
 
 /* ---------------------------------------------------------------- narrow */
 @media (max-width: 959px) {

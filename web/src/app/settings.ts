@@ -118,6 +118,8 @@ export const KEYS: readonly KeyDef[] = [
   { key: 'audio_latency', env: 'NFSU2_AUDIO_LATENCY', kind: 'enum', vals: 'interactive|balanced|playback|#', scope: 'web' },
   // the game's Online mode against this server's own stand-in (web/server/online/; read by runtime/winsock.c)
   { key: 'online', env: 'NFSU2_ONLINE', kind: 'bool', scope: 'web' },
+  // each profile's Save option set to Autosave once, before Play (the page's own: profile.ts turnOnAutosave)
+  { key: 'autosave', env: 'NFSU2_AUTOSAVE', kind: 'bool', scope: 'web' },
 ];
 
 /** strcasecmp's and toupper's folding: ASCII letters only (String.toLowerCase would also fold the Kelvin sign to 'k') */
@@ -158,6 +160,14 @@ export const TEMPLATE = `# NFSU2 settings, read at every launch.
 
 # Sound output.  [NOSOUND, inverted]
 #sound = on
+
+# Autosave: before Play, every profile still on the game's own default, Save
+# = Prompt (whose "save?" question opens on No), is set to Autosave once, so
+# the game saves by itself after races, purchases and changes.  A profile
+# gets it at the first Play after it was saved; pick Prompt or Off in the
+# game's Options, Gameplay, Save and that choice stays.  off = profiles keep
+# what the game has.  [NFSU2_AUTOSAVE]
+#autosave = on
 
 # What the game does while this tab is hidden or another window is active:
 # "pause" freezes it and pauses its sound, like alt-tab on Windows; "run"
