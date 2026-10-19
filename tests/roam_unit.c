@@ -1,0 +1,734 @@
+/* roam_unit.c -- unit tests for the free-roam multiplayer core (roam_core.c)
+ * and the platform layer's pure parts (roam_bsd.c: guard, broadcast
+ * targets, peer list).  No socket is opened: sessions talk through an
+ * in-process fake network with a fake clock.
+ *
+ *   clang -O1 -g -fsanitize=address,undefined -Iruntime -o out/roam_unit \
+ *         tests/roam_unit.c runtime/roam_core.c runtime/roam_bsd.c
+ *   out/roam_unit [fuzz-iterations]
+ */
+#include "roam_core.h"
+#include "roam_plat.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+
+static int g_fail, g_pass;
+#define CHECK(cond, ...) do{ if (cond) g_pass++; else { g_fail++; printf("FAIL %s:%d: ", __FILE__, __LINE__); printf(__VA_ARGS__); printf("\n"); } }while(0)
+
+/* roam_bsd.c logs events through the game; here they are counted */
+static int g_ev[8];
+void roam_game_event(int ev, int peer, const char *text){ (void)peer; (void)text; if (ev >= 0 && ev < 8) g_ev[ev]++; }
+
+static uint32_t rng = 12345;
+static uint32_t rnd(void){ rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return rng; }
+static float frnd(float lo, float hi){ return lo + (hi - lo) * (float)(rnd() % 1000000u) / 1e6f; }
+
+/* ---- 1. byte layout against the documented offsets -------------------------------- */
+static uint32_t le32(const uint8_t *p){ return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
+static uint16_t le16(const uint8_t *p){ return (uint16_t)(p[0] | p[1] << 8); }
+static float lef(const uint8_t *p){ uint32_t u = le32(p); float f; memcpy(&f, &u, 4); return f; }
+static void t_layout(void){
+    uint8_t b[RC_MAX_DGRAM];
+    rc_msg m; memset(&m, 0, sizeof m);
+    m.h.type = RC_MSG_HELLO; m.h.sender = 0xA1B2C3D4u; m.h.seq = 0x1234; m.h.flags = 0;
+    m.u.hello.core_ver = 1; m.u.hello.platform = RC_PLAT_MAC; m.u.hello.status = RC_ST_ROAM; m.u.hello.listen_port = 47210;
+    m.u.hello.cfg_rev = 7; m.u.hello.room = 0x01020304u; strcpy(m.u.hello.name, "Thom"); m.u.hello.n_seen = 2;
+    m.u.hello.seen[0] = 0x11111111u; m.u.hello.seen[1] = 0x22222222u;
+    int n = rc_encode(&m, b, sizeof b);
+    /* header 16 + core_ver 2 + platform 1 + status 1 + port 2 + rev 2 + room 4 + len 1 + name 4 + n_seen 1 + 8 + crc 4 */
+    CHECK(n == 16 + 2 + 1 + 1 + 2 + 2 + 4 + 1 + 4 + 1 + 8 + 4, "HELLO length %d", n);
+    CHECK(!memcmp(b, "N2FR", 4) && b[4] == 1 && b[5] == RC_MSG_HELLO, "HELLO magic/version/type");
+    CHECK(le16(b + 6) == n && le32(b + 8) == 0xA1B2C3D4u && le16(b + 12) == 0x1234 && le16(b + 14) == 0, "HELLO header fields");
+    CHECK(le16(b + 16) == 1 && b[18] == RC_PLAT_MAC && b[19] == RC_ST_ROAM && le16(b + 20) == 47210 && le16(b + 22) == 7 &&
+          le32(b + 24) == 0x01020304u && b[28] == 4 && !memcmp(b + 29, "Thom", 4) && b[33] == 2 &&
+          le32(b + 34) == 0x11111111u && le32(b + 38) == 0x22222222u, "HELLO payload offsets");
+    CHECK(le32(b + n - 4) == rc_crc32(b, (uint32_t)n - 4), "HELLO CRC trailer");
+
+    memset(&m, 0, sizeof m);
+    m.h.type = RC_MSG_SNAP; m.h.sender = 5; m.h.seq = 9;
+    m.u.snap.status = RC_ST_ROAM; m.u.snap.epoch = 3; m.u.snap.cfg_rev = 0x0102; m.u.snap.n = 1; m.u.snap.clock = 4;
+    rc_state *s = &m.u.snap.s[0];
+    s->t_us = 0xDEADBEEFu; s->p[0] = 1.5f; s->p[1] = -2.25f; s->p[2] = 3.0f; s->v[0] = 10; s->v[1] = 0; s->v[2] = -1;
+    s->q[0] = 0; s->q[1] = 0; s->q[2] = 0; s->q[3] = 1; s->w[0] = 0.5f; s->w[1] = -0.25f; s->w[2] = 1.0f;
+    s->steer = -0.5f; s->throttle = 1.0f; s->brake = 0.0f; s->rpm = 4500; s->speed = 33.33f; s->gear = 3; s->bits = RC_BIT_BRAKE;
+    n = rc_encode(&m, b, sizeof b);
+    CHECK(n == 16 + 6 + 52 + 4, "SNAP length %d", n);
+    const uint8_t *st = b + 22;
+    CHECK(b[16] == RC_ST_ROAM && b[17] == 3 && le16(b + 18) == 0x0102 && b[20] == 1 && b[21] == 4, "SNAP header payload");
+    CHECK(le32(st) == 0xDEADBEEFu && lef(st + 4) == 1.5f && lef(st + 8) == -2.25f && lef(st + 12) == 3.0f &&
+          lef(st + 16) == 10.f && lef(st + 24) == -1.f, "SNAP state floats");
+    CHECK((int16_t)le16(st + 28) == 0 && (int16_t)le16(st + 34) == 32767, "SNAP quaternion i16 (w = 32767)");
+    CHECK((int16_t)le16(st + 36) == 500 && (int16_t)le16(st + 38) == -250 && (int16_t)le16(st + 40) == 1000, "SNAP angvel x1000");
+    CHECK((int16_t)le16(st + 42) == -16384 && st[44] == 255 && st[45] == 0 && le16(st + 46) == 4500 &&
+          (int16_t)le16(st + 48) == 3333 && (int8_t)st[50] == 3 && st[51] == RC_BIT_BRAKE, "SNAP controls");
+
+    memset(&m, 0, sizeof m);
+    m.h.type = RC_MSG_PEERS; m.h.sender = 5; m.u.peers.n = 1; m.u.peers.e[0].ip = 0xC0A80114u; m.u.peers.e[0].port = 47211; m.u.peers.e[0].id = 0x55667788u;
+    n = rc_encode(&m, b, sizeof b);
+    CHECK(n == 16 + 1 + 10 + 4 && b[16] == 1 && b[17] == 192 && b[18] == 168 && b[19] == 1 && b[20] == 20 &&
+          le16(b + 21) == 47211 && le32(b + 23) == 0x55667788u, "PEERS layout");
+
+    uint8_t rec[1500]; for (int i = 0; i < 1500; i++) rec[i] = (uint8_t)i;
+    memset(&m, 0, sizeof m);
+    m.h.type = RC_MSG_CFG; m.h.sender = 5; m.u.cfg.cfg_rev = 2; m.u.cfg.frag = 1; m.u.cfg.nfrag = 2; m.u.cfg.total = 1500;
+    m.u.cfg.dlen = 500; m.u.cfg.data = rec + 1000;
+    n = rc_encode(&m, b, sizeof b);
+    CHECK(n == 16 + 8 + 500 + 4 && le16(b + 16) == 2 && b[18] == 1 && b[19] == 2 && le16(b + 20) == 1500 && le16(b + 22) == 500 &&
+          b[24] == (uint8_t)1000, "CFG layout");
+
+    memset(&m, 0, sizeof m); m.h.type = RC_MSG_PONG; m.h.sender = 5; m.u.ping.t0 = 1; m.u.ping.t1 = 2; m.u.ping.t2 = 3;
+    n = rc_encode(&m, b, sizeof b);
+    CHECK(n == 16 + 12 + 4 && le32(b + 16) == 1 && le32(b + 20) == 2 && le32(b + 24) == 3, "PONG layout");
+    memset(&m, 0, sizeof m); m.h.type = RC_MSG_BYE; m.h.sender = 5; m.u.bye.reason = 1;
+    n = rc_encode(&m, b, sizeof b);
+    CHECK(n == 16 + 1 + 4 && b[16] == 1, "BYE layout");
+    memset(&m, 0, sizeof m); m.h.type = RC_MSG_CFG_REQ; m.h.sender = 5; m.u.cfgreq.cfg_rev = 9; m.u.cfgreq.have_mask = 1;
+    n = rc_encode(&m, b, sizeof b);
+    CHECK(n == 16 + 3 + 4 && le16(b + 16) == 9 && b[18] == 1, "CFG_REQ layout");
+
+    /* CRC-32 check value */
+    CHECK(rc_crc32((const uint8_t *)"123456789", 9) == 0xCBF43926u, "CRC-32 check value");
+    /* a fixed message: the exact bytes (regression of the format) */
+    memset(&m, 0, sizeof m); m.h.type = RC_MSG_PING; m.h.sender = 0x01020304u; m.h.seq = 1; m.u.ping.t0 = 0x0A0B0C0Du;
+    n = rc_encode(&m, b, sizeof b);
+    static const uint8_t ping_gold[24] = { 0x4E,0x32,0x46,0x52, 0x01, 0x06, 0x18,0x00, 0x04,0x03,0x02,0x01, 0x01,0x00, 0x00,0x00,
+                                           0x0D,0x0C,0x0B,0x0A, 0,0,0,0 };
+    uint8_t g[24]; memcpy(g, ping_gold, 24); uint32_t c = rc_crc32(g, 20); g[20] = (uint8_t)c; g[21] = (uint8_t)(c >> 8); g[22] = (uint8_t)(c >> 16); g[23] = (uint8_t)(c >> 24);
+    CHECK(n == 24 && !memcmp(b, g, 24), "PING golden bytes");
+    printf("  PING datagram: "); for (int i = 0; i < n; i++) printf("%02x", b[i]); printf("\n");
+}
+
+/* ---- 2. round trips ------------------------------------------------------------------------ */
+static void t_roundtrip(void){
+    uint8_t b[RC_MAX_DGRAM]; rc_msg m, d;
+    for (int it = 0; it < 2000; it++){
+        memset(&m, 0, sizeof m);
+        m.h.type = RC_MSG_SNAP; m.h.sender = rnd() | 1u; m.h.seq = (uint16_t)rnd();
+        m.u.snap.status = (uint8_t)(rnd() % RC_ST__N); m.u.snap.epoch = (uint8_t)rnd(); m.u.snap.clock = (uint8_t)rnd();
+        m.u.snap.cfg_rev = (uint16_t)rnd(); m.u.snap.n = (uint8_t)(1 + rnd() % 3);
+        for (int k = 0; k < m.u.snap.n; k++){
+            rc_state *s = &m.u.snap.s[k];
+            s->t_us = rnd();
+            for (int i = 0; i < 3; i++){ s->p[i] = frnd(-5000, 5000); s->v[i] = frnd(-60, 60); s->w[i] = frnd(-5, 5); }
+            s->p[2] = frnd(-500, 500);
+            float q[4] = { frnd(-1, 1), frnd(-1, 1), frnd(-1, 1), frnd(-1, 1) }, nn = sqrtf(q[0]*q[0]+q[1]*q[1]+q[2]*q[2]+q[3]*q[3]);
+            for (int i = 0; i < 4; i++) s->q[i] = q[i] / nn;
+            s->steer = frnd(-1, 1); s->throttle = frnd(0, 1); s->brake = frnd(0, 1); s->rpm = frnd(0, 9000); s->speed = frnd(-20, 90);
+            s->gear = (int8_t)(rnd() % 8); s->bits = (uint8_t)rnd();
+        }
+        int n = rc_encode(&m, b, sizeof b);
+        int e = rc_decode(b, n, &d);
+        if (e){ CHECK(0, "snap decode %d", e); break; }
+        int okk = d.h.sender == m.h.sender && d.h.seq == m.h.seq && d.u.snap.n == m.u.snap.n && d.u.snap.epoch == m.u.snap.epoch &&
+                  d.u.snap.clock == m.u.snap.clock && d.u.snap.cfg_rev == m.u.snap.cfg_rev && d.u.snap.status == m.u.snap.status;
+        for (int k = 0; k < m.u.snap.n && okk; k++){
+            const rc_state *a = &m.u.snap.s[k], *z = &d.u.snap.s[k];
+            okk = a->t_us == z->t_us && a->gear == z->gear && a->bits == z->bits;
+            for (int i = 0; i < 3; i++) okk = okk && a->p[i] == z->p[i] && a->v[i] == z->v[i] && fabsf(a->w[i] - z->w[i]) <= 0.0006f;
+            float dot = 0; for (int i = 0; i < 4; i++) dot += a->q[i] * z->q[i];
+            okk = okk && fabsf(dot) > 0.99999f && fabsf(a->steer - z->steer) < 1e-4f && fabsf(a->throttle - z->throttle) < 0.003f &&
+                  fabsf(a->rpm - z->rpm) <= 0.5f && fabsf(a->speed - z->speed) <= 0.0051f;
+        }
+        if (!okk){ CHECK(0, "snap round trip %d", it); break; }
+    }
+    g_pass++;
+    /* HELLO with every name length, PEERS with every count */
+    for (int nl = 0; nl <= RC_NAME_MAX; nl++){
+        memset(&m, 0, sizeof m); m.h.type = RC_MSG_HELLO; m.h.sender = 7;
+        for (int i = 0; i < nl; i++) m.u.hello.name[i] = (char)('a' + i % 26);
+        m.u.hello.n_seen = (uint8_t)(nl % (RC_MAX_PEERS + 1));
+        for (int i = 0; i < m.u.hello.n_seen; i++) m.u.hello.seen[i] = rnd();
+        int n = rc_encode(&m, b, sizeof b);
+        CHECK(n > 0 && rc_decode(b, n, &d) == RC_OK && !strcmp(d.u.hello.name, m.u.hello.name) && d.u.hello.n_seen == m.u.hello.n_seen &&
+              !memcmp(d.u.hello.seen, m.u.hello.seen, 4u * m.u.hello.n_seen), "HELLO round trip, name length %d", nl);
+    }
+    memset(&m, 0, sizeof m); m.h.type = RC_MSG_HELLO; m.h.sender = 7; memset(m.u.hello.name, 'x', RC_NAME_MAX + 1); m.u.hello.name[RC_NAME_MAX] = 'y';
+    CHECK(rc_encode(&m, b, sizeof b) < 0, "HELLO name longer than 24 refused");
+    /* car record */
+    rc_carcfg cc, c2; memset(&cc, 0, sizeof cc);
+    cc.type_hash = 0x12345678u; strcpy(cc.type_name, "350Z"); cc.ride_b[3] = 1;
+    for (int i = 0; i < RC_PART_SLOTS; i++){ cc.part[i].slot = (uint8_t)i; cc.part[i].key = rnd(); cc.part[i].owner = rnd(); }
+    cc.n_parts = RC_PART_SLOTS;
+    uint8_t rec[RC_CFG_MAX];
+    int n = rc_carcfg_encode(&cc, rec, sizeof rec);
+    CHECK(n == 27 + 9 * RC_PART_SLOTS, "full car record %d bytes", n);
+    /* with the performance extension */
+    { rc_carcfg cp = cc, d2; cp.has_perf = 1; for (int i = 0; i < RC_PERF_BYTES; i++) cp.perf[i] = (uint8_t)(i * 7 + 1);
+      uint8_t r2[RC_CFG_MAX]; int n2 = rc_carcfg_encode(&cp, r2, sizeof r2);
+      CHECK(n2 == 27 + 9 * RC_PART_SLOTS + 2 + RC_PERF_BYTES && r2[n - 1] == 1 && r2[n] == RC_EXT_PERF && r2[n + 1] == RC_PERF_BYTES,
+            "car record with performance extension: %d bytes", n2);
+      CHECK(rc_carcfg_decode(r2, n2, &d2) == RC_OK && d2.has_perf && !memcmp(d2.perf, cp.perf, RC_PERF_BYTES), "performance extension round trip");
+      r2[n] = 77;                                            /* an unknown extension tag is skipped */
+      CHECK(rc_carcfg_decode(r2, n2, &d2) == RC_OK && !d2.has_perf && d2.n_parts == RC_PART_SLOTS, "unknown extension skipped"); }
+    CHECK(rc_carcfg_decode(rec, n, &c2) == RC_OK && c2.type_hash == cc.type_hash && !strcmp(c2.type_name, "350Z") && c2.n_parts == RC_PART_SLOTS &&
+          !memcmp(c2.part, cc.part, sizeof cc.part), "car record round trip");
+    /* record: version 1, type hash 4, name 16, ride bytes 4, count 1 = 26, then 9 per part */
+    rec[26 + 9] = 0;                                          /* second slot = slot 0 again */
+    CHECK(rc_carcfg_decode(rec, n, &c2) == RC_E_FIELD, "duplicate part slot refused");
+    rec[26 + 9] = 200;
+    CHECK(rc_carcfg_decode(rec, n, &c2) == RC_E_FIELD, "part slot >= 170 refused");
+    rec[26 + 9] = 1;
+    CHECK(rc_carcfg_decode(rec, n - 1, &c2) != RC_OK, "truncated car record refused");
+    rec[5] = 0x07;
+    CHECK(rc_carcfg_decode(rec, n, &c2) == RC_E_FIELD, "non-printable car type name refused");
+}
+
+/* ---- 3. hostile datagrams ----------------------------------------------------------------- */
+static void t_fuzz(long iters){
+    uint8_t b[1600], base[8][RC_MAX_DGRAM]; int bn[8];
+    rc_msg m;
+    /* one valid datagram of each type, to mutate */
+    for (int t = 1; t <= 8; t++){
+        memset(&m, 0, sizeof m); m.h.type = (uint8_t)t; m.h.sender = 9;
+        if (t == RC_MSG_HELLO){ strcpy(m.u.hello.name, "abc"); m.u.hello.n_seen = 2; }
+        if (t == RC_MSG_PEERS){ m.u.peers.n = 2; m.u.peers.e[0].ip = 0x7f000001u; m.u.peers.e[0].port = 1; m.u.peers.e[0].id = 1; m.u.peers.e[1] = m.u.peers.e[0]; }
+        if (t == RC_MSG_SNAP){ m.u.snap.n = 3; for (int k = 0; k < 3; k++) m.u.snap.s[k].q[3] = 1; }
+        static uint8_t d[1000]; if (t == RC_MSG_CFG){ m.u.cfg.nfrag = 1; m.u.cfg.total = 100; m.u.cfg.dlen = 100; m.u.cfg.data = d; }
+        bn[t - 1] = rc_encode(&m, base[t - 1], RC_MAX_DGRAM);
+    }
+    rc_session s; rc_config cf; memset(&cf, 0, sizeof cf); cf.self_id = 1; cf.port = 1; cf.max_players = 8; cf.rate_hz = 20; cf.test_mode = 1;
+    rc_io io = { 0, 0, 0, 0 };
+    rc_session_init(&s, &cf, &io);
+    long accepted = 0, refused = 0, bad = 0;
+    for (long it = 0; it < iters; it++){
+        int len;
+        int kind = (int)(rnd() % 4);
+        if (kind == 0){ len = (int)(rnd() % 1300); for (int i = 0; i < len; i++) b[i] = (uint8_t)rnd(); }
+        else {
+            int t = (int)(rnd() % 8); len = bn[t]; memcpy(b, base[t], (size_t)len);
+            int nm = 1 + (int)(rnd() % 6);
+            for (int k = 0; k < nm; k++) b[rnd() % (uint32_t)len] = (uint8_t)rnd();
+            if (kind == 2) len = (int)(rnd() % (uint32_t)(len + 1));
+            if (kind == 3){                                    /* keep the CRC valid: field fuzzing past the checksum */
+                if (len >= 20){ uint32_t c = rc_crc32(b, (uint32_t)len - 4); b[6] = (uint8_t)len; b[7] = (uint8_t)(len >> 8);
+                    c = rc_crc32(b, (uint32_t)len - 4); b[len - 4] = (uint8_t)c; b[len - 3] = (uint8_t)(c >> 8); b[len - 2] = (uint8_t)(c >> 16); b[len - 1] = (uint8_t)(c >> 24);
+                    b[0] = 'N'; b[1] = '2'; b[2] = 'F'; b[3] = 'R'; b[4] = 1; }
+            }
+        }
+        int e = rc_decode(b, len, &m);
+        if (e == RC_OK){
+            accepted++;
+            int okk = m.h.len == len && len <= RC_MAX_DGRAM;
+            if (m.h.type == RC_MSG_HELLO) okk = okk && strlen(m.u.hello.name) <= RC_NAME_MAX && m.u.hello.n_seen <= RC_MAX_PEERS;
+            if (m.h.type == RC_MSG_PEERS) okk = okk && m.u.peers.n <= RC_MAX_PEERS;
+            if (m.h.type == RC_MSG_SNAP){ okk = okk && m.u.snap.n >= 1 && m.u.snap.n <= 3;
+                for (int k = 0; k < m.u.snap.n && okk; k++) for (int i = 0; i < 3; i++)
+                    okk = okk && isfinite(m.u.snap.s[k].p[i]) && fabsf(m.u.snap.s[k].p[i]) <= 20000.f; }
+            if (m.h.type == RC_MSG_CFG) okk = okk && m.u.cfg.data >= b && m.u.cfg.data + m.u.cfg.dlen <= b + len - 4;
+            if (!okk){ bad++; if (bad < 5) printf("  fuzz: accepted datagram breaks an invariant (type %d)\n", m.h.type); }
+        } else refused++;
+        /* and through a session (state machine, reassembly) */
+        rc_receive(&s, 0x7f000001u + (rnd() % 4u), (uint16_t)(1 + rnd() % 3), b, len, it * 1000);
+        if (it % 1000 == 0) rc_tick(&s, it * 1000);
+    }
+    CHECK(bad == 0, "fuzz: %ld accepted datagrams break invariants", bad);
+    printf("  fuzz: %ld datagrams, %ld accepted, %ld refused, session rx %u bad %u policy %u\n", iters, accepted, refused, s.rx, s.rx_bad, s.rx_policy);
+}
+
+/* ---- 4. a fake network of sessions -------------------------------------------------------------- */
+#define NN 6
+static rc_session g_n[NN];
+static int64_t g_now;
+static int g_drop[NN][NN];                 /* 1 = link a -> b down */
+static int g_loss_pct;
+typedef struct { int64_t at; int to; uint32_t ip; uint16_t port; int len; uint8_t b[RC_MAX_DGRAM]; } Pkt;
+static Pkt g_q[20000]; static int g_qn;
+static int g_lat_us = 1000, g_jit_us = 0, g_dup_pct = 0;
+static int g_ver_from = -1;                 /* this node's datagrams go out as protocol version 2 */
+static int g_twoaddr_from = -1;             /* this node's HELLOs also arrive from 127.0.0.2 */
+static uint32_t node_ip(int i){ return 0x7f000001u; (void)i; }
+static uint16_t node_port(int i){ return (uint16_t)(50000 + i); }
+static int node_of(uint32_t ip, uint16_t port){ if (ip != 0x7f000001u) return -1; for (int i = 0; i < NN; i++) if (node_port(i) == port) return i; return -1; }
+static int g_bcast_calls;
+static void net_send(void *u, uint32_t ip, uint16_t port, const uint8_t *buf, int len){
+    int from = (int)(intptr_t)u, to = node_of(ip, port);
+    if (to < 0 || g_drop[from][to]) return;
+    if (g_loss_pct && (int)(rnd() % 100u) < g_loss_pct) return;
+    for (int copy = 0; copy < 2; copy++){
+        if (copy && (int)(rnd() % 100u) >= g_dup_pct) break;
+        if (g_qn >= 20000) return;
+        Pkt *p = &g_q[g_qn++];
+        p->at = g_now + g_lat_us + (g_jit_us ? (int)(rnd() % (uint32_t)(2 * g_jit_us)) - g_jit_us : 0);
+        p->to = to; p->ip = node_ip(from); p->port = node_port(from); p->len = len; memcpy(p->b, buf, (size_t)len);
+        if (from == g_ver_from){                /* another protocol version, CRC fixed up */
+            p->b[4] = 2; uint32_t c = rc_crc32(p->b, (uint32_t)len - 4);
+            for (int k = 0; k < 4; k++) p->b[len - 4 + k] = (uint8_t)(c >> (8 * k)); }
+        if (from == g_twoaddr_from && len > 5 && buf[5] == RC_MSG_HELLO && g_qn < 20000){
+            g_q[g_qn] = *p; g_q[g_qn].ip = 0x7f000002u; g_qn++; }
+    }
+}
+static void net_bcast(void *u, uint16_t port, const uint8_t *buf, int len){ (void)u; (void)port; (void)buf; (void)len; g_bcast_calls++; }
+static int g_join[NN], g_leave[NN], g_note[NN], g_restart[NN];
+static char g_note_text[NN][200];
+static void net_event(void *u, int ev, int peer, const char *t){
+    (void)peer; int i = (int)(intptr_t)u;
+    if (ev == RC_EV_JOIN) g_join[i]++;
+    if (ev == RC_EV_LEAVE) g_leave[i]++;
+    if (ev == RC_EV_RESTART) g_restart[i]++;
+    if (ev == RC_EV_NOTE){ g_note[i]++; snprintf(g_note_text[i], sizeof g_note_text[i], "%s", t); }
+}
+static void node_init(int i, uint32_t id, int maxp, uint32_t room){
+    rc_config cf; memset(&cf, 0, sizeof cf);
+    cf.self_id = id; cf.port = node_port(i); cf.room = room; snprintf(cf.name, sizeof cf.name, "node%d", i);
+    cf.platform = RC_PLAT_TOOL; cf.test_mode = 1; cf.max_players = maxp; cf.rate_hz = 20;
+    rc_io io = { (void *)(intptr_t)i, net_send, net_bcast, net_event };
+    rc_session_init(&g_n[i], &cf, &io);
+}
+static void net_run(int64_t until, int nn){
+    while (g_now < until){
+        g_now += 1000;
+        /* deliver everything due (in time order) */
+        int moved = 1;
+        while (moved){
+            moved = 0; int best = -1;
+            for (int k = 0; k < g_qn; k++) if (g_q[k].at <= g_now && (best < 0 || g_q[k].at < g_q[best].at)) best = k;
+            if (best >= 0){
+                Pkt p = g_q[best]; g_q[best] = g_q[--g_qn];
+                if (p.to < nn) rc_receive(&g_n[p.to], p.ip, p.port, p.b, p.len, g_now);
+                moved = 1;
+            }
+        }
+        if (g_now % 10000 == 0) for (int i = 0; i < nn; i++) rc_tick(&g_n[i], g_now);
+    }
+}
+static int est(int i){ return rc_established(&g_n[i]); }
+static void t_session(void){
+    memset(g_drop, 0, sizeof g_drop); g_qn = 0; g_now = 0;
+    for (int i = 0; i < 3; i++) node_init(i, 0x100 + (uint32_t)i, 8, 0);
+    /* a line: 0 knows 1, 1 knows 2; gossip must close the triangle */
+    rc_add_peer(&g_n[0], node_ip(1), node_port(1), 1, 0);
+    rc_add_peer(&g_n[1], node_ip(2), node_port(2), 1, 0);
+    net_run(5000000, 3);
+    CHECK(est(0) == 2 && est(1) == 2 && est(2) == 2, "3 nodes, chain of configured peers: full mesh by gossip (%d %d %d)", est(0), est(1), est(2));
+    CHECK(g_bcast_calls == 0, "no broadcast with discovery off");
+    /* car records */
+    rc_carcfg cc; memset(&cc, 0, sizeof cc); cc.type_hash = 0xABCDEFu; strcpy(cc.type_name, "GTO"); cc.n_parts = 150;
+    for (int i = 0; i < 150; i++){ cc.part[i].slot = (uint8_t)i; cc.part[i].key = 0x1000u + (uint32_t)i; cc.part[i].owner = 7; }
+    uint8_t rec[RC_CFG_MAX]; int rn = rc_carcfg_encode(&cc, rec, sizeof rec);
+    g_loss_pct = 30;                                          /* fragments get lost: CFG_REQ must fill the holes */
+    rc_set_cfg(&g_n[0], rec, rn, g_now);
+    net_run(g_now + 6000000, 3);
+    g_loss_pct = 0;
+    net_run(g_now + 2000000, 3);
+    int i01 = -1; for (int k = 0; k < RC_TABLE; k++) if (g_n[1].peer[k].id == 0x100) i01 = k;
+    CHECK(i01 >= 0 && g_n[1].peer[i01].cfg_len == rn && !memcmp(g_n[1].peer[i01].cfg, rec, (size_t)rn) && g_n[1].peer[i01].cfg_rev == g_n[0].cfg_rev,
+          "car record (%d bytes, 2 fragments) arrives through 30%% loss", rn);
+    /* snapshots flow */
+    for (int k = 0; k < 40; k++){
+        rc_state st; memset(&st, 0, sizeof st); st.q[3] = 1; st.t_us = (uint32_t)g_now; st.p[0] = (float)k;
+        rc_set_status(&g_n[0], RC_ST_ROAM); rc_push_state(&g_n[0], &st, g_now);
+        net_run(g_now + 50000, 3);
+    }
+    CHECK(i01 >= 0 && g_n[1].peer[i01].rx_snap >= 35 && g_n[1].peer[i01].mo.n >= 20, "snapshots at 20 Hz (%u)", i01 >= 0 ? g_n[1].peer[i01].rx_snap : 0);
+    /* a dead link: lost after 3 s, dropped after 10 s */
+    for (int k = 0; k < 3; k++){ g_drop[0][k] = 1; g_drop[k][0] = 1; }
+    int lv = g_leave[1];
+    net_run(g_now + 4000000, 3);
+    CHECK(i01 >= 0 && g_n[1].peer[i01].lost && g_n[1].peer[i01].state == RC_PS_EST, "silent peer: lost after 3 s");
+    net_run(g_now + 7500000, 3);
+    CHECK(g_leave[1] == lv + 1 && est(1) == 1, "silent peer: dropped after 10 s (leaves %d, est %d)", g_leave[1] - lv, est(1));
+    /* the link comes back: the configured peer is tried again */
+    for (int k = 0; k < 3; k++){ g_drop[0][k] = 0; g_drop[k][0] = 0; }
+    net_run(g_now + 4000000, 3);
+    CHECK(est(0) == 2 && est(1) == 2, "link back: re-established (%d %d)", est(0), est(1));
+    /* restart: same address, new id */
+    int j1 = g_join[1];
+    node_init(2, 0x999, 8, 0);
+    rc_add_peer(&g_n[2], node_ip(1), node_port(1), 1, g_now);
+    net_run(g_now + 4000000, 3);
+    int found = 0; for (int k = 0; k < RC_TABLE; k++) if (g_n[1].peer[k].id == 0x999 && g_n[1].peer[k].state == RC_PS_EST) found = 1;
+    CHECK(found && g_join[1] > j1, "restarted peer (new id, same address) re-joins");
+    /* BYE */
+    int l0 = g_leave[0];
+    rc_shutdown(&g_n[2], 0);
+    net_run(g_now + 200000, 3);
+    CHECK(g_leave[0] == l0 + 1, "BYE: dropped at once");
+    /* rooms */
+    memset(g_drop, 0, sizeof g_drop); g_qn = 0;
+    node_init(0, 0x201, 8, rc_fnv1a("blue")); node_init(1, 0x202, 8, rc_fnv1a("red"));
+    rc_add_peer(&g_n[0], node_ip(1), node_port(1), 1, g_now); rc_add_peer(&g_n[1], node_ip(0), node_port(0), 1, g_now);
+    net_run(g_now + 3000000, 2);
+    CHECK(est(0) == 0 && est(1) == 0, "different rooms never establish");
+    /* max players */
+    g_qn = 0;
+    for (int i = 0; i < 4; i++) node_init(i, 0x300 + (uint32_t)i, 3, 0);
+    for (int i = 1; i < 4; i++){ rc_add_peer(&g_n[0], node_ip(i), node_port(i), 1, g_now); rc_add_peer(&g_n[i], node_ip(0), node_port(0), 1, g_now); }
+    net_run(g_now + 4000000, 4);
+    CHECK(est(0) == 2, "max_players 3: two peers, not three (%d)", est(0));
+    /* address policy: production accepts private ranges only */
+    rc_session p; rc_config cf; memset(&cf, 0, sizeof cf); cf.self_id = 5; cf.port = 1; cf.max_players = 8; cf.rate_hz = 20;
+    rc_io io = { 0, 0, 0, 0 }; rc_session_init(&p, &cf, &io);
+    rc_msg m; memset(&m, 0, sizeof m); m.h.type = RC_MSG_HELLO; m.h.sender = 77; strcpy(m.u.hello.name, "x");
+    uint8_t b[RC_MAX_DGRAM]; int n = rc_encode(&m, b, sizeof b);
+    rc_receive(&p, 0x08080808u, 47210, b, n, 0);
+    CHECK(p.rx_policy == 1 && p.peer[0].state == RC_PS_FREE, "public source address refused");
+    rc_receive(&p, 0xC0A8010Au, 47210, b, n, 0);
+    CHECK(p.peer[0].state == RC_PS_HEARD, "RFC 1918 source heard");
+    p.conf.test_mode = 1;
+    rc_receive(&p, 0x0A000001u, 47210, b, n, 0);
+    CHECK(p.rx_policy == 2, "test mode: 10/8 refused");
+    p.conf.test_mode = 0;
+    rc_add_peer(&p, 0x64400005u, 47210, 1, 0);                  /* a listed VPN overlay address (100.64/10) */
+    m.h.sender = 78; n = rc_encode(&m, b, sizeof b);
+    rc_receive(&p, 0x64400005u, 47210, b, n, 0);
+    CHECK(p.rx_policy == 2, "a listed non-private peer is heard");
+    rc_receive(&p, 0x64400006u, 47210, b, n, 0);
+    CHECK(p.rx_policy == 3, "an unlisted non-private address is not");
+    /* rate limit: 300 datagrams in one second from one source */
+    rc_session_init(&p, &cf, &io);
+    for (int k = 0; k < 300; k++){ m.h.seq = (uint16_t)k; n = rc_encode(&m, b, sizeof b); rc_receive(&p, 0xC0A8010Au, 47210, b, n, 1000 + k); }
+    CHECK(p.rx_ratelimit == 300 - 100, "rate limit: 100 per second per source (%u dropped)", p.rx_ratelimit);
+    /* our own beacon */
+    rc_session_init(&p, &cf, &io);
+    m.h.sender = 5; n = rc_encode(&m, b, sizeof b); rc_receive(&p, 0xC0A8010Au, 47210, b, n, 0);
+    CHECK(p.peer[0].state == RC_PS_FREE, "own beacon ignored");
+    /* discovery: the beacon goes to io.broadcast every 2 s */
+    cf.discovery = 1; g_bcast_calls = 0; rc_io io2 = { 0, net_send, net_bcast, 0 };
+    rc_session_init(&p, &cf, &io2);
+    for (int64_t t = 0; t <= 10000000; t += 10000) rc_tick(&p, t);
+    CHECK(g_bcast_calls == 6, "discovery beacon every 2 s (%d in 10 s)", g_bcast_calls);
+}
+
+/* ---- 4b. the free-roam adversarial review's findings -- */
+static int peer_of(int i, uint32_t id){ for (int k = 0; k < RC_TABLE; k++) if (g_n[i].peer[k].state != RC_PS_FREE && g_n[i].peer[k].id == id) return k; return -1; }
+static void mesh(int n, int maxp){
+    memset(g_drop, 0, sizeof g_drop); g_qn = 0; g_loss_pct = 0; g_ver_from = -1; g_twoaddr_from = -1;
+    memset(g_join, 0, sizeof g_join); memset(g_leave, 0, sizeof g_leave); memset(g_note, 0, sizeof g_note); memset(g_restart, 0, sizeof g_restart);
+    for (int i = 0; i < n; i++) node_init(i, 0x500 + (uint32_t)i, maxp, 0);
+}
+static void drive(int n, int64_t until){
+    /* every node in free roam, a snapshot due every 50 ms */
+    while (g_now < until){
+        for (int i = 0; i < n; i++){
+            rc_state st; memset(&st, 0, sizeof st); st.q[3] = 1; st.t_us = (uint32_t)g_now; st.p[0] = (float)i;
+            rc_set_status(&g_n[i], RC_ST_ROAM); rc_push_state(&g_n[i], &st, g_now);
+        }
+        net_run(g_now + 10000, n);
+    }
+}
+static void t_review(void){
+    /* a late state of the previous epoch (a datagram sent before a teleport,
+     * reordered) or of the previous clock epoch is dropped */
+    { rc_interp ip; rc_interp_reset(&ip); rc_pose P; rc_state s; memset(&s, 0, sizeof s); s.q[3] = 1; s.v[0] = 10;
+      int64_t t = 10000000;
+      for (int k = 0; k < 40; k++){ s.t_us = (uint32_t)(k * 50000); s.p[0] = 0.5f * (float)k; rc_interp_insert(&ip, &s, 0, 0, RC_ST_ROAM, t + k * 50000 + 20000, 1); }
+      t += 40 * 50000;
+      for (int f = 0; f < 30; f++){ t += 8333; rc_interp_eval(&ip, t, 8333, 100000, 250000, &P); }
+      s.p[0] = 1000.f; s.t_us = 40 * 50000; rc_interp_insert(&ip, &s, 1, 0, RC_ST_ROAM, t, 1);
+      t += 8333; rc_interp_eval(&ip, t, 8333, 100000, 250000, &P); float tp = P.p[0];
+      s.p[0] = 19.5f; s.t_us = 39 * 50000; rc_interp_insert(&ip, &s, 0, 0, RC_ST_ROAM, t + 1000, 1);
+      t += 8333; rc_interp_eval(&ip, t, 8333, 100000, 250000, &P);
+      CHECK(tp > 999.f && P.p[0] > 999.f && ip.n_stale == 1, "a late state of the old epoch after a teleport is dropped (shown %.1f, stale %llu)",
+            (double)P.p[0], (unsigned long long)ip.n_stale);
+      s.p[0] = 1001.f; s.t_us = 41 * 50000; rc_interp_insert(&ip, &s, 1, 1, RC_ST_ROAM, t + 2000, 1);      /* re-anchored clock */
+      uint64_t ep = ip.n_epoch;
+      s.p[0] = 5.f; s.t_us = 38 * 50000; rc_interp_insert(&ip, &s, 1, 0, RC_ST_ROAM, t + 3000, 1);         /* the old clock, late */
+      CHECK(ip.clock == 1 && ip.n_epoch == ep && ip.n_stale == 2, "a late state of the old clock epoch is dropped too");
+      s.p[0] = 2000.f; s.t_us = 5; rc_interp_insert(&ip, &s, 0, 0, RC_ST_ROAM, t + 4000, 1);              /* 255 epochs on: wraps */
+      CHECK(ip.epoch == 1 && ip.n_stale == 3, "epoch order is modulo 256 (an epoch 255 behind is old)");
+      s.p[0] = 3000.f; s.t_us = 6; rc_interp_insert(&ip, &s, 2, 0, RC_ST_ROAM, t + 5000, 1);
+      CHECK(ip.epoch == 2 && ip.n == 1, "a newer epoch is taken"); }
+    /* another protocol version: noted (with the address), at most every 30 s */
+    mesh(2, 8); g_now = 0;
+    rc_add_peer(&g_n[0], node_ip(1), node_port(1), 1, 0); rc_add_peer(&g_n[1], node_ip(0), node_port(0), 1, 0);
+    g_ver_from = 1;
+    net_run(40000000, 2);
+    CHECK(est(0) == 0 && g_n[0].rx_version > 30 && g_note[0] == 2 && strstr(g_note_text[0], "127.0.0.1:50001") && strstr(g_note_text[0], "version 2"),
+          "another protocol version is noted, every 30 s (%d notes, %u datagrams: \"%s\")", g_note[0], g_n[0].rx_version, g_note_text[0]);
+    /* another room: counted and noted */
+    mesh(2, 8); g_now = 0;
+    node_init(1, 0x601, 8, rc_fnv1a("red"));
+    rc_add_peer(&g_n[1], node_ip(0), node_port(0), 1, 0);
+    net_run(5000000, 2);
+    CHECK(est(0) == 0 && g_n[0].rx_room >= 4 && g_note[0] == 1 && strstr(g_note_text[0], "another room"),
+          "a HELLO from another room is counted (%u) and noted once (\"%s\")", g_n[0].rx_room, g_note_text[0]);
+    /* snapshot loss statistics: 0 on a lossless 3-node mesh (other messages
+     * to other peers make no gaps), and close to the truth with loss */
+    mesh(3, 8); g_now = 0;
+    for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++) if (i != j) rc_add_peer(&g_n[i], node_ip(j), node_port(j), 1, 0);
+    drive(3, 30000000);
+    uint32_t lost = 0, snaps = 0;
+    for (int i = 0; i < 3; i++) for (int k = 0; k < RC_TABLE; k++) if (g_n[i].peer[k].state == RC_PS_EST){ lost += g_n[i].peer[k].seq_lost; snaps += g_n[i].peer[k].rx_snap; }
+    CHECK(est(0) == 2 && snaps > 3000 && lost == 0, "snapshots lost on a lossless 3-node mesh: %u of %u", lost, snaps);
+    uint32_t rx0 = 0; for (int k = 0; k < RC_TABLE; k++) if (g_n[1].peer[k].id == 0x500) rx0 = g_n[1].peer[k].rx_snap;
+    int k10 = peer_of(1, 0x500); uint32_t lost0 = k10 >= 0 ? g_n[1].peer[k10].seq_lost : 0;
+    g_loss_pct = 10;
+    drive(3, g_now + 20000000);
+    g_loss_pct = 0;
+    uint32_t got = k10 >= 0 ? g_n[1].peer[k10].rx_snap - rx0 : 0, gone = k10 >= 0 ? g_n[1].peer[k10].seq_lost - lost0 : 0;
+    double rate = got + gone ? 100.0 * gone / (got + gone) : 0;
+    CHECK(rate > 7.0 && rate < 13.0, "10%% loss on the wire: %.1f%% of snapshots counted lost (%u of %u)", rate, gone, got + gone);
+    /* different max_players: the full one does not list a waiting peer, so
+     * nobody joins one-sidedly */
+    mesh(3, 8); g_now = 0;
+    node_init(0, 0x500, 2, 0);
+    rc_add_peer(&g_n[0], node_ip(1), node_port(1), 1, 0); rc_add_peer(&g_n[1], node_ip(0), node_port(0), 1, 0);
+    drive(2, 3000000);
+    rc_add_peer(&g_n[2], node_ip(0), node_port(0), 1, g_now);
+    drive(3, g_now + 5000000);
+    int c_a = peer_of(2, 0x500);
+    CHECK(est(0) == 1 && c_a >= 0 && g_n[2].peer[c_a].state != RC_PS_EST && g_join[2] == 0,
+          "MaxPlayers 2 (full) next to 8: the third does not join one-sidedly (its state for A %d, joins %d)", c_a >= 0 ? g_n[2].peer[c_a].state : -1, g_join[2]);
+    /* one player heard from two addresses: one entry */
+    mesh(2, 8); g_now = 0;
+    rc_add_peer(&g_n[0], node_ip(1), node_port(1), 1, 0);
+    g_twoaddr_from = 1;
+    drive(2, 6000000);
+    int nb = 0; for (int k = 0; k < RC_TABLE; k++) if (g_n[0].peer[k].state != RC_PS_FREE && g_n[0].peer[k].id == 0x501) nb++;
+    CHECK(nb == 1 && g_join[0] == 1 && g_n[0].rx_dup_id > 0, "one player heard from two addresses: one entry (%d), one join (%d)", nb, g_join[0]);
+    /* a stray datagram with another id from a friend's address is not a restart */
+    g_twoaddr_from = -1;
+    rc_msg m; memset(&m, 0, sizeof m); m.h.type = RC_MSG_PING; m.h.sender = 0xBAD; uint8_t b[RC_MAX_DGRAM];
+    int n = rc_encode(&m, b, sizeof b);
+    rc_receive(&g_n[0], node_ip(1), node_port(1), b, n, g_now);
+    drive(2, g_now + 1000000);
+    CHECK(g_leave[0] == 0 && g_restart[0] == 0 && est(0) == 1 && g_n[0].rx_stray == 1, "a stray datagram with another id from a friend's address: ignored, no leave");
+    /* ... but a HELLO with a new id is a restart (and the player joins again) */
+    node_init(1, 0x777, 8, 0); rc_add_peer(&g_n[1], node_ip(0), node_port(0), 1, g_now);
+    drive(2, g_now + 4000000);
+    CHECK(g_restart[0] == 1 && peer_of(0, 0x777) >= 0 && g_n[0].peer[peer_of(0, 0x777)].state == RC_PS_EST, "a HELLO with a new id from the same address: a restart");
+    /* after BYE: the quitter's session sends nothing more, and its late
+     * datagrams (one sent before the BYE, overtaken) do not make it join
+     * again */
+    mesh(2, 8); g_now = 0;
+    rc_add_peer(&g_n[0], node_ip(1), node_port(1), 1, 0); rc_add_peer(&g_n[1], node_ip(0), node_port(0), 1, 0);
+    drive(2, 3000000);
+    { rc_msg h; memset(&h, 0, sizeof h); h.h.type = RC_MSG_HELLO; h.h.sender = 0x501; strcpy(h.u.hello.name, "node1");
+      h.u.hello.n_seen = 1; h.u.hello.seen[0] = 0x500; h.u.hello.status = RC_ST_ROAM; uint8_t hb[RC_MAX_DGRAM]; int hn = rc_encode(&h, hb, sizeof hb);
+      uint32_t tx1 = g_n[1].tx;
+      rc_shutdown(&g_n[1], 0);
+      uint32_t after = g_n[1].tx;
+      net_run(g_now + 200000, 1);                            /* node 0 gets the BYE; node 1 is silent from now on */
+      rc_tick(&g_n[1], g_now); rc_state st; memset(&st, 0, sizeof st); st.q[3] = 1; rc_push_state(&g_n[1], &st, g_now + 100000);
+      rc_receive(&g_n[0], node_ip(1), node_port(1), hb, hn, g_now);   /* the overtaken HELLO */
+      net_run(g_now + 1000000, 1);
+      CHECK(after > tx1 && g_n[1].tx == after && est(0) == 0 && g_join[0] == 1 && g_leave[0] == 1 && g_n[0].rx_after_bye == 3,   /* the 2nd and 3rd BYE, the HELLO */
+            "after BYE: silent (tx %u, %u -> %u), a late HELLO of the quitter ignored (joins %d, leaves %d, est %d, after bye %u)", tx1, after, g_n[1].tx, g_join[0], g_leave[0], est(0), g_n[0].rx_after_bye); }
+    /* a car record this core cannot read: noted once, not asked for again */
+    mesh(2, 8); g_now = 0;
+    rc_add_peer(&g_n[0], node_ip(1), node_port(1), 1, 0);
+    uint8_t rec[300]; memset(rec, 0, sizeof rec); rec[0] = 2;                 /* record version 2 */
+    rc_set_cfg(&g_n[1], rec, sizeof rec, 0);
+    drive(2, 2000000);
+    int notes = g_note[0]; uint32_t tx1 = g_n[1].tx, tx0 = g_n[0].tx;
+    drive(2, g_now + 10000000);
+    /* in 10 s: 200 SNAPs, 5 HELLOs, 10 PINGs, 10 PONGs, 1 PEERS each way, and no CFG or CFG_REQ */
+    int k01 = peer_of(0, 0x501);
+    CHECK(notes == 1 && g_note[0] == 1 && k01 >= 0 && g_n[0].peer[k01].cfg_bad_rev == g_n[1].cfg_rev && g_n[0].tx - tx0 < 240 && g_n[1].tx - tx1 < 240,
+          "an unreadable car record: one note (\"%s\"), not asked for again (tx %u / %u in 10 s)", g_note_text[0], g_n[0].tx - tx0, g_n[1].tx - tx1);
+    rec[0] = 1; rec[5] = 'X';                                                 /* still not a valid record */
+    uint8_t ok_rec[64]; rc_carcfg cc; memset(&cc, 0, sizeof cc); cc.type_hash = 5; strcpy(cc.type_name, "RX8");
+    int okn = rc_carcfg_encode(&cc, ok_rec, sizeof ok_rec);
+    rc_set_cfg(&g_n[1], ok_rec, okn, g_now);
+    drive(2, g_now + 2000000);
+    CHECK(k01 >= 0 && g_n[0].peer[k01].cfg_len == okn, "a new revision is fetched again");
+    /* encoder edge values: NaN and out-of-range floats give defined bytes
+     * (the same on x86: tests/roam_selftest.c) */
+    memset(&m, 0, sizeof m); m.h.type = RC_MSG_SNAP; m.h.sender = 1; m.u.snap.n = 1; m.u.snap.status = RC_ST_ROAM;
+    rc_state *st = &m.u.snap.s[0]; st->q[3] = 1;
+    float nanv = __builtin_nanf("");
+    st->w[0] = nanv; st->w[1] = 3e6f; st->w[2] = -3e6f; st->speed = nanv; st->steer = nanv; st->rpm = nanv; st->throttle = nanv; st->brake = 1e30f;
+    n = rc_encode(&m, b, sizeof b);
+    const uint8_t *q = b + 22;
+    CHECK(n > 0 && (int16_t)le16(q + 36) == 0 && (int16_t)le16(q + 38) == 32767 && (int16_t)le16(q + 40) == -32767 && (int16_t)le16(q + 42) == 0 &&
+          q[44] == 0 && q[45] == 255 && le16(q + 46) == 0 && (int16_t)le16(q + 48) == 0,
+          "NaN and huge values: angular velocity 0 / +32767 / -32767, steer 0, throttle 0, brake 255, rpm 0, speed 0");
+}
+
+/* ---- 5. interpolation against a known trajectory ------------------------------------------------- */
+/* a car on a circle (radius 80 m, 45 m/s) with a slalom in z-rotation */
+static void truth(double t, float *p, float *v, float *q, float *w){
+    double R = 80.0, sp = 45.0, om = sp / R, a = om * t;
+    p[0] = (float)(R * cos(a)); p[1] = (float)(R * sin(a)); p[2] = (float)(2.0 * sin(0.3 * t));
+    v[0] = (float)(-sp * sin(a)); v[1] = (float)(sp * cos(a)); v[2] = (float)(0.6 * cos(0.3 * t));
+    double yaw = a + M_PI / 2;
+    q[0] = 0; q[1] = 0; q[2] = (float)sin(yaw / 2); q[3] = (float)cos(yaw / 2);
+    w[0] = 0; w[1] = 0; w[2] = (float)om;
+}
+typedef struct { double mean, p99, max, extrap_frac; uint64_t snaps; double max_jerk, latency; } Metrics;
+static int cmpd(const void *a, const void *b){ double x = *(const double *)a, y = *(const double *)b; return x < y ? -1 : x > y; }
+static Metrics run_interp(int loss_pct, int jitter_us, int dup_pct, int reorder, double drift_ppm, int64_t latency_us){
+    rc_interp ip; rc_interp_reset(&ip);
+    static double err[40000]; int ne = 0;
+    /* sender samples at 20 Hz on its own clock; receiver renders at 120 Hz */
+    const int64_t delay = 100000, cap = 250000;
+    int64_t sender_off = 123456789;                          /* the clocks are unrelated */
+    struct { int64_t at; rc_state s; } q[64]; int qn = 0;
+    int64_t next_sample = 0; uint32_t sent = 0;
+    rc_state hist[3]; int nh = 0;
+    double prev_p[3] = {0}; int have_prev = 0; double max_jerk = 0, prev_step = 0, lat_sum = 0; long lat_n = 0;
+    for (int64_t now = 0; now < 30000000; now += 8333){
+        double ts = (double)now / 1e6;                       /* true time */
+        if (now >= next_sample){
+            next_sample += 50000;
+            rc_state s; memset(&s, 0, sizeof s);
+            int64_t st = sender_off + (int64_t)((double)now * (1.0 + drift_ppm * 1e-6));
+            s.t_us = (uint32_t)st;
+            truth(ts, s.p, s.v, s.q, s.w);
+            memmove(&hist[1], &hist[0], sizeof hist[0] * 2); hist[0] = s; if (nh < 3) nh++;
+            sent++;
+            if ((int)(rnd() % 100u) >= loss_pct){
+                for (int copy = 0; copy < 2; copy++){
+                    if (copy && (int)(rnd() % 100u) >= dup_pct) break;
+                    int64_t at = now + latency_us + (jitter_us ? (int64_t)(rnd() % (uint32_t)(2 * jitter_us)) - jitter_us : 0);
+                    if (reorder && rnd() % 10u == 0) at += 60000;
+                    if (qn < 64){ q[qn].at = at; q[qn].s = s; qn++; }
+                    /* the SNAP also carries the 2 older states */
+                    for (int k = 1; k < nh && qn < 64; k++){ q[qn].at = at; q[qn].s = hist[k]; q[qn].s.bits = 0x80; qn++; }
+                }
+            }
+        }
+        /* receiver: deliver due packets */
+        for (int k = 0; k < qn; ){
+            if (q[k].at <= now){ int newest = !(q[k].s.bits & 0x80); rc_state s = q[k].s; s.bits = 0;
+                rc_interp_insert(&ip, &s, 0, 0, RC_ST_ROAM, now, newest); q[k] = q[--qn]; }
+            else k++;
+        }
+        rc_pose P;
+        if (!rc_interp_eval(&ip, now, 8333, delay, cap, &P)) continue;
+        /* the truth at the time the receiver rendered (its render time back in
+         * true time): this is the smoothing error; the latency is separate */
+        int64_t rt = now - ip.off_r - delay;
+        double tt = (double)(rt - ((int64_t)1 << 32) - sender_off) / (1.0 + drift_ppm * 1e-6) / 1e6;   /* unwrapped t starts at 2^32 */
+        if (ts < 1.0) continue;
+        lat_sum += ts - tt; lat_n++;
+        float tp[3], tv[3], tq[4], tw[3]; truth(tt, tp, tv, tq, tw);
+        double dx = P.p[0] - tp[0], dy = P.p[1] - tp[1], dz = P.p[2] - tp[2];
+        if (ne < 40000) err[ne++] = sqrt(dx*dx + dy*dy + dz*dz);
+        if (have_prev){
+            double s0 = sqrt((P.p[0]-prev_p[0])*(P.p[0]-prev_p[0]) + (P.p[1]-prev_p[1])*(P.p[1]-prev_p[1]));
+            if (prev_step > 0){ double j = fabs(s0 - prev_step); if (j > max_jerk) max_jerk = j; }
+            prev_step = s0;
+        }
+        prev_p[0] = P.p[0]; prev_p[1] = P.p[1]; prev_p[2] = P.p[2]; have_prev = 1;
+    }
+    Metrics M; memset(&M, 0, sizeof M);
+    double sum = 0; for (int i = 0; i < ne; i++){ sum += err[i]; if (err[i] > M.max) M.max = err[i]; }
+    M.mean = ne ? sum / ne : 0;
+    qsort(err, (size_t)ne, sizeof err[0], cmpd);
+    M.p99 = ne ? err[(int)(ne * 0.99)] : 0;
+    M.extrap_frac = ip.n_eval ? (double)ip.n_extrap / (double)ip.n_eval : 0;
+    M.snaps = ip.n_snap; M.max_jerk = max_jerk; M.latency = lat_n ? lat_sum / lat_n : 0;
+    return M;
+}
+static void t_interp(void){
+    struct { const char *name; int loss, jit, dup, reord; double ppm; int64_t lat; double lim_p99, lim_max; } cs[] = {
+        { "clean LAN (1 ms)",            0,     0, 0, 0,    0,   1000, 0.05, 0.10 },
+        { "clock drift +200 ppm",        0,     0, 0, 0,  200,   1000, 0.10, 0.20 },
+        { "clock drift -200 ppm",        0,     0, 0, 0, -200,   1000, 0.10, 0.20 },
+        { "20 ms jitter",                0, 20000, 0, 0,    0,   5000, 0.30, 1.00 },
+        { "5% loss, 20 ms jitter",       5, 20000, 0, 0,    0,   5000, 0.50, 1.50 },
+        { "5% loss + 100 ms delay",      5, 10000, 0, 0,    0, 100000, 0.50, 1.50 },
+        { "10% loss, duplicates, reorder",10, 10000, 10, 1, 0,   5000, 0.80, 3.00 },
+    };
+    for (unsigned i = 0; i < sizeof cs / sizeof cs[0]; i++){
+        Metrics M = run_interp(cs[i].loss, cs[i].jit, cs[i].dup, cs[i].reord, cs[i].ppm, cs[i].lat);
+        printf("  interp %-32s shown %.1f ms behind; error mean %.4f m, p99 %.4f m, max %.4f m; extrapolating %.2f%%; snaps %llu; "
+               "max step change %.4f m\n", cs[i].name, 1000 * M.latency, M.mean, M.p99, M.max, 100 * M.extrap_frac, (unsigned long long)M.snaps, M.max_jerk);
+        CHECK(M.p99 < cs[i].lim_p99 && M.max < cs[i].lim_max, "interp %s: p99 %.3f (< %.2f), max %.3f (< %.2f)", cs[i].name, M.p99, cs[i].lim_p99, M.max, cs[i].lim_max);
+        if (cs[i].loss == 0 && cs[i].jit == 0) CHECK(M.extrap_frac < 0.01 && M.snaps == 0, "clean: < 1%% extrapolation, no snaps");
+    }
+    /* teleport epoch: the car snaps to the new place, no glide through the city */
+    rc_interp ip; rc_interp_reset(&ip);
+    rc_state s; memset(&s, 0, sizeof s); s.q[3] = 1;
+    for (int k = 0; k < 10; k++){ s.t_us = (uint32_t)(k * 50000); s.p[0] = (float)k; s.v[0] = 20; rc_interp_insert(&ip, &s, 0, 0, RC_ST_ROAM, k * 50000, 1); }
+    rc_pose P; for (int64_t t = 0; t < 600000; t += 8333) rc_interp_eval(&ip, t, 8333, 100000, 250000, &P);
+    s.t_us = 600000; s.p[0] = 1000; rc_interp_insert(&ip, &s, 1, 0, RC_ST_ROAM, 600000, 1);
+    rc_interp_eval(&ip, 608333, 8333, 100000, 250000, &P);
+    CHECK(fabsf(P.p[0] - 1000.f) < 0.5f, "teleport epoch: snapped to %.1f", (double)P.p[0]);
+    /* paused sender: hold, no extrapolation */
+    rc_interp_reset(&ip);
+    for (int k = 0; k < 4; k++){ s.t_us = (uint32_t)(k * 50000); s.p[0] = (float)k; s.v[0] = 20; rc_interp_insert(&ip, &s, 0, 0, k < 3 ? RC_ST_ROAM : RC_ST_PAUSED, k * 50000, 1); }
+    rc_interp_eval(&ip, 1000000, 8333, 100000, 250000, &P);
+    CHECK(P.p[0] == 3.f && P.mode == RC_MODE_HOLD, "paused sender: held at %.2f", (double)P.p[0]);
+    /* a gap: extrapolate up to 250 ms, then hold */
+    rc_interp_reset(&ip);
+    for (int k = 0; k < 4; k++){ s.t_us = (uint32_t)(k * 50000); s.p[0] = (float)k; s.v[0] = 20; rc_interp_insert(&ip, &s, 0, 0, RC_ST_ROAM, k * 50000, 1); }
+    rc_interp_eval(&ip, 150000 + 100000 + 100000, 8333, 100000, 250000, &P);
+    CHECK(P.mode == RC_MODE_EXTRAP && fabsf(P.p[0] - (3.f + 20.f * 0.1f)) < 0.05f, "gap: extrapolated to %.2f", (double)P.p[0]);
+    rc_interp_eval(&ip, 150000 + 100000 + 600000, 8333, 100000, 250000, &P);
+    CHECK(P.mode == RC_MODE_HOLD, "gap > 250 ms: held");
+    /* expneg */
+    float worst = 0; for (float x = 0; x < 20; x += 0.01f){ float r = rc_expneg(x), t = expf(-x); float e = fabsf(r - t) / (t > 1e-30f ? t : 1e-30f); if (x < 15 && e > worst) worst = e; }
+    CHECK(worst < 1e-4f, "rc_expneg relative error %.2e", (double)worst);
+    /* atan2 (the heading of friends' cars): against libm, every quadrant and axis */
+    {
+        double aw = 0; int sameh = 0, nh = 0;
+        for (int i = 0; i < 200000; i++){
+            float ang = (float)i * (6.2831853f / 200000.f) - 3.1415926f, r = 0.5f + (float)(i % 97);
+            float y = r * sinf(ang), x = r * cosf(ang);
+            double e = fabs((double)rc_atan2f(y, x) - atan2((double)y, (double)x));
+            if (e > 3.2 && e < 3.15e0 + 3.2) e = fabs(e - 6.283185307179586);
+            if (e > aw) aw = e;
+            uint16_t h0 = (uint16_t)(int)(atan2f(y, x) / (2.f * 3.14159265f) * 65536.f);
+            uint16_t h1 = (uint16_t)(int)(rc_atan2f(y, x) / (2.f * 3.14159265f) * 65536.f);
+            sameh += h0 == h1; nh++;
+        }
+        float ax[8][2] = { {0,1}, {0,-1}, {1,0}, {-1,0}, {0,0}, {1e-30f,1}, {-1,-1e-30f}, {3,3} };
+        int axok = 1;
+        for (int k = 0; k < 8; k++) if (fabs((double)rc_atan2f(ax[k][0], ax[k][1]) - atan2((double)ax[k][0], (double)ax[k][1])) > 3e-7) axok = 0;
+        CHECK(aw < 4e-7 && axok, "rc_atan2f within %.2e rad of libm (axes %s)", aw, axok ? "exact" : "OFF");
+        CHECK(sameh >= nh - nh / 1000, "heading u16 from rc_atan2f equals libm's in %d of %d cases", sameh, nh);
+    }
+    /* matrix <-> quaternion */
+    float mx = 0;
+    for (int it = 0; it < 10000; it++){
+        float q[4] = { frnd(-1,1), frnd(-1,1), frnd(-1,1), frnd(-1,1) }, n = sqrtf(q[0]*q[0]+q[1]*q[1]+q[2]*q[2]+q[3]*q[3]);
+        for (int i = 0; i < 4; i++) q[i] /= n;
+        float f[3], l[3], u[3], q2[4], f2[3], l2[3], u2[3];
+        rc_q2m(q, f, l, u); rc_m2q(f, l, u, q2); rc_q2m(q2, f2, l2, u2);
+        for (int i = 0; i < 3; i++){ mx = fmaxf(mx, fabsf(f[i]-f2[i])); mx = fmaxf(mx, fabsf(l[i]-l2[i])); mx = fmaxf(mx, fabsf(u[i]-u2[i])); }
+    }
+    CHECK(mx < 1e-5f, "matrix -> quaternion -> matrix: max %.2e", (double)mx);
+}
+
+/* ---- 6. the platform guard ----------------------------------------------------------------- */
+static void t_guard(void){
+    printf("  (the next BLOCKED lines are expected: the guard under test)\n");
+    CHECK(roam_plat_guard(1, 0x7f000001u, 0) == 1, "test mode: 127.0.0.1 allowed");
+    CHECK(roam_plat_guard(1, 0xC0A80114u, 0) == 0, "test mode: 192.168.1.20 refused");
+    CHECK(roam_plat_guard(1, 0xFFFFFFFFu, 1) == 0, "test mode: broadcast refused");
+    CHECK(roam_plat_guard(1, 0x7fffffffu, 1) == 0, "test mode: even a loopback 'broadcast' refused");
+    CHECK(roam_plat_guard(0, 0xC0A80114u, 0) == 1, "production: LAN address allowed");
+    roam_if ifs[] = {
+        { "lo0",   0x7f000001u, 0xff000000u, 1, 1, 0 },
+        { "en0",   0xC0A80114u, 0xffffff00u, 1, 0, 1 },
+        { "en1",   0x0A000005u, 0xff000000u, 1, 0, 1 },
+        { "utun3", 0x64400001u, 0xffc00000u, 1, 0, 1 },
+        { "awdl0", 0xA9FE0101u, 0xffff0000u, 1, 0, 1 },
+        { "en5",   0x55AA0001u, 0xffffff00u, 1, 0, 1 },      /* public address: no */
+        { "en2",   0xC0A80220u, 0xffffff00u, 0, 0, 1 },      /* down */
+        { "bridge0", 0xC0A80201u, 0xffffff00u, 1, 0, 1 },
+    };
+    uint32_t t[16]; int n = roam_bcast_targets(ifs, (int)(sizeof ifs / sizeof ifs[0]), t, 16);
+    CHECK(n == 4 && t[0] == 0xFFFFFFFFu && t[1] == 0xC0A801FFu && t[2] == 0x0AFFFFFFu && t[3] == 0xC0A802FFu,
+          "broadcast targets: limited + en0 + en1 + bridge0 (%d)", n);
+    uint32_t ip[8]; uint16_t pt[8];
+    n = roam_plat_parse_peers("127.0.0.1:47211, 192.168.1.20, 127.0.0.2,host.local:5,1.2.3:4, 127.0.0.1:0", 1, 47210, ip, pt, 8);
+    CHECK(n == 2 && ip[0] == 0x7f000001u && pt[0] == 47211 && ip[1] == 0x7f000002u && pt[1] == 47210, "peer list, test mode: loopback literals only (%d)", n);
+    n = roam_plat_parse_peers("192.168.1.20, 10.0.0.7:47300", 0, 47210, ip, pt, 8);
+    CHECK(n == 2 && ip[0] == 0xC0A80114u && pt[0] == 47210 && pt[1] == 47300, "peer list, production");
+    /* settings.ini's check (bundle.m) and the Windows plugin take tabs as separators too */
+    n = roam_plat_parse_peers("127.0.0.1:48761\t127.0.0.1:48762,\t127.0.0.1:48763", 1, 47210, ip, pt, 8);
+    CHECK(n == 3 && pt[0] == 48761 && pt[1] == 48762 && pt[2] == 48763, "peer list: tab-separated entries (%d)", n);
+    char nm[RC_NAME_MAX + 1];
+    rc_name_clean(nm, "  Th\xe9o\x01 ", 10); CHECK(!strcmp(nm, "Th?o?"), "name cleaned: '%s'", nm);
+    rc_name_clean(nm, "", 0); CHECK(!strcmp(nm, "Player"), "empty name -> Player");
+    rc_name_clean(nm, "abcdefghijklmnopqrstuvwxyz0123", 30); CHECK(strlen(nm) == RC_NAME_MAX, "name cut at 24");
+}
+
+int main(int argc, char **argv){
+    long fuzz = argc > 1 ? atol(argv[1]) : 200000;
+    printf("roam_unit: core %d, protocol %d\n", RC_CORE_VER, RC_PROTO_VER);
+    t_layout();
+    t_roundtrip();
+    t_fuzz(fuzz);
+    t_session();
+    t_review();
+    t_interp();
+    t_guard();
+    printf("roam_unit: %d passed, %d failed\n", g_pass, g_fail);
+    return g_fail ? 1 : 0;
+}

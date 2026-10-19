@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0d0d0d">
+<title>Underground 2</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23171717'/%3E%3Crect x='5' y='5' width='22' height='22' rx='6' fill='%23404038' stroke='%23c8f088' stroke-width='2'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/main.css">
+<script type="module" src="/main.js"></script>
+</head>
+<body data-phase="boot">
+
+<main class="app" id="app">
+  <header class="top">
+    <div class="top-row">
+      <h1>Underground 2</h1>
+      <p class="hint">Fan project. Not affiliated with or endorsed by Electronic Arts.</p>
+    </div>
+    <div class="bar" id="progress" role="progressbar" aria-label="Game download" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+      <div class="bar-fill" id="progress-fill"></div>
+    </div>
+  </header>
+
+  <div class="side">
+    <section class="panel hero" aria-label="Play">
+      <p class="status" id="status" role="status">Loading</p>
+      <p class="status-sub" id="status-sub">Downloading the game.</p>
+      <div class="row">
+        <button type="button" class="play" id="play" disabled>Play <kbd>Enter</kbd></button>
+        <button type="button" class="btn" id="retry" hidden>Retry</button>
+        <button type="button" class="btn" id="log-btn" hidden>Download log</button>
+      </div>
+      <ul class="problems" id="problems" aria-live="polite"></ul>
+      <p class="msg warn" id="override" hidden></p>
+    </section>
+
+    <section class="panel" id="controls" aria-labelledby="controls-title">
+      <h2 id="controls-title">Controls</h2>
+      <div id="keys">
+        <h3>Driving</h3>
+        <dl class="keys">
+          <div><dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>Throttle, brake and reverse</dd></div>
+          <div><dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>Steer (or W S A D)</dd></div>
+          <div><dt><kbd>Alt</kbd></dt><dd>Nitrous</dd></div>
+          <div><dt><kbd>Space</kbd></dt><dd>Handbrake</dd></div>
+          <div><dt><kbd>Shift</kbd> <kbd>Ctrl</kbd></dt><dd>Shift up, shift down (manual gearbox)</dd></div>
+          <div><dt><kbd>C</kbd> <kbd>B</kbd></dt><dd>Change camera, look back</dd></div>
+          <div><dt><kbd>R</kbd></dt><dd>Back on the road</dd></div>
+          <div><dt><kbd>M</kbd> <kbd>Tab</kbd></dt><dd>Map, messages</dd></div>
+          <div><dt><kbd>Esc</kbd> <kbd>P</kbd></dt><dd>Pause</dd></div>
+        </dl>
+        <h3>This page</h3>
+        <dl class="keys">
+          <div><dt><kbd>F9</kbd></dt><dd>Menu: full screen, controls, log, quit</dd></div>
+          <div><dt><kbd>F8</kbd></dt><dd>Frame-rate counter</dd></div>
+          <div><dt><kbd>F12</kbd></dt><dd>Screenshot, saved with your profiles</dd></div>
+          <div><dt>Hold <kbd>Esc</kbd></dt><dd>Leave full screen</dd></div>
+        </dl>
+        <p class="hint">In menus: arrow keys and Enter, Esc goes back. Change keys in the game's Options, Controls. Xbox and PlayStation controllers work too.</p>
+      </div>
+    </section>
+
+    <section class="panel" id="changes" aria-labelledby="changes-title">
+      <h2 id="changes-title">Changes from the original</h2>
+      <ul class="changes">
+        <li>The PC game's own code, recompiled to run in Chrome, with WebGPU for the graphics and Web Audio for the sound.</li>
+        <li>Up to 120 fps, widescreen at your screen's resolution.</li>
+        <li>The original look, with the game's graphics settings at their highest.</li>
+        <li>Startup movies skip with one press.</li>
+        <li>Free roam and Online mode with friends on this server, no EA account needed.</li>
+        <li>Xbox and PlayStation controllers, with rumble.</li>
+        <li>The game pauses when its tab is in the background.</li>
+        <li>Saves stay in this browser, with zip backups.</li>
+      </ul>
+    </section>
+  </div>
+
+  <div class="content">
+    <section class="panel" id="settings" aria-labelledby="settings-title">
+      <h2 id="settings-title">Settings</h2>
+      <p class="hint" id="settings-note">Saved in this browser. Changes apply the next time you press Play.</p>
+      <div id="settings-body"></div>
+      <details class="raw" id="settings-raw">
+        <summary>Edit settings.ini as text</summary>
+        <textarea id="settings-text" spellcheck="false" rows="20" wrap="off" aria-label="settings.ini"></textarea>
+        <div class="row">
+          <button type="button" class="btn" id="settings-text-save">Save file</button>
+          <span class="hint" id="settings-text-msg" role="status"></span>
+        </div>
+      </details>
+    </section>
+
+    <section class="panel" id="saves" aria-labelledby="saves-title">
+      <h2 id="saves-title">Saves</h2>
+      <ul class="profiles" id="profiles" aria-label="Profiles in this browser"></ul>
+      <p class="hint">Quit from the game's main menu, or <kbd>F9</kbd> then Quit game, so a save in progress is never cut short.</p>
+      <h3>Backup</h3>
+      <p class="hint">One zip with your profiles, the game's options, settings.ini and F12 screenshots. Restoring a backup replaces all of them in this browser.</p>
+      <div class="row">
+        <button type="button" class="btn" id="export">Download a backup</button>
+        <label class="btn file-btn">Restore a backup<input type="file" id="import" accept=".zip,application/zip"></label>
+      </div>
+      <p class="msg" id="saves-msg" role="status"></p>
+      <p class="msg warn" id="storage-note" hidden></p>
+      <h3>Game data on this PC</h3>
+      <p class="hint" id="cache-info">Counting…</p>
+      <div class="row">
+        <button type="button" class="btn" id="clear-cache">Delete the downloaded game data</button>
+      </div>
+    </section>
+  </div>
+</main>
+
+<div class="stage" id="stage" hidden>
+  <div class="hud-fps" id="fps" hidden></div>
+  <div class="toast" id="toast" hidden></div>
+  <div class="notices" id="notices" role="status" aria-live="polite"></div>
+</div>
+
+<div class="page-toast" id="page-toast" role="status" aria-live="polite"></div>
+
+<dialog class="dlg help" id="help" aria-labelledby="help-title">
+  <form method="dialog" class="dlg-head">
+    <h2 id="help-title">Controls</h2>
+    <button class="btn" value="close">Close</button>
+  </form>
+  <div id="help-body"></div>
+</dialog>
+
+<dialog class="dlg menu" id="menu" aria-labelledby="menu-title">
+  <h2 id="menu-title">Menu</h2>
+  <p class="hint">The game keeps running behind this menu.</p>
+  <div class="menu-actions">
+    <button type="button" class="btn selected" data-act="resume">Back to the game</button>
+    <button type="button" class="btn" data-act="fullscreen">Full screen</button>
+    <button type="button" class="btn" data-act="fps">Frame-rate counter: off</button>
+    <button type="button" class="btn" data-act="help">Controls</button>
+    <button type="button" class="btn" data-act="log">Download log</button>
+    <button type="button" class="btn danger" data-act="quit">Quit game</button>
+  </div>
+</dialog>
+
+<dialog class="dlg confirm" id="confirm" aria-labelledby="confirm-title">
+  <form method="dialog">
+    <h2 id="confirm-title"></h2>
+    <div id="confirm-body"></div>
+    <div class="row end">
+      <button class="btn" value="cancel" id="confirm-cancel">Cancel</button>
+      <button class="btn selected" value="ok" id="confirm-ok"></button>
+    </div>
+  </form>
+</dialog>
+
+</body>
+</html>

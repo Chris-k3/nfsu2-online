@@ -1,0 +1,91 @@
+// The contract between the app shell and its subsystems (renderer, audio,
+// input, network), as the shell calls them.  subsystems.ts adapts the real
+// modules (web/src/gpu, web/src/audio, web/src/input, web/src/net) to these
+// shapes.  See web/src/host/abi.ts for the shared-memory side (nfsu2_register
+// kinds).
+import type { GameProcess } from '../host/process';
+
+/** Given to every subsystem. */
+export interface CommonOptions {
+  /** the resolved process environment of this launch (settings.ini, defaults, page address) */
+  env: Readonly<Record<string, string>>;
+  /** a line for the game log (Download log) and the console */
+  log(line: string): void;
+}
+
+export interface RendererOptions extends CommonOptions {
+  /** NFSU2_WIDTH/HEIGHT the game was started with: the canvas size in device pixels at Play */
+  width: number; height: number;
+  /** measured display refresh rate (rAF), Hz */
+  displayHz: number;
+  /** tests: a URL prefix the autotest's frame dumps are PUT to (the server's /artifacts/) */
+  artifacts?: string;
+  /** tests: scale of those dumps */
+  dumpScale?: number;
+}
+
+export interface AudioOptions extends CommonOptions {
+  /**
+   * Created and resumed inside the Play click (a user gesture), with the
+   * latencyHint from settings (audio_latency).  The audio subsystem plays into
+   * it and closes it on detach.
+   */
+  context: AudioContext | null;
+}
+
+export interface InputOptions extends CommonOptions {
+  /** the element that is (or will be) full screen: the canvas's parent */
+  stage: HTMLElement;
+  /** where the game's image is inside the canvas, CSS px (the renderer's aspect-fit) */
+  viewRect?: () => { x: number; y: number; w: number; h: number };
+  /** what Cmd-F does on a Mac: the shell's full screen (stage + Keyboard Lock) */
+  toggleFullscreen?: () => void;
+}
+
+export interface NetOptions extends CommonOptions {
+  /** the name other browsers see on the server's LAN */
+  name: string;
+  /** a line for the player from the game (a friend joined, left, went into a race) */
+  notice?: (text: string) => void;
+}
+
+/** What an attach call returns.  Everything but detach is optional. */
+export interface Subsystem {
+  /** stop for good: remove listeners, close contexts, drop views of the game's memory;
+   *  called when the game exits or is stopped (or at once when it attaches too late) */
+  detach(): void;
+  /** counters for the detailed frame-rate overlay, e.g. { 'gpu ms': 2.1 } */
+  stats?(): Record<string, number>;
+}
+
+export interface RendererSubsystem extends Subsystem {
+  /** the game's image inside the canvas, in canvas pixels */
+  imageRect(): { x: number; y: number; w: number; h: number };
+  /** tests: the next frame as PNG (also uploaded as <name>.png with RendererOptions.artifacts) */
+  dump?(name: string): Promise<Blob>;
+}
+
+export interface AudioSubsystem extends Subsystem {
+  /** the AudioContext's state: 'running' once sound can play */
+  state(): string;
+}
+
+export interface InputSubsystem extends Subsystem {
+  /** ask the game to quit through its own path (WM_CLOSE, lifecycle_request_quit).  A request
+   *  made before the game's input is up is sent when it is.  false: it cannot reach the game */
+  requestQuit?(): boolean;
+  /** whether requestQuit() can (still) reach the game (default: whether it exists) */
+  canQuit?(): boolean;
+}
+
+export interface NetSubsystem extends Subsystem {
+  /** this browser's address on the server's LAN, once connected */
+  vip(): string | null;
+  /** the other browsers on the server's LAN */
+  peers(): string[];
+}
+
+export type AttachRenderer = (proc: GameProcess, canvas: HTMLCanvasElement, opts: RendererOptions) => RendererSubsystem | Promise<RendererSubsystem>;
+export type AttachAudio = (proc: GameProcess, opts: AudioOptions) => AudioSubsystem | Promise<AudioSubsystem>;
+export type AttachInput = (proc: GameProcess, element: HTMLElement, opts: InputOptions) => InputSubsystem | Promise<InputSubsystem>;
+export type AttachNet = (proc: GameProcess, opts: NetOptions) => NetSubsystem | Promise<NetSubsystem>;

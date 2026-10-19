@@ -1,0 +1,191 @@
+# Playing NFS Underground 2 in Chrome
+
+The game runs in Google Chrome. One server hosts it: it keeps the game files, serves the game to the browsers and
+connects players for free roam. On a Mac it serves that Mac; for other PCs it goes behind HTTPS, usually on a VPS
+([VPS.md](VPS.md)). Nothing is installed on the players' PCs, and no file is picked by hand.
+
+## 1. Start it (on the Mac)
+
+```sh
+web/start.sh            # or: cd web && npm start
+```
+
+- The first start takes longer: it installs the page's tools and builds what is missing. Later starts go straight
+  to the server, unless the code changed.
+- It looks for the game in `~/projects/nsfu2/Need for Speed - Underground 2`. If the game is somewhere else, start
+  once with `web/start.sh --data "/path/to/the folder with SPEED2.EXE"`. The folder is remembered.
+- The game folder is only read, never changed.
+- It prints the address to open. `Ctrl-C` stops the server.
+
+| Option | What it does |
+|---|---|
+| `--open` | Also opens the game in Chrome on this Mac. |
+| `--http-port 8080` | Use another port, if this one is taken. |
+| `--no-build` | Serve what is there, without checking the build. |
+
+On the Mac itself, open **http://localhost:8080/** and press **Play** (or Enter).
+
+The start page shows the download, then **Ready**. Play is on once the game module has loaded, which takes a second
+or two. The page shows a problem only when there is one, with what to do about it.
+
+## 2. Other PCs
+
+Chrome runs the game only on a secure page (`https://`, or `localhost` on the machine itself), so friends play from
+a server behind HTTPS: a certificate on the server, or a proxy or tunnel in front of it. [VPS.md](VPS.md) has the
+ways to set that up. Each player then opens that `https://` address in the latest **Google Chrome** and presses
+**Play**.
+
+The first start on a PC downloads about 7 MB of game code and, while playing, the game data it needs. That PC keeps
+the data, so later starts are quick.
+
+## 3. Controls
+
+| Key or button | What it does |
+|---|---|
+| Arrows or W A S D | Throttle, brake and reverse, steer |
+| Alt | Nitrous |
+| Space | Handbrake |
+| Shift, Ctrl | Gear up, gear down (manual gearbox) |
+| C, B | Camera, look back |
+| R | Back on the road |
+| M, Tab | Map, messages |
+| Esc or P | Pause; Esc also goes back in menus |
+| Enter | Choose (menus) |
+| F12 | The game's screenshot, kept with your saves |
+| **F8** | Frame-rate counter: off, on, detailed |
+| **F9** | The page menu: full screen, counter, controls, log, **Quit game** |
+| **Hold Esc** | Leave full screen (a short press still goes to the game) |
+
+The start page shows these keys under **Controls**, and F9, Controls shows them while you play.
+
+- **Change the keys:** in the game, Options, Controls.
+- **Mouse:** works in the menus.
+- **Controller:** an Xbox or PlayStation pad works through Chrome. Chrome shows a pad to the page only after a
+  button is pressed on it.
+- **Rumble:** a controller that can rumble in Chrome (Xbox, DualSense and others) shakes when you crash, scrape a
+  wall or land hard. Settings, Controller, Rumble turns it off.
+- **Sound** starts with the Play click. If Chrome still keeps it off, a note says so, and a click on the game or a key
+  press turns it on. A controller button cannot: Chrome does not count it.
+- **Quit** from the game's main menu, or with F9, Quit game. Both let the game save and close. If a loading screen
+  ignores the request, the same menu item then reads "Close the game now". As a last resort it reads "Stop the
+  game". Closing the tab asks first, because a save in progress could be cut short.
+
+## 4. Settings
+
+**Settings** on the start page holds this browser's `settings.ini`, the same file and keys as the Mac app. Each change
+is saved at once and applies the next time you press Play.
+
+| Group | Settings |
+|---|---|
+| Game | movies, startup movies (skippable, original or off), sound, pause or keep running in the background |
+| Display | full screen on Play (off: the game plays in the browser window), resolution scale, HUD layout, movie framing, cutscene bars |
+| Frame rate | auto (follows the screen: 120 on a 120 Hz display), 60 or 120, and the counter |
+| Sound | output latency |
+| Controller | controller, rumble, menu buttons, dead zones |
+| Multiplayer | how many play on this server now, your name (in free roam and online), the game's Online mode (on by default) |
+| Free roam | play with friends, room |
+
+- **More settings:** each group's "More … settings" has the less common ones. **Reset** next to a changed setting
+  puts its default back.
+- **Edit the file:** "Edit settings.ini as text" opens the file itself. A line the game would ignore is shown with
+  the reason. A line that sets a runtime variable by its own name (`NFSU2_ROAM = 1`) shows on the row it belongs to,
+  and every such line is listed under "Other variables in this file". Lines that would name a file of your saves or
+  drive the game by itself (`NFSU2_REGFILE`, `NFSU2_INPUT_SCRIPT`, ...) are ignored: only the page sets those.
+- **Links:** settings in a page address (`?env=...`) work only on a development server (one started with `--dev`).
+  On yours a link cannot change your game; the start page says so when an address carries them.
+- **The look:** the game looks as it did originally. Any graphics enhancement will be a separate setting, off
+  unless you turn it on.
+- **Two tabs:** one browser runs one game at a time. A second tab shows "Open elsewhere" and its Settings are
+  read only. It takes over when the first tab closes.
+
+## 5. Saves
+
+- **Where they are:** your profiles and career are saved **in this browser, on this PC** (Chrome's site storage for
+  the server's address). They are not on the server. Each address keeps its own save store, so stick to one.
+- **Backup:** Saves, Download a backup gives one zip with your profiles, the game's options (`registry.txt`),
+  `settings.ini` and F12 screenshots.
+- **Restore:** Saves, Restore a backup puts a zip back, on this PC or on another one. It replaces what this browser
+  has, after showing what is in the zip, including what its `settings.ini` would change on the network (free roam
+  on, the name others see). A very large backup keeps every save and settings file. Only screenshots past 512 MB
+  are left out. Restore only backups you made yourself or trust.
+- **Backups are your safety net.** Chrome may clear a site's storage when the disk runs low; the Saves section says
+  so when Chrome has not promised to keep it. Make a backup now and then.
+- **Downloaded game data:** "Delete the downloaded game data" in Saves frees disk space on this PC. Your saves stay;
+  the data downloads again when needed.
+
+## 6. Free roam with friends
+
+1. Every player turns on **Settings, Free roam, Play with friends**. **Settings, Multiplayer, Your name** is the name
+   the others see (empty: your profile name).
+2. Everyone plays from the same server's address.
+3. Each player starts or loads a career and drives in free roam. Friends find each other by themselves, and their
+   cars appear in your city.
+
+Good to know:
+
+- **Rooms:** set the same "Room" to see only some of the players' cars. A room is a filter between friends, not
+  privacy: every browser on the server still sees your name ("Your name", or the profile name), whether you are in
+  the menus or driving, and the room, and someone with their own tools could join it. Play on a server only with
+  people you would show your name and car to.
+- **Who sees what:** with free roam off (the default), the game does not join the server's network at all. With it
+  on, everyone on the server sees your name and status, and players in free roam with you see your car and where it
+  is. Nobody sees your real address: the server gives each player a virtual one (`10.77.0.x`).
+- **A tab in the background** (or another window in front) pauses your game. Friends see you as paused: your car stays where you stopped until you come back.
+- **Closing the tab:** friends see your car disappear after a few seconds.
+- **Messages over the game** say when a friend comes online, goes into a race or a shop, is back in free roam, or
+  leaves.
+- **The game's own LAN races** (its LAN menu) work between players on the same server too, with free roam on or off.
+
+## 7. The game's Online mode
+
+The game's own **Online** menu works again, against this server instead of EA's long-gone one: everyone who plays
+from the same server address can meet there.
+
+1. Main menu, **Online**. You go straight to the Online Main Menu under your name: **Settings, Multiplayer, Your
+   name**, or your profile name when that is empty. There are no EA accounts, so the game's EA Login screens are
+   skipped.
+2. **Lobby** shows the games. **Create Game** (race type, track, options; Game Type Unranked), or **Refresh** and
+   **Join Game**. In the game room, chat, press **Ready**; the creator presses **Start Race**.
+
+Good to know:
+
+- **Your name online** keeps letters, digits, `-` and `_` (at most 15): `Thom K.` plays as `Thom_K`. A changed name
+  applies the next time you press Play.
+- **Your name is yours while you are online.** Someone else can use it when you are not; the rankings and your EA
+  Messenger friends list follow the name, so whoever plays under it while you are away sees your friends list and
+  can change it. If another player is online under it, the game says so and shows its EA Login screens instead
+  (below), where you can type another name.
+- **No name and no profile:** the game's own EA Login screens come instead. **Use Existing EA Account**, any name
+  (3 to 15 letters, digits, `-` or `_`) and any password, **Continue**; **No** to "create a profile"; your persona.
+  Nothing is checked and nothing is kept: there are no accounts. Type a password you use nowhere else: the game
+  sends it to the server only lightly scrambled (the server never reads it).
+- **Kept on the server:** only race results per name (Rankings) and your EA Messenger friends list (names). Never
+  a password: the server does not read it. Players you block stay blocked while you are online; the block is not
+  kept after that.
+- **Others see** your name, your game, your chat and your results, never your real address.
+- **Ranked games** need three players at least, and the others see them only with the lobby's **Filter**, Game
+  Type set to **Ranked**. Ranked wins give ranking points.
+- **A race counts** in Rankings once two of its players' games sent the same result (every game sends its own at
+  the results screen), so a race that only one player finished does not count. Each player races from their own
+  browser.
+- **EA Messenger:** Search finds players on this server; Send Message works. To become friends, both send a
+  friend request (the other's request shows the asker in your list: open them, Send Friend Request).
+- **Not yet:** game passwords (a password game is joined like an open one); the points table after a ranked race
+  stays empty (the race still counts in Rankings).
+- **Who is on:** Settings, Multiplayer shows how many play on this server now, and how many of them are in Online
+  mode (in its menus or racing). Only the two numbers: no names.
+- Turning it off: Settings, Multiplayer, Online mode (the game then cannot connect).
+
+## 8. When something is wrong
+
+| What you see | What to do |
+|---|---|
+| "Secure, isolated page" on another PC | Open the server's `https://` address, not `http`. Only `localhost` works without HTTPS. |
+| "WebGPU" | Update Chrome; look at `chrome://gpu`. The game needs WebGPU with BC texture compression. |
+| "Game download" | The download failed, or the server is not reachable. The page tries again by itself, or press **Retry**. If the module is missing, start the server with `web/start.sh`, which builds it. |
+| "Open elsewhere" | The game runs in another tab of this browser. Switch to it, or close it. |
+| No sound | Click the game or press a key. Check the sound setting and the output latency (try "Robust"). |
+| Stuck on a loading screen | F9, Quit game; then "Close the game now"; then "Stop the game". |
+| Anything odd | F9, Download log (or "Download log" on the start page after the game ended) and keep the file. It has the game's own log. Before you post it anywhere: it names your Chrome version and system, your graphics chip, your time zone, and the names and virtual addresses of the players you met (not the server's address: only whether it was this machine, on the LAN or remote). |
+| `Port 8080 is in use` when starting | The server already runs; open its address. Or start on another port: `web/start.sh --http-port 9080`. |
+| Full screen | The game plays in the browser window. F9, Full screen goes full screen, and holding Esc leaves it. "Full screen on Play" in Settings starts every game full screen. |

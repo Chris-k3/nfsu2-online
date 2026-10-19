@@ -1,0 +1,222 @@
+// Free-roam multiplayer between two browsers: two game instances in two
+// headless Chrome pages (separate browser contexts, so separate OPFS) against
+// one local server, both with roam on, talking through the server's switch.
+//
+//   node web/tools/roam-pair.mjs --out <dir> [--mode vlan|loop] [--port 8516 --http-port 8616]
+//        [--timeout 1200] [--drive 3600] [--watch 2400] [--stagger 2] [--bounce <s>]
+//        [--a Alice:roam_mp_drive.txt] [--b Bob:roam_mp_watch.txt] [--c Carol:<script>] [--d Dave:<script>]
+//        [--env K=V ...] [--headed]
+//        [--base http://localhost:8616]   (use a server that is already running instead)
+//        [--https]   the pages load from https://localhost:<port> (the switch over wss://): our own server
+//                    gets a test certificate (web/test/cf-sim.mjs makeTestCerts, --tls-cert), whose
+//                    errors the pages ignore instead of trusting it
+//        [--page app]  each instance is the player's start page (web/index.html): Play is clicked, the
+//                    renderer, audio, input and network are the app's (free roam from the page address's
+//                    NFSU2_ROAM=1); the default is test/hostcheck.html (null renderer, net=<name>)
+//        [--hide Bob:60:8]  that page reports itself hidden (document.hidden + visibilitychange, as when
+//                    its tab goes to the background; headless pages are never really hidden) at 60 s
+//                    after the first page opened, for 8 s
+//
+// Without --base it starts its own server (web/server/server.mjs --dev on the given
+// ports, the game folder from --data or NFSU2_DATA) and stops it at the end.
+// --bounce <s>: stops that server <s> seconds after the first page opened and
+// starts it again 3 s later (the pages reconnect to the switch).
+//
+// mode vlan: the players' path (NFSU2_ROAM_WEBTEST=vlan): virtual addresses,
+//            discovery by broadcast to the switch, no configured peers.
+// mode loop: the test harness (as tools/roam_multi.sh on the Mac): each its own
+//            roam_port (47300 + i), peers 127.0.0.1:<the other's port>, the
+//            switch as the emulated loopback.
+// 2 to 4 instances (--c, --d add a third and a fourth).  Writes <out>/<name>.log
+// (the page console), <name>.pose.csv (the pose log from the page's OPFS) and
+// <out>/summary.json; then runs tools/roam_compare.py for the first (the driver)
+// against every other instance.
+import { chromium } from 'playwright';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { execFileSync, spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { makeTestCerts } from '../test/cf-sim.mjs';
+
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const argv = process.argv.slice(2);
+const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && i + 1 < argv.length ? argv[i + 1] : d; };
+const opts = (k) => argv.flatMap((a, i) => (a === '--' + k && i + 1 < argv.length ? [argv[i + 1]] : []));
+const HTTP_PORT = +opt('http-port', 8616), HTTPS_PORT = +opt('port', 8516);
+const OWN = !argv.includes('--base');
+const HTTPS = argv.includes('--https');
+const BASE = opt('base', HTTPS ? `https://localhost:${HTTPS_PORT}` : `http://localhost:${HTTP_PORT}`);
+const DATA = opt('data', process.env.NFSU2_DATA || path.join(os.homedir(), 'projects/nsfu2/Need for Speed - Underground 2'));
+const BOUNCE = argv.includes('--bounce') ? +opt('bounce', 0) * 1000 : 0;
+const OUT = path.resolve(opt('out', path.join(REPO, 'out/web/roam-pair')));
+const MODE = opt('mode', 'vlan');
+const TMO = +opt('timeout', 1200) * 1000;
+const STAGGER = +opt('stagger', 2) * 1000;
+const SPECS = [opt('a', 'Alice:roam_mp_drive.txt'), opt('b', 'Bob:roam_mp_watch.txt'), opt('c', null), opt('d', null)]
+  .filter(Boolean).map(x => x.split(':'));
+const N = SPECS.length;
+const APP = opt('page', 'test') === 'app';
+const HIDE = opts('hide').map(x => { const [n, at, dur] = x.split(':'); return { name: n, at: +at * 1000, dur: +(dur ?? 8) * 1000 }; });
+fs.mkdirSync(OUT, { recursive: true });
+
+const COMMON = {
+  NFSU2_SAVEDIR: '/save', NFSU2_READONLY_DATA: '1', NOMOVIES: '1', SNDSYNC: '0', GPUVS: '1', NFSU2_FNG_LOG: '1',
+  NFSU2_STATUS_EVERY: '1200', NFSU2_DISCORD: '0', NFSU2_ROAM: '1', NFSU2_ROAM_POSELOG: '/save/pose.csv',
+  ROAM_DRIVE_FRAMES: opt('drive', '3600'), ROAM_WATCH_FRAMES: opt('watch', '2400'),
+};
+for (const kv of opts('env')) COMMON[kv.slice(0, kv.indexOf('='))] = kv.slice(kv.indexOf('=') + 1);
+
+function url(i, name, script) {
+  const env = { ...COMMON, NFSU2_ROAM_NAME: name, ROAM_PROFILE: name };
+  if (MODE === 'vlan') env.NFSU2_ROAM_WEBTEST = 'vlan';
+  else {
+    env.NFSU2_ROAM_PORT = String(47300 + i);
+    env.NFSU2_ROAM_PEERS = [...Array(N).keys()].filter(j => j !== i).map(j => `127.0.0.1:${47300 + j}`).join(',');
+  }
+  const q = APP
+    ? new URLSearchParams({ reg: '/tests/web/seed/registry_perf4_native.txt', script: `/tests/scripts/${script}`, save: `roam-${name}` })
+    : new URLSearchParams({ wasm: '/game.wasm', pages: '16384', arg: '/data/SPEED2.EXE',
+      reg: '/tests/web/seed/registry_perf4_native.txt', script: `/tests/scripts/${script}`, save: `roam-${name}`, net: name });
+  for (const [k, v] of Object.entries(env)) if (!(APP && (k === 'NFSU2_SAVEDIR'))) q.append('env', `${k}=${v}`);
+  return APP ? `${BASE}/?${q}&fresh` : `${BASE}/test/hostcheck.html?${q}&fresh`;
+}
+
+// our own server (stopped by its child handle only)
+let server = null;
+const serverLog = fs.createWriteStream(path.join(OUT, 'server.log'), { flags: 'a' });
+async function startServer() {
+  const certs = HTTPS ? makeTestCerts(path.join(OUT, 'certs')) : null;
+  const c = spawn(process.execPath, [path.join(REPO, 'web/server/server.mjs'), '--data', DATA,
+    ...(certs ? ['--port', String(HTTPS_PORT), '--tls-cert', certs.cert, '--tls-key', certs.key] : []),
+    '--http-port', String(HTTP_PORT), '--dev'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  c.stdout.pipe(serverLog, { end: false }); c.stderr.pipe(serverLog, { end: false });
+  await new Promise((res, rej) => {
+    let out = '';
+    const t = setTimeout(() => rej(new Error('server did not start')), 20000);
+    c.stdout.on('data', d => { out += d; if (out.includes('  access    :')) { clearTimeout(t); res(); } });
+    c.on('exit', code => { clearTimeout(t); rej(new Error(`server exited (${code})`)); });
+  });
+  serverLog.write(`--- server pid ${c.pid} up at ${new Date().toISOString()}\n`);
+  return c;
+}
+async function stopServer() {
+  if (!server) return;
+  const c = server; server = null;
+  const gone = new Promise(r => c.once('exit', r));
+  c.kill('SIGTERM'); await gone;
+  serverLog.write(`--- server stopped at ${new Date().toISOString()}\n`);
+}
+if (OWN) server = await startServer();
+
+const browser = await chromium.launch({ channel: 'chrome', headless: !argv.includes('--headed') });
+const t0 = Date.now();
+const inst = [];
+async function start(i, name, script) {
+  const ctx = await browser.newContext(HTTPS ? { ignoreHTTPSErrors: true } : {});
+  const page = await ctx.newPage();
+  const log = fs.createWriteStream(path.join(OUT, `${name}.log`));
+  const w = (s) => log.write(`${((Date.now() - t0) / 1000).toFixed(3)} ${s}\n`);
+  page.on('console', m => w(m.text()));
+  page.on('pageerror', e => w('PAGEERROR ' + e));
+  const u = url(i, name, script);
+  w(`URL ${u}`);
+  await page.goto(u);
+  if (APP) {
+    // the player's page: Ready, then a trusted click on Play
+    await page.waitForFunction(() => window.__nfsu2?.phase === 'ready', null, { timeout: 120000 });
+    await page.click('#play');
+    w('[roam-pair] clicked Play');
+  }
+  // the page's view of the virtual LAN every 10 s
+  const timer = setInterval(async () => {
+    try {
+      const s = await page.evaluate(() => {
+        if (window.__nfsu2?.session) { const n = window.__nfsu2.session.net; return n ? { ...n.stats(), vip: n.vip(), peers: n.peers() } : { net: 'not attached' }; }
+        const n = globalThis.nfsu2Net; return n ? { ...n.stats(), peers: n.peers } : null;
+      });
+      if (s) w(`NETSTAT ${JSON.stringify(s)}`);
+    } catch {}
+  }, 10000);
+  const r = { name, page, ctx, log, w, timer, done: null };
+  r.done = page.waitForFunction(APP ? () => window.__nfsu2?.phase === 'exited' : () => document.title === 'DONE', null, { timeout: TMO, polling: 1000 })
+    .then(() => 'done', () => 'timeout');
+  if (APP) r.done = r.done.then(async (x) => { w(`EXIT ${await page.evaluate(() => window.__nfsu2.lastExit?.code).catch(() => '?')}`); return x; });
+  for (const h of HIDE.filter(h => h.name === name)) {
+    const hide = (on) => page.evaluate((on) => {
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => on });
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (on ? 'hidden' : 'visible') });
+      document.dispatchEvent(new Event('visibilitychange'));
+    }, on).catch(() => {});
+    setTimeout(() => { w(`[roam-pair] page reports hidden for ${h.dur / 1000} s`); void hide(true); }, Math.max(0, h.at - (Date.now() - t0)));
+    setTimeout(() => { w('[roam-pair] page reports visible again'); void hide(false); }, Math.max(0, h.at + h.dur - (Date.now() - t0)));
+  }
+  inst.push(r);
+  return r;
+}
+await start(0, ...SPECS[0]);
+let bounced = null;
+if (BOUNCE && OWN) bounced = new Promise(r => setTimeout(async () => {
+  console.log(`roam-pair: stopping the server at ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+  await stopServer();
+  await new Promise(q => setTimeout(q, 3000));
+  server = await startServer();
+  console.log(`roam-pair: server back at ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+  r();
+}, BOUNCE));
+for (let i = 1; i < N; i++) {
+  await new Promise(r => setTimeout(r, STAGGER));
+  await start(i, ...SPECS[i]);
+}
+const res = await Promise.all(inst.map(x => x.done));
+console.log(`roam-pair: ${inst.map((x, i) => `${x.name} ${res[i]}`).join(', ')} after ${((Date.now() - t0) / 1000).toFixed(0)} s`);
+
+// the pose logs from each page's OPFS
+for (const x of inst) {
+  clearInterval(x.timer);
+  try {
+    const txt = await x.page.evaluate(async (dir) => {
+      const root = await navigator.storage.getDirectory();
+      const d = await root.getDirectoryHandle(dir);
+      const f = await (await d.getFileHandle('pose.csv')).getFile();
+      return await f.text();
+    }, `roam-${x.name}`);
+    fs.writeFileSync(path.join(OUT, `${x.name}.pose.csv`), txt);
+    console.log(`roam-pair: ${x.name}.pose.csv ${txt.split('\n').length - 1} rows`);
+  } catch (e) { console.log(`roam-pair: no pose log from ${x.name}: ${e}`); }
+  x.log.end();
+}
+await browser.close();
+if (bounced) await bounced;
+await stopServer();
+serverLog.end();
+
+// what the logs say
+const summary = { mode: MODE, result: Object.fromEntries(inst.map((x, i) => [x.name, res[i]])) };
+for (const x of inst) {
+  // lines without the runner's time stamp and the thread tag
+  const L = fs.readFileSync(path.join(OUT, `${x.name}.log`), 'utf8').split('\n').map(l => l.replace(/^[\d.]+ /, '').replace(/^\[\d+!?\] /, ''));
+  const grab = (re) => L.filter(l => re.test(l));
+  summary[x.name] = {
+    vlan: grab(/virtual LAN (up|down|UDP)|\[net\]/).slice(0, 12),
+    joins: grab(/\[roam\] JOIN|\[roam\] LEAVE/),
+    waits: grab(/mp wait(peers|cars)/),
+    slots: grab(/slot \d.*(ready|for )/).slice(0, 8),
+    friends: grab(/\(\w+, [\w ]+, rtt [\d.]+ ms\)/).slice(-4),
+    stats: grab(/virtual LAN (stats|closed)|datagrams sent|stats: \d friend/).slice(-6),
+    blocked: grab(/BLOCKED/).length,
+    parked: grab(/in the background: friends see you paused|\(paused|roam-pair\] page reports|app: (de)?activated/).slice(0, 8),
+    exit: grab(/^EXIT /).pop() ?? null,
+    net: grab(/^NET \{/).pop() ?? null,
+  };
+}
+fs.writeFileSync(path.join(OUT, 'summary.json'), JSON.stringify(summary, null, 2));
+console.log(JSON.stringify(summary, null, 2));
+const pa = path.join(OUT, `${SPECS[0][0]}.pose.csv`);
+for (const [name] of SPECS.slice(1)) {
+  const pb = path.join(OUT, `${name}.pose.csv`);
+  if (!fs.existsSync(pa) || !fs.existsSync(pb)) continue;
+  console.log(`--- ${SPECS[0][0]} as shown by ${name}`);
+  try { console.log(execFileSync('python3', [path.join(REPO, 'tools/roam_compare.py'), pa, pb], { encoding: 'utf8' })); }
+  catch (e) { console.log(`roam_compare.py failed: ${e.stdout ?? ''}${e.stderr ?? e}`); }
+}

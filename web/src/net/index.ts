@@ -1,0 +1,442 @@
+// The virtual LAN on the page: one WebSocket to the server's switch
+// (web/server/lan.mjs, /lan on this page's origin) and the net mailboxes the C
+// runtime publishes (runtime/web/net_proto.h, one layout):
+//   HostKind.Net  free roam (runtime/web/roam_web.c): frame kinds 1 and 2
+//   HostKind.Lan  LAN play, the Winsock HLE's virtual LAN (runtime/web/net_lan.c):
+//                 frame kinds 3 (UDP), 4 (TCP), 5 (ICMP)
+//
+//   C (TX rings) --> this file --> WebSocket --> switch --> other browsers
+//   C (RX rings) <-- this file <-- WebSocket <-- switch       (routed by frame kind)
+//
+// WebSockets live on the page's main thread, so this runs there.  It never
+// blocks: it sleeps on each TX ring's bell with Atomics.waitAsync (C rings it
+// when it queued frames) and writes received frames straight into the right RX
+// ring, then rings C's network thread with Atomics.notify.  The switch assigns
+// a virtual IPv4 address; this writes it into every mailbox, keeps the
+// connection (reconnects with back-off and asks for the same address again,
+// with the token the switch gave with it: /lan?resume, then the address and
+// the token in the first message, never in the URL),
+// writes the switch's peer list as a bitmap into the mailboxes, tells the LAN
+// side when a browser left (its TCP connections are reset), and pings the
+// switch for its round-trip time.  The server's own online host (the game's
+// Online mode, web/server/online/) is on the peer list as server: true: in the
+// bitmap, never among the players.  Nothing connects until the runtime
+// registers a mailbox, which it does only when a network feature is used (free
+// roam: roam = on; LAN play: the game's first WSAStartup, its LAN screens).
+//
+// TCP frames are never dropped here: while the LAN RX ring is full they wait
+// in order (the C side's streams have no retransmission; the WebSocket and the
+// switch are reliable and ordered).  A TCP connect to this browser while it has
+// no LAN endpoint is answered with a reset (refused), as a host without a
+// listener would.
+import type { GameProcess } from '../host/process';
+import { HostKind } from '../host/abi';
+import * as P from './proto';
+
+export interface NetOptions {
+  /** the name other players see on the switch's peer list */
+  name?: string;
+  /** the switch (default: /lan on this page's origin, wss on https) */
+  url?: string;
+  /** state changes, one line each */
+  log?: (s: string) => void;
+  /** the switch's peer list changed */
+  onPeers?: (peers: NetPeer[]) => void;
+  /** a line from the game for the player (NET_KIND_NOTICE: a friend joined, left, went into a race) */
+  onNotice?: (text: string) => void;
+  /** milliseconds between pings to the switch (default 2000) */
+  pingMs?: number;
+}
+export interface NetPeer { vip: string; name: string; self: boolean }
+export type NetState = 'waiting' | 'connecting' | 'online' | 'offline' | 'closed';
+export interface NetStats {
+  state: NetState; vip: string | null; connections: number; reconnects: number;
+  framesOut: number; bytesOut: number; framesIn: number; bytesIn: number;
+  /** frames C queued while the switch was not connected (dropped, as UDP would) */
+  txOfflineDrop: number;
+  /** received frames dropped: RX ring full / larger than a slot / nobody listening on that kind */
+  rxFullDrop: number; rxOversize: number; rxFiltered: number;
+  switchRttMs: number; switchRttMeanMs: number; switchRttMaxMs: number;
+  /** C queued -> sent on the socket */
+  txWaitMeanMs: number; txWaitMaxMs: number;
+  peersOnSwitch: number;
+  /** main-thread time spent moving frames (both directions), ms in total, and calls */
+  mainMs: number; mainCalls: number;
+  /** LAN play: frames each way, TCP frames that waited for RX ring room (most at once),
+   *  TCP connects refused here because the game had no LAN endpoint, peers that left */
+  lan: { attached: boolean; framesOut: number; framesIn: number; waited: number; waitedMax: number; refusedNoEndpoint: number; peersGone: number };
+}
+export interface NetLink {
+  readonly state: NetState;
+  readonly vip: string | null;
+  readonly peers: NetPeer[];
+  /** resolves with our virtual address once the switch first assigned one */
+  readonly online: Promise<string>;
+  stats(): NetStats;
+  close(): void;
+}
+
+/** One mailbox (free roam's or LAN play's) in shared wasm memory. */
+class Endpoint {
+  i32: Int32Array; f64: Float64Array; dv: DataView; u8: Uint8Array;
+  /** LAN: received TCP frames waiting for RX ring room, in order */
+  waiting: ArrayBuffer[] = [];
+  constructor(readonly kind: 'roam' | 'lan', buf: SharedArrayBuffer, ptr: number, size: number) {
+    // shared memory is never detached: views made now stay valid after the
+    // memory grows (the mailbox lies inside the current buffer)
+    this.i32 = new Int32Array(buf, ptr, P.NET_HDR_BYTES / 4);
+    this.f64 = new Float64Array(buf, ptr, P.NET_HDR_BYTES / 8);
+    this.dv = new DataView(buf, ptr, size);
+    this.u8 = new Uint8Array(buf, ptr, size);
+  }
+  mode() { return Atomics.load(this.i32, P.W_MODE); }
+  ring() { Atomics.add(this.i32, P.W_RX_BELL, 1); Atomics.notify(this.i32, P.W_RX_BELL); }
+  /** a received frame into the RX ring; false = the ring is full */
+  put(b: ArrayBuffer): boolean {
+    const i32 = this.i32, fv = new DataView(b), len = b.byteLength - P.F_DATA;
+    const head = Atomics.load(i32, P.W_RX_HEAD), tail = Atomics.load(i32, P.W_RX_TAIL);
+    if (((head - tail) >>> 0) >= P.NET_RX_SLOTS) return false;
+    const s = i32[P.W_RX_OFF] + ((head >>> 0) % P.NET_RX_SLOTS) * P.NET_SLOT_BYTES, dv = this.dv;
+    dv.setUint32(s + P.S_LEN, len, true);
+    dv.setUint32(s + P.S_KIND, fv.getUint8(P.F_KIND), true);
+    dv.setUint32(s + P.S_SRC_IP, fv.getUint32(P.F_SRC), true);
+    dv.setUint32(s + P.S_DST_IP, fv.getUint32(P.F_DST), true);
+    dv.setUint16(s + P.S_SRC_PORT, fv.getUint16(P.F_SPORT), true);
+    dv.setUint16(s + P.S_DST_PORT, fv.getUint16(P.F_DPORT), true);
+    dv.setFloat64(s + P.S_T_MS, now(), true);
+    this.u8.set(new Uint8Array(b, P.F_DATA, len), s + P.S_DATA);
+    Atomics.store(i32, P.W_RX_HEAD, (head + 1) | 0);
+    return true;
+  }
+}
+
+class Link implements NetLink {
+  state: NetState = 'waiting';
+  vip: string | null = null;
+  peers: NetPeer[] = [];
+  online: Promise<string>;
+  private resolveOnline!: (v: string) => void;
+  private roam: Endpoint | null = null;
+  private lan: Endpoint | null = null;
+  private ws: WebSocket | null = null;
+  private vipNum = 0;
+  /** the switch's proof that vipNum is ours (welcome.token): only with it does a reconnect get the address back */
+  private token = '';
+  private netmask = 0xffffff00;
+  private generation = 0;
+  private backoff = 250;
+  private closed = false;
+  private pingTimer: ReturnType<typeof setInterval> | null = null;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private pings = new Map<number, number>();
+  private pingSeq = 0;
+  private failed = 0;
+  private lastDownLog = -Infinity;
+  private peerVips = new Set<number>();
+  private st = { connections: 0, reconnects: 0, framesOut: 0, bytesOut: 0, framesIn: 0, bytesIn: 0, rxFiltered: 0,
+    rttSum: 0, rttN: 0, rttMax: 0, mainMs: 0, mainCalls: 0, rxFull: 0, rxOversize: 0,
+    lanOut: 0, lanIn: 0, lanWaited: 0, lanWaitedMax: 0, lanRefused: 0, lanGone: 0 };
+
+  constructor(private proc: GameProcess, private o: NetOptions) {
+    this.online = new Promise(r => (this.resolveOnline = r));
+  }
+
+  private log(s: string) { this.o.log?.(`[net] ${s}`); }
+  private eps(): Endpoint[] { return [this.roam, this.lan].filter((e): e is Endpoint => !!e); }
+
+  start() {
+    this.proc.exited.then(() => this.close());
+    void this.attach(HostKind.Net, 'roam');
+    void this.attach(HostKind.Lan, 'lan');
+  }
+  private async attach(kind: HostKind, name: 'roam' | 'lan') {
+    const r = await this.proc.registered(kind);
+    if (this.closed) return;
+    const buf = this.proc.memory.buffer as unknown as SharedArrayBuffer;
+    const ep = new Endpoint(name, buf, r.ptr, r.size);
+    const magic = ep.i32[P.W_MAGIC] >>> 0, ver = ep.i32[P.W_VERSION];
+    if (magic !== P.NET_MAGIC || ver !== P.NET_VERSION || r.size !== P.NET_MAILBOX_BYTES ||
+        ep.i32[P.W_SLOT_BYTES] !== P.NET_SLOT_BYTES || ep.i32[P.W_TX_SLOTS] !== P.NET_TX_SLOTS || ep.i32[P.W_RX_SLOTS] !== P.NET_RX_SLOTS) {
+      this.log(`${name} mailbox does not match this page (magic ${magic.toString(16)}, version ${ver}, ${r.size} bytes): no ${name === 'lan' ? 'LAN play' : 'free roam'}`);
+      return;
+    }
+    if (name === 'roam') this.roam = ep; else this.lan = ep;
+    if (name === 'lan') this.log('LAN play attached (the game opened its LAN screens)');
+    this.publishPeers(ep);
+    if (this.state === 'online') this.publishOnline(ep);
+    else Atomics.store(ep.i32, P.W_PAGE_STATE, this.state === 'connecting' ? P.NET_PAGE_CONNECTING : this.state === 'offline' ? P.NET_PAGE_OFFLINE : P.NET_PAGE_NONE);
+    if (!this.ws && this.state === 'waiting') this.connect();
+    void this.txLoop(ep);
+  }
+
+  // ---- the switch connection ----
+  private setPage(s: number) { for (const ep of this.eps()) Atomics.store(ep.i32, P.W_PAGE_STATE, s); }
+  private publishOnline(ep: Endpoint) {
+    Atomics.store(ep.i32, P.W_VIP, this.vipNum | 0);
+    Atomics.store(ep.i32, P.W_NETMASK, this.netmask | 0);
+    Atomics.store(ep.i32, P.W_GENERATION, this.generation);
+    Atomics.store(ep.i32, P.W_PAGE_STATE, P.NET_PAGE_ONLINE);
+    ep.ring();                                     // wake C's network thread so it sees the address now
+  }
+  private publishPeers(ep: Endpoint) {
+    const bits = new Uint32Array(8);
+    for (const v of this.peerVips) if (!this.vipNum || ((v ^ this.vipNum) & this.netmask) === 0) bits[(v & 255) >>> 5] |= 1 << (v & 31);
+    for (let i = 0; i < 8; i++) Atomics.store(ep.i32, P.W_PEER_BITS + i, bits[i] | 0);
+    Atomics.store(ep.i32, P.W_SWITCH_PEERS, this.peers.length);
+  }
+  private connect() {
+    if (this.closed) return;
+    const def = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/lan`;
+    const u = new URL(this.o.url ?? def, location.href);
+    // the same address again: the switch waits for the hello with the token (it keeps the address for it a minute)
+    const resume = !!(this.vipNum && this.token);
+    if (resume) u.searchParams.set('resume', '');
+    this.state = 'connecting'; this.setPage(P.NET_PAGE_CONNECTING);
+    const ws = new WebSocket(u.href);
+    ws.binaryType = 'arraybuffer';
+    this.ws = ws;
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ t: 'hello', name: this.o.name ?? 'player', ...(resume ? { vip: P.ipStr(this.vipNum), token: this.token } : {}) }));
+      this.pingTimer = setInterval(() => this.ping(), this.o.pingMs ?? 2000);
+    };
+    ws.onmessage = (e) => {
+      if (typeof e.data === 'string') { let m: any; try { m = JSON.parse(e.data); } catch { return; } this.control(m); }
+      else this.rx(e.data as ArrayBuffer);
+    };
+    ws.onclose = (e) => {
+      if (this.ws !== ws) return;
+      this.ws = null;
+      if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null; }
+      this.pings.clear();
+      if (this.closed) return;
+      const was = this.state;
+      this.state = 'offline'; this.setPage(P.NET_PAGE_OFFLINE);
+      // one line when the link goes, then one every 30 s while it stays away
+      const t = now();
+      if (was === 'online' || t - this.lastDownLog > 30000) {
+        this.log(was === 'online' ? `lost the switch (${e.code}${e.reason ? ' ' + e.reason : ''}); reconnecting`
+          : `still no switch (${this.failed} attempts); reconnecting every ${this.backoff / 1000} s`);
+        this.lastDownLog = t;
+      }
+      this.failed++;
+      this.reconnectTimer = setTimeout(() => { this.reconnectTimer = null; this.st.reconnects++; this.connect(); }, this.backoff);
+      this.backoff = Math.min(this.backoff * 2, 5000);
+    };
+    ws.onerror = () => { /* onclose follows */ };
+  }
+  private control(m: any) {
+    if (m.t === 'welcome' && typeof m.vip === 'number') {
+      const vip = m.vip >>> 0, mask = P.ipNum(String(m.mask ?? '255.255.255.0')) ?? 0xffffff00;
+      const again = this.vipNum === vip;
+      this.vipNum = vip; this.vip = P.ipStr(vip); this.netmask = mask; this.generation++;
+      this.token = typeof m.token === 'string' ? m.token : '';
+      this.state = 'online'; this.backoff = 250; this.failed = 0; this.st.connections++;
+      for (const ep of this.eps()) { this.publishPeers(ep); this.publishOnline(ep); }
+      this.log(`on the virtual LAN as ${this.vip}${this.st.connections > 1 ? (again ? ' (the same address again)' : ' (a new address)') : ''}`);
+      this.resolveOnline(this.vip);
+    } else if (m.t === 'peers' && Array.isArray(m.peers)) {
+      this.peers = m.peers.filter((p: any) => !p.server)
+        .map((p: any) => ({ vip: P.ipStr(p.vip >>> 0), name: String(p.name ?? ''), self: (p.vip >>> 0) === this.vipNum }));
+      const cur = new Set<number>(m.peers.map((p: any) => p.vip >>> 0));
+      // a browser that left: its TCP connections to this one are reset (LAN play)
+      for (const v of this.peerVips) if (!cur.has(v) && v !== this.vipNum) this.peerGone(v);
+      this.peerVips = cur;
+      for (const ep of this.eps()) this.publishPeers(ep);
+      this.o.onPeers?.(this.peers);
+    } else if (m.t === 'pong' && typeof m.id === 'number') {
+      const t0 = this.pings.get(m.id);
+      if (t0 === undefined) return;
+      this.pings.delete(m.id);
+      const rtt = now() - t0;
+      for (const ep of this.eps()) ep.f64[P.D_SWITCH_RTT_MS] = rtt;
+      this.st.rttSum += rtt; this.st.rttN++; if (rtt > this.st.rttMax) this.st.rttMax = rtt;
+    }
+  }
+  private peerGone(vip: number) {
+    const ep = this.lan;
+    if (!ep || ep.mode() !== P.NET_MODE_LAN) return;
+    this.st.lanGone++;
+    const f = new Uint8Array(P.F_DATA + P.NET_LAN_HDR), fv = new DataView(f.buffer);
+    f[P.F_KIND] = P.NET_KIND_LAN_TCP;
+    fv.setUint32(P.F_SRC, vip); fv.setUint32(P.F_DST, this.vipNum);
+    f[P.F_DATA] = P.NET_LAN_TCP_GONE;
+    this.lanIn(ep, f.buffer, true);
+  }
+  private ping() {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    const id = ++this.pingSeq;
+    this.pings.set(id, now());
+    if (this.pings.size > 16) this.pings.delete(this.pings.keys().next().value!);
+    this.ws.send(JSON.stringify({ t: 'ping', id }));
+  }
+
+  // ---- C -> switch ----
+  private async txLoop(ep: Endpoint) {
+    let sync = 0;                       // turns without a real wait: yield to the event loop now and then
+    while (!this.closed) {
+      const bell = Atomics.load(ep.i32, P.W_TX_BELL);
+      this.drainTx(ep);
+      const w = Atomics.load(ep.i32, P.W_TX_HEAD) !== Atomics.load(ep.i32, P.W_TX_TAIL) ? null
+        : waitAsync(ep.i32, P.W_TX_BELL, bell, 1000);
+      if (w && w.async) { sync = 0; await w.value; }
+      else if (++sync >= 32) { sync = 0; await new Promise(r => setTimeout(r, 0)); }
+    }
+  }
+  private drainTx(ep: Endpoint) {
+    const i32 = ep.i32, dv = ep.dv;
+    let tail = Atomics.load(i32, P.W_TX_TAIL);
+    const head = Atomics.load(i32, P.W_TX_HEAD);
+    if (tail === head) return;
+    const c0 = performance.now();
+    const txOff = i32[P.W_TX_OFF], ws = this.ws, open = !!ws && ws.readyState === WebSocket.OPEN && this.state === 'online';
+    const t = now();
+    let waitSum = 0, waitMax = ep.f64[P.D_TX_WAIT_MS_MAX], n = 0;
+    while (tail !== head) {
+      const s = txOff + ((tail >>> 0) % P.NET_TX_SLOTS) * P.NET_SLOT_BYTES;
+      const len = dv.getUint32(s + P.S_LEN, true);
+      if (dv.getUint32(s + P.S_KIND, true) === P.NET_KIND_NOTICE) {
+        // for this page only, online or not; a copy: TextDecoder does not read shared memory
+        if (len <= P.NET_MAX_PAYLOAD) this.o.onNotice?.(new TextDecoder().decode(ep.u8.slice(s + P.S_DATA, s + P.S_DATA + len)));
+      } else if (open && len <= P.NET_MAX_PAYLOAD) {
+        const f = new Uint8Array(P.F_DATA + len), fv = new DataView(f.buffer);
+        f[P.F_KIND] = dv.getUint32(s + P.S_KIND, true);
+        fv.setUint32(P.F_SRC, this.vipNum);                      // the switch writes the real one
+        fv.setUint32(P.F_DST, dv.getUint32(s + P.S_DST_IP, true));
+        fv.setUint16(P.F_SPORT, dv.getUint16(s + P.S_SRC_PORT, true));
+        fv.setUint16(P.F_DPORT, dv.getUint16(s + P.S_DST_PORT, true));
+        f.set(ep.u8.subarray(s + P.S_DATA, s + P.S_DATA + len), P.F_DATA);   // a copy: a socket cannot send shared memory
+        ws!.send(f);
+        this.st.framesOut++; this.st.bytesOut += len;
+        if (ep.kind === 'lan') this.st.lanOut++;
+        const w = t - dv.getFloat64(s + P.S_T_MS, true);
+        if (w >= 0 && w < 60000) { waitSum += w; n++; if (w > waitMax) waitMax = w; }
+      } else Atomics.add(i32, P.W_TX_OFFLINE_DROP, 1);
+      tail = (tail + 1) | 0;
+      Atomics.store(i32, P.W_TX_TAIL, tail);
+    }
+    if (n) {
+      ep.f64[P.D_TX_WAIT_MS_SUM] += waitSum; ep.f64[P.D_TX_WAIT_MS_MAX] = waitMax;
+      Atomics.add(i32, P.W_TX_WAIT_N, n);
+    }
+    this.st.mainMs += performance.now() - c0; this.st.mainCalls++;
+  }
+
+  // ---- switch -> C ----
+  private rx(b: ArrayBuffer) {
+    const c0 = performance.now();
+    this.rxFrame(b);
+    this.st.mainMs += performance.now() - c0; this.st.mainCalls++;
+  }
+  private rxFrame(b: ArrayBuffer) {
+    if (b.byteLength < P.F_DATA) return;
+    const kind = new Uint8Array(b, 0, 1)[0];
+    const len = b.byteLength - P.F_DATA;
+    if (len > P.NET_MAX_PAYLOAD) { this.st.rxOversize++; for (const ep of this.eps()) Atomics.add(ep.i32, P.W_RX_OVERSIZE, 1); return; }
+    if (kind === P.NET_KIND_LAN_UDP || kind === P.NET_KIND_LAN_TCP || kind === P.NET_KIND_LAN_ICMP) { this.lanRx(b, kind); return; }
+    // free roam: a player's endpoint takes only UDP, a test endpoint only the
+    // emulated loopback (C checks port and address)
+    const ep = this.roam, mode = ep ? ep.mode() : P.NET_MODE_CLOSED;
+    if (!ep || (kind !== P.NET_KIND_UDP && kind !== P.NET_KIND_UDP_LOOP) || mode === P.NET_MODE_CLOSED ||
+        (kind === P.NET_KIND_UDP) !== (mode === P.NET_MODE_VLAN)) { this.st.rxFiltered++; return; }
+    if (!ep.put(b)) { Atomics.add(ep.i32, P.W_RX_FULL_DROP, 1); this.st.rxFull++; return; }
+    ep.ring();
+    this.st.framesIn++; this.st.bytesIn += len;
+  }
+  private lanRx(b: ArrayBuffer, kind: number) {
+    const ep = this.lan;
+    if (!ep || ep.mode() !== P.NET_MODE_LAN) {
+      // no LAN endpoint in this game (it never opened its LAN screens): a
+      // connect is refused, as by a host with no listener; the rest is dropped
+      const d = new Uint8Array(b);
+      if (kind === P.NET_KIND_LAN_TCP && b.byteLength >= P.F_DATA + P.NET_LAN_HDR && d[P.F_DATA] === P.NET_LAN_TCP_SYN) this.refuse(b);
+      this.st.rxFiltered++;
+      return;
+    }
+    this.st.framesIn++; this.st.bytesIn += b.byteLength - P.F_DATA; this.st.lanIn++;
+    this.lanIn(ep, b, kind === P.NET_KIND_LAN_TCP);
+  }
+  /** into the LAN RX ring; TCP frames wait (in order) when it is full, others are dropped like UDP */
+  private lanIn(ep: Endpoint, b: ArrayBuffer, keep: boolean) {
+    if (ep.waiting.length && keep) { this.queue(ep, b); return; }
+    if (ep.put(b)) { ep.ring(); return; }
+    if (keep) this.queue(ep, b);
+    else { Atomics.add(ep.i32, P.W_RX_FULL_DROP, 1); this.st.rxFull++; }
+  }
+  private queue(ep: Endpoint, b: ArrayBuffer) {
+    ep.waiting.push(b); this.st.lanWaited++;
+    if (ep.waiting.length > this.st.lanWaitedMax) this.st.lanWaitedMax = ep.waiting.length;
+    if (!this.retryTimer) this.retryTimer = setTimeout(() => this.flushWaiting(), 1);
+  }
+  private flushWaiting() {
+    this.retryTimer = null;
+    const ep = this.lan;
+    if (!ep || this.closed) return;
+    let n = 0;
+    while (ep.waiting.length && ep.put(ep.waiting[0])) { ep.waiting.shift(); n++; }
+    if (n) ep.ring();
+    if (ep.waiting.length) this.retryTimer = setTimeout(() => this.flushWaiting(), 1);
+  }
+  private refuse(b: ArrayBuffer) {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const fv = new DataView(b), r = new Uint8Array(P.F_DATA + P.NET_LAN_HDR), rv = new DataView(r.buffer);
+    r[P.F_KIND] = P.NET_KIND_LAN_TCP;
+    rv.setUint32(P.F_SRC, this.vipNum); rv.setUint32(P.F_DST, fv.getUint32(P.F_SRC));
+    rv.setUint16(P.F_SPORT, fv.getUint16(P.F_DPORT)); rv.setUint16(P.F_DPORT, fv.getUint16(P.F_SPORT));
+    r[P.F_DATA] = P.NET_LAN_TCP_RST; r[P.F_DATA + 1] = 64;
+    r.set(new Uint8Array(b, P.F_DATA + 4, 4), P.F_DATA + 4);              // the connection id
+    ws.send(r);
+    this.st.lanRefused++;
+  }
+
+  stats(): NetStats {
+    const f = this.roam?.f64 ?? this.lan?.f64, s = this.st;
+    let txn = 0, tws = 0, twm = 0, off = 0;
+    for (const ep of this.eps()) {
+      txn += Atomics.load(ep.i32, P.W_TX_WAIT_N); tws += ep.f64[P.D_TX_WAIT_MS_SUM];
+      twm = Math.max(twm, ep.f64[P.D_TX_WAIT_MS_MAX]); off += Atomics.load(ep.i32, P.W_TX_OFFLINE_DROP);
+    }
+    return {
+      state: this.state, vip: this.vip, connections: s.connections, reconnects: s.reconnects,
+      framesOut: s.framesOut, bytesOut: s.bytesOut, framesIn: s.framesIn, bytesIn: s.bytesIn,
+      txOfflineDrop: off, rxFullDrop: s.rxFull, rxOversize: s.rxOversize, rxFiltered: s.rxFiltered,
+      switchRttMs: f ? f[P.D_SWITCH_RTT_MS] : 0, switchRttMeanMs: s.rttN ? s.rttSum / s.rttN : 0, switchRttMaxMs: s.rttMax,
+      txWaitMeanMs: txn ? tws / txn : 0, txWaitMaxMs: twm,
+      peersOnSwitch: this.peers.length, mainMs: s.mainMs, mainCalls: s.mainCalls,
+      lan: { attached: !!this.lan, framesOut: s.lanOut, framesIn: s.lanIn, waited: s.lanWaited, waitedMax: s.lanWaitedMax,
+        refusedNoEndpoint: s.lanRefused, peersGone: s.lanGone },
+    };
+  }
+  close() {
+    if (this.closed) return;
+    // send what C queued last (free roam's BYEs, LAN play's FIN/RST) before the socket goes
+    for (const ep of this.eps()) this.drainTx(ep);
+    this.closed = true; this.state = 'closed';
+    if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null; }
+    if (this.retryTimer) { clearTimeout(this.retryTimer); this.retryTimer = null; }
+    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+    // every handler goes: a closing socket lives on until the server answers the
+    // close, and a handler would keep this link and the game's memory with it
+    const ws = this.ws; this.ws = null;
+    if (ws) { ws.onopen = null; ws.onmessage = null; ws.onerror = null; ws.onclose = null; ws.close(1000, 'closed'); }
+    for (const ep of this.eps()) {
+      Atomics.store(ep.i32, P.W_PAGE_STATE, P.NET_PAGE_NONE);
+      Atomics.add(ep.i32, P.W_TX_BELL, 1); Atomics.notify(ep.i32, P.W_TX_BELL);   // ends txLoop's wait
+    }
+  }
+}
+
+const now = () => performance.timeOrigin + performance.now();   // the runtime's monotonic clock
+// Atomics.waitAsync (ES2024; the project's TypeScript lib is ES2023)
+const waitAsync = (Atomics as unknown as { waitAsync(a: Int32Array, i: number, v: number, t?: number):
+  { async: false; value: 'not-equal' | 'timed-out' } | { async: true; value: Promise<'ok' | 'timed-out'> } }).waitAsync;
+
+/** Attach the virtual LAN to a running game process.  Returns at once; the
+ *  socket opens when the runtime registers its first net mailbox (free roam
+ *  or LAN play). */
+export function attachNet(proc: GameProcess, opts: NetOptions = {}): NetLink {
+  const l = new Link(proc, opts);
+  l.start();
+  return l;
+}

@@ -1,0 +1,23 @@
+# compose.yml with a Cloudflare Tunnel in front instead of Caddy (docs/web/DOCKER.md, D): cloudflared connects
+# out to Cloudflare, so the VPS needs no open port for the game at all.  The server shares cloudflared's network
+# namespace (a Docker network, not the VPS's): cloudflared reaches it on 127.0.0.1:8080, nothing else can, and
+# the client's address comes from Cloudflare's CF-Connecting-IP.  In Cloudflare's dashboard the tunnel's public
+# hostname is NFSU2_HOST and its service http://127.0.0.1:8080.
+#
+# In .env, besides NFSU2_HOST, NFSU2_DATA and NFSU2_MODULE (compose.yml):
+#   TUNNEL_TOKEN=<the tunnel's token>
+#   COMPOSE_FILE=compose.yml:compose.tunnel.yml     so that plain "docker compose ..." uses both files
+# then:  docker compose up -d && docker compose logs -f server
+services:
+  caddy:
+    profiles: [off]          # not started: cloudflared is the front
+  cloudflared:
+    image: cloudflare/cloudflared:2026.9.3
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?set TUNNEL_TOKEN in .env, the tunnel's token}
+  server:
+    network_mode: service:cloudflared
+    environment:
+      NFSU2_REAL_IP_HEADER: cf-connecting-ip

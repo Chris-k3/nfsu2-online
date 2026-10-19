@@ -1,0 +1,91 @@
+/* roam_host.h -- free-roam multiplayer: what roam_game.c needs from its host,
+ * for the native port (the guest's memory is the 4 GB arena at g_mem, guest
+ * code is the lifted C, called through dispatch_indirect).
+ *
+ * roam_game.c is shared with the Windows companion (win/roam_asi), which
+ * builds it with -DROAM_HOST_WIN and win/roam_asi/roam_host_win.h instead:
+ * there the guest's memory is the process's own (a guest address is a
+ * pointer) and guest code is the original x86 code, called through a
+ * pointer.  Both headers provide the same names:
+ *
+ *   MR8/MR16/MR32/MRF32(a)  guest memory as lvalues;  GPTR(a)  a host pointer
+ *   rh_committed(a)         1 when guest address a is readable and writable
+ *   rh_call(c, fn, ecx, edx, n, args)
+ *                           call guest function fn with ecx/edx and n stack
+ *                           arguments (any convention: the stack is restored
+ *                           afterwards); returns eax.  Only from the main-loop
+ *                           hook, on the game's thread
+ *   rlog(fmt, ...)          one log line (printf format)
+ *   rh_opt(name)            an option (NFSU2_ROAM_*), or NULL
+ *   rh_frame()              the frame number (logs)
+ *   rh_heap_mb()            guest heap in use (live blocks), MB (0 when not known)
+ *   rh_ns()                 a monotonic clock in ns (frame cost)
+ *   rh_file, rh_fopen/rh_fprintf/rh_fflush   the pose log (test aid)
+ *   ROAM_HOST_SCRIPT        defined when the input-script commands exist
+ */
+#ifndef ROAM_HOST_H
+#define ROAM_HOST_H
+#include "cpu.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
+#include <mach/mach_time.h>
+
+void dispatch_indirect(CPU *c, uint32_t addr);
+long autotest_frame(void);
+uint32_t win32_heap_live(void);          /* win32.c: bytes in live heap blocks */
+
+#define ROAM_HOST_SCRIPT 1
+#define ROAM_HOOK_RET    0x00581475u     /* the return address guest calls see */
+#define GPTR(a)          (g_mem + (uint32_t)(a))
+#define rh_committed(a)  mem_is_committed(a)
+#define rlog(...)        fprintf(stderr, __VA_ARGS__)
+#define rh_opt(k)        getenv(k)
+#define rh_frame()       autotest_frame()
+#define rh_heap_mb()     (win32_heap_live() >> 20)
+typedef FILE rh_file;
+#ifdef __wasm__
+/* The pose log (a test aid) in the browser: every stdio flush is a
+ * synchronous round trip to the I/O worker and an OPFS write.  With stdio's
+ * 1 KB buffer that was a flush every ~3 frames and made roam_game_frame cost
+ * 0.3 ms a frame on average (max 36 ms) against 20 us without the log.  The
+ * buffer holds what the periodic rh_fflush (every 240 frames, roam_game.c)
+ * writes, so that stays the only flush: per frame one L row (our car) and
+ * one R row per friend's car shown (at most 5, roam_max_cars), each about
+ * 145 bytes (147 at most in the measured runs), with room to 256.  64 KB
+ * was 229 frames with one friend. */
+#define RH_POSELOG_BUF (240u * (1u + 5u) * 256u)
+static inline FILE *rh_fopen(const char *p){
+    FILE *f = fopen(p, "w");
+    /* musl ignores the size when setvbuf gets no buffer: give it one (one
+     * pose log per process, kept open until exit) */
+    char *b = f ? malloc(RH_POSELOG_BUF) : NULL;
+    if (b) setvbuf(f, b, _IOFBF, RH_POSELOG_BUF);
+    return f;
+}
+#else
+#define rh_fopen(p)      fopen((p), "w")
+#endif
+#define rh_fprintf       fprintf
+#define rh_fflush        fflush
+
+static inline uint64_t rh_ns(void){
+    static mach_timebase_info_data_t tb;
+    if (!tb.denom) mach_timebase_info(&tb);
+    return mach_absolute_time() * tb.numer / tb.denom;
+}
+/* call a guest function (any convention) from the main-loop hook; the CPU
+ * state is restored afterwards */
+static inline uint32_t rh_call(CPU *c, uint32_t fn, uint32_t ecx, uint32_t edx, int n, const uint32_t *arg){
+    CPU save = *c;
+    c->esp = (c->esp - 1024u) & ~15u;
+    for (int i = n - 1; i >= 0; i--) PUSH32(arg[i]);
+    c->ecx = ecx; c->edx = edx;
+    PUSH32(ROAM_HOOK_RET);
+    dispatch_indirect(c, fn);
+    uint32_t r = c->eax;
+    *c = save;
+    return r;
+}
+#endif

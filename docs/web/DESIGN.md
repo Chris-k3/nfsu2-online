@@ -1,0 +1,180 @@
+# NFSU2 in the browser: design
+
+Status: **2026-10-18** (phase 2, integration). The player's page (`web/index.html`) runs the game with the WebGPU
+renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over the server's virtual LAN.
+- **Driven to a race:** from the start page by the real keyboard or by an autotest script.
+- **Frame rate** in a headed window on this Mac's 120 Hz panel: the menus run at 118.6–120 fps. Races reach 120 only
+  when the GPU is not shared with other programs: then one race missed 5 of its 120 Hz slots, with the game thread's
+  p99 at 8.6 ms against the 8.33 ms slot. With the GPU shared, races missed ~1,300–1,500 slots. Before the perf
+  work they ran at 100–118 fps.
+- **Start:** `web/start.sh`.
+- **More:** `docs/web/PLAYING.md` (the player's guide) and `docs/web/VPS.md` (hosting for friends).
+- **Test pages:** they keep the null stand-ins (`runtime/web/null_platform.c`) where they leave a subsystem out.
+
+## 1. Goals and constraints
+
+- **Goal:** NFS Underground 2 natively playable in the browser: whole career, save games, 120 fps, the original look by
+  default. Bonuses: LAN and free-roam multiplayer between PCs, the upscaled-texture pack.
+- **Browser:** the latest **Chrome only** (the user's call). Chrome 155 on the dev Mac (M4 Pro, macOS 27, 3024×1964
+  ProMotion) has WebGPU on Metal 3 with `texture-compression-bc`, `texture-component-swizzle`,
+  `texture-compression-unaligned`, `clip-distances`, `dual-source-blending`, `timestamp-query`, `subgroups`; JSPI;
+  `Atomics.waitAsync`; 4 GB shared wasm memory; tail calls; exnref exceptions.
+- **Hosting:** the player's own server, no public site.
+  - A Mac (or a VPS) runs `web/server/server.mjs`. It serves the app, the game module built on the Mac
+    (`out/web/nfsu2.wasm`) and the game's own files of the NFSU2 install folder (`SPEED2.EXE`, `server.dll`,
+    `server.cfg`, the data folders), read-only: never the rest of the folder (an installer's log, saves, mods).
+  - This Mac uses `http://localhost:8080/`. Other PCs need HTTPS in front of the server (`--tls-cert`, or a reverse
+    proxy or tunnel), because WebGPU and SharedArrayBuffer need a secure context; the server has no certificate of its own.
+  - No file picking. Game data streams over the LAN on demand and each browser keeps an OPFS block cache.
+  - The server is also the multiplayer switch (the virtual LAN).
+  - The same server also runs on a VPS, for friends who are not on the same LAN (`docs/web/VPS.md`): a real
+    certificate or a reverse proxy/tunnel (Caddy, Cloudflare) in front, nothing else changes.
+- **Graphics enhancements are opt-in.** The original look is the default, and they ship only when measured to be a
+  real improvement. No FSR (the newest generation cannot run in a browser).
+
+## 2. Architecture
+
+```
+ Chrome page (main thread)                         workers (all share one 4 GB-max wasm32 memory)
+ ─────────────────────────                         ─────────────────────────────────────────────
+ UI shell, settings, input capture  ──SAB rings──▶ game threads: one Worker per guest/host pthread
+ WebGPU renderer (TS) ◀─ frame packets / resource   (wasi-threads; the GIL serialises guest code)
+   queue in wasm memory, Atomics.waitAsync          I/O worker: WASI files (/data over HTTP + OPFS
+ rAF: vsync clock ─────────────────────────────▶     cache, /save in OPFS, /dev)
+ AudioWorklet ◀── PCM ring (audio pump pthread)     LAN socket to the server's switch (net track)
+```
+
+- **Toolchain:** wasi-sdk 34 (clang 23.1), `wasm32-wasip1-threads`.
+  - Flags: `-O3 -mtail-call -msimd128 -mbulk-memory -mnontrapping-fptoint -mexception-handling` (setjmp/longjmp via
+    wasm EH), `-fno-delete-null-pointer-checks`.
+  - The compat headers (`runtime/web/compat/`) are force-included: Mach time, `os_unfair_lock`, kqueue, Mach task info,
+    `pthread_exit` through a trampoline.
+  - No Emscripten: the host is our own TypeScript (`web/src/host`).
+  - `web/gen.sh <SPEED2.EXE>` lifts the game and `server.dll` into `gen/all` and `gen/server` (`./gen.sh` with the
+    web's lift options FLAGABI, X87OPT and JTSWITCH). `gen.sh` stamps both (`stamp.txt`, `tools/genstamp.sh`: the
+    override list, the hook list, the lifter, the exe, the options).
+  - JTSWITCH: an MSVC switch (`cmp r, n; ja`, then `jmp [r*4+table]`, also through a byte table) becomes a C
+    `switch` inside its function. Each case checks the table entry in guest memory and anything else still takes the
+    dispatcher, so the semantics stay the same. Without it every table target was entered as a function of its own,
+    a lifted copy of the rest of the parent's body (3,821 of them from 477 tables; `sub_00620ae0` alone had 20
+    copies of ~660 KB of wasm). `genall.py` no longer makes functions of pointers that only such tables hold.
+  - `web/build.sh` refuses a `gen/all` made from another override list, hook list or lifter than the checkout's,
+    then does an incremental shard build through a shared content-addressed object cache
+    (`~/.cache/nsfu2-web/obj`), links `out/web/nfsu2.wasm` (38 MB) and writes `nfsu2.json`.
+- **Memory:** guest address == linear address (`cpu.h`).
+  - The guest owns `[0, 0x28000000)` (640 MB):
+    - image at 0x400000
+    - server.dll (LAN hosting, lifted second module) 0x00A00000–0x00A58000; Winsock's per-thread hostent buffers
+      0x00BE0000
+    - TEBs at 0x00C00000
+    - server.dll's heaps (`modheap.c`) 0x01000000–0x05000000 (2 × 32 MB; the Mac's 0x01000000–0x0F000000 would
+      overlap the stacks)
+    - main stack 0x05000000–0x05FF0000
+    - thread stacks from 0x06000000
+    - heap VA 0x08000000–0x28000000
+  - The runtime's data, C stacks and malloc heap sit above (`--global-base=0x28000000 --no-stack-first`).
+  - Initial memory 1 GB, maximum 4 GB.
+- **Threads:** the page starts the I/O worker and a pool of 24 game workers (`web/src/host/process.ts`).
+  - `wasi thread-spawn` claims a pool slot synchronously. Workers block with `Atomics.wait`; the page's main thread
+    never runs wasm and never blocks.
+  - Guest threads still hold the GIL (`win32_ext.c`).
+- **Stacks:** a Chrome worker's engine stack is about 1 MB and cannot be raised (measured: `--js-flags=--stack-size`
+  changes nothing).
+  - Lifted frames are small (48–400 B) and indirect tail jumps are real tail calls (`DISPATCH_TAIL`/`dispatch_tail`,
+    `musttail`).
+  - Fallback if a deep chain ever overflows: hop to a fresh stack segment through a JSPI `WebAssembly.promising` call.
+    This is measured to work: a 100,000-deep recursion passed through 25 segments in 5.9 ms.
+- **Files:** WASI preview1 calls go to the I/O worker over per-thread RPC slots (SAB + `Atomics.wait`). Results are
+  written straight into wasm memory. Mounts:
+  - `/data`: the install folder. Manifest from the server, case-insensitive lookup, 1 MiB range blocks, memory LRU,
+    persistent OPFS block cache.
+  - `/save`: OPFS save overlay. Holds saves, `registry.txt`, `settings.ini` and logs.
+  - `/dev`: `null`, `zero`, `urandom`.
+
+  The runtime runs as on the Mac with `NFSU2_SAVEDIR=/save` and `NFSU2_READONLY_DATA=1`.
+- **Clock:** `clock_gettime(MONOTONIC)` is `performance.timeOrigin + performance.now()`, which is one clock across
+  workers.
+
+## 3. The renderer contract (C recorder ↔ TypeScript WebGPU encoder)
+
+The game thread keeps `com.c` (D3D9 state, shader translation) and records through the `metal_*` API (the boundary
+`com.c` already has).
+
+- `runtime/web/gpu_web.c` implements that API. It writes into **shared memory**:
+  1. **Frame packets.** Port the essentials of `metal.m`'s record side:
+     - double/triple-buffered `MDraw`-like records;
+     - the raw vertex arena;
+     - the VS constant arena;
+     - the PS constant pool;
+     - clears and blits;
+     - render-target switches.
+  2. **An ordered resource queue.** Texture create/upload/free, mirrors (persistent vertex/index pool uploads) and
+     shader registration (WGSL text). It replaces the immediate Metal calls the guest thread made on the Mac.
+  3. **A present handshake.** A frame-state word: the game publishes with `Atomics.notify`, and the page wakes with
+     `Atomics.waitAsync`. Pacing follows a vsync clock the page fills from rAF (timestamp, period). The game thread
+     never waits on JS or WebGPU except for frames in flight (≤ 2) and explicit readbacks.
+- The TypeScript side (`web/src/gpu/`) reads those structures **zero-copy** from the wasm memory and uploads arenas with
+  one `queue.writeBuffer` each per frame. It keeps pipeline and bind-group caches and encodes the passes. It presents to
+  the canvas at native resolution, aspect-fit, and serves screenshot dumps for tests. When the game's device size is
+  the canvas's (the usual case) the frame draws its screen straight into the canvas texture: no back buffer and no
+  composite pass. A frame that copies from the screen before drawing to it keeps the back buffer (it reads the
+  previous frame); none of the checked scenes did. `?direct=0` on the test page turns the direct path off.
+- C and TS layouts come from one source: a C header with `_Static_assert` offsets, plus a generated or hand-mirrored
+  `proto.ts` checked by a test.
+
+### Shader ABI (WGSL), shared by the translator and the encoder
+
+The translator (`vsemu.c`, a WGSL backend next to `vs_to_msl`/`ps_to_msl`) and the encoder both follow this ABI. The
+authoritative version is `docs/web/gpu-abi.md`.
+
+```wgsl
+// group 0: per draw, dynamic offsets
+@group(0) @binding(0) var<storage, read> VB : array<u32>;   // vertex pulling: the frame arena or the mirror pool
+@group(0) @binding(1) var<uniform> K : VSPar;               // {stride, tsel, base, pad; c[NK]}  (vs_1_1 uses up to c85)
+@group(0) @binding(2) var<uniform> P : PSPar;               // {aref, usec, pad, pad; proj; c[32]; fog}
+// group 1: textures and samplers, cached per tuple
+@group(1) @binding(0..3) t0..t3 : texture_2d<f32>           // texture_cube<f32> for t0 in the cube variant
+@group(1) @binding(4..7) s0..s3 : sampler
+struct VOut { @builtin(position) pos: vec4f; @location(0) col0: vec4f; @location(1) col1: vec4f;
+              @location(2) uv0: vec4f; ... @location(5) uv3: vec4f; @location(6) fog: f32 }
+```
+
+- **Vertex pulling** as on Metal: no vertex attributes, so a pipeline does not depend on the vertex format. The vertex
+  address is `K.base + vertex_index * K.stride`; `drawIndexed`'s `baseVertex` handles D3D9's `BaseVertexIndex`.
+- The fixed-function / pretransformed (`TVert`) path is one hand-written WGSL module over the same ABI.
+- Alpha test is an `override` constant, so there is a no-discard variant when `aref <= 0`, as on Metal for HSR.
+- Everything is triangle lists, because `metal_draw_raw` already unrolls strips and fans on the CPU.
+- D3D9 gaps that WebGPU does not have:
+  - 16-bit formats: `com.c` already converts to A8R8G8B8.
+  - Border clamp: not used.
+  - LOD bias: `textureSampleBias`, if used.
+  - D3DCOLOR: unpack bytes in the shader.
+
+## 4. Testing
+
+- Without a browser:
+  - `web/tools/isatest.sh` (`WEB_LIFT=opt` for the web's lift options): the x86 ISA suite (`tools/isatest.py`, 479
+    tests) lifted and compiled like the game's shards, run in V8 under node:wasi. The first gate after a lifter or
+    `cpu.h` change.
+  - `web/tools/aliastest.sh`: guest memory type punning (`tests/web/aliastest.c`). It runs
+    `web/tools/aliasguard.sh` first, a structural check that every guest access macro of `runtime/cpu.h`'s wasm
+    branches keeps its `may_alias` type; `web/build.sh` runs the guard before it compiles anything.
+  - `cd web && node --test test/*.test.mjs`: the unit tests (the LAN backend `lan_unit.c`, free roam, the C ns* key
+    driver against the page's key path, `settings.ts` against `bundle.m`, the alias guard and test, the server,
+    deployment, the security and privacy audit's regressions: `audit.test.mjs`, `page-audit.test.mjs`). They build their wasm programs with wasi-sdk from `deps/`.
+- `node web/tools/run-page.mjs <url> <ms>` drives Chrome 155 (`channel: 'chrome'`, headless, WebGPU works) and streams
+  the console.
+- Test page: `/test/hostcheck.html?wasm=/game.wasm&pages=16384&arg=/data/SPEED2.EXE&env=K=V&...&save=<opfs dir>&fresh`
+  - `&reg=/tests/web/seed/registry_perf4_native.txt` seeds the registry, as `run_suite.sh` does.
+  - `&script=/tests/scripts/quickrace.txt` adds an input script.
+  - Suite env: `NOMOVIES=1 SNDSYNC=1 GPUVS=1 NFSU2_FNG_LOG=1 NFSU2_STATUS_EVERY=600 NFSU2_DISCORD=0`.
+- The server: `node web/server/server.mjs --data "<game folder>" --http-port <http> --dev`.
+  `--dev` serves the test pages (`/test/`), the repo's test scripts (`/tests/`), source maps and, with `--artifacts`,
+  frame dumps; without it the server serves only what a player needs.
+- **Logs are English:** the runtime's log lines, the lifter's trap reasons in the lifted C, the generator's and the
+  tools' console output and the test harnesses.
+  - Among their other checks the suite runners fail a run on these markers: `FAULT IN GUEST`, `GUEST MEMORY FAULT`
+    or `HOST SEGV` (a fault), `TIME LIMIT REACHED` (boot.c's alarm or the runner's limit), `UNRESOLVED INDIRECT` (an
+    indirect call into no lifted function), a line starting with `[trap]`.
+  - `web/test/log-english.test.mjs` checks that every runner and report still matches the markers the runtime
+    prints, and that the runtime's string literals stay English.
