@@ -19,52 +19,14 @@ interface Item { key: string; label: string; help: string; c: Control; more?: bo
 interface Group { title: string; items: Item[]; status?: boolean }
 
 const GROUPS: Group[] = [
-  { title: 'Game', items: [
-    { key: 'movies', label: 'Movies', help: 'Intro, story and FMV movies.', c: { t: 'switch' } },
-    { key: 'intro', label: 'Startup movies', help: 'The EA and THX logos, the PSA and the intro. Skippable: Enter, Esc, Space, a left click, or A, B or Start ends each one. Original: as in the game, where only the intro ends early.', c: { t: 'seg', opts: [['skippable', 'Skippable'], ['original', 'Original'], ['off', 'Off']] } },
-    { key: 'sound', label: 'Sound', help: 'All sound output.', c: { t: 'switch' } },
-    { key: 'autosave', label: 'Autosave', help: 'Sets each profile\'s Save option in the game to Autosave once, so races, purchases and changes are saved without asking. Prompt or Off chosen afterwards in the game\'s Options, Gameplay stays.', c: { t: 'switch' } },
-    { key: 'background', label: 'When the tab is in the background', help: 'Pause freezes the game and its sound, as alt-tab does on Windows. In LAN and Online play it keeps running, without sound.', c: { t: 'seg', opts: [['pause', 'Pause'], ['run', 'Keep running']] } },
-    { key: 'seed_registry', label: 'Highest graphics for a new save', help: 'The game\'s own graphics options at their highest, at this screen\'s resolution. Off lets the game run its own hardware check.', c: { t: 'switch' }, more: true },
-    { key: 'quit_grace', label: 'Time to quit', help: 'Seconds the game gets to shut down after Quit game before it is stopped.', c: { t: 'num', min: 0, step: 1, unit: 's' }, more: true },
-    { key: 'watchdog', label: 'Stall report', help: 'Seconds without a frame before the log gets a report of every game thread (0 = off).', c: { t: 'num', min: 0, step: 1, unit: 's' }, more: true },
-  ] },
-  { title: 'Display', items: [
-    { key: 'fullscreen', label: 'Full screen on Play', help: 'Off plays in this browser window; F9 has full screen while you play. Hold Esc to leave it.', c: { t: 'switch' } },
-    { key: 'render', label: 'Resolution scale', help: 'Scales the game\'s screen-size resolution (its default), per side: 50% renders a quarter of the pixels. Lower is faster and softer.', c: { t: 'seg', opts: [['scale:0.5', '50%'], ['scale:0.75', '75%'], ['backing', '100%'], ['scale:1.5', '150%'], ['scale:2', '200%']] } },
-    { key: 'hud', label: 'Race HUD', help: 'Wide anchors it to the screen edges; 4:3 is the original centred layout.', c: { t: 'seg', opts: [['wide', 'Wide'], ['43', '4:3']] } },
-    { key: 'movie_framing', label: 'Movie framing', help: 'Fit keeps the 4:3 movies whole; fill crops them; stretch widens them.', c: { t: 'seg', opts: [['fit', 'Fit'], ['fill', 'Fill'], ['stretch', 'Stretch']] } },
-    { key: 'cutscene_borders', label: 'Cutscene bars', help: 'Letterbox bars across the whole width, or none.', c: { t: 'seg', opts: [['full', 'Full'], ['off', 'Off']] } },
-    { key: 'resolution', label: 'Fixed render size', help: 'Renders every resolution at this size, for example 2560x1440. Empty uses the one chosen in the game.', c: { t: 'text', placeholder: 'WxH' }, more: true },
-    { key: 'max_pixels', label: 'Pixel limit', help: 'Most pixels the screen-size resolution renders (0 = no limit).', c: { t: 'num', min: 0, step: 100000 }, more: true },
-  ] },
-  { title: 'Frame rate', items: [
-    { key: 'fps', label: 'Frame rate', help: 'Auto follows the display (120 on a 120 Hz screen). Cutscenes stay at 30.', c: { t: 'seg', opts: [['auto', 'Auto'], ['60', '60'], ['120', '120']] } },
-    { key: 'fps_counter', label: 'Frame-rate counter', help: 'In a corner of the game. F8 cycles it while you play.', c: { t: 'seg', opts: [['off', 'Off'], ['on', 'On'], ['detailed', 'Detailed']] } },
-    { key: 'hfr_fixes', label: 'High-frame-rate fixes', help: 'For the parts of the game that count frames: default, all, none, or a list of ticks, timer, particles, trail, audio, rtf.', c: { t: 'text', placeholder: 'default' }, more: true },
-    { key: 'nos_trail_length', label: 'Nitrous trail length', help: 'Length factor of the nitrous and speed-streak trails (1 = normal).', c: { t: 'num', min: 0, step: 0.1 }, more: true },
-  ] },
-  { title: 'Sound', items: [
-    { key: 'audio_latency', label: 'Output latency', help: 'Lowest reacts fastest; Robust survives a busy PC best.', c: { t: 'seg', opts: [['interactive', 'Lowest'], ['balanced', 'Balanced'], ['playback', 'Robust']] } },
-  ] },
-  { title: 'Controller', items: [
-    { key: 'gamepad', label: 'Controller', help: 'On keeps a controller once it was connected; hotplug only while connected.', c: { t: 'seg', opts: [['on', 'On'], ['hotplug', 'Hotplug'], ['off', 'Off']] } },
-    { key: 'rumble', label: 'Rumble', help: 'On controllers that have it: crashes, hard landings and the game\'s own force feedback.', c: { t: 'switch' } },
-    { key: 'gamepad_menu_keys', label: 'Menu buttons', help: 'A, B and View also act as Enter, Esc and Q in the menus.', c: { t: 'switch' } },
-    { key: 'gamepad_deadzone', label: 'Stick dead zone', help: 'Fraction of full travel, 0 to 0.9.', c: { t: 'num', min: 0, max: 0.9, step: 0.01 }, more: true },
-    { key: 'gamepad_trigger_deadzone', label: 'Trigger dead zone', help: 'Fraction of full travel, 0 to 0.9.', c: { t: 'num', min: 0, max: 0.9, step: 0.01 }, more: true },
-    { key: 'gamepad_trigger_click', label: 'Trigger full press', help: 'How far a trigger travels before it counts as fully pressed (full throttle, full brake).', c: { t: 'num', min: 0, max: 1, step: 0.01 }, more: true },
-  ] },
   { title: 'Multiplayer', status: true, items: [
-    { key: 'roam_name', label: 'Your name', help: 'What friends see in free roam, and your name in the Online menu (there only letters, digits, - and _, at most 15). Empty uses your profile name.', c: { t: 'text', placeholder: 'profile name' } },
-    { key: 'online', label: 'Online mode', help: 'The game\'s Online menu takes you straight to the Online Main Menu under your name, without the EA Login screens: lobby, chat and races with everyone playing from this server.', c: { t: 'switch' } },
-  ] },
-  { title: 'Free roam', items: [
-    { key: 'roam', label: 'Play with others', help: 'Everyone on this server who turns this on sees your car in career free roam, and you see theirs, with their names over them.', c: { t: 'switch' } },
+    { key: 'roam', label: 'Free roam with others', help: 'Everyone on this server who turns this on sees your car in career free roam, and you see theirs, with their names over them.', c: { t: 'switch' } },
+    { key: 'roam_name', label: 'Your name', help: 'What other players see over your car in free roam, and your name in the Online menu (there only letters, digits, - and _, at most 15). Empty uses your profile name.', c: { t: 'text', placeholder: 'profile name' } },
     { key: 'roam_room', label: 'Room', help: 'Only players in the same room see each other\'s cars. A filter, not privacy: everyone on this server still sees your name and whether you play.', c: { t: 'text', placeholder: 'none' } },
+    { key: 'online', label: 'Online mode', help: 'The game\'s Online menu takes you straight to the Online Main Menu under your name, without the EA Login screens: lobby, chat and races with everyone playing from this server.', c: { t: 'switch' } },
+    { key: 'roam_collide', label: 'Solid cars', help: 'You collide with the other players\' cars. A car that appears on yours lets you through until you are apart. Off: you drive through them.', c: { t: 'switch' }, more: true },
     { key: 'roam_max_players', label: 'Largest group', help: 'You and the players you exchange cars with at once, 2 to 8: the server picks the nearest.', c: { t: 'num', min: 2, max: 8, step: 1 }, more: true },
     { key: 'roam_max_cars', label: 'Players\' cars shown', help: 'The nearest, 0 to 5.', c: { t: 'num', min: 0, max: 5, step: 1 }, more: true },
-    { key: 'roam_collide', label: 'Solid cars', help: 'You collide with the other players\' cars. A car that appears on yours lets you through until you are apart. Off: you drive through them.', c: { t: 'switch' }, more: true },
     { key: 'roam_discovery', label: 'Find players automatically', help: 'When the server does not pick the players near you: looks for players on this server with a broadcast every 2 s.', c: { t: 'switch' }, more: true },
     { key: 'roam_peers', label: 'Players\' addresses', help: 'a.b.c.d or a.b.c.d:port, separated by commas.', c: { t: 'text', placeholder: 'none' }, more: true },
     { key: 'roam_port', label: 'Port', help: 'The same for every player, 1024 to 65535.', c: { t: 'num', min: 1024, max: 65535, step: 1 }, more: true },
@@ -73,11 +35,44 @@ const GROUPS: Group[] = [
     { key: 'roam_extrap', label: 'Longest extrapolation', help: 'How long another player\'s car keeps moving on its own when updates are late, 0 to 1000.', c: { t: 'num', min: 0, max: 1000, step: 10, unit: 'ms' }, more: true },
     { key: 'roam_carpool_kb', label: 'Car memory pool', help: 'In KB; never below the game\'s own 11000.', c: { t: 'num', min: 0, max: 64000, step: 1000, unit: 'KB' }, more: true },
   ] },
+  { title: 'Game', items: [
+    { key: 'movies', label: 'Movies', help: 'Intro, story and FMV movies.', c: { t: 'switch' } },
+    { key: 'autosave', label: 'Autosave', help: 'Sets each profile\'s Save option in the game to Autosave once, so races, purchases and changes are saved without asking. Prompt or Off chosen afterwards in the game\'s Options, Gameplay stays.', c: { t: 'switch' } },
+    { key: 'intro', label: 'Startup movies', help: 'The EA and THX logos, the PSA and the intro. Skippable: Enter, Esc, Space, a left click, or A, B or Start ends each one. Original: as in the game, where only the intro ends early.', c: { t: 'seg', opts: [['skippable', 'Skippable'], ['original', 'Original'], ['off', 'Off']] }, more: true },
+    { key: 'sound', label: 'Sound', help: 'All sound output.', c: { t: 'switch' }, more: true },
+    { key: 'background', label: 'When the tab is in the background', help: 'Pause freezes the game and its sound, as alt-tab does on Windows. In LAN and Online play it keeps running, without sound.', c: { t: 'seg', opts: [['pause', 'Pause'], ['run', 'Keep running']] }, more: true },
+    { key: 'audio_latency', label: 'Output latency', help: 'Lowest reacts fastest; Robust survives a busy PC best.', c: { t: 'seg', opts: [['interactive', 'Lowest'], ['balanced', 'Balanced'], ['playback', 'Robust']] }, more: true },
+    { key: 'seed_registry', label: 'Highest graphics for a new save', help: 'The game\'s own graphics options at their highest, at this screen\'s resolution. Off lets the game run its own hardware check.', c: { t: 'switch' }, more: true },
+    { key: 'quit_grace', label: 'Time to quit', help: 'Seconds the game gets to shut down after Quit game before it is stopped.', c: { t: 'num', min: 0, step: 1, unit: 's' }, more: true },
+    { key: 'watchdog', label: 'Stall report', help: 'Seconds without a frame before the log gets a report of every game thread (0 = off).', c: { t: 'num', min: 0, step: 1, unit: 's' }, more: true },
+  ] },
+  { title: 'Display', items: [
+    { key: 'fullscreen', label: 'Full screen on Play', help: 'Off plays in this browser window; F9 has full screen while you play. Hold Esc to leave it.', c: { t: 'switch' } },
+    { key: 'render', label: 'Resolution scale', help: 'Scales the game\'s screen-size resolution (its default), per side: 50% renders a quarter of the pixels. Lower is faster and softer.', c: { t: 'seg', opts: [['scale:0.5', '50%'], ['scale:0.75', '75%'], ['backing', '100%'], ['scale:1.5', '150%'], ['scale:2', '200%']] } },
+    { key: 'fps', label: 'Frame rate', help: 'Auto follows the display (120 on a 120 Hz screen). Cutscenes stay at 30.', c: { t: 'seg', opts: [['auto', 'Auto'], ['60', '60'], ['120', '120']] } },
+    { key: 'hud', label: 'Race HUD', help: 'Wide anchors it to the screen edges; 4:3 is the original centred layout.', c: { t: 'seg', opts: [['wide', 'Wide'], ['43', '4:3']] }, more: true },
+    { key: 'movie_framing', label: 'Movie framing', help: 'Fit keeps the 4:3 movies whole; fill crops them; stretch widens them.', c: { t: 'seg', opts: [['fit', 'Fit'], ['fill', 'Fill'], ['stretch', 'Stretch']] }, more: true },
+    { key: 'cutscene_borders', label: 'Cutscene bars', help: 'Letterbox bars across the whole width, or none.', c: { t: 'seg', opts: [['full', 'Full'], ['off', 'Off']] }, more: true },
+    { key: 'fps_counter', label: 'Frame-rate counter', help: 'In a corner of the game. F8 cycles it while you play.', c: { t: 'seg', opts: [['off', 'Off'], ['on', 'On'], ['detailed', 'Detailed']] }, more: true },
+    { key: 'resolution', label: 'Fixed render size', help: 'Renders every resolution at this size, for example 2560x1440. Empty uses the one chosen in the game.', c: { t: 'text', placeholder: 'WxH' }, more: true },
+    { key: 'max_pixels', label: 'Pixel limit', help: 'Most pixels the screen-size resolution renders (0 = no limit).', c: { t: 'num', min: 0, step: 100000 }, more: true },
+    { key: 'hfr_fixes', label: 'High-frame-rate fixes', help: 'For the parts of the game that count frames: default, all, none, or a list of ticks, timer, particles, trail, audio, rtf.', c: { t: 'text', placeholder: 'default' }, more: true },
+    { key: 'nos_trail_length', label: 'Nitrous trail length', help: 'Length factor of the nitrous and speed-streak trails (1 = normal).', c: { t: 'num', min: 0, step: 0.1 }, more: true },
+  ] },
+  { title: 'Controller', items: [
+    { key: 'rumble', label: 'Rumble', help: 'On controllers that have it: crashes, hard landings and the game\'s own force feedback.', c: { t: 'switch' } },
+    { key: 'gamepad', label: 'Controller', help: 'On keeps a controller once it was connected; hotplug only while connected.', c: { t: 'seg', opts: [['on', 'On'], ['hotplug', 'Hotplug'], ['off', 'Off']] }, more: true },
+    { key: 'gamepad_menu_keys', label: 'Menu buttons', help: 'A, B and View also act as Enter, Esc and Q in the menus.', c: { t: 'switch' }, more: true },
+    { key: 'gamepad_deadzone', label: 'Stick dead zone', help: 'Fraction of full travel, 0 to 0.9.', c: { t: 'num', min: 0, max: 0.9, step: 0.01 }, more: true },
+    { key: 'gamepad_trigger_deadzone', label: 'Trigger dead zone', help: 'Fraction of full travel, 0 to 0.9.', c: { t: 'num', min: 0, max: 0.9, step: 0.01 }, more: true },
+    { key: 'gamepad_trigger_click', label: 'Trigger full press', help: 'How far a trigger travels before it counts as fully pressed (full throttle, full brake).', c: { t: 'num', min: 0, max: 1, step: 0.01 }, more: true },
+  ] },
 ];
 
 /** Every key the panel shows (the check in app-test.mjs compares this with the template). */
 export const PANEL_KEYS = GROUPS.flatMap(g => g.items.map(i => i.key));
 const ITEMS = new Map(GROUPS.flatMap(g => g.items.map(i => [i.key, i] as const)));
+const GROUP_OF = new Map(GROUPS.flatMap(g => g.items.map(i => [i.key, g] as const)));
 
 const boolOn = (v: string) => v === 'on';
 const READ_ONLY = 'Read only here: another tab of this browser runs the game and owns its saves and settings. Change them there; this tab takes over when that one closes.';
@@ -216,11 +211,17 @@ export class SettingsPanel {
       const d = document.createElement('details'); d.className = 'more';
       d.open = this.openMore.has(g.title);
       d.ontoggle = () => { if (d.open) this.openMore.add(g.title); else this.openMore.delete(g.title); };
-      const s = document.createElement('summary'); s.textContent = `More ${g.title.toLowerCase()} settings`;
+      const s = document.createElement('summary'); s.textContent = this.moreLabel(g);
       d.append(s, ...more.map(i => this.row(i)));
       box.append(d);
     }
     return box;
+  }
+
+  /** "More ... settings", with how many of them the file changes: a changed setting is not out of sight unnoticed. */
+  private moreLabel(g: Group): string {
+    const n = g.items.filter(i => i.more && this.resolved.file[i.key]?.raw).length;
+    return `More ${g.title.toLowerCase()} settings${n ? ` (${n} changed)` : ''}`;
   }
 
   /** The lines with keys outside the table: listed, so nothing in the file acts unseen (the audit's PAGE-2). */
@@ -251,6 +252,7 @@ export class SettingsPanel {
     const focused = old.contains(document.activeElement);
     const fresh = this.row(it);
     old.replaceWith(fresh);
+    if (it.more) fresh.parentElement!.querySelector('summary')!.textContent = this.moreLabel(GROUP_OF.get(key)!);
     if (focused) this.focusRow(fresh);
   }
 

@@ -77,16 +77,13 @@ is saved at once and applies the next time you press Play.
 
 | Group | Settings |
 |---|---|
-| Game | movies, startup movies (skippable, original or off), sound, autosave, pause or keep running in the background |
-| Display | full screen on Play (off: the game plays in the browser window), resolution scale, HUD layout, movie framing, cutscene bars |
-| Frame rate | auto (follows the screen: 120 on a 120 Hz display), 60 or 120, and the counter |
-| Sound | output latency |
-| Controller | controller, rumble, menu buttons, dead zones |
-| Multiplayer | how many play on this server now, your name (in free roam and online), the game's Online mode (on by default) |
-| Free roam | play with others, room, solid cars |
+| Multiplayer | how many play on this server now, free roam with others, your name (in free roam and online), room, the game's Online mode (on by default); more: solid cars and the free-roam network |
+| Game | movies, autosave; more: startup movies (skippable, original or off), sound, pause or keep running in the background, sound output latency |
+| Display | full screen on Play (off: the game plays in the browser window), resolution scale, frame rate (auto follows the screen: 120 on a 120 Hz display; 60 or 120); more: HUD layout, movie framing, cutscene bars, frame-rate counter |
+| Controller | rumble; more: controller on or off, menu buttons, dead zones |
 
-- **More settings:** each group's "More … settings" has the less common ones. **Reset** next to a changed setting
-  puts its default back.
+- **More settings:** each group's "More … settings" has the less common ones, and says how many of them you
+  changed. **Reset** next to a changed setting puts its default back.
 - **Edit the file:** "Edit settings.ini as text" opens the file itself. A line the game would ignore is shown with
   the reason. A line that sets a runtime variable by its own name (`NFSU2_ROAM = 1`) shows on the row it belongs to,
   and every such line is listed under "Other variables in this file". Lines that would name a file of your saves or
@@ -124,8 +121,8 @@ is saved at once and applies the next time you press Play.
 
 Free roam is shared with **everyone** on the server who turns it on. Use a Room to keep to a group.
 
-1. Each player turns on **Settings, Free roam, Play with others**. **Settings, Multiplayer, Your name** is the name
-   the others see (empty: your profile name).
+1. Each player turns on **Settings, Multiplayer, Free roam with others**. **Settings, Multiplayer, Your name** is
+   the name the others see (empty: your profile name).
 2. Everyone plays from the same server's address.
 3. Each player starts or loads a career and drives in free roam. Players find each other by themselves, and their
    cars appear in your city with their names over them, as in the game's own LAN races.
@@ -135,8 +132,8 @@ Good to know:
 - **How many:** up to 64 players on a server (its owner can change that). The server pairs each player with the 7
   players nearest to them, and your game shows the 5 nearest cars at once; as you drive, nearer cars take the place
   of farther ones.
-- **Solid cars:** you collide with the other players' cars (Settings, Free roam, More free roam settings, Solid
-  cars; off: you drive through them). A car that appears on top of yours, at a garage or after a jump, lets you
+- **Solid cars:** you collide with the other players' cars (Settings, Multiplayer, More multiplayer settings,
+  Solid cars; off: you drive through them). A car that appears on top of yours, at a garage or after a jump, lets you
   through until you are apart. Each player's own game moves their car: a car you hit is pushed in its owner's game,
   and moves on your screen as it does there.
 - **Names over the cars** follow the game's own player-names option, as in its LAN races.

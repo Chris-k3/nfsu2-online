@@ -266,8 +266,8 @@ export const TEMPLATE = `# NFSU2 settings, read at every launch.
 
 # ---- Multiplayer ---------------------------------------------------------
 
-# Your name: what friends see in free roam (printable ASCII, at most 24
-# characters), and your name in the game's Online menu, which goes straight
+# Your name: what other players see in free roam (printable ASCII, at most
+# 24 characters), and your name in the game's Online menu, which goes straight
 # to the Online Main Menu under it, without the EA Login screens (there only
 # letters, digits, '-' and '_', at most 15: any other run of characters
 # becomes one '_').  Empty = your profile name.  A ';' or '#' after a blank

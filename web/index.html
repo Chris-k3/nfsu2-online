@@ -84,20 +84,6 @@
   </div>
 
   <div class="content">
-    <section class="panel" id="settings" aria-labelledby="settings-title">
-      <h2 id="settings-title">Settings</h2>
-      <p class="hint" id="settings-note">Saved in this browser. Changes apply the next time you press Play.</p>
-      <div id="settings-body"></div>
-      <details class="raw" id="settings-raw">
-        <summary>Edit settings.ini as text</summary>
-        <textarea id="settings-text" spellcheck="false" rows="20" wrap="off" aria-label="settings.ini"></textarea>
-        <div class="row">
-          <button type="button" class="btn" id="settings-text-save">Save file</button>
-          <span class="hint" id="settings-text-msg" role="status"></span>
-        </div>
-      </details>
-    </section>
-
     <section class="panel" id="saves" aria-labelledby="saves-title">
       <h2 id="saves-title">Saves</h2>
       <ul class="profiles" id="profiles" aria-label="Profiles in this browser"></ul>
@@ -115,6 +101,20 @@
       <div class="row">
         <button type="button" class="btn" id="clear-cache">Delete the downloaded game data</button>
       </div>
+    </section>
+
+    <section class="panel" id="settings" aria-labelledby="settings-title">
+      <h2 id="settings-title">Settings</h2>
+      <p class="hint" id="settings-note">Saved in this browser. Changes apply the next time you press Play.</p>
+      <div id="settings-body"></div>
+      <details class="raw" id="settings-raw">
+        <summary>Edit settings.ini as text</summary>
+        <textarea id="settings-text" spellcheck="false" rows="20" wrap="off" aria-label="settings.ini"></textarea>
+        <div class="row">
+          <button type="button" class="btn" id="settings-text-save">Save file</button>
+          <span class="hint" id="settings-text-msg" role="status"></span>
+        </div>
+      </details>
     </section>
   </div>
 </main>

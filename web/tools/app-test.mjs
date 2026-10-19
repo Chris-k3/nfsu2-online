@@ -146,10 +146,11 @@ try {
     let n0 = await saved(page);
     await page.click('.set[data-key="movies"] .switch'); await settle(page, n0++);          // movies: on -> off
     await page.click('.set[data-key="fps"] .opt:has-text("120")'); await settle(page, n0++);
+    await page.click('#settings summary:has-text("More display")');
     await page.click('.set[data-key="fps_counter"] .opt:has-text("Detailed")'); await settle(page, n0++);
     await page.click('.set[data-key="roam"] .switch'); await settle(page, n0++);            // roam on (validated bool)
     await page.fill('#set-roam_name', 'Tester ; a comment'); await page.press('#set-roam_name', 'Tab'); await settle(page, n0++);
-    await page.click('#settings summary:has-text("More free roam")');
+    await page.click('#settings summary:has-text("More multiplayer")');
     await page.fill('#set-roam_port', '99'); await page.press('#set-roam_port', 'Tab');   // out of range: refused, not written
     const refusedMsg = await page.locator('.set[data-key="roam_port"] .set-state').textContent();
     await page.click('.set[data-key="roam"] .switch'); await settle(page, n0);              // roam back off
@@ -178,11 +179,13 @@ try {
       name: document.querySelector('#set-roam_name').value,
     }));
     // Reset puts the template line back
+    const moreDisplay = await page.locator('#settings summary:has-text("More display")').textContent();   // fps_counter and hud
+    await page.click('#settings summary:has-text("More display")');
     n0 = await saved(page);
     await page.click('.set[data-key="hud"] .set-reset'); await settle(page, n0);
     const file2 = (await readOpfs(page, SAVE, 'settings.ini')).text;
     report('settings', fileOk && envOk && /not a whole number in 1024\.\.65535/.test(refusedMsg) && /ignored/.test(rawMsg) &&
-      /ultrawide/.test(hudState) && after.movies === 'false' && after.fps === '120' && after.name === 'Tester' && /^#hud = wide$/m.test(file2),
+      /ultrawide/.test(hudState) && after.movies === 'false' && after.fps === '120' && after.name === 'Tester' && /^#hud = wide$/m.test(file2) && /\(2 changed\)$/.test(moreDisplay),
       { setLines: lines, env: { NOMOVIES: env.NOMOVIES, NFSU2_FPS: env.NFSU2_FPS, NFSU2_FPS_COUNTER: env.NFSU2_FPS_COUNTER, NFSU2_ROAM_NAME: env.NFSU2_ROAM_NAME, NFSU2_ROAM: env.NFSU2_ROAM, WINDOW: env.WINDOW ?? '(unset)' },
         refusedMsg, rawMsg, hudState, afterReload: after, hudReset: /^#hud = wide$/m.test(file2) });
   }
