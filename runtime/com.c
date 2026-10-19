@@ -1413,6 +1413,9 @@ static const VSConst *aspect_apply(const VSConst *vsk, const VSProg *prog){
             }
             if (!rt_screen) sx = sy = 1.f;
         }
+        /* A quad the game draws over the whole target (the rain tint) is in
+         * HUD units too, but must cover the whole screen (widescreen.c). */
+        if (ws_fill_target()) sx = sy = 1.f;
         if (ENVC("ASPLOG")){ static int no = 0;
             if (no < 6){ no++;
                 fprintf(stderr,"  [asp-ortho] vs=%u cx=%d cw=%d  c%d=(%.4f %.4f %.4f %.4f)"

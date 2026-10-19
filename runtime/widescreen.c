@@ -19,9 +19,12 @@
  *   marker    a HUD marker placed over a world position (sub_004ebec0)
  *             gets the inverse of the HUD squeeze.
  *   rain      the lens rain drops keep their 4:3 shape.
+ *   fill      quads over a whole render target (sub_005c7140: the rain and
+ *             overcast tint) are 640-unit HUD quads too and covered only the
+ *             4:3 middle; the renderer leaves them full size.
  *
  * Every hook site is listed with HOOK_SITE() so gen.sh can hand it to the
- * lifter.  Options (all read once):
+ * lifter (fill is an override of the whole function).  Options (all read once):
  *   NFSU2_FOV=game|renderer       where Hor+ is applied (default game)
  *   NFSU2_HUD=43|wide             centred 4:3 HUD or edge-anchored HUD
  *   NFSU2_MOVIE=fit|fill|stretch  FMV framing (default fit = pillarbox)
@@ -218,6 +221,24 @@ static void movie_quad(uint32_t sp){
     MRF32(sp) = -hx; MRF32(sp + 4u) = -hy; MRF32(sp + 8u) = hx; MRF32(sp + 12u) = hy;
 }
 
+/* sub_005c7140(surface, texture, colour, ?, src blend, dest blend, flag)
+ * makes the surface the render target and draws one quad over all of it:
+ * 0..640 x 0..480 HUD units, i.e. identity-matrix clip space, which com.c
+ * narrows to the 4:3 middle like the HUD.  Its callers mean the whole
+ * target: sub_005c7860's weather tint (DESTCOLOR x SRCCOLOR, a 16x16 grey
+ * texture times the rain/overcast colour, into the frame's copy) and two
+ * alpha passes in sub_005caad0.  While it runs, aspect_apply leaves
+ * orthographic draws alone. */
+static int g_fill;
+void sub_005c7140_orig(CPU *c);
+void sub_005c7140(CPU *c){
+    g_hits[12]++;
+    g_fill++;
+    sub_005c7140_orig(c);
+    g_fill--;
+}
+int ws_fill_target(void){ return g_fill > 0; }
+
 void ws_hud_marker(float *x, float *y){
     ws_init();
     if (g_fov != FOV_GAME) return;
@@ -340,8 +361,8 @@ int ws_hook(CPU *c, uint32_t ip){
 void ws_report(void){
     if (!g_init) return;
     fprintf(stderr, "ws: hooks fov=%lu/%lu borders=%lu movie=%lu hud=%lu/%lu/%lu/%lu marker=%lu/%lu rain=%lu"
-            " fe-rerender=%lu (k=%.4f)\n",
+            " fe-rerender=%lu fill=%lu (k=%.4f)\n",
             g_hits[0], g_hits[1], g_hits[2], g_hits[3],
             g_hits[4], g_hits[5], g_hits[6], g_hits[7], g_hits[8], g_hits[9], g_hits[10],
-            g_hits[11], (double)g_k);
+            g_hits[11], g_hits[12], (double)g_k);
 }
