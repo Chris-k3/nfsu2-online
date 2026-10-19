@@ -501,7 +501,7 @@ test('requests queued on one connection (pipelined) and never read: cut, no memo
     let got = '';
     c.on('data', d => { got += d; });
     for (let i = 0; i < 5; i++) {
-      c.write(req('GET', '/robots.txt').replace('Connection: close\r\n', ''));
+      c.write(req('GET', '/players').replace('Connection: close\r\n', ''));
       const t0 = Date.now();
       while ((got.match(/HTTP\/1\.1 200/g) ?? []).length <= i && Date.now() - t0 < 5000) await sleep(20);
     }
@@ -510,7 +510,7 @@ test('requests queued on one connection (pipelined) and never read: cut, no memo
     const c2 = await rawConnect(P2);
     let got2 = '';
     c2.on('data', d => { got2 += d; });
-    c2.write(req('GET', '/robots.txt').replace('Connection: close\r\n', '').repeat(3));
+    c2.write(req('GET', '/players').replace('Connection: close\r\n', '').repeat(3));
     await sleep(500);
     assert.equal((got2.match(/HTTP\/1\.1 200/g) ?? []).length, 3, 'three pipelined requests answered');
     c.destroy(); c2.destroy();
@@ -522,7 +522,7 @@ test('TLS handshakes that never finish: closed after the handshake timeout, one 
   // timed out and never closed them; 1024 such sockets locked the HTTPS port until a restart
   const s = await startServer(['--port', String(P1), '--http-port', '0', '--tls-cert', CERTS.cert, '--tls-key', CERTS.key]);
   const realClient = async (host = '127.0.0.1') => {
-    try { return (await rawRequest({ port: P1, useTls: true, host, servername: 'nfsu2.test', data: req('GET', '/robots.txt'), timeout: 8000 })).status; }
+    try { return (await rawRequest({ port: P1, useTls: true, host, servername: 'nfsu2.test', data: req('GET', '/players'), timeout: 8000 })).status; }
     catch (e) { return e.code ?? 'error'; }
   };
   const socks = [];
@@ -579,8 +579,8 @@ test('no certificate: this machine only (HTTP on 127.0.0.1), no HTTPS port, and 
   const s = await startServer(['--port', String(P1), '--http-port', String(P2)]);
   try {
     assert.match(s.out(), /other PCs : none: they need HTTPS/);
-    assert.equal((await rawRequest({ port: P2, data: req('GET', '/robots.txt') })).status, 200, 'http://localhost');
-    const refused = async (o) => { try { await rawRequest({ ...o, data: req('GET', '/robots.txt'), timeout: 5000 }); return false; } catch (e) { return e.code === 'ECONNREFUSED'; } };
+    assert.equal((await rawRequest({ port: P2, data: req('GET', '/players') })).status, 200, 'http://localhost');
+    const refused = async (o) => { try { await rawRequest({ ...o, data: req('GET', '/players'), timeout: 5000 }); return false; } catch (e) { return e.code === 'ECONNREFUSED'; } };
     assert.ok(await refused({ port: P1, useTls: true }), 'no HTTPS port');
     if (LAN_IP) assert.ok(await refused({ port: P2, host: LAN_IP }), 'the HTTP port is not on the LAN');
   } finally { await s.stop(); }
@@ -590,7 +590,7 @@ test('IPv6: a certificate listens on both (::), --bind as given', { skip: SKIP, 
   const has6 = Object.values(os.networkInterfaces()).flat().some(a => a && a.family === 'IPv6' && a.internal);
   if (!has6) { console.log('no IPv6 loopback: skipped'); return; }
   const st = async (host, port = P1) => {
-    try { return (await rawRequest({ port, useTls: true, host, servername: 'nfsu2.test', data: req('GET', '/robots.txt'), timeout: 5000 })).status; }
+    try { return (await rawRequest({ port, useTls: true, host, servername: 'nfsu2.test', data: req('GET', '/players'), timeout: 5000 })).status; }
     catch (e) { return e.code; }
   };
   const a = await startServer(['--port', String(P1), '--http-port', '0', '--tls-cert', CERTS.cert, '--tls-key', CERTS.key]);
@@ -614,7 +614,7 @@ test('with --trusted-proxies cloudflare, the long keep-alive is for the proxies 
     const so = tls.connect({ host, port: P1, servername: 'nfsu2.test', rejectUnauthorized: false });
     let t0 = 0, head = '';
     so.on('data', d => { head += d; if (!t0 && head.includes('\r\n\r\n')) t0 = Date.now(); });
-    so.on('secureConnect', () => so.write(req('GET', '/robots.txt').replace('Connection: close\r\n', 'Connection: keep-alive\r\n')));
+    so.on('secureConnect', () => so.write(req('GET', '/players').replace('Connection: close\r\n', 'Connection: keep-alive\r\n')));
     so.on('error', rej);
     so.on('close', () => res({ s: (Date.now() - t0) / 1000, head }));
     setTimeout(() => { so.destroy(); }, 80_000);
@@ -706,7 +706,7 @@ test('trusted proxies: client address headers believed only from a trusted peer'
   let n = 0;
   const probe = async (s, target, headers) => {
     const marker = `m${++n}-${Date.now()}`;
-    await rawRequest({ ...target, data: req('GET', `/robots.txt?${marker}`, { headers }) });
+    await rawRequest({ ...target, data: req('GET', `/players?${marker}`, { headers }) });
     await sleep(100);
     return logged(s, marker);
   };
@@ -760,7 +760,7 @@ test('trusted proxies: client address headers believed only from a trusted peer'
 });
 
 test('HSTS: over a certificate or a proxy that says https, never on localhost or an IP', { skip: SKIP, timeout: 60_000 }, async () => {
-  const hsts = async (target, host, headers = {}) => (await rawRequest({ ...target, data: req('GET', '/robots.txt', { host, headers }) })).headers['strict-transport-security'] ?? null;
+  const hsts = async (target, host, headers = {}) => (await rawRequest({ ...target, data: req('GET', '/players', { host, headers }) })).headers['strict-transport-security'] ?? null;
   const s = await startServer(['--port', String(P1), '--http-port', String(P2), '--tls-cert', CERTS.cert, '--tls-key', CERTS.key]);
   try {
     const tlsT = { port: P1, useTls: true, servername: 'nfsu2.test' };

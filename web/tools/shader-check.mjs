@@ -77,7 +77,7 @@ page.on('console', m => {
 page.on('pageerror', e => console.log('PAGEERROR ' + e));
 // write a dump directory (WGSL text + .vec test vectors) into OPFS <save>/shaders
 async function upload(dir) {
-  await page.goto(`${origin}/robots.txt`);
+  await page.goto(`${origin}/players`);
   const files = {};
   for (const n of fs.readdirSync(dir))
     if (n.endsWith('.wgsl') || n.endsWith('.vec') || n.endsWith('.pvec')) files[n] = fs.readFileSync(path.join(dir, n)).toString('base64');

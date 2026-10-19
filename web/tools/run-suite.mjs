@@ -110,7 +110,7 @@ async function seedSave(page, s) {
       else if (e.isFile()) files.push([r, fs.readFileSync(path.join(d, e.name)).toString('base64')]);
     }
   })(SEED, '');
-  await page.goto(`${opt.base}/robots.txt`);
+  await page.goto(`${opt.base}/players`);
   const n = await page.evaluate(async ([dir, files]) => {
     const root = await navigator.storage.getDirectory();
     try { await root.removeEntry(dir, { recursive: true }); } catch { /* none yet */ }

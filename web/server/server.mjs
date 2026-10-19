@@ -15,7 +15,6 @@
 //                      free roam's hub on 10.77.0.253 (roam-hub.mjs: each
 //                      player's peers are the players nearest to it; --roam-hub
 //                      off: none, players find each other by broadcast)
-//   /robots.txt        nothing to index
 //   /players           how many play on this server now: { players, online }, two
 //                      counts and nothing else (never cached)
 //   test aids, only with --dev: the test pages (/test/) and source maps from
@@ -244,12 +243,12 @@ const TYPES = {
   '.png': 'image/png', '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8', '.map': 'application/json',
 };
 const hstsFor = q => HSTS_OK && viaHttps(q, trust) && !isLocalOrIp(forwardedHost(q, trust) ?? q.headers.host);
-function headers(q, extra = {}, cache = 'store') {
-  return { ...securityHeaders({ hsts: hstsFor(q) }), ...cacheHeaders(cache), ...extra };
+function headers(q, extra = {}, cache = 'store', noindex = true) {
+  return { ...securityHeaders({ hsts: hstsFor(q), noindex }), ...cacheHeaders(cache), ...extra };
 }
-function plain(q, s, code, text, extra = {}) {
+function plain(q, s, code, text, extra = {}, cache = 'store', noindex = true) {
   const body = text + '\n';
-  s.writeHead(code, headers(q, { 'content-type': 'text/plain; charset=utf-8', 'content-length': Buffer.byteLength(body), ...extra }));
+  s.writeHead(code, headers(q, { 'content-type': 'text/plain; charset=utf-8', 'content-length': Buffer.byteLength(body), ...extra }, cache, noindex));
   s.end(q.method === 'HEAD' ? undefined : body);
 }
 const notFound = (q, s) => plain(q, s, 404, 'Not found');
@@ -569,7 +568,6 @@ async function handler(q, s) {
     return sendFile(q, s, path.dirname(WASM), WASM, { cache: 'revalidate', extra: { vary: 'accept-encoding' } });
   }
   if (p === '/game.json') return sendFile(q, s, path.dirname(GAME_JSON), GAME_JSON);
-  if (p === '/robots.txt') return plain(q, s, 200, 'User-agent: *\nDisallow: /');
   if (p === '/players') {
     // how many play on this server now (the start page's Multiplayer settings): two counts and nothing else, no
     // names, addresses or times; online: in the game's Online mode (logged in, or racing an online race), null

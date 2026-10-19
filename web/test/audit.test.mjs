@@ -137,7 +137,7 @@ test('F7 / PRIV-4: a page that rebinds its own name to this machine gets 421 eve
   try {
     const evil = `rebind.attacker.example:${P2}`;
     const got = {};
-    for (const p of ['/', '/robots.txt', '/data-manifest', '/data/SPEED2.EXE', '/game.json'])
+    for (const p of ['/', '/players', '/data-manifest', '/data/SPEED2.EXE', '/game.json'])
       got[p] = (await request(P2, { p, host: evil })).status;
     const up = { Upgrade: 'websocket', Connection: 'Upgrade', 'Sec-WebSocket-Version': '13', 'Sec-WebSocket-Key': crypto.randomBytes(16).toString('base64') };
     got['/lan'] = (await request(P2, { p: '/lan', host: evil, headers: { ...up, Origin: `http://${evil}` } })).status;
@@ -171,7 +171,7 @@ test('F4: with --tls-cert, a handshake without the server\'s name or with anothe
     assert.match(r.other, /^error/, 'another name: no certificate');
     assert.equal(r.own, 'CN=game.test');
     assert.equal(r.wild, 'CN=game.test', 'a wildcard name of the certificate');
-    const ok = await request(P1, { useTls: true, servername: 'game.test', host: 'game.test', p: '/robots.txt' });
+    const ok = await request(P1, { useTls: true, servername: 'game.test', host: 'game.test', p: '/players' });
     const odd = await request(P1, { useTls: true, servername: 'game.test', host: 'elsewhere.example', p: '/' });
     console.log(`Host game.test: ${ok.status}, another name: ${odd.status}`);
     assert.equal(ok.status, 200);
@@ -214,7 +214,7 @@ async function hold(port, n, xff, socks, p = BIG) {
   })));
   return answers;
 }
-const xffOther = (port, ip) => request(port, { p: '/robots.txt', host: HOST, headers: { 'X-Forwarded-For': ip } });
+const xffOther = (port, ip) => request(port, { p: '/players', host: HOST, headers: { 'X-Forwarded-For': ip } });
 test('F3: one client behind a proxy holds at most 64 requests at once, one IPv6 /48 at most 128; the last quarter is for newcomers', { skip: SKIP, timeout: 180_000 }, async () => {
   const s = await startServer(['--behind-proxy', '--http-port', String(P2)], { env: { NFSU2_HOST: HOST } });
   await sleep(1500);                                   // the module's compression at start
@@ -289,16 +289,16 @@ os.networkInterfaces = () => { const e = new Error('A system error occurred: uv_
   ssl('req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes', '-keyout', path.join(dir, 'k.pem'), '-out', path.join(dir, 'c.pem'),
     '-days', '5', '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost');
   const modes = {
-    'A, D (behind a proxy)': [['--behind-proxy', '--http-port', String(P2)], { NFSU2_HOST: HOST }, () => request(P2, { p: '/robots.txt' })],
+    'A, D (behind a proxy)': [['--behind-proxy', '--http-port', String(P2)], { NFSU2_HOST: HOST }, () => request(P2, { p: '/players' })],
     'B (a certificate)': [['--port', String(P1), '--http-port', '0', '--bind', '127.0.0.1', '--tls-cert', path.join(dir, 'c.pem'), '--tls-key', path.join(dir, 'k.pem')], {},
-      () => request(P1, { useTls: true, servername: 'localhost', p: '/robots.txt' })],
-    'this machine only': [['--http-port', String(P2)], {}, () => request(P2, { p: '/robots.txt' })],
+      () => request(P1, { useTls: true, servername: 'localhost', p: '/players' })],
+    'this machine only': [['--http-port', String(P2)], {}, () => request(P2, { p: '/players' })],
   };
   for (const [name, [args, env, probe]] of Object.entries(modes)) {
     const s = await startServer(args, { env, execArgv: ['--import', pre], expectExit: true });
     const r = s.ready ? await probe() : { status: 0 };
     const code = s.ready ? 'running' : `exited ${await s.exited}`;
-    console.log(`${name}: ${code}, /robots.txt ${r.status}${s.ready ? '' : `\n${s.out().split('\n').filter(l => /Error|error/.test(l)).slice(0, 2).join('\n')}`}`);
+    console.log(`${name}: ${code}, /players ${r.status}${s.ready ? '' : `\n${s.out().split('\n').filter(l => /Error|error/.test(l)).slice(0, 2).join('\n')}`}`);
     if (s.ready) await s.stop();
     assert.ok(s.ready, `${name}: starts`);
     assert.equal(r.status, 200, `${name}: serves`);
