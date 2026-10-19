@@ -94,7 +94,7 @@ typedef struct {
     float    p[3], v[3];           /* m, m/s */
     float    q[4];                 /* body -> world, x y z w */
     float    w[3];                 /* angular velocity, rad/s (world) */
-    float    steer;                /* -1 .. 1 */
+    float    steer;                /* -1 .. 1: the front wheels' angle, 1 = 180 degrees (left positive) */
     float    throttle, brake;      /* 0 .. 1 */
     float    rpm, speed;           /* rpm, m/s (forward) */
     int8_t   gear;

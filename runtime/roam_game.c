@@ -848,21 +848,21 @@ static void sincos_pi(float a, float *sn, float *cs){
  * (the spin about the axle and the steering of the front wheels), and in
  * physics mode 0 they stand still.  Spin: the wheel's angle goes down by
  * speed / tyre radius (RidePhysicsInfo +0x20 + 0x30 k) as the car goes
- * forward.  Steering: from the turn the car makes, tan = wheelbase x yaw rate
- * / speed, smoothed over 80 ms, at most 35 degrees -- what the friend steers,
- * without a field for it on the wire. */
-static void wheels_pose(Slot *s, const rc_pose *P, const float *u, float dt){
+ * forward.  Steering: the friend's own, the controls' +0x1e0 that goes on the
+ * wire as steer.  It is the angle the game's physics turns the front wheels
+ * to over a few frames, 16 bits to a full turn (steer 1 = 180 degrees, left
+ * positive), speed-dependent lock included (car dumps: the caliper settles at
+ * 180 degrees x steer at speed under the game's autopilot, and at 45 degrees
+ * for the keys' full lock standing still); so whatever the friend steers
+ * shows, counter-steer and standing still too.  Smoothed over 80 ms, at most
+ * 0.8 rad. */
+static void wheels_pose(Slot *s, const rc_pose *P, float dt){
     uint32_t car = s->car, ph = MR32(car + 0x20u);
     if (!(dt > 0.f)) dt = 0.f;
     if (dt > 0.1f) dt = 0.1f;
-    float wb = MRF32(car + 0x160u) - MRF32(car + 0x1e0u);          /* front axle x - rear axle x */
-    float yaw = P->w[0] * u[0] + P->w[1] * u[1] + P->w[2] * u[2], v = P->speed, want = s->steer;
-    if (__builtin_fabsf(v) > 1.f && wb > 1.f && wb < 5.f){
-        float t = wb * yaw / v;
-        if (t > 0.7f) t = 0.7f;
-        if (t < -0.7f) t = -0.7f;
-        want = rc_atan2f(t, 1.f);
-    }
+    float v = P->speed, want = P->steer * 3.14159265f;
+    if (want > 0.8f) want = 0.8f;
+    if (want < -0.8f) want = -0.8f;
     float k = dt / 0.08f;
     s->steer += (want - s->steer) * (k < 1.f ? k : 1.f);
     if (!__builtin_isfinite(s->steer)) s->steer = 0.f;
@@ -914,7 +914,7 @@ static void apply_pose(CPU *c, Slot *s, const rc_pose *P, float dt){
     if (rd32(car + 0x28u) != 0){ gcall1(c, FN_CAR_SETPHYS, car, 0); s->remode++; }
     gcall1(c, FN_ROADTRACK, car + 0x8d8u, car + 0x60u);
     gcall0(c, FN_CAR_SECTION, car);
-    wheels_pose(s, P, u, dt);
+    wheels_pose(s, P, dt);
     s->pose_frames++;
 }
 
