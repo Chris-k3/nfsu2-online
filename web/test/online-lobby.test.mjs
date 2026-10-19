@@ -178,6 +178,19 @@ test('a game: create, list, join, ready, start; +ses names every player by virtu
   assert.equal(w.host.lobby.games.size, 0, 'forgotten after raceMs');
 });
 
+test('six players: a game asked for 8 takes 6, the seventh finds it full; +ses names all six', () => {
+  const w = world(), names = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot', 'Golf'];
+  const cs = names.map((n, i) => w.client(`10.77.0.${i + 2}`).login(n));
+  cs[0].send('gcre', [['NAME', 'six'], ['MAXSIZE', 8], ['PARAMS', 'TRACK=4123']]);
+  assert.equal(cs[0].last('gcre').f.get('MAXSIZE'), '6');
+  for (const c of cs.slice(1, 6)) { c.send('gjoi', [['NAME', 'six']]); assert.equal(c.last('gjoi').code, ''); }
+  cs[6].send('gjoi', [['NAME', 'six']]);
+  assert.equal(cs[6].last('gjoi').code, 'full');
+  cs[0].send('gsta', [['NAME', 'six']]);
+  const s = cs[5].last('+ses');
+  assert.equal(s.f.get('COUNT'), '6'); assert.equal(s.f.get('OPPO5'), 'Foxtrot'); assert.equal(s.f.get('ADDR5'), '10.77.0.7');
+});
+
 test('leaving: a joiner leaves, the creator leaves, the creator deletes; a browser that goes', () => {
   const w = world(), a = w.client('10.77.0.2').login('Alpha'), b = w.client('10.77.0.3').login('Bravo');
   a.send('gcre', [['NAME', 'g1'], ['MAXSIZE', 2], ['PARAMS', 'TRACK=1']]);

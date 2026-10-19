@@ -75,7 +75,7 @@ export const LOBBY_LIMITS = Object.freeze({
   openPerGroup: 4,          // in one client
   startedPerVip: 2,         // started games (until they end) with a creator in one browser
   startedPerGroup: 8,       // in one client
-  gameSize: 4,              // players in one game (the game's own most)
+  gameSize: 6,              // players in one game (the race coordinator's racer entries; runtime/netrace.c)
   gameNameLen: 32,
   auxiLen: 2048,            // the car description a player publishes (auxi TEXT)
   pingMs: 20_000,           // a ~png this often

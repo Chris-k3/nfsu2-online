@@ -1,4 +1,4 @@
-// The game's Online mode between browsers: one to four game instances in
+// The game's Online mode between browsers: one to six game instances in
 // headless Chrome pages (separate browser contexts, so separate OPFS) on one
 // local server, logging into the server's own online host (web/server/online/)
 // and meeting in its lobby: the online version of web/tools/lan-pair.mjs.
@@ -6,7 +6,7 @@
 // drives every car (drag: the synthetic pad).  Scripts come from
 // onlineScript() below, or from files (--script, one per instance in order).
 //
-//   node web/tools/online-pair.mjs --out <dir> [--players 1..4] [--mode circuit|sprint|drag] [--races N]
+//   node web/tools/online-pair.mjs --out <dir> [--players 1..6] [--mode circuit|sprint|drag|drift|streetx] [--races N]
 //        [--http-port 8673] [--base http://localhost:8671] [--timeout <s>] [--stagger <s>]
 //        [--script tests/scripts/x.txt ...]   (instead of the generated flow)
 //        [--env K=V ...] [--env-i<n> K=V ...] [--headed] [--server-arg X ...] (own server only)
@@ -51,21 +51,21 @@ const BASE = opt('base', `http://localhost:${HTTP_PORT}`);
 const DATA = opt('data', process.env.NFSU2_DATA || path.join(os.homedir(), 'projects/nsfu2/Need for Speed - Underground 2'));
 const OUT = path.resolve(opt('out', path.join(REPO, 'out/web/online-pair')));
 const FILES = opts('script');
-const PLAYERS = Math.min(4, Math.max(1, +opt('players', FILES.length || 2)));
+const PLAYERS = Math.min(6, Math.max(1, +opt('players', FILES.length || 2)));
 const MODE = opt('mode', 'circuit'), RACES = +opt('races', 1);
 const TMO = +opt('timeout', 900 * RACES) * 1000;
 const STAGGER = +opt('stagger', 3) * 1000;
 const PAGE = opt('page', 'hostcheck'), SIZE = opt('size', '960x540').split('x').map(Number), PLAY_ONLY = +opt('play-only', 0);
 const PASSWORD = opt('password', 'testpass');
 const WAIT_ROOM = +opt('wait-room', 70000), JOIN_WAIT = +opt('join-wait', 40000);
-const MODES = { circuit: 0, sprint: 1, drag: 2 };
+const MODES = { circuit: 0, sprint: 1, drag: 2, drift: 3, streetx: 4 };
 const RANKED = argv.includes('--ranked');
 const EA_LOGIN = argv.includes('--ea-login') || argv.includes('--canary');
 // --quit-mid N:MS: instance N quits its game MS after its race started (the others race on)
 const QUIT_MID = opt('quit-mid', '') ? opt('quit-mid', '').split(':').map(Number) : [0, 0];
 fs.mkdirSync(OUT, { recursive: true });
 
-const NAMES = ['OLHOST', 'OLJOIN', 'OLJOIN3', 'OLJOIN4'];
+const NAMES = ['OLHOST', 'OLJOIN', 'OLJOIN3', 'OLJOIN4', 'OLJOIN5', 'OLJOIN6'];
 const scripts = [];
 for (let i = 0; i < PLAYERS; i++) {
   const f = FILES[i] ?? FILES[FILES.length - 1];
@@ -221,6 +221,10 @@ function raceFlow(w, host, race, raceMs, inst) {
   // the race: GameFlow 6, then the game's AI driver (drag: the synthetic pad)
   w('+0    waitmem 0x008654a4 6 20000');
   w('+0    log race-loaded');
+  // every player's car in the race (the coordinator's racer count), and the car memory pool as it goes
+  w(`+0    waitexpr i:[0x00890118]+0x24 == ${PLAYERS} 1200`);
+  w(`+0    expect i:[0x00890118]+0x24 == ${PLAYERS}`);
+  w('+0    trace 600 racers=i:[0x00890118]+0x24 carpool_used=i:[0x00828164]+0x28 carpool_size=i:[0x00828164]+0x24');
   if (MODE === 'drag') {
     w('+0    trigger RT 1'); w('+0    wzero'); w('+9000ms log race-start');
     for (let k = 0; k < 16; k++) w('+1200ms tappad A');
@@ -238,6 +242,7 @@ function raceFlow(w, host, race, raceMs, inst) {
   // the results: a ranked race shows the tournament results screen instead
   w(`+0    waitfng ${RANKED ? 'UI_PostRace_TournResults.fng' : 'UI_PostRaceResults.fng'} 30000`);
   w(`+0    log results${x}`);
+  w('+0    untrace');
   w(`+180  dump results${x}`);
   w(`+3000ms dump results_2${x}`);
   w('+300  tap RETURN');                     // Continue: the game logs in again, reports the result, the lobby
@@ -353,6 +358,7 @@ for (const x of inst) {
     if (quitter && !log.includes('LOG quit-mid-race')) why.push(`${n}:no-quit-mid`);
     if (RACES > 1 && !has(new RegExp(`LOG results_r${RACES}$`, 'm'))) why.push(`${n}:no-results-r${RACES}`);
   }
+  if (has(/^\[expect\] FAIL/m)) why.push(`${n}:expect`);
   if (has(/FAULT IN GUEST|GUEST MEMORY FAULT|HOST SEGV/)) why.push(`${n}:fault`);
   if (log.includes('TIME LIMIT REACHED')) why.push(`${n}:timeout`);
   if (has(/^\[trap\]/m) || has(/^TRAP in thread/m)) why.push(`${n}:trap`);

@@ -1,4 +1,4 @@
-// LAN play between browsers: two (to four) game instances in headless Chrome
+// LAN play between browsers: two (to six) game instances in headless Chrome
 // pages (separate browser contexts, so separate OPFS) on one local server,
 // racing each other over the server's virtual LAN -- the browser version of
 // the Mac's tests/net/lan_race.sh.  Instance 1 hosts with the lifted
@@ -6,7 +6,7 @@
 // join and ready; the game's AI drives every car (drag: the synthetic pad).
 // Scripts from tools/gen_lan_race.py, with lan_race.sh's options.
 //
-//   node web/tools/lan-pair.mjs --out <dir> [--mode circuit|sprint|drag] [--races N] [--players 2..4]
+//   node web/tools/lan-pair.mjs --out <dir> [--mode circuit|sprint|drag] [--races N] [--players 2..6]
 //        [--http-port 8643] [--base http://localhost:8623] [--timeout <s>] [--stagger <s>]
 //        [--env K=V ...] [--host-env K=V ...] [--join-env K=V ...] [--headed] [--bounce <s>]
 //        [--host-arg X ...] [--join-arg X ...]   more tools/gen_lan_race.py options, e.g. --join-arg --confirm-join
@@ -55,7 +55,7 @@ const OWN = !argv.includes('--base');
 const BASE = opt('base', `http://localhost:${HTTP_PORT}`);
 const DATA = opt('data', process.env.NFSU2_DATA || path.join(os.homedir(), 'projects/nsfu2/Need for Speed - Underground 2'));
 const OUT = path.resolve(opt('out', path.join(REPO, 'out/web/lan-pair')));
-const MODE = opt('mode', 'circuit'), RACES = +opt('races', 1), PLAYERS = Math.min(4, Math.max(2, +opt('players', 2)));
+const MODE = opt('mode', 'circuit'), RACES = +opt('races', 1), PLAYERS = Math.min(6, Math.max(2, +opt('players', 2)));
 const TMO = +opt('timeout', 1200 * RACES) * 1000;
 const STAGGER = +opt('stagger', 3) * 1000;
 const BOUNCE = argv.includes('--bounce') ? +opt('bounce', 0) * 1000 : 0;
@@ -73,7 +73,7 @@ const MODES = {
   streetx: { h: ['--mode', '4', '--race-ms', '120000'], j: ['--filter', '4', '--race-ms', '120000'] },
 };
 if (!MODES[MODE]) { console.error('--mode circuit|sprint|drag|streetx|drift'); process.exit(2); }
-const NAMES = ['HOSTWEB', 'JOINWEB', 'JOINWEB3', 'JOINWEB4'];
+const NAMES = ['HOSTWEB', 'JOINWEB', 'JOINWEB3', 'JOINWEB4', 'JOINWEB5', 'JOINWEB6'];
 const gen = (role, name, car, extra) => execFileSync(PY, [path.join(REPO, 'tools/gen_lan_race.py'), role, '--name', name, '--car', String(car),
   '--races', String(RACES), ...extra], { encoding: 'utf8' });
 const scripts = [gen('host', NAMES[0], 0, [...MODES[MODE].h, ...opts('host-arg')])];

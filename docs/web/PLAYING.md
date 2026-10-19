@@ -192,6 +192,8 @@ Good to know:
 - **Every track is open** when you create a game, either direction, whatever your career has unlocked, and a new
   game starts at **2 laps** (the game's own default was 3; Options, Laps changes it). The same goes for the game's
   LAN races. The career and Quick Race keep their unlocks.
+- **Up to 6 players** race in one game (Options, Max Players; the game's own most was 4, and 6 only in Street X).
+  Drag keeps one car per lane: 4, or 3 on the track with three lanes.
 - **Ranked games** need three players at least, and the others see them only with the lobby's **Filter**, Game
   Type set to **Ranked**. Ranked wins give ranking points.
 - **A race counts** in Rankings once two of its players' games sent the same result (every game sends its own at
