@@ -1,8 +1,8 @@
 # Need for Speed: Underground 2 in the browser
 
-A fan project that runs the PC game *Need for Speed: Underground 2* (2004) in Google Chrome. The game's x86 code is
-translated to C ahead of time and compiled to WebAssembly. Direct3D 9 runs on WebGPU and the sound on Web Audio.
-You bring your own copy of the game.
+A fan project that runs the PC game *Need for Speed: Underground 2* (2004) in Google Chrome and Firefox. The game's
+x86 code is translated to C ahead of time and compiled to WebAssembly. Direct3D 9 runs on WebGPU and the sound on
+Web Audio. You bring your own copy of the game.
 
 > Not affiliated with or endorsed by Electronic Arts. This repository contains none of the game's code or data.
 
@@ -14,7 +14,7 @@ You bring your own copy of the game.
   will not work): 4,800,512 bytes, SHA-256 `f9dd86c054878ce6276beb07c1fd61874f7a1e4bf1f241b084c65b73e24168a7`.
 - **To build:** an Apple Silicon Mac (the tested setup), Python 3, Node.js 20 or newer, and
   [wasi-sdk](https://github.com/WebAssembly/wasi-sdk/releases) 34 unpacked into `deps/`.
-- **To play:** the latest Google Chrome, with WebGPU.
+- **To play:** the latest Google Chrome, or Firefox where it has WebGPU (Windows, macOS).
 
 ## Build
 
@@ -32,8 +32,8 @@ The generated C and the compiled module are made from the game, so they are neve
 web/start.sh --data "/path/to/Need for Speed Underground 2"
 ```
 
-Open **http://localhost:8080/** in Chrome and press **Play**. The start page has the settings, your saves and the
-controls. The player's guide is [docs/web/PLAYING.md](docs/web/PLAYING.md).
+Open **http://localhost:8080/** in Chrome or Firefox and press **Play**. The start page has the settings, your saves
+and the controls. The player's guide is [docs/web/PLAYING.md](docs/web/PLAYING.md).
 
 To play with friends, run the server behind HTTPS, for example on a small VPS with Docker:
 [docs/web/VPS.md](docs/web/VPS.md).

@@ -19,7 +19,7 @@ const opts = {
     'test/aicheck': 'src/test/aicheck.ts',
     'audio/worklet': 'src/audio/worklet.ts',
   },
-  outdir: DIST, bundle: true, format: 'esm', target: 'chrome140', sourcemap: true, minify: !watch,
+  outdir: DIST, bundle: true, format: 'esm', target: ['chrome140', 'firefox145'], sourcemap: true, minify: !watch,
   logLevel: 'info', write: false,
   // registry-defaults.txt and similar seeds go into the page as strings
   loader: { '.txt': 'text' },

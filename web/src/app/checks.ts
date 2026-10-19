@@ -6,6 +6,8 @@ export type CheckState = 'pending' | 'ok' | 'warn' | 'fail';
 export interface Check { id: string; label: string; state: CheckState; detail: string }
 
 export const MIN_CHROME = 140;
+/** Atomics.waitAsync (the renderer's and the network's doorbells) is in Firefox from 145 */
+export const MIN_FIREFOX = 145;
 
 /** "Google Chrome" major version, or null (another browser), from User-Agent Client Hints. */
 export function chromeVersion(): { brand: string; major: number } | null {
@@ -16,41 +18,66 @@ export function chromeVersion(): { brand: string; major: number } | null {
   return m ? { brand: 'Chromium', major: +m[1] } : null;
 }
 
+/** Firefox's major version, or null (another browser; Firefox on iOS is WebKit and says FxiOS). */
+export function firefoxVersion(): number | null {
+  const m = /Firefox\/(\d+)/.exec(navigator.userAgent);
+  return m ? +m[1] : null;
+}
+
+/** what the messages call this browser: Firefox, Chrome (any Chromium browser) or the browser */
+export function browserName(): string {
+  return firefoxVersion() !== null ? 'Firefox' : chromeVersion() ? 'Chrome' : 'the browser';
+}
+const upper = (s: string) => s[0].toUpperCase() + s.slice(1);
+
 /**
  * Which browser this is: a warning at most, never a reason to stop.  What the
  * game needs is checked by what it is (WebGPU, isolation, storage below), so
  * another browser that has all of it may play.
  */
 export function checkBrowser(): Check {
+  const f = firefoxVersion();
+  if (f !== null) {
+    if (f < MIN_FIREFOX) return { id: 'browser', label: `Firefox ${f}`, state: 'warn', detail: `Only the latest Firefox is tested (${MIN_FIREFOX} or newer). Update Firefox (Help, About Firefox) if something does not work.` };
+    return { id: 'browser', label: `Firefox ${f}`, state: 'ok', detail: 'A tested browser.' };
+  }
   const c = chromeVersion();
   const label = 'Browser';
-  if (!c) return { id: 'browser', label, state: 'warn', detail: 'Only Google Chrome is tested. This browser may work if every other check passes.' };
+  if (!c) return { id: 'browser', label, state: 'warn', detail: 'Only Google Chrome and Firefox are tested. This browser may work if every other check passes.' };
   if (c.major < MIN_CHROME) return { id: 'browser', label: `Chrome ${c.major}`, state: 'warn', detail: `Only the latest Chrome is tested (${MIN_CHROME} or newer). Update Chrome (Help, About Google Chrome) if something does not work.` };
-  if (c.brand !== 'Google Chrome') return { id: 'browser', label: `${c.brand} ${c.major}`, state: 'warn', detail: 'Only Google Chrome is tested. This browser may work if every other check passes.' };
-  return { id: 'browser', label: `Chrome ${c.major}`, state: 'ok', detail: 'The tested browser.' };
+  if (c.brand !== 'Google Chrome') return { id: 'browser', label: `${c.brand} ${c.major}`, state: 'warn', detail: 'Only Google Chrome and Firefox are tested. This browser may work if every other check passes.' };
+  return { id: 'browser', label: `Chrome ${c.major}`, state: 'ok', detail: 'A tested browser.' };
 }
 
 export function checkIsolation(): Check {
   const label = 'Secure, isolated page';
   if (!isSecureContext) {
     return { id: 'isolation', label, state: 'fail',
-      detail: 'This address is not secure, so Chrome turns off what the game needs. Open the server\'s https:// address instead.' };
+      detail: `This address is not secure, so ${browserName()} turns off what the game needs. Open the server's https:// address instead.` };
   }
   if (!crossOriginIsolated || typeof SharedArrayBuffer === 'undefined') {
     return { id: 'isolation', label, state: 'fail', detail: 'The page is not cross-origin isolated (no SharedArrayBuffer). Open it from the NFSU2 web server, not another server.' };
   }
   try { new WebAssembly.Memory({ initial: 1, maximum: 65536, shared: true }); }
   catch (e) { return { id: 'isolation', label, state: 'fail', detail: `Shared 4 GB WebAssembly memory is not available: ${e}` }; }
+  if (typeof (Atomics as { waitAsync?: unknown }).waitAsync !== 'function') {
+    return { id: 'isolation', label, state: 'fail', detail: `This browser is too old for the game (no Atomics.waitAsync). Update ${browserName()}.` };
+  }
   return { id: 'isolation', label, state: 'ok', detail: 'HTTPS or localhost, cross-origin isolated, threads and 4 GB memory available.' };
 }
 
 export async function checkGpu(): Promise<Check & { adapter?: string }> {
   const label = 'WebGPU';
   const gpu = (navigator as any).gpu as GPU | undefined;
-  if (!gpu) return { id: 'gpu', label, state: 'fail', detail: 'WebGPU is off in this browser. Update Chrome; on Linux enable it in chrome://flags (#enable-unsafe-webgpu).' };
+  const ff = firefoxVersion() !== null;
+  if (!gpu) return { id: 'gpu', label, state: 'fail', detail: ff
+    ? 'WebGPU is off in this Firefox. Update Firefox (it has WebGPU on Windows and macOS); where it is still off, as on Linux and Android, set dom.webgpu.enabled to true in about:config, or play in Chrome.'
+    : 'WebGPU is off in this browser. Update Chrome; on Linux enable it in chrome://flags (#enable-unsafe-webgpu).' };
   let ad: GPUAdapter | null = null;
   try { ad = await gpu.requestAdapter({ powerPreference: 'high-performance' }); } catch { /* reported below */ }
-  if (!ad) return { id: 'gpu', label, state: 'fail', detail: 'Chrome found no usable graphics adapter (blocklisted driver or GPU process crash). Check chrome://gpu.' };
+  if (!ad) return { id: 'gpu', label, state: 'fail', detail: ff
+    ? 'Firefox found no usable graphics adapter (its blocklist may turn WebGPU off for this graphics driver). Check about:support, Graphics, or play in Chrome.'
+    : 'Chrome found no usable graphics adapter (blocklisted driver or GPU process crash). Check chrome://gpu.' };
   const info = ad.info ? [ad.info.vendor, ad.info.architecture, ad.info.description].filter(Boolean).join(' ') : '';
   // no BC (PowerVR, Mali): the renderer unpacks the textures (web/src/gpu/dxt.ts), so it plays
   if (!ad.features.has('texture-compression-bc')) {
@@ -60,20 +87,29 @@ export async function checkGpu(): Promise<Check & { adapter?: string }> {
   return { id: 'gpu', label: `WebGPU${info ? ', ' + info : ''}`, state: 'ok', adapter: info, detail: 'Adapter with BC texture compression.' };
 }
 
-export async function checkStorage(): Promise<Check> {
+/**
+ * Firefox asks the player before it keeps a site's data for good (a prompt by
+ * the address bar), and persist() waits for the answer: the check does not.
+ * It says so then, and `answer` is the check again once the player answered.
+ */
+export async function checkStorage(): Promise<Check & { answer?: Promise<Check> }> {
   const label = 'Browser storage';
   try { await navigator.storage.getDirectory(); }
   catch { return { id: 'storage', label, state: 'fail', detail: 'This browser window cannot store files (a guest or private window?). Saves need the origin private file system.' }; }
-  let persisted = false;
-  try { persisted = await navigator.storage.persisted() || await navigator.storage.persist(); } catch { /* not decisive */ }
   let free = '';
   try {
     const e = await navigator.storage.estimate();
     if (e.quota !== undefined && e.usage !== undefined) free = `, ${fmtBytes(e.quota - e.usage)} free`;
   } catch { /* fine */ }
-  return { id: 'storage', label, state: persisted ? 'ok' : 'warn',
+  const verdict = (persisted: boolean): Check => ({ id: 'storage', label, state: persisted ? 'ok' : 'warn',
     detail: persisted ? `Saves and cached game data are kept${free}.`
-      : `Chrome may clear this site's storage when the disk runs low${free}. Download a backup of your saves now and then.` };
+      : `${upper(browserName())} may clear this site's storage when the disk runs low${free}. Download a backup of your saves now and then.` });
+  const ask = (async () => await navigator.storage.persisted() || await navigator.storage.persist())()
+    .catch(() => false);                 // not decisive
+  const quick = await Promise.race([ask, new Promise<null>(res => setTimeout(() => res(null), 500))]);
+  if (quick !== null) return verdict(quick);
+  return { id: 'storage', label, state: 'warn', answer: ask.then(verdict),
+    detail: `${upper(browserName())} asks, by the address bar, whether this site may keep its data for good: allow it, so that your saves stay when the disk runs low.` };
 }
 
 export function fmtBytes(n: number): string {

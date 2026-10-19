@@ -1,8 +1,8 @@
-# Playing NFS Underground 2 in Chrome
+# Playing NFS Underground 2 in the browser
 
-The game runs in Google Chrome. One server hosts it: it keeps the game files, serves the game to the browsers and
-connects players for free roam. On a Mac it serves that Mac; for other PCs it goes behind HTTPS, usually on a VPS
-([VPS.md](VPS.md)). Nothing is installed on the players' PCs, and no file is picked by hand.
+The game runs in Google Chrome and in Firefox. One server hosts it: it keeps the game files, serves the game to the
+browsers and connects players for free roam. On a Mac it serves that Mac; for other PCs it goes behind HTTPS, usually
+on a VPS ([VPS.md](VPS.md)). Nothing is installed on the players' PCs, and no file is picked by hand.
 
 ## 1. Start it (on the Mac)
 
@@ -30,10 +30,10 @@ or two. The page shows a problem only when there is one, with what to do about i
 
 ## 2. Other PCs
 
-Chrome runs the game only on a secure page (`https://`, or `localhost` on the machine itself), so friends play from
-a server behind HTTPS: a certificate on the server, or a proxy or tunnel in front of it. [VPS.md](VPS.md) has the
-ways to set that up. Each player then opens that `https://` address in the latest **Google Chrome** and presses
-**Play**.
+The browser runs the game only on a secure page (`https://`, or `localhost` on the machine itself), so friends play
+from a server behind HTTPS: a certificate on the server, or a proxy or tunnel in front of it. [VPS.md](VPS.md) has
+the ways to set that up. Each player then opens that `https://` address in the latest **Google Chrome** or
+**Firefox** and presses **Play**.
 
 The first start on a PC downloads about 7 MB of game code and, while playing, the game data it needs. That PC keeps
 the data, so later starts are quick.
@@ -60,12 +60,13 @@ The start page shows these keys under **Controls**, and F9, Controls shows them 
 
 - **Change the keys:** in the game, Options, Controls.
 - **Mouse:** works in the menus.
-- **Controller:** an Xbox or PlayStation pad works through Chrome. Chrome shows a pad to the page only after a
-  button is pressed on it.
+- **Controller:** an Xbox or PlayStation pad works through the browser. The browser shows a pad to the page only
+  after a button is pressed on it.
 - **Rumble:** a controller that can rumble in Chrome (Xbox, DualSense and others) shakes when you crash, scrape a
-  wall or land hard. Settings, Controller, Rumble turns it off.
-- **Sound** starts with the Play click. If Chrome still keeps it off, a note says so, and a click on the game or a key
-  press turns it on. A controller button cannot: Chrome does not count it.
+  wall or land hard. Settings, Controller, Rumble turns it off. Firefox has no rumble.
+- **Sound** starts with the Play click. If the browser still keeps it off, a note says so, and a click on the game or
+  a key press turns it on. A controller button cannot: the browser does not count it.
+- **Firefox:** Esc leaves full screen at once (Firefox has no keyboard lock); in full screen, pause with P.
 - **Quit** from the game's main menu, or with F9, Quit game. Both let the game save and close. If a loading screen
   ignores the request, the same menu item then reads "Close the game now". As a last resort it reads "Stop the
   game". Closing the tab asks first, because a save in progress could be cut short.
@@ -97,7 +98,7 @@ is saved at once and applies the next time you press Play.
 
 ## 5. Saves
 
-- **Where they are:** your profiles and career are saved **in this browser, on this PC** (Chrome's site storage for
+- **Where they are:** your profiles and career are saved **in this browser, on this PC** (the site storage for
   the server's address). They are not on the server. Each address keeps its own save store, so stick to one.
 - **Autosave:** the game saves your progress by itself after races, purchases and changed options. The game starts
   every profile on Save = Prompt, whose "save?" question opens on No, so Enter through the results skips the save;
@@ -112,8 +113,9 @@ is saved at once and applies the next time you press Play.
   has, after showing what is in the zip, including what its `settings.ini` would change on the network (free roam
   on, the name others see). A very large backup keeps every save and settings file. Only screenshots past 512 MB
   are left out. Restore only backups you made yourself or trust.
-- **Backups are your safety net.** Chrome may clear a site's storage when the disk runs low; the Saves section says
-  so when Chrome has not promised to keep it. Make a backup now and then.
+- **Backups are your safety net.** The browser may clear a site's storage when the disk runs low; the Saves section
+  says so when the browser has not promised to keep it. Firefox asks first, by the address bar: allow it. Make a
+  backup now and then.
 - **Downloaded game data:** "Delete the downloaded game data" in Saves frees disk space on this PC. Your saves stay;
   the data downloads again when needed.
 
@@ -196,12 +198,12 @@ Good to know:
 | What you see | What to do |
 |---|---|
 | "Secure, isolated page" on another PC | Open the server's `https://` address, not `http`. Only `localhost` works without HTTPS. |
-| "WebGPU" | Update Chrome; look at `chrome://gpu`. The game needs WebGPU. |
+| "WebGPU" | Update the browser; look at `chrome://gpu` in Chrome, about:support (Graphics) in Firefox. The game needs WebGPU. Firefox has it on Windows and macOS; where it is off, Chrome plays. |
 | "WebGPU" with a note about compressed textures | Nothing to do: the game plays. This GPU (in many phones, Pixels among them) cannot read the game's compressed textures, so the page unpacks them as the game loads: about 200 MB more memory, and loading screens may pause for a moment. |
 | "Game download" | The download failed, or the server is not reachable. The page tries again by itself, or press **Retry**. If the module is missing, start the server with `web/start.sh`, which builds it. |
 | "Open elsewhere" | The game runs in another tab of this browser. Switch to it, or close it. |
 | No sound | Click the game or press a key. Check the sound setting and the output latency (try "Robust"). |
 | Stuck on a loading screen | F9, Quit game; then "Close the game now"; then "Stop the game". |
-| Anything odd | F9, Download log (or "Download log" on the start page after the game ended) and keep the file. It has the game's own log. Before you post it anywhere: it names your Chrome version and system, your graphics chip, your time zone, and the names and virtual addresses of the players you met (not the server's address: only whether it was this machine, on the LAN or remote). |
+| Anything odd | F9, Download log (or "Download log" on the start page after the game ended) and keep the file. It has the game's own log. Before you post it anywhere: it names your browser, its version and your system, your graphics chip, your time zone, and the names and virtual addresses of the players you met (not the server's address: only whether it was this machine, on the LAN or remote). |
 | `Port 8080 is in use` when starting | The server already runs; open its address. Or start on another port: `web/start.sh --http-port 9080`. |
-| Full screen | The game plays in the browser window. F9, Full screen goes full screen, and holding Esc leaves it. "Full screen on Play" in Settings starts every game full screen. |
+| Full screen | The game plays in the browser window. F9, Full screen goes full screen, and holding Esc leaves it (in Firefox, a press). "Full screen on Play" in Settings starts every game full screen. |

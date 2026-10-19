@@ -18,7 +18,7 @@
 // While any of them is given, the start page says whether it is in effect.
 
 import registryDefaults from '../../../app/registry-defaults.txt';
-import { checkBrowser, checkGpu, checkIsolation, checkStorage, fmtBytes, type Check } from './checks';
+import { checkBrowser, checkGpu, checkIsolation, checkStorage, firefoxVersion, fmtBytes, type Check } from './checks';
 import { loadGame, type Loaded } from './loader';
 import { claimInstance } from './instance';
 import { LogRing, downloadBlob, stamp } from './logs';
@@ -318,9 +318,9 @@ function serverKind(): string {
 /** "Chrome 155 on macOS": enough to tell what ran, nothing more */
 function browserBrief(): string {
   const ua = navigator.userAgent;
-  const c = /(?:Chrome|Chromium)\/(\d+)/.exec(ua);
+  const c = /(?:Chrome|Chromium)\/(\d+)/.exec(ua), f = firefoxVersion();
   const os = /CrOS/.test(ua) ? 'ChromeOS' : /Windows/.test(ua) ? 'Windows' : /Mac OS X|Macintosh/.test(ua) ? 'macOS' : /Android/.test(ua) ? 'Android' : /Linux/.test(ua) ? 'Linux' : 'another system';
-  return `${c ? `Chrome ${c[1]}` : 'not Chrome'} on ${os}`;
+  return `${f !== null ? `Firefox ${f}` : c ? `Chrome ${c[1]}` : 'another browser'} on ${os}`;
 }
 /** a subsystem the game cannot do without failed: the running game is stopped */
 function stopFatal(what: string) {
@@ -361,7 +361,8 @@ function onExit(s: GameSession, code: number) {
   players?.now();
   $('#log-btn').hidden = false;
   const mins = seconds >= 120 ? `${Math.floor(seconds / 60)} min` : `${seconds.toFixed(0)} s`;
-  if (fatal) setPhase('exited', 'Did not start', `The game was stopped: ${fatal}. Download the log to see why; chrome://gpu shows what Chrome thinks of the graphics.`);
+  if (fatal) setPhase('exited', 'Did not start', `The game was stopped: ${fatal}. Download the log to see why; ` +
+    (firefoxVersion() !== null ? 'about:support, Graphics, shows what Firefox thinks of the graphics.' : 'chrome://gpu shows what Chrome thinks of the graphics.'));
   else {
     const base = code === 0 ? `The game closed normally after ${mins}.` : code === -1 ? `The game was stopped after ${mins}.`
       : `The game stopped with error code ${code} after ${mins}. Download the log to see why.`;
@@ -621,7 +622,8 @@ export async function boot() {
   void saves.refresh();
   void instance.whenOwner.then(async () => { await loadSettings(); evaluate(); void settings.refresh(); void saves.refresh(); });
   void checkGpu().then(setCheck);
-  void checkStorage().then(setCheck);
+  // Firefox's answer to its storage prompt comes later: the check again then
+  void checkStorage().then(({ answer, ...c }) => { setCheck(c); void answer?.then(setCheck); });
   refreshMeasured = measureRefresh(60).then(r => { displayHz = r.hz; log.add(`[app] display refresh ${r.raw.toFixed(1)} Hz -> ${r.hz}`); });
 
   if (crossOriginIsolated) await loadModule();
