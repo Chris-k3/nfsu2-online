@@ -147,7 +147,7 @@ const STREAM_LOW = 64 << 10;    // a receiver with less than this queued gets st
 export const LAN_WSS_OPTIONS = Object.freeze({ autoPong: false });
 
 export const LAN_DEFAULTS = Object.freeze({
-  maxPeers: 64, maxFrame: 8192, frameRate: 1000, byteRate: 256 << 10, groupFrameRate: 2000, groupByteRate: 512 << 10,
+  maxPeers: 128, maxFrame: 8192, frameRate: 1000, byteRate: 256 << 10, groupFrameRate: 2000, groupByteRate: 512 << 10,
   siteFrameRate: 4000, siteByteRate: 1 << 20,
   textRate: 20, maxText: 1024, ctlRate: 10, shedQueue: 256 << 10, streamQueue: 2 << 20, streamShare: 1 << 20, stallMs: 1000,
   sendBuffer: 8 << 20, keepaliveMs: 25_000, idleMs: 10 * 60_000, reserveMs: 60_000, groupReserve: 8, siteReserve: 16,
@@ -374,6 +374,16 @@ export class LanSwitch {
       if (!this.peers.has(c) && !this.reserved.has(c)) { this.next = (c & 0xff) + 1; return c; }
     }
     return 0;
+  }
+  /** a newcomer would get "LAN full" now: every place taken, or every address in use or kept for its player */
+  get full() {
+    if (this.peers.size >= this.o.maxPeers) return true;
+    const now = Date.now();
+    for (let h = 2; h <= 251; h++) {
+      const c = (BASE | h) >>> 0;
+      if (!this.peers.has(c) && !(this.reserved.get(c)?.until > now)) return false;
+    }
+    return true;
   }
   /** vip is kept for its token; past its client's (and site's) share of reservations, that client's own oldest go */
   reserve(vip, peer) {

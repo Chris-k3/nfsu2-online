@@ -418,7 +418,7 @@ function openHelp() {
   $<HTMLDialogElement>('#help').showModal();
 }
 
-/** free roam: a friend joined, left, went into a race; four at most, each for 5 s (also in the log) */
+/** free roam: a friend joined, left, went into a race; the server full; four at most, each for 5 s (also in the log) */
 function notice(text: string) {
   log.add(`[notice] ${text}`);
   const box = $('#notices'), line = document.createElement('div');

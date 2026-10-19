@@ -15,8 +15,9 @@
 //                      free roam's hub on 10.77.0.253 (roam-hub.mjs: each
 //                      player's peers are the players nearest to it; --roam-hub
 //                      off: none, players find each other by broadcast)
-//   /players           how many play on this server now: { players, online }, two
-//                      counts and nothing else (never cached)
+//   /players           how many play on this server now: { players, online, full },
+//                      two counts and whether a newcomer gets "LAN full", nothing
+//                      else (never cached)
 //   test aids, only with --dev: the test pages (/test/) and source maps from
 //   web/dist-dev (node build.mjs writes them there, never into web/dist), the
 //   repo's test scripts (/tests/), PUT /artifacts/<name>.png (with --artifacts)
@@ -123,7 +124,7 @@ const TLS_KEY = arg('--tls-key', '') ? path.resolve(arg('--tls-key', '')) : '';
 const DEV = flag('--dev');
 const ACCESS_LOG = flag('--access-log');
 const ARTIFACTS = arg('--artifacts', '') ? path.resolve(arg('--artifacts', '')) : '';
-const MAX_PEERS = +arg('--max-peers', 64);
+const MAX_PEERS = +arg('--max-peers', 128);
 // the public names (a domain), comma-separated; '*.' covers one label
 const HOSTS = String(arg('--host', '')).split(',').map(h => h.trim().toLowerCase().replace(/\.$/, '')).filter(Boolean);
 // a test aid of the LAN-play tests (delay, loss, reordering on the switch; lan.mjs where it is implemented)
@@ -569,11 +570,11 @@ async function handler(q, s) {
   }
   if (p === '/game.json') return sendFile(q, s, path.dirname(GAME_JSON), GAME_JSON);
   if (p === '/players') {
-    // how many play on this server now (the start page's Multiplayer settings): two counts and nothing else, no
-    // names, addresses or times; online: in the game's Online mode (logged in, or racing an online race), null
-    // with --online off
+    // how many play on this server now (the start page's Multiplayer settings): two counts and whether it is
+    // full, nothing else, no names, addresses or times; online: in the game's Online mode (logged in, or racing
+    // an online race), null with --online off; full: a game that connects now gets "LAN full"
     const o = online?.info(), players = lan.peers.size;
-    const body = JSON.stringify({ players, online: o ? Math.min(players, o.personas + o.racing) : null });
+    const body = JSON.stringify({ players, online: o ? Math.min(players, o.personas + o.racing) : null, full: lan.full });
     s.writeHead(200, headers(q, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) }));
     return s.end(q.method === 'HEAD' ? undefined : body);
   }

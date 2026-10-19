@@ -394,8 +394,10 @@ paths to the VPS, so pick a VPS location between you.
 - **Keepalive:** the switch pings every connection every 25 s. Proxies and Cloudflare then never cut a quiet player,
   and the switch finds players whose connection died.
 - **Limits:**
-  - 250 players on the switch with the image (`NFSU2_MAX_PEERS=250`; the server's own default is 64, and 250 is the
-    most its virtual network has addresses for);
+  - 250 players on the switch with the image (`NFSU2_MAX_PEERS=250`; the server's own default is 128, and 250 is the
+    most its virtual network has addresses for). A game the switch refuses as full shows "The server is full" in
+    the game and tries again every 5 s; it says so again when it gets a place, and the start page says the server
+    is full;
   - 8 connections at once per client address and 16 per IPv6 /48; opening them is rate limited per client
     address (a burst of 20, then one a second), so a client that opens and closes connections as fast as it can
     gets 429;
@@ -426,9 +428,10 @@ paths to the VPS, so pick a VPS location between you.
     seen, written atomically. No passwords (the server never reads them), CD keys, addresses or chat.
   - **The console** names online players by persona and virtual address (10.77.0.x) only, and shows at most 30
     Online lines a minute caused by one client address (then one line saying how many were left out).
-  - **Who plays now:** `/players` answers anyone who reaches the server with two numbers for the start page:
-    `{"players":3,"online":1}`, the games on the switch and how many of them are in Online mode (logged in, or in
-    an online race; `null` with `--online off`). Nothing else: no names, addresses or times, never cached. The
+  - **Who plays now:** `/players` answers anyone who reaches the server with two numbers for the start page and
+    whether it is full: `{"players":3,"online":1,"full":false}`, the games on the switch, how many of them are in
+    Online mode (logged in, or in an online race; `null` with `--online off`), and whether a game that connects
+    now gets "LAN full". Nothing else: no names, addresses or times, never cached. The
     game's own lobby shows its players to anyone who logs in anyway.
   - **Limits:** 300 lobby sessions, 3 per browser, 8 per client address, 32 per IPv6 /48, and the last quarter
     only for a client that holds none; 100 games of at most 4, 2 open and 2 started per browser (4 and 8 per client

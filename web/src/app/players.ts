@@ -1,8 +1,8 @@
 // How many play on this server now, for the start page's Multiplayer settings: the server's /players (two
-// counts, nothing else).  Asked every 15 s, and only while the start page is visible and no game runs; a
+// counts and whether it is full, nothing else).  Asked every 15 s, and only while the start page is visible and no game runs; a
 // server without the route shows nothing.
 
-export interface PlayerCounts { players: number; online: number | null }
+export interface PlayerCounts { players: number; online: number | null; full?: boolean }
 
 const EVERY_MS = 15_000;
 const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
@@ -12,7 +12,8 @@ export function playersText(c: PlayerCounts): string {
   if (!Number.isInteger(c.players) || c.players < 0) return '';
   if (c.players === 0) return 'On this server now: nobody is playing.';
   const on = Number.isInteger(c.online) && c.online! >= 0 ? `, ${c.online} in Online mode` : '';
-  return `On this server now: ${n(c.players, 'player', 'players')}${on}.`;
+  const full = c.full === true ? ' The server is full: playing with others waits until a place frees up.' : '';
+  return `On this server now: ${n(c.players, 'player', 'players')}${on}.${full}`;
 }
 
 /** show(line) at once and every 15 s while idle() and the page is visible */

@@ -8,8 +8,9 @@
 // virtual addresses only), the limits (players, frame size and rate, control
 // messages, a broadcast charged per receiver, limits shared by one client
 // address, a flood never getting a slower receiver cut: the audit's F2),
-// WebSocket keepalive and idle close, and (against the real server, when the
-// game folder is there) the Origin check and /lan?resume.  The switches made
+// WebSocket keepalive and idle close, the page's notices when the switch is
+// full (web/src/net/index.ts), and (against the real server, when the game
+// folder is there) the Origin check and /lan?resume.  The switches made
 // in this process listen on an ephemeral port of 127.0.0.1; the real server
 // on NFSU2_TEST_PORT (8528).
 // NFSU2_TEST_LAN=<lan.mjs>: another switch module (a negative control: the
@@ -25,6 +26,8 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
+import * as esbuild from 'esbuild';
+import * as P from '../src/net/proto.ts';
 const { LanSwitch, LAN_WSS_OPTIONS } = await import(process.env.NFSU2_TEST_LAN ? path.resolve(process.env.NFSU2_TEST_LAN) : '../server/lan.mjs');
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -273,8 +276,10 @@ test('what a peer learns about the others: virtual addresses and cleaned names, 
 test('limits: players, frame size, frame rate, control messages', async () => {
   const sw = await startSwitch({ maxPeers: 2, maxFrame: 1600, frameRate: 50, textRate: 5, maxText: 256 });
   try {
+    assert.equal(sw.lan.full, false);
     const a = new Client(sw.port, 'A'), b = new Client(sw.port, 'B');
     await a.welcome(); await b.welcome();
+    assert.equal(sw.lan.full, true, 'full: maxPeers on the switch');
     // a third player: the switch is full (1013, a fixed reason)
     const c = new WebSocket(`ws://127.0.0.1:${sw.port}/lan`);
     const [code, reason] = await new Promise(r => c.on('close', (k, why) => r([k, String(why)])));
@@ -550,6 +555,7 @@ test('churning connections never takes a dropped player\'s address; each client 
     const bvip = bob.vip;
     bob.ws.terminate();
     await alice.until(() => !alice.lastPeers()?.some(p => p.vip === bvip));
+    assert.equal(sw.lan.full, true, 'full with one player on: every other address kept for its player');
     // Mallory opens and closes connections as fast as it can, from many addresses of its own
     let got = 0, full = 0;
     const t0 = performance.now();
@@ -570,6 +576,8 @@ test('churning connections never takes a dropped player\'s address; each client 
     const bob2 = new Client(sw.port, 'Bob', '?g=bob', { vip: bvip, token: wb.token });
     assert.equal((await bob2.welcome()).vip >>> 0, bvip, 'Bob gets his address back');
     await bob2.close(); await alice.close();
+    for (const r of sw.lan.reserved.values()) r.until = Date.now() - 1;
+    assert.equal(sw.lan.full, false, 'not full once the kept addresses run out');
   } finally { await sw.close(); }
   // a client that drops many connections keeps groupReserve reservations (its own oldest go), a site siteReserve
   const sw2 = await startSwitch({ maxPeers: 250, groupReserve: 3, siteReserve: 5 });
@@ -772,4 +780,42 @@ test('with a store, a restart of the server keeps each player\'s address for its
     assert.equal((await b2.welcome()).vip >>> 0, b.vip);
     for (const c of [m, a2, b2]) await c.close();
   } finally { await sw2.close(); }
+});
+
+// the page (web/src/net/index.ts) on a switch with room for one: the second game hears "the server is full" once
+// while it keeps trying, and "a place freed up" when the first leaves and it gets on
+test('the page: a notice when the switch is full, and one when a place frees up', async () => {
+  const sw = await startSwitch({ maxPeers: 1 });
+  const js = (await esbuild.build({ entryPoints: [path.join(HERE, '../src/net/index.ts')], bundle: true, write: false, format: 'esm', platform: 'neutral' })).outputFiles[0].text;
+  const { attachNet } = await import('data:text/javascript;base64,' + Buffer.from(js).toString('base64'));
+  globalThis.location ??= new URL(`http://127.0.0.1:${sw.port}/`);
+  // a game with free roam's mailbox (HostKind.Net, 4) at 0; LAN play's never comes
+  const game = (name, notices) => {
+    const memory = new WebAssembly.Memory({ initial: 10, maximum: 10, shared: true }), w = new Int32Array(memory.buffer, 0, P.NET_HDR_BYTES / 4);
+    w[P.W_MAGIC] = P.NET_MAGIC; w[P.W_VERSION] = P.NET_VERSION; w[P.W_HDR_BYTES] = P.NET_HDR_BYTES; w[P.W_SLOT_BYTES] = P.NET_SLOT_BYTES;
+    w[P.W_TX_SLOTS] = P.NET_TX_SLOTS; w[P.W_RX_SLOTS] = P.NET_RX_SLOTS;
+    w[P.W_TX_OFF] = P.NET_HDR_BYTES; w[P.W_RX_OFF] = P.NET_HDR_BYTES + P.NET_TX_SLOTS * P.NET_SLOT_BYTES;
+    const proc = { memory, ctl: new Int32Array(1), exited: new Promise(() => {}),
+      registered: k => k === 4 ? Promise.resolve({ ptr: 0, size: P.NET_MAILBOX_BYTES }) : new Promise(() => {}) };
+    return attachNet(proc, { url: `ws://127.0.0.1:${sw.port}/lan`, name, onNotice: t => notices.push(t), pingMs: 60_000 });
+  };
+  const until = async (f, ms = 5000) => { const t0 = Date.now(); while (!f()) { if (Date.now() - t0 > ms) throw new Error('timed out'); await sleep(20); } };
+  const na = [], nb = [];
+  const a = game('A', na);
+  try {
+    await a.online;
+    const b = game('B', nb);
+    try {
+      await until(() => nb.length === 1);
+      assert.equal(nb[0], 'The server is full: playing with others waits for a free place');
+      await until(() => sw.lan.info().refused >= 3);
+      assert.equal(nb.length, 1, 'said once while it keeps trying');
+      assert.equal(b.state === 'online', false);
+      a.close();
+      assert.match(await b.online, /^10\.77\.0\.\d+$/);
+      await until(() => nb.length === 2);
+      assert.equal(nb[1], 'A place on the server freed up: you can play with others now');
+      assert.deepEqual(na, [], 'the first game heard nothing');
+    } finally { b.close(); }
+  } finally { a.close(); await sw.close(); }
 });

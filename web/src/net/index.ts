@@ -42,7 +42,7 @@ export interface NetOptions {
   log?: (s: string) => void;
   /** the switch's peer list changed */
   onPeers?: (peers: NetPeer[]) => void;
-  /** a line from the game for the player (NET_KIND_NOTICE: a friend joined, left, went into a race) */
+  /** a line for the player: from the game (NET_KIND_NOTICE: a friend joined, left, went into a race), or the server full */
   onNotice?: (text: string) => void;
   /** milliseconds between pings to the switch (default 2000) */
   pingMs?: number;
@@ -133,6 +133,8 @@ class Link implements NetLink {
   private pingSeq = 0;
   private failed = 0;
   private lastDownLog = -Infinity;
+  /** the switch refused us as full (close 1013 "LAN full"): told once, and again when a place frees up */
+  private full = false;
   private peerVips = new Set<number>();
   private st = { connections: 0, reconnects: 0, framesOut: 0, bytesOut: 0, framesIn: 0, bytesIn: 0, rxFiltered: 0,
     rttSum: 0, rttN: 0, rttMax: 0, mainMs: 0, mainCalls: 0, rxFull: 0, rxOversize: 0,
@@ -212,6 +214,11 @@ class Link implements NetLink {
       if (this.closed) return;
       const was = this.state;
       this.state = 'offline'; this.setPage(P.NET_PAGE_OFFLINE);
+      if (e.code === 1013 && !this.full) {
+        this.full = true;
+        this.log('the server is full (LAN full); trying again until a place frees up');
+        this.o.onNotice?.('The server is full: playing with others waits for a free place');
+      }
       // one line when the link goes, then one every 30 s while it stays away
       const t = now();
       if (was === 'online' || t - this.lastDownLog > 30000) {
@@ -234,6 +241,7 @@ class Link implements NetLink {
       this.state = 'online'; this.backoff = 250; this.failed = 0; this.st.connections++;
       for (const ep of this.eps()) { this.publishPeers(ep); this.publishOnline(ep); }
       this.log(`on the virtual LAN as ${this.vip}${this.st.connections > 1 ? (again ? ' (the same address again)' : ' (a new address)') : ''}`);
+      if (this.full) { this.full = false; this.o.onNotice?.('A place on the server freed up: you can play with others now'); }
       this.resolveOnline(this.vip);
     } else if (m.t === 'peers' && Array.isArray(m.peers)) {
       this.peers = m.peers.filter((p: any) => !p.server)
