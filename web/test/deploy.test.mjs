@@ -75,16 +75,19 @@ function leaks(text, { binary = false } = {}) {
 const REQUIRED = {
   'content-security-policy': v => v.includes("default-src 'self'") && v.includes("'wasm-unsafe-eval'") && v.includes("frame-ancestors 'none'") && !v.includes('unsafe-inline'),
   'x-content-type-options': v => v === 'nosniff', 'referrer-policy': v => v === 'no-referrer', 'x-frame-options': v => v === 'DENY',
-  'permissions-policy': v => v.includes('gamepad=(self)') && v.includes('camera=()'), 'x-robots-tag': v => /noindex/.test(v),
+  'permissions-policy': v => v.includes('gamepad=(self)') && v.includes('camera=()'), 'x-robots-tag': v => /^(no)?index, (no)?follow$/.test(v),
   'cross-origin-opener-policy': v => v === 'same-origin', 'cross-origin-embedder-policy': v => v === 'require-corp',
   'cross-origin-resource-policy': v => v === 'same-origin',
   'cache-control': v => /\bprivate\b/.test(v) && /\bno-(store|cache)\b/.test(v), 'cdn-cache-control': v => v === 'no-store',
   'cloudflare-cdn-cache-control': v => v === 'no-store',
 };
+const INDEXABLE = new Set(['index', 'index.html', 'HEAD /', 'robots']);
 const FORBIDDEN = ['server', 'x-powered-by', 'last-modified'];
-function headerProblems(r, { viaProxy = false } = {}) {
+function headerProblems(r, { viaProxy = false, indexable = false } = {}) {
   const bad = [];
   for (const [k, ok] of Object.entries(REQUIRED)) if (!(k in r.headers) || !ok(r.headers[k])) bad.push(`${k}: ${r.headers[k] ?? '(missing)'}`);
+  const wantRobots = indexable ? 'index, follow' : 'noindex, nofollow';
+  if ('x-robots-tag' in r.headers && r.headers['x-robots-tag'] !== wantRobots) bad.push(`x-robots-tag: ${r.headers['x-robots-tag']} (expected ${wantRobots})`);
   for (const k of FORBIDDEN) if (k in r.headers && !(viaProxy && k === 'server')) bad.push(`${k} present`);
   return bad;
 }
@@ -220,7 +223,7 @@ async function crawl(label, target, { viaProxy = false } = {}) {
     if (res.status >= 400 && body.length > 64) problems.push(`${label} ${name} (${res.status}): error body of ${body.length} bytes`);
     // through the proxy, a request it refuses itself (as Cloudflare's edge would) never reaches the server
     const fromProxy = viaProxy && !('content-security-policy' in res.headers) && [400, 417, 431, 502, 505].includes(res.status);
-    const hp = headerProblems(res, { viaProxy });
+    const hp = headerProblems(res, { viaProxy, indexable: INDEXABLE.has(name) });
     if (hp.length && !fromProxy) problems.push(`${label} ${name} (${res.status}): ${hp.join('; ')}`);
   }
   return { results, problems, statuses: Object.fromEntries(results.map(r => [r.name, r.res.status])) };
@@ -248,7 +251,7 @@ test('crawl: every route and error path, each TLS mode: nothing about this machi
   // soft checks: every problem of every mode is listed at the end
   const expect = (ok, msg) => { if (!ok) all.push(msg); };
   const is = (label, statuses, name, code) => expect(statuses[name] === code, `${label} ${name}: ${statuses[name]}, not ${code}`);
-  const gone = (label, statuses) => { for (const n of ['server-info', 'setup', 'ca.crt']) is(label, statuses, n, 404); };
+  const gone = (label, statuses) => { for (const n of ['server-info', 'setup', 'ca.crt']) is(label, statuses, n, 404); is(label, statuses, 'robots', 200); };
   // 1. no TLS (the default: this machine only, http://localhost), no --dev
   {
     const s = await startServer(['--http-port', String(P2)]);

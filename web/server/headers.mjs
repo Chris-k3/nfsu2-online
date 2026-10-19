@@ -72,7 +72,7 @@ export const ISOLATION = Object.freeze({
 export const CSP = contentSecurityPolicy();
 export const HSTS = 'max-age=31536000';
 /** The headers every response carries. */
-export function securityHeaders({ hsts = false, csp = CSP } = {}) {
+export function securityHeaders({ hsts = false, csp = CSP, noindex = true } = {}) {
   return {
     ...ISOLATION,
     'content-security-policy': csp,
@@ -80,7 +80,7 @@ export function securityHeaders({ hsts = false, csp = CSP } = {}) {
     'referrer-policy': 'no-referrer',
     'x-frame-options': 'DENY',
     'permissions-policy': PERMISSIONS_POLICY,
-    'x-robots-tag': 'noindex, nofollow',
+    'x-robots-tag': noindex ? 'noindex, nofollow' : 'index, follow',
     ...(hsts ? { 'strict-transport-security': HSTS } : {}),
   };
 }

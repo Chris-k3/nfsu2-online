@@ -408,13 +408,13 @@ async function locate(root, file) {
   return st.isFile() ? { real, st } : null;
 }
 
-async function sendFile(q, s, root, file, { type, cache = 'store', extra = {}, found = null } = {}) {
+async function sendFile(q, s, root, file, { type, cache = 'store', extra = {}, found = null, noindex = true } = {}) {
   const f = found ?? await locate(root, file);
   if (!f) return notFound(q, s);
   const { real, st } = f;
   const etag = etagOf(real, st.size, st.mtimeMs);
   const h = headers(q, { 'content-type': type ?? TYPES[path.extname(real).toLowerCase()] ?? 'application/octet-stream',
-    'accept-ranges': 'bytes', etag, ...extra }, cache);
+    'accept-ranges': 'bytes', etag, ...extra }, cache, noindex);
   if (etagMatches(q.headers['if-none-match'], etag)) { s.writeHead(304, h); return s.end(); }
   // one range (bytes=a-b, a-, -n); anything else is answered with the whole file
   const range = q.headers.range && /^bytes=(\d*)-(\d*)$/.exec(String(q.headers.range).trim());
@@ -577,6 +577,7 @@ async function handler(q, s) {
     s.writeHead(200, headers(q, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) }));
     return s.end(q.method === 'HEAD' ? undefined : body);
   }
+  if (p === '/robots.txt') return plain(q, s, 200, ROBOTS_TXT, {}, 'revalidate', false);
   // test aids (--dev only): the repo's test scripts, and the test pages and source maps from their own
   // folder (web/dist-dev), which the server never looks in without --dev
   if (DEV && p.startsWith('/tests/')) return sendFile(q, s, TESTS, resolveInside(TESTS, p.slice(6)));
@@ -586,8 +587,18 @@ async function handler(q, s) {
   const rel = p.endsWith('/') ? p + 'index.html' : p;
   let root = DIST, found = await locate(DIST, resolveInside(DIST, rel));
   if (!found && DEV) { root = DEV_DIST; found = await locate(DEV_DIST, resolveInside(DEV_DIST, rel)); }
-  return sendFile(q, s, root, null, { found, cache: rel.endsWith('.html') ? 'store' : 'revalidate' });
+  return sendFile(q, s, root, null, { found, cache: rel.endsWith('.html') ? 'store' : 'revalidate', noindex: !(root === DIST && rel === '/index.html') });
 }
+const ROBOTS_TXT = [
+  'User-agent: *',
+  'Allow: /',
+  'Disallow: /data/',
+  'Disallow: /data-manifest',
+  'Disallow: /game.wasm',
+  'Disallow: /game.json',
+  'Disallow: /players',
+  'Disallow: /lan',
+].join('\n');
 const TESTS = path.join(REPO, 'tests');
 const devOnly = p => { const n = p.normalize('NFKC').toLowerCase(); return /^\/tests?(\/|$)/.test(n) || n.endsWith('.map'); };
 
