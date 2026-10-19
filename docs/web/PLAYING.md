@@ -156,7 +156,7 @@ Good to know:
   real address: the server gives each player a virtual one (`10.77.0.x`).
 - **A tab in the background** (or another window in front) pauses your game. The others see you as paused: your car stays where you stopped, with "paused" after your name, until you come back.
 - **Closing the tab:** the others see your car disappear after a few seconds.
-- **Messages over the game** say when a player comes online, goes into a race, is back in free roam after it, or
+- **Messages over the game** say when a player joins free roam, goes into a race, is back in free roam after it, or
   leaves. The menus and the shops are not announced.
 - **The game's own LAN races** (its LAN menu) work between players on the same server too, with free roam on or off.
 

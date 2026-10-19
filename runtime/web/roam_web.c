@@ -222,15 +222,18 @@ static void io_broadcast(void *u, uint16_t port, const uint8_t *buf, int len){
 void roam_game_event(int ev, int peer, const char *text);    /* roam_game.c provides the log */
 
 /* ---- notices: what the page shows over the game ----------------------------------
- * A friend joining or leaving, and where a friend is (free roam or a race), as
- * NET_KIND_NOTICE lines on the TX ring; the page never sends them on.  Pausing
- * is free roam here (a window in the background pauses; the name over the car
- * says "paused"), and the menus, a shop and loading are in between: a friend
- * who goes into the menus or a shop and comes back is not announced.  A place
- * is told once it has held for 1.5 s, so a friend passing through a loading
- * screen is not announced either.  All with the lock held. */
+ * A friend joining free roam, going into a race, back in free roam after it, and
+ * leaving, as NET_KIND_NOTICE lines on the TX ring; the page never sends them
+ * on.  Joining free roam is told when the friend's car gets there: from the
+ * menus (starting the game, or back from the main menu), or already in free
+ * roam when we first hear them.  Pausing is free roam here (a window in the
+ * background pauses; the name over the car says "paused"); the menus are not
+ * told, and a shop and loading are in between: a friend who goes into a shop
+ * and comes back is not announced.  A place is told once it has held for
+ * 1.5 s, so a friend passing through a loading screen is not announced
+ * either.  All with the lock held. */
 #define NOTICE_HOLD_US 1500000
-static struct { uint32_t id; uint8_t told, cand; int64_t since; } g_where[RC_TABLE];
+static struct { uint32_t id; uint8_t told, cand, roam; int64_t since; } g_where[RC_TABLE];   /* roam: "joined free roam" told since the menus */
 /* the players whose joining was told: once each (with the hub, a player
  * near us now and then, or passing by, comes and goes as a peer) */
 #define TOLD_IDS 256
@@ -252,12 +255,19 @@ static void where_watch(int64_t now){
         const rc_peer *p = &g_s->peer[i];
         if (p->state != RC_PS_EST || p->lost){ if (p->state != RC_PS_EST) g_where[i].id = 0; continue; }
         uint8_t st = place(p);
-        if (st == RC_ST_LOADING || st == RC_ST_MENUS || st == RC_ST_SHOP) continue;
-        if (g_where[i].id != p->id){ g_where[i].id = p->id; g_where[i].told = g_where[i].cand = st; g_where[i].since = now; continue; }
+        if (st == RC_ST_LOADING || st == RC_ST_SHOP) continue;
+        if (g_where[i].id != p->id){
+            g_where[i].id = p->id; g_where[i].told = g_where[i].cand = st; g_where[i].roam = st == RC_ST_ROAM; g_where[i].since = now;
+            continue;
+        }
         if (st != g_where[i].cand){ g_where[i].cand = st; g_where[i].since = now; }
         if (g_where[i].cand == g_where[i].told || now - g_where[i].since < NOTICE_HOLD_US) continue;
+        uint8_t was = g_where[i].told;
         g_where[i].told = g_where[i].cand;
-        notice(p->name, st == RC_ST_EVENT ? " is in a race" : " is in free roam");
+        if (st == RC_ST_EVENT) notice(p->name, " is in a race");
+        else if (st == RC_ST_MENUS) g_where[i].roam = 0;                   /* out of free roam: not told */
+        else if (!g_where[i].roam){ g_where[i].roam = 1; told_once(p->id); notice(p->name, " joined free roam"); }
+        else if (was == RC_ST_EVENT) notice(p->name, " is in free roam");
     }
 }
 static void io_event(void *u, int ev, int peer, const char *text){
@@ -265,9 +275,12 @@ static void io_event(void *u, int ev, int peer, const char *text){
     if (peer < 0 || peer >= RC_TABLE) return;
     const rc_peer *p = &g_s->peer[peer];
     if (ev == RC_EV_JOIN){
+        /* in the menus (or a shop, or loading): told when the car gets to free roam */
         uint8_t st = place(p);
-        g_where[peer].id = p->id; g_where[peer].told = g_where[peer].cand = st; g_where[peer].since = roam_plat_now_us();
-        if (told_once(p->id)) notice(p->name, st == RC_ST_ROAM ? " joined free roam" : st == RC_ST_EVENT ? " is online (in a race)" : " is online");
+        g_where[peer].id = p->id; g_where[peer].told = g_where[peer].cand = st; g_where[peer].roam = st == RC_ST_ROAM;
+        g_where[peer].since = roam_plat_now_us();
+        if (st == RC_ST_ROAM && told_once(p->id)) notice(p->name, " joined free roam");
+        else if (st == RC_ST_EVENT && told_once(p->id)) notice(p->name, " is online (in a race)");
     } else if (ev == RC_EV_LEAVE){
         /* roam_core.c drop_peer: "<name> left: <why>"; a restart joins again at once, another room was never ours,
          * one out of range (the hub's list) is still playing */
