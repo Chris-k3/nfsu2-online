@@ -13,7 +13,8 @@
 //   auth     -> any name logs in (no accounts, nothing stored); PERSONAS
 //   acct     -> "create account": logs in the same way
 //   cper/dper-> a persona for this session, or one less (at most LIMITS.personas)
-//   pers     -> the persona to play as (one holder per name while online); LKEY
+//   pers     -> the persona to play as (one holder per name while online or
+//               racing; the holder's own browser takes it back); LKEY
 //   move     -> into a room (+who, +usr, +pop), or out (an unknown NAME)
 //   mesg     -> chat in the room, or to one persona (PRIV; the game's
 //               challenge invites are private messages too): +msg
@@ -104,9 +105,13 @@ const READY = 1 << 27, PASSWORD = 1 << 16, ACTIVE = 1 << 19;
 // SYSFLAGS bit of a ranked game (Options: Game Type Ranked; the game then asks for 3 players at least, and its
 // lobby's default search hides ranked games: SYSMASK bits 18 and 19)
 const RANKED = 1 << 18;
-// the shortest race of each type (RACE_TYPES order) a result may come from, in seconds: well under the game's
+// the race types a report may name: RACE_TYPES, which have their stat blocks, and the game's seventh (a game with
+// CUSTFLAGS bit 25, which SPEED2.EXE 0x5fe8d0 reports as 6), which has no stat block or tier points: its results
+// count nowhere
+const REPORT_TYPES = Object.freeze([...RACE_TYPES, 'type 6']);
+// the shortest race of each type (REPORT_TYPES order) a result may come from, in seconds: well under the game's
 // own shortest (one lap of the shortest track; a quarter-mile drag)
-const MIN_RACE_S = Object.freeze([20, 20, 20, 5, 20, 20]);
+const MIN_RACE_S = Object.freeze([20, 20, 5, 20, 20, 20, 20]);
 
 export class Bucket {
   constructor(rate, burst, now) { this.rate = rate; this.cap = burst; this.v = burst; this.now = now; this.t = now(); }
@@ -335,12 +340,16 @@ export class Lobby {
     const p = f.get('PERS') ?? '';
     const mine = s.personas.find(x => x.toLowerCase() === p.toLowerCase());
     if (!mine) return this.send(s, 'pers', [], 'invp');
+    // the holder gives way when it is this browser's own older session (its game logged in again) or its game is
+    // gone (a stale session)
     const holder = this.byPersona.get(mine.toLowerCase());
-    if (holder && holder !== s) {
-      // one holder per name while online; a holder whose game is gone (a stale session) gives way
-      if (!holder.gone && this.now() - holder.lastIn < 30_000) return this.send(s, 'pers', [], 'pset');
+    if (holder && holder !== s && (holder.gone || holder.vip === s.vip || this.now() - holder.lastIn >= 30_000)) {
       this.drop(holder, 'the persona logged in again');
     }
+    // one holder per name, online or racing.  (Not the name with digits in its place: the game finds itself in a
+    // race's players by the name it asked for, so a game playing under a name the server chose raced against
+    // itself.)
+    if (this.nameTaken(mine, s)) return this.send(s, 'pers', [], 'pset');
     if (s.persona && s.persona !== mine) this.byPersona.delete(s.persona.toLowerCase());
     // the key of the buddy login: the game keeps 31 characters of it (its buddy AUTH carried 31 of 32)
     s.persona = mine; s.lkey = crypto.randomBytes(15).toString('hex');
@@ -349,6 +358,16 @@ export class Lobby {
     this.send(s, 'pers', this.persFields(s, mine));
     this.send(s, '+who', this.userFields(s));
     this.send(s, '+sst', this.sstFields());
+  }
+  /** name is another player's: a session that holds it, or a player racing under it (a race this server started,
+   *  the player not back yet) from another browser that is still on the switch, who comes back to it */
+  nameTaken(name, s) {
+    const k = name.toLowerCase(), h = this.byPersona.get(k);
+    if (h && h !== s && !h.gone) return true;
+    for (const g of this.games.values()) if (g.started) for (const p of g.players) {
+      if (!p.back && p.vip !== s.vip && p.name.toLowerCase() === k && !this.goneVips.has(p.vip)) return true;
+    }
+    return false;
   }
   /** the lobby's counts (the Game Session Lobby's "Players Online" and "Games Created"; server.dll pushes them
    *  every few seconds) */
@@ -467,8 +486,8 @@ export class Lobby {
       const ranked = g.ranked && g.players.length >= 3;
       g.result = key;
       this.results.addRace({ type: r.type, ranked, track: r.track, players: order });
-      this.log(`[online] "${g.name}" (${RACE_TYPES[r.type] ?? `type ${r.type}`}, ${ranked ? 'ranked' : 'unranked'}): ${line}` +
-        (g.ranked && !ranked ? ' (a ranked race needs 3 players: no points)' : ''), s.group);
+      this.log(`[online] "${g.name}" (${REPORT_TYPES[r.type]}, ${ranked ? 'ranked' : 'unranked'}): ${line}` +
+        (r.type >= RACE_TYPES.length ? ' (no stats for this race type)' : g.ranked && !ranked ? ' (a ranked race needs 3 players: no points)' : ''), s.group);
     } else {
       if (g.reports.length && !g.reports.some(x => x.key === key)) this.log(`[online] "${g.name}": ${s.persona}'s report differs (${line})`, s.group);
       g.reports.push({ vip: s.vip, key });
@@ -487,17 +506,18 @@ export class Lobby {
     const idx = new Set(r.players.map(p => p.index)), places = r.players.filter(p => !p.dropped).map(p => p.place);
     if (idx.size !== names.length || [...idx].some(i => i >= names.length)) return 'players named twice';
     if (new Set(places).size !== places.length || places.some(p => p < 1 || p > names.length)) return 'places do not add up';
-    if (!(r.type >= 0 && r.type < RACE_TYPES.length)) return `race type ${r.type}`;
+    if (!(r.type >= 0 && r.type < REPORT_TYPES.length)) return `race type ${r.type}`;
     const age = (this.now() - g.started) / 1000, min = MIN_RACE_S[r.type];
-    if (age < min) return `a race of ${age.toFixed(1)} s (a ${RACE_TYPES[r.type]} race takes ${min} s at least)`;
+    if (age < min) return `a race of ${age.toFixed(1)} s (a ${REPORT_TYPES[r.type]} race takes ${min} s at least)`;
     if (r.players.some(p => !p.dropped && !(p.time >= min && p.time <= age + 5))) return 'a time the race has not had';
     return '';
   }
-  /** back in the lobby after a race (its game list): the race is over for this player */
+  /** back in the lobby after a race (its game list): the race is over for this player, who raced from this
+   *  browser (another player under the same name is not that player: the race went on, and its result was lost) */
   backFromRace(s) {
     for (const g of this.games.values()) {
       if (!g.started) continue;
-      const me = g.players.find(p => p.name.toLowerCase() === s.persona.toLowerCase());
+      const me = g.players.find(p => p.vip === s.vip && p.name.toLowerCase() === s.persona.toLowerCase());
       if (me && me.s !== s) { me.back = true; this.endIfBack(g); }
     }
   }

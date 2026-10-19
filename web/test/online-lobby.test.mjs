@@ -276,6 +276,39 @@ test('results: the race report counts once, is checked, and shows in the career 
   assert.equal(a2.last('snap').f.get('COUNT'), '0', 'no sprint races yet');
 });
 
+test('names: one holder per name; the holder\'s own browser takes it back from its old session', () => {
+  const w = world();
+  const a = w.client('10.77.0.2').login('NAME');
+  assert.equal(a.last('pers').f.get('PERS'), 'NAME');
+  assert.equal(w.client('10.77.0.3').login('NAME').last('pers').code, 'pset', 'another browser');
+  // the holder's own browser logging in again (its game's new lobby link)
+  const a2 = w.client('10.77.0.2').login('NAME');
+  assert.equal(a2.last('pers').code, ''); assert.equal(a2.last('pers').f.get('PERS'), 'NAME');
+  assert.equal([...w.host.lobby.sessions].filter(s => s.persona === 'NAME').length, 1, 'the old session went');
+});
+
+test('names: a racer keeps the name until back, and only its own browser brings it back', () => {
+  const w = world(), a = w.client('10.77.0.2').login('Alpha'), b = w.client('10.77.0.3').login('Bravo');
+  a.send('gcre', [['NAME', 'r2'], ['PARAMS', 'TRACK=4014']]); b.send('gjoi', [['NAME', 'r2']]);
+  a.send('gsta', [['NAME', 'r2']]);
+  const auth = a.last('+ses').f.get('AUTH');
+  a.close(); b.close();                                  // the game closes its lobby link for the race
+  // another browser cannot take the racer's name meanwhile (it took it, and its game list ended the race)
+  const other = w.client('10.77.0.4').login('Alpha');
+  assert.equal(other.last('pers').code, 'pset');
+  w.advance(200_000);
+  const report = c => c.send('rank', [['AUTH', auth], ['REPT', 'x'], ['RESU', RESU], ['VENUE', 'NFSUG2'], ['NAME0', 'Alpha'], ['NAME1', 'Bravo']]);
+  const b2 = w.client('10.77.0.3').login('Bravo');
+  b2.send('gsea', [['START', 0], ['COUNT', 20]]); report(b2);
+  assert.equal(w.host.lobby.games.size, 1, 'Alpha is still racing');
+  // the racer, back from its own browser: its name, and its report makes the result
+  const a2 = w.client('10.77.0.2').login('Alpha');
+  assert.equal(a2.last('pers').f.get('PERS'), 'Alpha');
+  report(a2);
+  assert.ok(w.lines.some(l => /"r2" \(circuit, unranked\): 1 Bravo 3:06\.82, 2 Alpha 3:07\.67/.test(l)), w.lines.join('\n'));
+  assert.equal(w.host.lobby.games.size, 0);
+});
+
 test('web pages: the news and terms pages as web-offer scripts, nothing else', () => {
   const w = world(), g = w.client('10.77.0.2');
   const get = (req) => {

@@ -25,8 +25,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-/** the race types, in the order of the server config's tier points and of the game's stat blocks */
-export const RACE_TYPES = Object.freeze(['circuit', 'sprint', 'drift', 'drag', 'streetx', 'url']);
+/** the race types by the game's own numbers: the type in its race report (SPEED2.EXE 0x5fe8d0, from the game's
+ *  CUSTFLAGS race bit, 0x58b0f7) and the order it reads the server config's tier points in (0x58a370); its stat
+ *  blocks are taken to follow it (UNVERIFIED).  (Until 2026-10-19 drag and drift were the other way round here:
+ *  stats.json is kept by these numbers, so only the names changed.) */
+export const RACE_TYPES = Object.freeze(['circuit', 'sprint', 'drag', 'drift', 'streetx', 'url']);
 const MAX_PERSONAS = 100_000, MAX_BEST = 300;
 
 const monthOf = t => { const d = new Date(t); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`; };

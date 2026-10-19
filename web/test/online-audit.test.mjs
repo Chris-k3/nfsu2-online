@@ -396,6 +396,33 @@ test('ONL-7: results: one report or reports that differ decide nothing; ranked n
   assert.ok(!board().some(r => r.startsWith('Quick')), 'a 3-second circuit race is not taken');
 });
 
+test('results: race types by the game\'s numbers (drag 2, drift 3); its seventh (6) is a result that counts nowhere', () => {
+  const w = world();
+  const boards = () => [0, 1, 2, 3, 4, 5].map(t => w.host.lobby.results.board(t).length);
+  // a quarter-mile drag: times well under the other types' 20 s
+  const a = w.client('10.77.0.2').login('Drag1'), b = w.client('10.77.0.3').login('Drag2');
+  let auth = race('drag', [a, b]);
+  w.advance(40_000);
+  for (const c of [a, b]) report(c, auth, ['Drag1', 'Drag2'], [{ index: 0, place: 1, time: 11.2 }, { index: 1, place: 2, time: 12.5 }], 2);
+  assert.ok(w.text().some(l => l.endsWith('"drag" (drag, unranked): 1 Drag1 0:11.20, 2 Drag2 0:12.50')), w.text().join('\n'));
+  // drift: places by points, not by time
+  const c = w.client('10.77.0.4').login('Drift1'), d = w.client('10.77.0.5').login('Drift2');
+  auth = race('drift', [c, d]);
+  w.advance(110_000);
+  for (const x of [c, d]) report(x, auth, ['Drift1', 'Drift2'], [{ index: 0, place: 1, time: 104 }, { index: 1, place: 2, time: 92 }], 3);
+  assert.ok(w.text().some(l => l.includes('"drift" (drift, unranked): 1 Drift1')), w.text().join('\n'));
+  assert.deepEqual(boards(), [0, 0, 2, 2, 0, 0]);
+  // the seventh: the result is taken and logged; no board or career counts it
+  const e = w.client('10.77.0.6').login('Seven1'), f = w.client('10.77.0.7').login('Seven2');
+  auth = race('seven', [e, f]);
+  w.advance(110_000);
+  for (const x of [e, f]) report(x, auth, ['Seven1', 'Seven2'], [{ index: 0, place: 1, time: 100 }, { index: 1, place: 2, time: 104 }], 6);
+  assert.ok(w.text().some(l => l.includes('"seven" (type 6, unranked): 1 Seven1') && l.endsWith('(no stats for this race type)')), w.text().join('\n'));
+  assert.ok(!w.text().some(l => l.includes('not taken')), w.text().join('\n'));
+  assert.deepEqual(boards(), [0, 0, 2, 2, 0, 0]);
+  assert.equal(w.host.lobby.games.size, 0, 'every race is over');
+});
+
 test('ONL-7: the results store: room for new players when full, the rankings built once for many asks, best times capped', () => {
   const st = new Stats({ max: 3 });
   st.addRace({ type: 0, ranked: false, track: 1, players: [{ name: 'Old1', place: 1, time: 50 }, { name: 'Old2', place: 2, time: 51 }] });
