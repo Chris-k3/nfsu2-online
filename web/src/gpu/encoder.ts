@@ -21,6 +21,7 @@ import * as P from './proto';
 import { D, F, Kind, Op } from './proto';
 import { COPY, FF_FS, TVERT_VS } from './wgsl';
 import { createShaderAbi, alphaFunc, PSCUBE, VSPAR_SIZE, PSPAR_SIZE } from './shader-abi';
+import { unpackDxt } from './dxt';
 
 export interface EncodeStats {
   draws: number; passes: number; skipped: number; encodeMs: number;
@@ -33,6 +34,7 @@ interface Tex {
   view: GPUTextureView;            // sampling view (2d, or cube)
   rtViews: GPUTextureView[];       // render target views: [0] = level 0 (2d) or faces 0..5 (cube)
   expandA8: boolean; bc: boolean;
+  unpack: boolean;                 // DXT on a GPU without texture-compression-bc: BGRA8, unpacked on upload
 }
 
 const enum Src { TVert = 0, Raw = 1, Pool = 2 }
@@ -161,7 +163,7 @@ export class Encoder {
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
     const px = new Uint8Array(24).fill(255);
     this.queue.writeTexture({ texture: t }, px, { bytesPerRow: 4, rowsPerImage: 1 }, [1, 1, cube ? 6 : 1]);
-    return { serial: 0, tex: t, fmt: 21, w: 1, h: 1, levels: 1, cube, rt: false, expandA8: false, bc: false, rtViews: [],
+    return { serial: 0, tex: t, fmt: 21, w: 1, h: 1, levels: 1, cube, rt: false, expandA8: false, bc: false, unpack: false, rtViews: [],
       view: t.createView({ dimension: cube ? 'cube' : '2d' }) };
   }
 
@@ -210,14 +212,14 @@ export class Encoder {
     return tail;
   }
 
-  private gpuFormat(fmt: number): { f: GPUTextureFormat; bc: boolean; a8: boolean } | null {
+  private gpuFormat(fmt: number): { f: GPUTextureFormat; bc: boolean; a8: boolean; unpack?: boolean } | null {
     switch (fmt) {
       case P.Fmt.A8R8G8B8: case P.Fmt.X8R8G8B8: return { f: 'bgra8unorm', bc: false, a8: false };
       case P.Fmt.A8: return this.feat.swizzle ? { f: 'r8unorm', bc: false, a8: false } : { f: 'bgra8unorm', bc: false, a8: true };
       case P.Fmt.P8: return { f: 'r8unorm', bc: false, a8: false };         // samples (L,0,0,1), as on the Mac
-      case P.Fmt.DXT1: return { f: 'bc1-rgba-unorm', bc: true, a8: false };
-      case P.Fmt.DXT3: return { f: 'bc2-rgba-unorm', bc: true, a8: false };
-      case P.Fmt.DXT5: return { f: 'bc3-rgba-unorm', bc: true, a8: false };
+      case P.Fmt.DXT1: case P.Fmt.DXT3: case P.Fmt.DXT5:
+        if (!this.feat.bc) return { f: 'bgra8unorm', bc: false, a8: false, unpack: true };
+        return { f: fmt === P.Fmt.DXT1 ? 'bc1-rgba-unorm' : fmt === P.Fmt.DXT3 ? 'bc2-rgba-unorm' : 'bc3-rgba-unorm', bc: true, a8: false };
     }
     return null;
   }
@@ -226,7 +228,7 @@ export class Encoder {
     this.texFree(id);
     const gf = this.gpuFormat(fmt);
     if (!gf) { this.log(`[gpu] texture ${id}: format ${fmt} not supported`); return; }
-    const cube = (flags & P.TF_CUBE) !== 0, rt = (flags & P.TF_RT) !== 0 && !gf.bc && fmt !== P.Fmt.A8 && fmt !== P.Fmt.P8;
+    const cube = (flags & P.TF_CUBE) !== 0, rt = (flags & P.TF_RT) !== 0 && !gf.bc && !gf.unpack && fmt !== P.Fmt.A8 && fmt !== P.Fmt.P8;
     if (gf.bc && ((w & 3) || (h & 3)) && !this.feat.unaligned) {
       const k = `bc-unaligned ${w}x${h}`;
       if (!this.seenFmt.has(k)) { this.seenFmt.add(k); this.log(`[gpu] texture ${id}: ${k} without texture-compression-unaligned (drawn white)`); }
@@ -244,7 +246,8 @@ export class Encoder {
       if (cube) for (let f = 0; f < 6; f++) rtViews.push(tex.createView({ dimension: '2d', baseArrayLayer: f, arrayLayerCount: 1, baseMipLevel: 0, mipLevelCount: 1 }));
       else rtViews.push(tex.createView({ dimension: '2d', baseMipLevel: 0, mipLevelCount: 1 }));
     }
-    this.tex[id] = { serial: this.serial++, tex, fmt, w, h, levels, cube, rt, view: tex.createView(vd), rtViews, expandA8: gf.a8, bc: gf.bc };
+    this.tex[id] = { serial: this.serial++, tex, fmt, w, h, levels, cube, rt, view: tex.createView(vd), rtViews, expandA8: gf.a8, bc: gf.bc,
+      unpack: !!gf.unpack };
   }
 
   private texFree(id: number): void {
@@ -267,6 +270,10 @@ export class Encoder {
       const out = new Uint8Array(lw * lh * 4);
       for (let y = 0; y < lh; y++) for (let x = 0; x < lw; x++) out[(y * lw + x) * 4 + 3] = this.u8[data + y * pitch + x];
       this.queue.writeTexture(dst, out, { bytesPerRow: lw * 4, rowsPerImage: lh }, [lw, lh, 1]);
+      return;
+    }
+    if (t.unpack) {
+      this.queue.writeTexture(dst, unpackDxt(t.fmt, this.u8, data, pitch, lw, lh), { bytesPerRow: lw * 4, rowsPerImage: lh }, [lw, lh, 1]);
       return;
     }
     this.queue.writeTexture(dst, this.u8, { offset: data, bytesPerRow: pitch, rowsPerImage: rows }, [w, h, 1]);

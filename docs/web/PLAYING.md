@@ -196,7 +196,8 @@ Good to know:
 | What you see | What to do |
 |---|---|
 | "Secure, isolated page" on another PC | Open the server's `https://` address, not `http`. Only `localhost` works without HTTPS. |
-| "WebGPU" | Update Chrome; look at `chrome://gpu`. The game needs WebGPU with BC texture compression. |
+| "WebGPU" | Update Chrome; look at `chrome://gpu`. The game needs WebGPU. |
+| "WebGPU" with a note about compressed textures | Nothing to do: the game plays. This GPU (in many phones, Pixels among them) cannot read the game's compressed textures, so the page unpacks them as the game loads: about 200 MB more memory, and loading screens may pause for a moment. |
 | "Game download" | The download failed, or the server is not reachable. The page tries again by itself, or press **Retry**. If the module is missing, start the server with `web/start.sh`, which builds it. |
 | "Open elsewhere" | The game runs in another tab of this browser. Switch to it, or close it. |
 | No sound | Click the game or press a key. Check the sound setting and the output latency (try "Robust"). |

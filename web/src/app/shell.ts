@@ -108,10 +108,10 @@ function setCheck(c: Check) {
 }
 const ORDER = ['browser', 'isolation', 'gpu', 'storage', 'module'];
 let problemsShown = '';
-/** Only what is wrong (a failed check) or worth knowing (another browser); the storage warning goes with the saves. */
+/** Only what is wrong (a failed check) or worth knowing (another browser, a GPU without BC); the storage warning goes with the saves. */
 function renderProblems() {
   const shown = ORDER.map(id => checks.get(id))
-    .filter((c): c is Check => !!c && (c.state === 'fail' || (c.state === 'warn' && c.id === 'browser')));
+    .filter((c): c is Check => !!c && (c.state === 'fail' || (c.state === 'warn' && (c.id === 'browser' || c.id === 'gpu'))));
   const key = shown.map(c => `${c.id}:${c.state}:${c.detail}`).join('|');
   if (key !== problemsShown) {          // the list is a live region: rebuilt only when it changes
     problemsShown = key;

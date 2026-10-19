@@ -38,6 +38,9 @@ export interface RendererOptions {
   /** false: always draw into the back buffer and composite it (the path before direct
    *  canvas drawing; A/B and diagnostics) */
   direct?: boolean;
+  /** unpack DXT textures on the CPU even when the GPU has texture-compression-bc (tests the
+   *  path of PowerVR and Mali phones on a desktop GPU) */
+  noBC?: boolean;
   log?: (s: string) => void;
 }
 
@@ -92,8 +95,10 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
   if (!navigator.gpu) throw new Error('WebGPU is not available in this browser');
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
   if (!adapter) throw new Error('no WebGPU adapter');
-  if (!adapter.features.has('texture-compression-bc')) throw new Error('the GPU lacks texture-compression-bc (DXT textures)');
-  const want: GPUFeatureName[] = ['texture-compression-bc'];
+  // without BC the encoder unpacks the DXT textures as they upload (dxt.ts)
+  const bc = adapter.features.has('texture-compression-bc') && !opts.noBC;
+  if (!bc) log(`[gpu] ${opts.noBC ? 'noBC' : 'no texture-compression-bc'}: DXT textures are unpacked to BGRA8 as they upload`);
+  const want: GPUFeatureName[] = bc ? ['texture-compression-bc'] : [];
   for (const f of ['texture-component-swizzle', 'texture-compression-unaligned', 'timestamp-query'])
     if (adapter.features.has(f as GPUFeatureName)) want.push(f as GPUFeatureName);
   const device = await adapter.requestDevice({ requiredFeatures: want, requiredLimits: {

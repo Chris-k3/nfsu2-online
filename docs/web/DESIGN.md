@@ -128,6 +128,11 @@ The game thread keeps `com.c` (D3D9 state, shader translation) and records throu
   the canvas's (the usual case) the frame draws its screen straight into the canvas texture: no back buffer and no
   composite pass. A frame that copies from the screen before drawing to it keeps the back buffer (it reads the
   previous frame); none of the checked scenes did. `?direct=0` on the test page turns the direct path off.
+- DXT textures stay BC on the GPU. A GPU without `texture-compression-bc` (PowerVR and Mali phones) gets them unpacked
+  to BGRA8 as they upload (`web/src/gpu/dxt.ts`). Measured on a Quick Race (Resort Loop) with a desktop CPU: about
+  7× the texture memory (30 MB packed, 213 MB unpacked) and about 0.4 s of page-thread work, all of it in the menus
+  and on the loading screen (pauses up to ~0.2 s there), none during the race. `?bc=0` on the test page takes this
+  path on any GPU.
 - C and TS layouts come from one source: a C header with `_Static_assert` offsets, plus a generated or hand-mirrored
   `proto.ts` checked by a test.
 

@@ -52,9 +52,10 @@ export async function checkGpu(): Promise<Check & { adapter?: string }> {
   try { ad = await gpu.requestAdapter({ powerPreference: 'high-performance' }); } catch { /* reported below */ }
   if (!ad) return { id: 'gpu', label, state: 'fail', detail: 'Chrome found no usable graphics adapter (blocklisted driver or GPU process crash). Check chrome://gpu.' };
   const info = ad.info ? [ad.info.vendor, ad.info.architecture, ad.info.description].filter(Boolean).join(' ') : '';
+  // no BC (PowerVR, Mali): the renderer unpacks the textures (web/src/gpu/dxt.ts), so it plays
   if (!ad.features.has('texture-compression-bc')) {
-    return { id: 'gpu', label: `WebGPU${info ? ', ' + info : ''}`, state: 'fail', adapter: info,
-      detail: 'This GPU does not offer BC texture compression (texture-compression-bc), which the game\'s textures use.' };
+    return { id: 'gpu', label: `WebGPU${info ? ', ' + info : ''}`, state: 'warn', adapter: info,
+      detail: 'This GPU cannot read the game\'s compressed textures, so they are unpacked as the game loads. That needs about 200 MB more memory, and loading screens may pause for a moment.' };
   }
   return { id: 'gpu', label: `WebGPU${info ? ', ' + info : ''}`, state: 'ok', adapter: info, detail: 'Adapter with BC texture compression.' };
 }
