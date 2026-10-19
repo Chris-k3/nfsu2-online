@@ -343,7 +343,7 @@ export class SettingsPanel {
       described = inp;
     }
     if (setInFile) {
-      const r = document.createElement('button'); r.type = 'button'; r.className = 'set-reset'; r.textContent = 'Reset';
+      const r = document.createElement('button'); r.type = 'button'; r.className = 'text-btn'; r.textContent = 'Reset';
       r.setAttribute('aria-label', `Reset ${it.label}`);
       r.title = `Back to the default (${shown(it, DEFAULTS.get(it.key) ?? '')})`;
       r.onclick = () => void this.put(it.key, null);

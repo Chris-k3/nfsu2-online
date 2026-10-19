@@ -77,6 +77,9 @@ h3 { font-size: 16px; line-height: 24px; color: var(--lime); margin: 32px 0 8px;
 body[data-phase="ready"] .status { color: var(--lime); }
 body[data-phase="error"] .status { color: var(--bad); }
 .status-sub { margin: 4px 0 24px; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* Play across the panel; Retry and Download log under it */
+.hero .row { justify-content: center; }
+.hero .play { flex: 1 0 100%; justify-content: center; padding: 0 16px; }
 
 /* ------------------------------------------------------------- controls */
 button, .file-btn { cursor: pointer; }
@@ -175,11 +178,12 @@ kbd {
   background: var(--field); color: var(--lime); font: italic 700 16px/24px var(--font);
 }
 .set input::placeholder { color: var(--edge); font-weight: 400; }
-.set-reset {
+/* a small action as underlined text: a setting's Reset, the hero's Download log */
+.text-btn {
   height: 32px; padding: 0 8px; border: 0; border-radius: 8px; background: none;
   color: var(--muted); font-size: 14px; line-height: 20px; text-decoration: underline; text-underline-offset: 4px;
 }
-.set-reset:hover { color: var(--lime); }
+.text-btn:hover { color: var(--lime); }
 
 summary { display: flex; align-items: center; gap: 8px; min-height: 48px; color: var(--muted); font-size: 14px; line-height: 20px; cursor: pointer; list-style: none; }
 summary::-webkit-details-marker { display: none; }

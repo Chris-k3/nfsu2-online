@@ -182,7 +182,7 @@ try {
     const moreDisplay = await page.locator('#settings summary:has-text("More display")').textContent();   // fps_counter and hud
     await page.click('#settings summary:has-text("More display")');
     n0 = await saved(page);
-    await page.click('.set[data-key="hud"] .set-reset'); await settle(page, n0);
+    await page.click('.set[data-key="hud"] .text-btn'); await settle(page, n0);
     const file2 = (await readOpfs(page, SAVE, 'settings.ini')).text;
     report('settings', fileOk && envOk && /not a whole number in 1024\.\.65535/.test(refusedMsg) && /ignored/.test(rawMsg) &&
       /ultrawide/.test(hudState) && after.movies === 'false' && after.fps === '120' && after.name === 'Tester' && /^#hud = wide$/m.test(file2) && /\(2 changed\)$/.test(moreDisplay),
