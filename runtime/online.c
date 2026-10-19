@@ -45,6 +45,9 @@
  * where another name can be typed (UI_OLEALogin also offers "Use <name>": the
  * game's own saved login, from the account field); no connection (stage 4) ->
  * leave online to the main menu, as UI_OLEALogin's Cancel does.
+ * A name another player holds the server gives with four digits instead (it
+ * refuses one only when it finds no free digits): online_lobby_read() below
+ * puts that name in the game's own fields as the server's answer arrives.
  */
 #include "cpu.h"
 #include <stdio.h>
@@ -184,4 +187,61 @@ void sub_004f19a0(CPU *c){
     fprintf(stderr, "[online] the server did not take %s (another player online under it?): the EA Login screens\n", g_name);
     a[0] = 0; call(c, FN_LEAVE_ONLINE, 0, 1, a);
     a[0] = fe; call_to(c, 0, sub_004effd0_orig, 0, 1, a);
+}
+
+/* The persona the server gave: its answer to pers (code 0) names it, the name
+ * the game asked for or, when another player is online or racing under that,
+ * the name with four digits in place of its end (lobby.mjs).  The game finds
+ * itself among a race's players by its own persona and account fields, so they
+ * take the server's name: a game that kept the name it asked for took the
+ * other player's place for its own and sent its race traffic to itself.
+ * winsock.c hands over the lobby link's bytes as the game reads them; a frame
+ * is 12 bytes of header (kind, code, u32 big-endian length, the header
+ * included) and TagField text (aries.mjs). */
+static int name_char(int ch){ return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-'; }
+static void persona_given(const char *body){
+    const char *v = 0;
+    for (const char *p = body; *p; p++)
+        if ((p == body || (unsigned char)p[-1] <= 0x20) && !strncasecmp(p, "PERS=", 5)){ v = p + 5; break; }
+    if (!v) return;
+    if (*v == '"') v++;
+    char given[16]; int n = 0;
+    while (n < 15 && name_char((unsigned char)v[n])){ given[n] = v[n]; n++; }
+    given[n] = 0;
+    if (n < 3 || name_char((unsigned char)v[n])) return;
+    char asked[17] = "", account[17] = "";
+    memcpy(asked, g_mem + G_PERSONA, 16); memcpy(account, g_mem + G_ACCOUNT, 16);
+    if (!strcmp(asked, given)) return;
+    /* the account too when it is the persona (this file's login, and LAN's): the
+     * next login (after a race) asks for the account's own persona */
+    if (!strcmp(account, asked)) field(G_ACCOUNT, given);
+    field(G_PERSONA, given);
+    if (!strcmp(g_name, asked)) memcpy(g_name, given, sizeof g_name);
+    fprintf(stderr, "[online] the server gave the name %s (another player is online under %s)\n", given, asked);
+}
+static uint32_t g_link;              /* the lobby link being read (its connection id) */
+static uint8_t g_hdr[12];
+static int g_hdr_n, g_keep;          /* header bytes so far; this frame is a pers answer */
+static uint32_t g_left;              /* body bytes of this frame still to come */
+static char g_body[256];
+static int g_body_n;
+void online_lobby_read(uint32_t link, const uint8_t *p, int n){
+    if (link != g_link){ g_link = link; g_hdr_n = 0; g_left = 0; g_keep = 0; }
+    while (n > 0){
+        if (!g_left){
+            int k = 12 - g_hdr_n < n ? 12 - g_hdr_n : n;
+            memcpy(g_hdr + g_hdr_n, p, (size_t)k); g_hdr_n += k; p += k; n -= k;
+            if (g_hdr_n < 12) return;
+            g_hdr_n = 0;
+            uint32_t len = (uint32_t)g_hdr[8] << 24 | (uint32_t)g_hdr[9] << 16 | (uint32_t)g_hdr[10] << 8 | g_hdr[11];
+            if (len <= 12) continue;
+            g_left = len - 12; g_body_n = 0;
+            g_keep = !memcmp(g_hdr, "pers", 4) && !memcmp(g_hdr + 4, "\0\0\0\0", 4) && g_left < sizeof g_body;
+            continue;
+        }
+        int k = (uint32_t)n < g_left ? n : (int)g_left;
+        if (g_keep){ memcpy(g_body + g_body_n, p, (size_t)k); g_body_n += k; }
+        p += k; n -= k; g_left -= (uint32_t)k;
+        if (!g_left && g_keep){ g_body[g_body_n] = 0; g_keep = 0; persona_given(g_body); }
+    }
 }

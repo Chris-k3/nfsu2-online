@@ -13,8 +13,10 @@
 //   auth     -> any name logs in (no accounts, nothing stored); PERSONAS
 //   acct     -> "create account": logs in the same way
 //   cper/dper-> a persona for this session, or one less (at most LIMITS.personas)
-//   pers     -> the persona to play as (one holder per name while online or
-//               racing; the holder's own browser takes it back); LKEY
+//   pers     -> the persona to play as; LKEY.  One holder per name while online
+//               or racing (the holder's own browser takes it back): a name
+//               another browser holds is given with four digits in place of
+//               its end, and the game takes it for its own (runtime/online.c)
 //   move     -> into a room (+who, +usr, +pop), or out (an unknown NAME)
 //   mesg     -> chat in the room, or to one persona (PRIV; the game's
 //               challenge invites are private messages too): +msg
@@ -338,7 +340,7 @@ export class Lobby {
   selectPersona(s, f) {
     if (!s.account) return this.send(s, 'pers', [], 'auth');
     const p = f.get('PERS') ?? '';
-    const mine = s.personas.find(x => x.toLowerCase() === p.toLowerCase());
+    let mine = s.personas.find(x => x.toLowerCase() === p.toLowerCase());
     if (!mine) return this.send(s, 'pers', [], 'invp');
     // the holder gives way when it is this browser's own older session (its game logged in again) or its game is
     // gone (a stale session)
@@ -346,15 +348,16 @@ export class Lobby {
     if (holder && holder !== s && (holder.gone || holder.vip === s.vip || this.now() - holder.lastIn >= 30_000)) {
       this.drop(holder, 'the persona logged in again');
     }
-    // one holder per name, online or racing.  (Not the name with digits in its place: the game finds itself in a
-    // race's players by the name it asked for, so a game playing under a name the server chose raced against
-    // itself.)
-    if (this.nameTaken(mine, s)) return this.send(s, 'pers', [], 'pset');
+    // one holder per name, online or racing: a name another player holds is this player's with digits.  The answer
+    // names it, and the runtime puts it in the game's own persona and account fields (runtime/online.c): the game
+    // finds itself among a race's players by them (one that kept the name it asked for raced against itself)
+    const asked = mine;
+    if (this.nameTaken(mine, s) && !(mine = this.freeVariant(mine, s))) return this.send(s, 'pers', [], 'pset');
     if (s.persona && s.persona !== mine) this.byPersona.delete(s.persona.toLowerCase());
     // the key of the buddy login: the game keeps 31 characters of it (its buddy AUTH carried 31 of 32)
     s.persona = mine; s.lkey = crypto.randomBytes(15).toString('hex');
     this.byPersona.set(mine.toLowerCase(), s);
-    this.log(`[online] ${s.addr}: plays as "${mine}"`, s.group);
+    this.log(`[online] ${s.addr}: plays as "${mine}"${mine !== asked ? ` ("${asked}" is taken)` : ''}`, s.group);
     this.send(s, 'pers', this.persFields(s, mine));
     this.send(s, '+who', this.userFields(s));
     this.send(s, '+sst', this.sstFields());
@@ -368,6 +371,16 @@ export class Lobby {
       if (!p.back && p.vip !== s.vip && p.name.toLowerCase() === k && !this.goneVips.has(p.vip)) return true;
     }
     return false;
+  }
+  /** a free name: name with four digits in place of its end (a persona name has 15 characters at most); the same
+   *  digits for one client while they are free (it keeps the name when it logs in again), else random ones */
+  freeVariant(name, s) {
+    const own = crypto.createHash('sha256').update(`${s.group}\n${name.toLowerCase()}`).digest().readUInt32BE(0) % 9000 + 1000;
+    for (let i = 0; i < 20; i++) {
+      const d = String(i ? crypto.randomInt(1000, 10000) : own), v = name.slice(0, 15 - d.length) + d;
+      if (!this.nameTaken(v, s)) return v;
+    }
+    return null;
   }
   /** the lobby's counts (the Game Session Lobby's "Players Online" and "Games Created"; server.dll pushes them
    *  every few seconds) */

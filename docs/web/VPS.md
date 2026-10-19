@@ -419,7 +419,8 @@ paths to the VPS, so pick a VPS location between you.
 - **The game's Online mode** is served by the server itself, at the switch's reserved address 10.77.0.1 (on by
   default; `--online off` in the server's `command` turns it off, and the game then cannot connect). Any name of 3
   to 15 letters, digits, `-` and `_` logs in; there are no accounts. One player per name, while online and while
-  racing.
+  racing: a name in use is given with four digits in place of its end (on a busy server many players come as
+  `NAME`), and the game plays under that.
   - **Kept in the state volume:** `online/stats.json` (race results and best times per persona) and
     `online/buddies.json` (EA Messenger friends lists, persona names only), each with the month a persona was last
     seen, written atomically. No passwords (the server never reads them), CD keys, addresses or chat.

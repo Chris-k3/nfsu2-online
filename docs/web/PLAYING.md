@@ -177,8 +177,9 @@ Good to know:
   applies the next time you press Play.
 - **Your name is yours while you are online**, and while you race. Someone else can use it when you are not; the
   rankings and your EA Messenger friends list follow the name, so whoever plays under it while you are away sees your
-  friends list and can change it. If another player is online under it, the game says so and shows its EA Login
-  screens instead (below), where you can type another name.
+  friends list and can change it. If another player is online under it, you play under it with four digits in place
+  of its end (`NAME` becomes `NAME4821`), usually the same digits when you come back. Set **Online, Your name** to
+  keep your own.
 - **No name and no profile:** the game's own EA Login screens come instead. **Use Existing EA Account**, any name
   (3 to 15 letters, digits, `-` or `_`) and any password, **Continue**; **No** to "create a profile"; your persona.
   Nothing is checked and nothing is kept: there are no accounts. Type a password you use nowhere else: the game

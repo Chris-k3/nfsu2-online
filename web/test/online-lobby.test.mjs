@@ -99,9 +99,9 @@ test('login: config, any name, personas, LKEY, nothing secret kept', () => {
     assert.ok(!dump.includes(secret), `session keeps ${secret}`);
     assert.ok(!w.lines.join('\n').includes(secret), `log has ${secret}`);
   }
-  // one holder per persona name while online; a bad name is refused
+  // one holder per persona name while online (another browser gets it with digits); a bad name is refused
   const g2 = w.client('10.77.0.3'), c2 = g2.login('Speedy');
-  assert.equal(c2.last('pers').code, 'pset');
+  assert.match(c2.last('pers').f.get('PERS'), /^Speedy\d{4}$/);
   const c3 = g2.login('x y');
   assert.equal(c3.last('auth').code, 'imst');
   // a second persona for this session (create, select, delete)
@@ -276,26 +276,41 @@ test('results: the race report counts once, is checked, and shows in the career 
   assert.equal(a2.last('snap').f.get('COUNT'), '0', 'no sprint races yet');
 });
 
-test('names: one holder per name; the holder\'s own browser takes it back from its old session', () => {
+test('names: a name another browser holds comes with four digits (the same for one client); its own browser takes it back', () => {
   const w = world();
   const a = w.client('10.77.0.2').login('NAME');
   assert.equal(a.last('pers').f.get('PERS'), 'NAME');
-  assert.equal(w.client('10.77.0.3').login('NAME').last('pers').code, 'pset', 'another browser');
-  // the holder's own browser logging in again (its game's new lobby link)
+  const b = w.client('10.77.0.3').login('NAME'), bn = b.last('pers').f.get('PERS');
+  assert.equal(b.last('pers').code, ''); assert.match(bn, /^NAME\d{4}$/);
+  assert.equal(b.last('+who').f.get('N'), bn, 'the lobby knows the player by it');
+  assert.ok(w.lines.some(l => l.includes(`plays as "${bn}" ("NAME" is taken)`)), w.lines.join('\n'));
+  const c = w.client('10.77.0.4').login('NAME'), cn = c.last('pers').f.get('PERS');
+  assert.match(cn, /^NAME\d{4}$/); assert.notEqual(cn, bn);
+  assert.deepEqual(new Set(w.host.lobby.byPersona.keys()), new Set(['name', bn.toLowerCase(), cn.toLowerCase()]));
+  // the digits take the end of a long name: still a persona name (15 characters at most)
+  w.client('10.77.0.5').login('ABCDEFGHIJKLMNO');
+  assert.match(w.client('10.77.0.6').login('ABCDEFGHIJKLMNO').last('pers').f.get('PERS'), /^ABCDEFGHIJK\d{4}$/);
+  // the same client logging in again: the same digits (the game asks for them now: the runtime took them)
+  b.close();
+  assert.equal(w.client('10.77.0.3').login('NAME').last('pers').f.get('PERS'), bn);
+  b.close();
+  assert.equal(w.client('10.77.0.3').login(bn).last('pers').f.get('PERS'), bn);
+  // the holder's own browser logging in again (its game's new lobby link): the name, from its old session
   const a2 = w.client('10.77.0.2').login('NAME');
-  assert.equal(a2.last('pers').code, ''); assert.equal(a2.last('pers').f.get('PERS'), 'NAME');
+  assert.equal(a2.last('pers').f.get('PERS'), 'NAME');
   assert.equal([...w.host.lobby.sessions].filter(s => s.persona === 'NAME').length, 1, 'the old session went');
 });
 
-test('names: a racer keeps the name until back, and only its own browser brings it back', () => {
+test('names: a racer keeps the name until back; another player under it gets digits and ends nothing', () => {
   const w = world(), a = w.client('10.77.0.2').login('Alpha'), b = w.client('10.77.0.3').login('Bravo');
   a.send('gcre', [['NAME', 'r2'], ['PARAMS', 'TRACK=4014']]); b.send('gjoi', [['NAME', 'r2']]);
   a.send('gsta', [['NAME', 'r2']]);
   const auth = a.last('+ses').f.get('AUTH');
   a.close(); b.close();                                  // the game closes its lobby link for the race
-  // another browser cannot take the racer's name meanwhile (it took it, and its game list ended the race)
+  // another browser under the racer's name: digits, and its game list does not take the racer back
   const other = w.client('10.77.0.4').login('Alpha');
-  assert.equal(other.last('pers').code, 'pset');
+  assert.match(other.last('pers').f.get('PERS'), /^Alpha\d{4}$/);
+  other.send('gsea', [['START', 0], ['COUNT', 20]]);
   w.advance(200_000);
   const report = c => c.send('rank', [['AUTH', auth], ['REPT', 'x'], ['RESU', RESU], ['VENUE', 'NFSUG2'], ['NAME0', 'Alpha'], ['NAME1', 'Bravo']]);
   const b2 = w.client('10.77.0.3').login('Bravo');

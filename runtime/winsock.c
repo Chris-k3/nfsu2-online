@@ -288,6 +288,8 @@ static int ws_harness(void){ return nfsu2_test_run(); }
 /* ---- online: the server's own stand-in at 10.77.0.1 (see the top) ---- */
 #define ONLINE_HOST_VA 0x7FBDBCu                  /* SPEED2.EXE v1.2 NA: LobbyConnect's host, 0x588630 */
 #define ONLINE_HOST    "pcnfs05.ea.com"
+#define ONLINE_LOBBY   20922u                     /* its lobby's port (web/server/online/index.mjs PORTS) */
+void online_lobby_read(uint32_t link, const uint8_t *p, int n);   /* online.c: the persona the server gave */
 static int g_online;
 static int env_off(const char *v){
     return v && (!strcmp(v, "0") || !strcasecmp(v, "off") || !strcasecmp(v, "no") || !strcasecmp(v, "false"));
@@ -1466,6 +1468,9 @@ static uint32_t do_recv(CPU *c, int has_from){
             st_recv++; st_bytes_in += (uint64_t)got;
             if (g_deny_strong && (got > 0 || s->type != 1)) deny_heard(ip);
             if (pf && s->type != 1) ga_out(pf, pfl, ip, port);
+            /* what the online host's lobby says, as the game reads it (not a peek) */
+            if (!e && got > 0 && !(fl & 2u) && s->type == 1 && g_online && s->raddr == mkip(10, 77, 0, 1) && s->rport == ONLINE_LOBBY)
+                online_lobby_read(s->conn_id ? s->conn_id : h, g_mem + buf, got);
             if (e) FAIL(e);
             return (uint32_t)got;
         }
