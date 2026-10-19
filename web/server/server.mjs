@@ -456,9 +456,12 @@ async function sendFile(q, s, root, file, { type, cache = 'store', extra = {}, f
 // client that stops reading holds no more than its buffers.  Sent as they are, never queued or refused: a run
 // whose first PROBE bytes do not compress (the movies' VP6 video, most car textures; judged per run, not per
 // file: the music's first megabyte does not compress, the rest does), and an answer while the compressors are
-// taken (COMPRESSORS: per client, per site, in all).
+// taken (COMPRESSORS: per client, per site, in all).  An answer holds its compressor until the client has its last
+// byte, so most of them wait on the network: about 100 players draw some 70 MB/s of game data, dozens of answers
+// under way at once.  The CPU follows the bytes, not the answers (br 3 does 200 MB/s on one core of an M4 Pro), so
+// the total bounds memory: 128 compressors take about 200 MB at most (zstd 1.5 MB each, br 0.9, gzip 0.4).
 const BLOCK = 1 << 20, BLOCKS_MAX = 8, PROBE = 64 << 10;
-const COMPRESSORS = { perClient: 8, perSite: 16, total: 16 };
+const COMPRESSORS = { perClient: 8, perSite: 16, total: 128 };
 const compressors = new Budget(COMPRESSORS.perClient, COMPRESSORS.perSite, COMPRESSORS.total);
 // fast settings: within a few percent of the best ratio for this data, at a fraction of the CPU (zstd 3:
 // about 260 MB/s on one core; Node has zstd from 22.15 and 23.8)

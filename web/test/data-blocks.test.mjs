@@ -3,7 +3,8 @@
 //   node --test web/test/data-blocks.test.mjs
 // The manifest names it; every encoding gives back the file's exact bytes; a run that does not compress goes
 // as it is (judged per run); requests out of bounds, outside the game's files or past the end are refused; a client holding all
-// its compressors gets the rest as they are (never refused, never queued), and gets them back when it lets go.
+// its compressors gets the rest as they are (never refused, never queued), and gets them back when it lets go; past
+// the 128 compressors of all clients, the next client gets its runs as they are until one is given back.
 // Port: NFSU2_TEST_BLOCKS_PORT (8532).
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -148,5 +149,31 @@ test('/data-blocks/: a client holding all its compressors gets the rest as they 
     let enc;
     for (let i = 0; i < 40 && !enc; i++) { await new Promise(r => setTimeout(r, 50)); enc = (await get('/data-blocks/TRACKS/L4RA.BUN?b=0&n=1')).headers['content-encoding']; }
     assert.ok(enc, 'compressed again once the held answers are gone');
+  } finally { for (const r of held) r.destroy(); await s.stop(); }
+});
+
+test('/data-blocks/: past the 128 compressors of all clients, the next client gets its runs as they are until one is given back', { timeout: 60_000 }, async () => {
+  const s = await server();
+  const held = [];
+  try {
+    // a client is an X-Forwarded-For address (this machine is a trusted proxy); its compressed runs are not read
+    const open = c => new Promise((res, rej) => {
+      const q = http.request({ host: '127.0.0.1', port: PORT, path: '/data-blocks/TRACKS/L4RA.BUN?b=0&n=8',
+        headers: { host: `localhost:${PORT}`, 'accept-encoding': 'zstd, br, gzip', 'x-forwarded-for': `192.0.2.${c}` } }, r => {
+        r.pause(); held.push(r); res(r.headers['content-encoding'] ?? 'none');
+      });
+      q.on('error', rej); q.end();
+    });
+    // 16 clients take 8 each
+    const encs = [];
+    for (let c = 1; c <= 16; c++) for (let i = 0; i < 8; i++) encs.push(await open(c));
+    assert.equal(encs.filter(e => e === 'none').length, 0, encs.join(' '));
+    // a 17th, with all of its own share free, gets its run as it is
+    assert.equal(await open(17), 'none');
+    // one given back (its client goes away mid-answer): the 17th gets it
+    held.shift().destroy();
+    let enc = 'none';
+    for (let i = 0; i < 40 && enc === 'none'; i++) { await new Promise(r => setTimeout(r, 50)); enc = await open(17); }
+    assert.notEqual(enc, 'none', 'compressed again once one of the 128 is given back');
   } finally { for (const r of held) r.destroy(); await s.stop(); }
 });

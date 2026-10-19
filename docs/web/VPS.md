@@ -132,7 +132,9 @@ traffic a month.
   does not compress and goes as it is. "Download the game data" on the start page fetches all but the movies at
   once, 4 requests at a time, so a player on a slow line never waits on a loading screen.
 - Compressing costs the server about 5 s of one core per player for that whole download (zstd; br about 1.5 times
-  that). At most 16 answers are compressed at once (8 per player); past that they go as they are, never held up.
+  that). At most 128 answers are compressed at once (8 per player, about 200 MB of memory); past that they go as
+  they are, never held up. The image gives Node 8 helper threads for the compressing and the file reads
+  (`UV_THREADPOOL_SIZE`, 4 by default).
 - Free roam is at most about 25 KB/s each way per player: the server's free-roam hub pairs each player with the 7
   nearest, and snapshots go between those only. 250 players roaming at once are about 50 Mbit/s each way through
   the VPS. Measured with 62 simulated players and 2 real pages on one server (`web/tools/roam-crowd.mjs`, a Ryzen 9

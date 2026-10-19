@@ -41,10 +41,13 @@ COPY --from=deps /app/web/node_modules web/node_modules
 COPY --from=page /src/web/dist web/dist
 COPY web/server web/server
 COPY --from=page --chown=node:node --chmod=700 /state /state
+# UV_THREADPOOL_SIZE: Node's helper threads, which read the game files and compress them (server.mjs, /data-blocks/):
+# 8 instead of 4, so a read does not wait behind the compressors on a busy server
 ENV NFSU2_DATA=/game \
     NFSU2_WASM=/module/nfsu2.wasm \
     NFSU2_STATE=/state \
-    NFSU2_MAX_PEERS=250
+    NFSU2_MAX_PEERS=250 \
+    UV_THREADPOOL_SIZE=8
 USER node
 VOLUME /state
 # the module is there and the server answers (over the HTTP port, which stays on 127.0.0.1)
