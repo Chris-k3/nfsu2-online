@@ -187,6 +187,9 @@ Good to know:
   a password: the server does not read it. Players you block stay blocked while you are online; the block is not
   kept after that.
 - **Others see** your name, your game, your chat and your results, never your real address.
+- **Every track is open** when you create a game, either direction, whatever your career has unlocked, and a new
+  game starts at **2 laps** (the game's own default was 3; Options, Laps changes it). The same goes for the game's
+  LAN races. The career and Quick Race keep their unlocks.
 - **Ranked games** need three players at least, and the others see them only with the lobby's **Filter**, Game
   Type set to **Ranked**. Ranked wins give ranking points.
 - **A race counts** in Rankings once two of its players' games sent the same result (every game sends its own at

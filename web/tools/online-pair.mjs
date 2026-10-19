@@ -81,7 +81,7 @@ for (let i = 0; i < PLAYERS; i++) {
  * (${NFSU2_OL_NAME}, ${NFSU2_OL_PASS}: the page's environment, so the
  * password is in no script file) -> Continue -> "EA Login cannot be saved
  * without a profile" No -> the persona -> Online Main Menu.  Then Lobby (Game
- * Session Lobby).  host: Create Game -> mode, the first track, options (laps)
+ * Session Lobby).  host: Create Game -> mode, the first track, options
  * -> "Entering a game room..." OK -> Created Game Room -> waits for the
  * joiners -> Start Race.  join: waits, Refresh, Join Game (the first game) ->
  * the room -> a chat line -> Ready.  Then as lan-pair: the game's AI drives
@@ -168,9 +168,9 @@ function raceFlow(w, host, race, raceMs, inst) {
     w(`+200  dump track${x}`);
     w('+0    tap RETURN');
     w('+0    waitfng UI_QRModeOptions.fng 900');
-    // Laps 3 -> 2 (the screen keeps the last game's options: once); --ranked: Game Type Unranked -> Ranked
-    if (MODE === 'circuit' && race === 1) { w('+200  tap DOWN'); w('+40   tap DOWN'); w('+40   tap LEFT'); }
-    if (RANKED && race === 1) { w('+200  tap DOWN'); if (MODE !== 'circuit') { w('+40   tap DOWN'); w('+40   tap DOWN'); } w('+40   tap RIGHT'); }
+    // Laps as they come (2, runtime/netrace.c); --ranked: Game Type (three rows down) Unranked -> Ranked, once (the
+    // screen keeps the last game's options)
+    if (RANKED && race === 1) { w('+200  tap DOWN'); w('+40   tap DOWN'); w('+40   tap DOWN'); w('+40   tap RIGHT'); }
     w(`+200  dump options${x}`);
     w('+0    tap RETURN');
     w(`+300  dump enter_room${x}`);

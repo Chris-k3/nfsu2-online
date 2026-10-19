@@ -66,7 +66,7 @@ fs.mkdirSync(OUT, { recursive: true });
 
 // lan_race.sh's scripts
 const MODES = {
-  circuit: { h: ['--mode', '0', '--opt', 'DOWN,DOWN,LEFT', '--race-ms', '120000'], j: ['--refresh', '--race-ms', '120000'] },
+  circuit: { h: ['--mode', '0', '--race-ms', '120000'], j: ['--refresh', '--race-ms', '120000'] },
   sprint: { h: ['--mode', '1', '--race-ms', '90000'], j: ['--filter', '1', '--race-ms', '90000'] },
   drag: { h: ['--mode', '2', '--drag', '--race-ms', '40000'], j: ['--filter', '2', '--drag', '--race-ms', '40000'] },
   drift: { h: ['--mode', '3', '--race-ms', '120000'], j: ['--filter', '3', '--race-ms', '120000'] },

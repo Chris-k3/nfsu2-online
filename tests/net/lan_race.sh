@@ -34,7 +34,7 @@ fi
 export NFSU2_DATA="${NFSU2_DATA:?set NFSU2_DATA to the game folder}"
 G="$ROOT/tools/gen_lan_race.py"
 case "$MODE" in
-  circuit) H="--mode 0 --opt DOWN,DOWN,LEFT --race-ms 120000"; J="--refresh --race-ms 120000" ;;
+  circuit) H="--mode 0 --race-ms 120000"; J="--refresh --race-ms 120000" ;;
   sprint)  H="--mode 1 --race-ms 90000";  J="--filter 1 --race-ms 90000" ;;
   drag)    H="--mode 2 --drag --race-ms 40000"; J="--filter 2 --drag --race-ms 40000" ;;
   *) echo "mode: circuit|sprint|drag"; exit 2 ;;

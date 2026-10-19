@@ -22,7 +22,7 @@ Options:
                        (0 Circuit, 1 Sprint, 2 Drag, 3 Street X? -- read the
                        dump "mode"; host only)
   --track N            N taps RIGHT on the track list (host only)
-  --opt KEYS           taps on the options screen, e.g. "DOWN,DOWN,LEFT";
+  --opt KEYS           taps on the options screen, e.g. "DOWN,DOWN,RIGHT";
                        "dump:LABEL" dumps a frame in between (host only)
   --wait-room MS       host: real time in the game room before Start Race
                        (joiners must be Ready by then; default 70000)
