@@ -38,6 +38,7 @@ void win32_set_last_error(CPU *c, uint32_t e){ if (c && c->fs_base) MR32(c->fs_b
 uint32_t win32_get_last_error(CPU *c){ return c && c->fs_base ? MR32(c->fs_base + 0x34u) : 0u; }
 void guest_wait_begin(void){ }
 void guest_wait_end(void){ }
+void online_lobby_read(uint32_t link, const uint8_t *p, int n){ (void)link; (void)p; (void)n; }   /* online.c */
 
 static int g_pass, g_fail;
 static void check(const char *what, int ok, const char *fmt, ...){
