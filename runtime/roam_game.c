@@ -30,6 +30,8 @@
  *    the past (NFSU2_ROAM_DELAY), smoothed through the jitter buffer.
  *  - names over friends' cars, as the game's own LAN races show them
  *    (roam_game_hud).
+ *  - horns: the player's goes out with the snapshots, friends' sound from
+ *    their cars (horns_update, horn.c).
  *  - leaving free roam (shop, crib, race, menus) parks the cars; their
  *    rides are unloaded once the world is gone.  A peer that leaves, times
  *    out or goes into a shop or race disappears (soft-parked), and its slot
@@ -205,6 +207,7 @@ static int64_t g_last_host;
 /* local car */
 static float g_lp[3]; static int g_lp_ok;
 static int64_t g_cfg_next;
+static int g_horn;                            /* the player's horn sounds this frame */
 /* guest memory for rides and records (allocated once, never freed) */
 static uint32_t g_gmem;
 /* slots */
@@ -295,6 +298,7 @@ static int local_state(rc_state *s){
         if (MRF32(ctl + 0x210u) > 0.1f) s->bits |= RC_BIT_HANDBRAKE;
     }
     if (s->speed < -0.5f) s->bits |= RC_BIT_REVERSE;
+    if (g_horn) s->bits |= RC_BIT_HORN;
     if (g_sync_paused > 1){ for (int i = 0; i < 3; i++){ s->v[i] = 0; s->w[i] = 0; } s->speed = 0; s->rpm = 0; }
     for (int i = 0; i < 3; i++) if (!__builtin_isfinite(s->p[i]) || !__builtin_isfinite(s->v[i])) return 0;
     /* the stamp clock may run a little faster than the world (it is pulled
@@ -1031,6 +1035,31 @@ typedef struct { int idx; uint32_t id; char name[RC_NAME_MAX + 1]; int visible, 
                  uint8_t cfg[RC_CFG_MAX]; int have_pose; rc_pose pose; float err; uint32_t look; } PeerView;
 static PeerView g_pv[RC_TABLE]; static int g_npv;
 
+/* ---- horns ----------------------------------------------------------------------------------------- */
+/* H or the controller's left stick click sounds the player's horn in free
+ * roam while the world runs, and the snapshots carry it (RC_BIT_HORN); a
+ * friend's horn sounds from their car, as the camera hears it (horn.c: the
+ * distance, the side, Doppler). */
+static int g_horns_on;                        /* horns were driven last frame */
+static void horns_update(const rc_state *ls, int heard){
+    float L[3] = {0}, f[3] = {1.f, 0.f, 0.f};
+    uint32_t cam = rd32(G_VIEW1 + 0x40u), me = player_car();
+    if (!ls) heard = 0;
+    if (heard && ok(cam, 0x60)){ rd3(cam + 0x40u, L); rd3(cam + 0x50u, f); }       /* the listener: the camera, */
+    else if (heard && ok(me, 0x9e0)){ rd3(me + 0x60u, L); rd3(me + 0x90u, f); }   /* else the player's car */
+    else heard = 0;
+    if (!heard && !g_horn && !g_horns_on) return;     /* racehorn.c may have the voices */
+    rh_horn_begin(heard ? L : 0, f, ls ? ls->v : 0);
+    if (g_horn) rh_horn_sound(g_s.conf.self_id, O.name, 0, 0);
+    for (int i = 0; heard && i < g_npv; i++){
+        const PeerView *v = &g_pv[i];
+        if (v->visible && !v->paused && v->have_pose && (v->pose.bits & RC_BIT_HORN))
+            rh_horn_sound(v->id, v->name, v->pose.p, v->pose.v);
+    }
+    rh_horn_end();
+    g_horns_on = heard || g_horn;
+}
+
 /* How far behind its sender's clock a friend's car is drawn (the render
  * delay of rc_interp_eval).  Ghost cars: the display delay
  * (NFSU2_ROAM_DELAY), smooth through the jitter buffer.  Solid cars: where
@@ -1364,7 +1393,10 @@ void roam_game_frame(CPU *c){
             rlog("[roam] my name: %s (the profile's; NFSU2_ROAM_NAME changes it)\n", O.name);
         }
     }
-    /* local state and look */
+    /* local state and look; the horn only while the world runs (not in the
+     * pause menu, the map or the messages) */
+    int world_runs = in_roam && g_sync_paused <= 1 && !g_parked;
+    g_horn = world_runs && rh_horn_held();
     rc_state ls; int have_ls = in_roam && local_state(&ls);
     uint8_t cfgb[RC_CFG_MAX]; int cfgn = 0; char tname[RC_CFG_TYPE_NAME + 1] = {0};
     if (in_roam && host >= g_cfg_next){ cfgn = local_cfg(cfgb, sizeof cfgb, tname); g_cfg_next = host + 5000000; }
@@ -1505,6 +1537,7 @@ void roam_game_frame(CPU *c){
             }
         }
     }
+    horns_update(have_ls ? &ls : 0, world_runs);
     if (g_poselog && have_ls){
         uint32_t me = player_car();
         rh_fprintf(g_poselog, "L,%lld,%.0f,%08x,%.4f,%.4f,%.4f,%.3f,0,0,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f\n", (long long)host, g_sync, g_s.conf.self_id,

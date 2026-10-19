@@ -11,6 +11,8 @@
 //        [--script tests/scripts/x.txt ...]   (instead of the generated flow)
 //        [--env K=V ...] [--env-i<n> K=V ...] [--headed] [--server-arg X ...] (own server only)
 //        [--ranked]  the host creates a ranked game (Options: Game Type)
+//        [--horn]    in the race each instance holds H (its horn, runtime/racehorn.c) for a second, one after the
+//                    other: instance n 3 + 4 (n - 1) s after the start; the others' logs say "[horn] <name>'s horn"
 //        [--quit-mid N:MS]   instance N's game quits MS after its race started (the others race on)
 //        [--wait-room MS] [--join-wait MS]   host: time in the room before Start Race (default 70000); joiners:
 //                    time in the lobby before Refresh and Join Game (default 40000)
@@ -60,6 +62,7 @@ const PASSWORD = opt('password', 'testpass');
 const WAIT_ROOM = +opt('wait-room', 70000), JOIN_WAIT = +opt('join-wait', 40000);
 const MODES = { circuit: 0, sprint: 1, drag: 2, drift: 3, streetx: 4 };
 const RANKED = argv.includes('--ranked');
+const HORN = argv.includes('--horn');
 const EA_LOGIN = argv.includes('--ea-login') || argv.includes('--canary');
 // --quit-mid N:MS: instance N quits its game MS after its race started (the others race on)
 const QUIT_MID = opt('quit-mid', '') ? opt('quit-mid', '').split(':').map(Number) : [0, 0];
@@ -231,6 +234,7 @@ function raceFlow(w, host, race, raceMs, inst) {
   } else {
     w('+0    autopilot on 6000'); w('+0    wzero'); w('+0    log race-start');
   }
+  if (HORN && race === 1) { w(`+${3000 + 4000 * (inst - 1)}ms log horn`); w('+0    down H'); w('+1000ms up H'); }
   if (QUIT_MID[0] === inst) {
     // this player's process ends in the middle of the race (sockets closed, nothing more sent)
     w(`+${QUIT_MID[1]}ms dump quit_mid`);

@@ -23,11 +23,15 @@
  *   rh_file, rh_fopen/rh_fprintf/rh_fflush   the pose log (test aid)
  *   rh_hud_marker(&x, &y)   a HUD marker's position (640x480 units from the
  *                           view's pixels) as the screen shows the HUD
+ *   rh_horn_held()          1 while the horn key or button is held
+ *   rh_horn_begin/rh_horn_sound/rh_horn_end
+ *                           a frame of horns (horn.h's horn_begin, ...)
  *   ROAM_HOST_SCRIPT        defined when the input-script commands exist
  */
 #ifndef ROAM_HOST_H
 #define ROAM_HOST_H
 #include "cpu.h"
+#include "horn.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,6 +52,10 @@ void ws_hud_marker(float *x, float *y);  /* widescreen.c */
 #define rh_frame()       autotest_frame()
 #define rh_heap_mb()     (win32_heap_live() >> 20)
 #define rh_hud_marker(x, y) ws_hud_marker((x), (y))
+#define rh_horn_held()   horn_held()
+#define rh_horn_begin(pos, fwd, vel)   horn_begin((pos), (fwd), (vel))
+#define rh_horn_sound(who, name, p, v) horn_sound((who), (name), (p), (v))
+#define rh_horn_end()    horn_end()
 typedef FILE rh_file;
 #ifdef __wasm__
 /* The pose log (a test aid) in the browser: every stdio flush is a

@@ -741,6 +741,7 @@ static void roam_frame(CPU *c){
     if (g_carlog_every > 0 && f >= g_carlog_next){ g_carlog_next = f + g_carlog_every; log_cars("periodic"); }
 }
 void roam_game_frame(CPU *c);                 /* roam_game.c: the multiplayer feature */
+void racehorn_frame(CPU *c);                  /* racehorn.c: horns in races between players */
 void roam_game_hud(CPU *c);                   /* its names over friends' cars */
 int roam_game_cmd(CPU *c, const char *args, long *wait_start);
 /* the "virtual Windows friend" (roam_asipeer.c, only in out/nfsu2_asipeer):
@@ -751,7 +752,7 @@ __attribute__((weak)) int roam_asipeer_cmd(CPU *c, const char *args, long *wait_
     fprintf(stderr, "[roam] asi: not in this build (ASIPEER=1 ./link.sh orig makes out/nfsu2_asipeer)\n"); return 1; }
 int roam_hook(CPU *c, uint32_t ip){
     switch (ip){
-    case HOOK_SITE(0x00581475): if (!roam_asipeer_frame(c)) roam_game_frame(c); roam_frame(c); return 1;
+    case HOOK_SITE(0x00581475): if (!roam_asipeer_frame(c)) roam_game_frame(c); racehorn_frame(c); roam_frame(c); return 1;
     /* Player::Update's HUD step (0x600590), behind its call of the HUD
      * update (0x4EC5A0), where the game places its own LAN race labels */
     case HOOK_SITE(0x006005e0): roam_game_hud(c); return 1;

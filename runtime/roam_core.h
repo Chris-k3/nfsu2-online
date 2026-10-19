@@ -60,6 +60,7 @@ enum { RC_PLAT_MAC = 1, RC_PLAT_WIN = 2, RC_PLAT_TOOL = 3 };
 #define RC_BIT_NOS       0x04
 #define RC_BIT_HANDBRAKE 0x08
 #define RC_BIT_LIGHTS    0x10
+#define RC_BIT_HORN      0x20       /* the horn sounds (horn.c); older builds ignore it */
 /* decoder results */
 enum { RC_OK = 0, RC_E_SHORT = -1, RC_E_MAGIC = -2, RC_E_VERSION = -3, RC_E_LENGTH = -4,
        RC_E_CRC = -5, RC_E_TYPE = -6, RC_E_FIELD = -7, RC_E_TRAIL = -8, RC_E_RANGE = -9 };

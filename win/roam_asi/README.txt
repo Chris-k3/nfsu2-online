@@ -55,5 +55,7 @@ What to expect
   back when they return to free roam.
 - Traffic, races, money and saves are your own; nothing of your career is
   sent. Only your car's position and its look.
+- No horn: players in the browser and the Mac port honk with H, but this
+  plugin neither sounds one nor plays theirs.
 
 Uninstall: delete the two files.

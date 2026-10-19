@@ -1,0 +1,34 @@
+# Free-roam horns, instance A (honks): new career -> prologue free roam, wait
+# for the other instance's car, then the horn: H held for a second, a short
+# tap, and the controller's left stick click.  The other instance
+# (roam_mp_horn_b.txt) hears them.
+0     tapuntil RETURN MC_Background.fng 120 4000
++120  tap LEFT
++30   tap RETURN
++240  tap BACK
++8    tap BACK
++8    tap BACK
++8    tap BACK
++20   type ${ROAM_PROFILE}
++60   tap RETURN
++240  tap RETURN
++0    waitfng GarageMain.fng 3000
++300  tap LEFT
++60   tap RETURN                      # Career
++300  tap RETURN                      # Start New Career
++0    waitfng UI_EngageMessageDialog.fng 8000
++120  tap RETURN                      # SMS: Continue
++0    roam waitroam 3000
++0    roam smsauto on
++0    roam mp waitpeers 1 6000
++0    roam mp waitcars 1 3000
++0    roam mp status
++900  down H
++120  up H
++90   down H
++15   up H
++90   pad connect
++10   pad LS down
++60   pad LS up
++600  roam mp status
++10   quit

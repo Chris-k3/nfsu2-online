@@ -22,6 +22,7 @@ const PAGES = {
       '- Up to 6 players in every race type (the original had 4, and 6 only in Street X). Drag keeps one car per lane.',
       '- Every track is open, whatever your career has unlocked, and a new game starts at 2 laps.',
       '- Free roam with other players: their cars drive in your city, with their names over them.',
+      '- A horn: H, in races and in free roam. The others hear it from your car.',
       '- Widescreen, and up to 120 fps on a 120 Hz screen.',
     ].join('\r\n'),
   },
