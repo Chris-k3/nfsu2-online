@@ -342,12 +342,7 @@ export class Lobby {
     const p = f.get('PERS') ?? '';
     let mine = s.personas.find(x => x.toLowerCase() === p.toLowerCase());
     if (!mine) return this.send(s, 'pers', [], 'invp');
-    // the holder gives way when it is this browser's own older session (its game logged in again) or its game is
-    // gone (a stale session)
-    const holder = this.byPersona.get(mine.toLowerCase());
-    if (holder && holder !== s && (holder.gone || holder.vip === s.vip || this.now() - holder.lastIn >= 30_000)) {
-      this.drop(holder, 'the persona logged in again');
-    }
+    this.giveWay(mine, s);
     // one holder per name, online or racing: a name another player holds is this player's with digits.  The answer
     // names it, and the runtime puts it in the game's own persona and account fields (runtime/online.c): the game
     // finds itself among a race's players by them (one that kept the name it asked for raced against itself)
@@ -362,6 +357,12 @@ export class Lobby {
     this.send(s, '+who', this.userFields(s));
     this.send(s, '+sst', this.sstFields());
   }
+  /** name's holder gives way to s when it is s's browser's own older session (its game logged in again) or its game
+   *  is gone (a stale session) */
+  giveWay(name, s) {
+    const h = this.byPersona.get(name.toLowerCase());
+    if (h && h !== s && (h.gone || h.vip === s.vip || this.now() - h.lastIn >= 30_000)) this.drop(h, 'the persona logged in again');
+  }
   /** name is another player's: a session that holds it, or a player racing under it (a race this server started,
    *  the player not back yet) from another browser that is still on the switch, who comes back to it */
   nameTaken(name, s) {
@@ -373,11 +374,13 @@ export class Lobby {
     return false;
   }
   /** a free name: name with four digits in place of its end (a persona name has 15 characters at most); the same
-   *  digits for one client while they are free (it keeps the name when it logs in again), else random ones */
+   *  digits for one client while they are free (it keeps the name when it logs in again, even before its older
+   *  session is gone), else random ones */
   freeVariant(name, s) {
     const own = crypto.createHash('sha256').update(`${s.group}\n${name.toLowerCase()}`).digest().readUInt32BE(0) % 9000 + 1000;
     for (let i = 0; i < 20; i++) {
       const d = String(i ? crypto.randomInt(1000, 10000) : own), v = name.slice(0, 15 - d.length) + d;
+      this.giveWay(v, s);
       if (!this.nameTaken(v, s)) return v;
     }
     return null;

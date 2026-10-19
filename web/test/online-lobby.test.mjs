@@ -308,6 +308,11 @@ test('names: a name another browser holds comes with four digits (the same for o
   assert.equal(w.client('10.77.0.3').login('NAME').last('pers').f.get('PERS'), bn);
   b.close();
   assert.equal(w.client('10.77.0.3').login(bn).last('pers').f.get('PERS'), bn);
+  // ... and asking for the name while its older session still plays under the digits (its game's new lobby link):
+  // the same digits, from that session
+  assert.equal(w.client('10.77.0.3').login('NAME').last('pers').f.get('PERS'), bn);
+  assert.equal([...w.host.lobby.sessions].filter(s => s.persona === bn).length, 1, 'the old session went');
+  assert.equal(w.host.lobby.byPersona.size, 5, 'NAME and two with digits, the long name and one with digits');
   // the holder's own browser logging in again (its game's new lobby link): the name, from its old session
   const a2 = w.client('10.77.0.2').login('NAME');
   assert.equal(a2.last('pers').f.get('PERS'), 'NAME');

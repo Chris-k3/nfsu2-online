@@ -36,9 +36,9 @@
  * and Back on the Online Main Menu are the game's own (0x4a0140: stage 0, the
  * main menu).
  * A login that fails on the way shows the game's own dialog on the Online Main
- * Menu (the callbacks 0x4b9090 connect, 0x4b9110 auth, 0x4b9220 pers; another
- * browser holding the name gets "There was a problem selecting this persona.
- * You will be returned to the EA Login screen.").  UI_OLMAIN has no answer to
+ * Menu (the callbacks 0x4b9090 connect, 0x4b9110 auth, 0x4b9220 pers; a name
+ * the server refuses gets "There was a problem selecting this persona.  You
+ * will be returned to the EA Login screen.").  UI_OLMAIN has no answer to
  * their OK (it expects a login the screens before it made), so the second
  * override below gives the one the screens would: the name refused (auth or
  * pers: the stage is back at 6 or 8) -> leave online and the EA Login screens,
@@ -46,7 +46,8 @@
  * game's own saved login, from the account field); no connection (stage 4) ->
  * leave online to the main menu, as UI_OLEALogin's Cancel does.
  * A name another player holds the server gives with four digits instead (it
- * refuses one only when it finds no free digits): online_lobby_read() below
+ * refuses a persona only when it finds no free digits for it, or the persona
+ * is not the account's): online_lobby_read() below
  * puts that name in the game's own fields as the server's answer arrives.
  */
 #include "cpu.h"
@@ -184,7 +185,7 @@ void sub_004f19a0(CPU *c){
         a[0] = fe; call(c, FN_LEAVE_ONLINE, 0, 1, a);
         return;
     }
-    fprintf(stderr, "[online] the server did not take %s (another player online under it?): the EA Login screens\n", g_name);
+    fprintf(stderr, "[online] the server did not take %s (no free digits for it?): the EA Login screens\n", g_name);
     a[0] = 0; call(c, FN_LEAVE_ONLINE, 0, 1, a);
     a[0] = fe; call_to(c, 0, sub_004effd0_orig, 0, 1, a);
 }

@@ -144,9 +144,10 @@ Free roam is shared with **everyone** on the server who turns it on. Use a Room 
 
 Good to know:
 
-- **How many:** up to 128 players on a server (its owner can change that, up to 250). When it is full, the game says
-  so and lets you in by itself when a place frees up. The server pairs each player with the 7 players nearest to
-  them, and your game shows the 5 nearest cars at once; as you drive, nearer cars take the place of farther ones.
+- **How many:** up to 250 players on a server set up as VPS.md describes, 128 on one started by hand (its owner can
+  change that). When it is full, the game says so and lets you in by itself when a place frees up. The server pairs
+  each player with the 7 players nearest to them, and your game shows the 5 nearest cars at once; as you drive,
+  nearer cars take the place of farther ones.
 - **Solid cars:** you collide with the other players' cars (Online, More online settings,
   Solid cars; off: you drive through them). A car that appears on top of yours, at a garage or after a jump, lets you
   through until you are apart. Each player's own game moves their car: a car you hit is pushed in its owner's game,

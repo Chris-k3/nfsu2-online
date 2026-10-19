@@ -65,7 +65,7 @@
 //        [--tls-cert <pem> --tls-key <pem> [--port 8443] [--bind <address>] | --behind-proxy --host <name>[,<name>...]]
 //        [--host <name>[,<name>...]] [--state <dir>]
 //        [--trusted-proxies cloudflare,<ip>,<cidr>,...] [--real-ip-header x-forwarded-for|cf-connecting-ip]
-//        [--max-peers 64] [--online on|off] [--roam-hub on|off] [--access-log] [--dev [--artifacts <dir>] [--lan-impair <spec>] [--online-trace <file>]]
+//        [--max-peers 128] [--online on|off] [--roam-hub on|off] [--access-log] [--dev [--artifacts <dir>] [--lan-impair <spec>] [--online-trace <file>]]
 // Options with a value can also come from the environment as NFSU2_<OPTION>
 // (NFSU2_DATA, NFSU2_PORT, NFSU2_TLS_CERT, ...); switches only from the command line.
 import http from 'node:http';
