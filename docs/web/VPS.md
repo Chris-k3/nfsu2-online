@@ -128,8 +128,11 @@ traffic a month.
 - The game folder takes about 3 GB of disk.
 - Each new player downloads the 7 MB module and then the game data they play (about 70 MB for a quick race, up to
   the whole 3 GB over a career), once: the browser keeps it.
-- Free roam is about 25 KB/s each way per player in a full group of 8, so 250 players roaming at once are about
-  50 Mbit/s each way through the VPS. More than a handful of players at once is **UNVERIFIED**.
+- Free roam is at most about 25 KB/s each way per player: the server's free-roam hub pairs each player with the 7
+  nearest, and snapshots go between those only. 250 players roaming at once are about 50 Mbit/s each way through
+  the VPS. Measured with 62 simulated players and 2 real pages on one server (`web/tools/roam-crowd.mjs`, a Ryzen 9
+  5900X): about 9,500 datagrams a second each way through the switch, the server at 11 % of one core. More players
+  than that, and a real VPS's CPU, are **UNVERIFIED**.
 
 ## The image
 
@@ -369,8 +372,15 @@ default. Options with a value can also be set as `NFSU2_<OPTION>` (`web/server/s
 The server's switch relays every packet: player → VPS → player. The delay between two players is the sum of both
 paths to the VPS, so pick a VPS location between you.
 
-- **Free roam** draws a friend's car `roam_delay` milliseconds (100 by default) behind its newest snapshot. That
-  delay hides the 50 ms between snapshots, jitter and the odd lost snapshot. Network delay comes on top of it.
+- **Free roam's hub** (`web/server/roam-hub.mjs`, on 10.77.0.253 of the switch): every second it tells each player
+  in free roam which players are nearest (7 at most, in the same Room); the players then send their cars only to
+  those, straight through the switch, and the game shows the 5 nearest. For that the hub reads where each player's
+  car is; it keeps nothing on disk. `--roam-hub off` in the server's `command`: no hub, players find each other by
+  broadcast in groups of 8, the first to meet.
+- **Free roam** draws another player's car where it is now (solid cars, the default: the newest snapshot carried on
+  by half the round trip), or with Solid cars off `roam_delay` milliseconds (100 by default) behind its newest
+  snapshot. That delay hides the 50 ms between snapshots, jitter and the odd lost snapshot. Network delay comes on
+  top of it.
   - **Measured with impairment on a local switch:** 100 ± 10 ms one way and 5 % loss.
     98.1 % of frames were interpolated, 1.9 % extrapolated, and none were held.
   - **For 50–150 ms round trips, the default is enough.** If friends' cars stutter (Wi-Fi or mobile jitter), set
@@ -383,7 +393,7 @@ paths to the VPS, so pick a VPS location between you.
 - **Keepalive:** the switch pings every connection every 25 s. Proxies and Cloudflare then never cut a quiet player,
   and the switch finds players whose connection died.
 - **Limits:**
-  - 250 players on the switch with the image (`NFSU2_MAX_PEERS=250`; the server's own default is 16, and 250 is the
+  - 250 players on the switch with the image (`NFSU2_MAX_PEERS=250`; the server's own default is 64, and 250 is the
     most its virtual network has addresses for);
   - 8 connections at once per client address and 16 per IPv6 /48; opening them is rate limited per client
     address (a burst of 20, then one a second), so a client that opens and closes connections as fast as it can

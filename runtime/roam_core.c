@@ -587,6 +587,10 @@ int rc_interp_eval(rc_interp *ip, int64_t now_us, int64_t frame_dt_us, int64_t d
 #define T_GOSSIP_FORGET 60000000
 #define T_CFGREQ        500000
 #define T_MISMATCH_NOTE 30000000    /* a protocol or room mismatch is noted at most this often */
+#define T_HUB_HELLO    1000000      /* to the hub: a HELLO this often */
+#define T_HUB_SNAP      500000      /* and a SNAP (where we are) this often */
+#define T_HUB_GRACE    2500000      /* a peer the hub has not listed for this long goes (its list comes every second) */
+#define T_HUB_SILENT  10000000      /* no list for this long (or from the start): discovery and gossip again */
 #define RL_DGRAMS      100          /* per second and source */
 #define RL_BYTES     65536
 
@@ -614,12 +618,31 @@ static void note(rc_session *s, int ev, int peer, const char *a, const char *b, 
  * SNAP goes to every peer, the other messages go to one peer each and carry
  * the current value, so a receiver's gap count is the snapshots it missed */
 static void hdr(rc_session *s, rc_msg *m, int type){ memset(m, 0, sizeof *m); m->h.type = (uint8_t)type; m->h.sender = s->conf.self_id; m->h.seq = s->seq; }
-static void tx(rc_session *s, const rc_peer *p, rc_msg *m){
+static void tx_to(rc_session *s, uint32_t ip, uint16_t port, rc_msg *m){
     uint8_t b[RC_MAX_DGRAM]; int n = rc_encode(m, b, sizeof b);
     if (n <= 0 || !s->io.send || s->closed) return;
-    s->io.send(s->io.user, p->ip, p->port, b, n); s->tx++; s->tx_bytes += (uint32_t)n;
+    s->io.send(s->io.user, ip, port, b, n); s->tx++; s->tx_bytes += (uint32_t)n;
+}
+static void tx(rc_session *s, const rc_peer *p, rc_msg *m){ tx_to(s, p->ip, p->port, m); }
+/* the hub decides who our peers are: one is configured, and it answered
+ * lately (or we are still in the first 10 s, waiting for its first list) */
+static int hub_mode(const rc_session *s, int64_t now){
+    if (!s->conf.hub_ip) return 0;
+    if (!s->hub_since) return 1;
+    return now - (s->hub_heard_us ? s->hub_heard_us : s->hub_since) < T_HUB_SILENT;
 }
 int rc_established(const rc_session *s){ int n = 0; for (int i = 0; i < RC_TABLE; i++) if (s->peer[i].state == RC_PS_EST) n++; return n; }
+/* an established peer counts for the group (max_players) unless the hub
+ * decides and its last list left it out: it goes within T_HUB_GRACE, and a
+ * player the hub lists instead does not wait for that */
+static int in_group(const rc_session *s, const rc_peer *p){
+    return s->hub_was != 2 || p->configured || p->hub_listed_us == s->hub_heard_us;
+}
+static int group_count(const rc_session *s){
+    int n = 0;
+    for (int i = 0; i < RC_TABLE; i++) if (s->peer[i].state == RC_PS_EST && in_group(s, &s->peer[i])) n++;
+    return n;
+}
 /* another table entry (not `except`) already has this sender id */
 static int id_elsewhere(const rc_session *s, uint32_t id, int except){
     for (int i = 0; i < RC_TABLE; i++) if (i != except && s->peer[i].state != RC_PS_FREE && s->peer[i].id == id) return 1;
@@ -669,28 +692,38 @@ int rc_add_peer(rc_session *s, uint32_t ip, uint16_t port, int configured, int64
     p->added_us = now_us; p->last_hello_tx = now_us - T_HELLO_CAND;
     return i;
 }
-static void fill_hello(rc_session *s, rc_msg *m){
+/* `to`: the peer it goes to (none for the beacon and the hub) */
+static void fill_hello(rc_session *s, rc_msg *m, const rc_peer *to){
     hdr(s, m, RC_MSG_HELLO);
     m->u.hello.core_ver = RC_CORE_VER; m->u.hello.platform = s->conf.platform; m->u.hello.status = s->status;
     m->u.hello.listen_port = s->conf.port; m->u.hello.cfg_rev = s->cfg_rev; m->u.hello.room = s->conf.room;
     memcpy(m->u.hello.name, s->conf.name, sizeof m->u.hello.name);
     int n = 0;
-    /* the ids we hear: established first, then the others that spoke lately;
-     * with the group full only the established ones (a peer that sees its id
-     * here takes us as established: with a larger max_players of its own it
-     * would join one-sidedly, and never get a snapshot) */
-    int full = rc_established(s) + 1 >= s->conf.max_players;
-    for (int pass = 0; pass < 2; pass++)
+    /* the ids we hear: our group first, then the established ones the hub's
+     * last list left out (they are going), then the others that spoke lately;
+     * with the group full not those (a peer that sees its id here takes us as
+     * established: with a larger max_players of its own it would join
+     * one-sidedly, and never get a snapshot) */
+    int full = group_count(s) + 1 >= s->conf.max_players;
+    for (int pass = 0; pass < 3; pass++)
         for (int i = 0; i < RC_TABLE && n < RC_MAX_PEERS; i++){
             const rc_peer *p = &s->peer[i];
             if (!p->id || !p->last_rx_us) continue;
-            if ((pass == 0) != (p->state == RC_PS_EST)) continue;
-            if (pass == 1 && (full || p->state != RC_PS_HEARD)) continue;
+            if (pass < 2 && (p->state != RC_PS_EST || (pass == 0) != in_group(s, p))) continue;
+            if (pass == 2 && (full || p->state != RC_PS_HEARD)) continue;
             m->u.hello.seen[n++] = p->id;
         }
+    /* more than the list holds (the hub's links overlap for a moment while
+     * one goes and another comes): the peer it goes to always finds its id,
+     * or it would take it that we no longer hear it */
+    if (to && to->id && to->last_rx_us && (to->state == RC_PS_EST || (!full && to->state == RC_PS_HEARD))){
+        int have = 0;
+        for (int k = 0; k < n; k++) if (m->u.hello.seen[k] == to->id) have = 1;
+        if (!have){ if (n < RC_MAX_PEERS) n++; m->u.hello.seen[n - 1] = to->id; }
+    }
     m->u.hello.n_seen = (uint8_t)n;
 }
-static void send_hello(rc_session *s, rc_peer *p, int64_t now){ rc_msg m; fill_hello(s, &m); tx(s, p, &m); p->last_hello_tx = now; }
+static void send_hello(rc_session *s, rc_peer *p, int64_t now){ rc_msg m; fill_hello(s, &m, p); tx(s, p, &m); p->last_hello_tx = now; }
 static void send_cfg(rc_session *s, rc_peer *p, uint8_t have_mask){
     if (!s->cfg_len) return;
     int nf = (s->cfg_len + RC_CFG_FRAG - 1) / RC_CFG_FRAG;
@@ -748,11 +781,33 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
     }
     if (e){ s->rx_bad++; return; }
     if (m.h.sender == s->conf.self_id) return;                 /* our own beacon */
+    if (s->conf.hub_ip && ip == s->conf.hub_ip && port == s->conf.hub_port){
+        /* the hub's list of the players near us: each one is a candidate
+         * (the hub lists us on theirs at the same time), and stays while it
+         * is listed (rc_tick drops the others) */
+        if (m.h.type != RC_MSG_PEERS) return;
+        s->hub_heard_us = now; s->hub_lists++;
+        for (int k = 0; k < m.u.peers.n; k++){
+            uint32_t id = m.u.peers.e[k].id;
+            if (id == s->conf.self_id) continue;
+            int j = find(s, m.u.peers.e[k].ip, m.u.peers.e[k].port);
+            if (j < 0){
+                if (id_elsewhere(s, id, -1)) continue;
+                j = rc_add_peer(s, m.u.peers.e[k].ip, m.u.peers.e[k].port, 0, now);
+                if (j < 0) continue;
+            }
+            s->peer[j].hub_listed_us = now;
+        }
+        return;
+    }
     for (int k = 0; k < s->nbye; k++)
         if (s->bye[k].id == m.h.sender && now - s->bye[k].at < 3000000){ s->rx_after_bye++; return; }
     int i = find(s, ip, port);
     if (i < 0){
         if (m.h.type != RC_MSG_HELLO) return;
+        /* with a hub, only the players it lists for us (they arrive with
+         * its next list, within a second) */
+        if (hub_mode(s, now)){ s->rx_unlisted++; return; }
         if (m.u.hello.room != s->conf.room){
             s->rx_room++;
             if (!s->noted_room || now - s->note_room_us >= T_MISMATCH_NOTE){
@@ -794,10 +849,11 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
         p->platform = m.u.hello.platform; p->status = m.u.hello.status; p->cfg_rev_seen = m.u.hello.cfg_rev;
         p->hears_us = 0;
         for (int k = 0; k < m.u.hello.n_seen; k++) if (m.u.hello.seen[k] == s->conf.self_id) p->hears_us = 1;
+        if (p->hears_us) p->hears_miss = 0;
         if (p->state != RC_PS_EST){
             if (p->state == RC_PS_CANDIDATE) p->state = RC_PS_HEARD;
             if (p->hears_us){
-                if (rc_established(s) + 1 >= s->conf.max_players){
+                if (group_count(s) + 1 >= s->conf.max_players){
                     if (first) note(s, RC_EV_NOTE, i, p->name, ": the group is full", "");
                 } else {
                     p->state = RC_PS_EST; s->peers_dirty = 1;
@@ -807,13 +863,19 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
                 }
             } else if (now - p->last_hello_tx > 100000) send_hello(s, p, now);   /* answer: now we hear it */
         } else if (!p->hears_us){
-            p->state = RC_PS_HEARD; s->peers_dirty = 1;
-            note(s, RC_EV_LEAVE, i, p->name, " left: ", "no longer hears us");
+            if (s->hub_was == 2 && !p->hears_miss){
+                /* with the hub, once: the hub may have just linked us again
+                 * after the peer let us go, and it hears us at our answer */
+                p->hears_miss = 1; send_hello(s, p, now);
+            } else {
+                p->state = RC_PS_HEARD; s->peers_dirty = 1;
+                note(s, RC_EV_LEAVE, i, p->name, " left: ", "no longer hears us");
+            }
         }
         want_cfg(s, p, p->cfg_rev_seen, now);
         break; }
     case RC_MSG_PEERS:
-        if (p->state != RC_PS_EST) return;
+        if (p->state != RC_PS_EST || hub_mode(s, now)) return;      /* with a hub, only its list */
         for (int k = 0; k < m.u.peers.n; k++){
             if (m.u.peers.e[k].id == s->conf.self_id) continue;
             int j = find(s, m.u.peers.e[k].ip, m.u.peers.e[k].port);
@@ -880,8 +942,20 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
 }
 void rc_tick(rc_session *s, int64_t now){
     if (s->closed) return;
-    if (s->conf.discovery && now - s->last_beacon >= T_BEACON && s->io.broadcast){
-        rc_msg m; fill_hello(s, &m);
+    int hub = hub_mode(s, now);
+    if (s->conf.hub_ip){
+        if (!s->hub_since) s->hub_since = now ? now : 1;
+        if (now - s->hub_hello_tx >= T_HUB_HELLO){ rc_msg m; fill_hello(s, &m, 0); tx_to(s, s->conf.hub_ip, s->conf.hub_port, &m); s->hub_hello_tx = now; }
+        int st = !hub ? 0 : s->hub_heard_us ? 2 : 1;        /* none or silent, waiting for its first list, answering */
+        if (st != s->hub_was && st != 1){
+            if (st == 2) note(s, RC_EV_NOTE, -1, "the server's free-roam hub answers: the players near you come from its list", "", "");
+            else note(s, RC_EV_NOTE, -1, s->hub_heard_us ? "the server's free-roam hub went silent" : "no free-roam hub on this server",
+                      s->conf.discovery ? ": players are found by broadcast" : "", "");
+        }
+        s->hub_was = st;
+    }
+    if (s->conf.discovery && !hub && now - s->last_beacon >= T_BEACON && s->io.broadcast){
+        rc_msg m; fill_hello(s, &m, 0);
         uint8_t b[RC_MAX_DGRAM]; int n = rc_encode(&m, b, sizeof b);
         if (n > 0) s->io.broadcast(s->io.user, s->conf.port, b, n);
         s->last_beacon = now;
@@ -890,6 +964,8 @@ void rc_tick(rc_session *s, int64_t now){
         rc_peer *p = &s->peer[i];
         if (p->state == RC_PS_FREE) continue;
         if (p->last_rx_us && now - p->last_rx_us > T_DROP){ drop_peer(s, i, "timeout"); continue; }
+        /* lists keep coming without it (a silent hub drops nobody) */
+        if (hub && s->hub_heard_us && !p->configured && s->hub_heard_us - p->hub_listed_us > T_HUB_GRACE){ drop_peer(s, i, "out of range"); continue; }
         if (!p->last_rx_us && !p->configured && now - p->added_us > T_GOSSIP_FORGET){ peer_clear(p, 0); continue; }
         if (p->state == RC_PS_EST && now - p->last_rx_us > T_LOST && !p->lost){
             p->lost = 1; note(s, RC_EV_NOTE, i, p->name, ": no packets for 3 s", ""); }
@@ -899,7 +975,7 @@ void rc_tick(rc_session *s, int64_t now){
             rc_msg m; hdr(s, &m, RC_MSG_PING); m.u.ping.t0 = (uint32_t)now; tx(s, p, &m); p->last_ping_tx = now; }
         if (p->state == RC_PS_EST) want_cfg(s, p, p->cfg_rev_seen, now);
     }
-    if (s->peers_dirty || now - s->last_peers_tx >= T_PEERS){
+    if (!hub && (s->peers_dirty || now - s->last_peers_tx >= T_PEERS)){
         rc_msg m; hdr(s, &m, RC_MSG_PEERS);
         int n = 0;
         for (int i = 0; i < RC_TABLE && n < RC_MAX_PEERS; i++){
@@ -916,7 +992,8 @@ void rc_set_status(rc_session *s, uint8_t st){
     if (st >= RC_ST__N || st == s->status) return;
     s->status = st;
     /* tell the others now, not at the next HELLO: they hide or show our car */
-    for (int i = 0; i < RC_TABLE; i++) if (s->peer[i].state == RC_PS_EST){ rc_msg m; fill_hello(s, &m); tx(s, &s->peer[i], &m); }
+    for (int i = 0; i < RC_TABLE; i++) if (s->peer[i].state == RC_PS_EST){ rc_msg m; fill_hello(s, &m, &s->peer[i]); tx(s, &s->peer[i], &m); }
+    if (s->conf.hub_ip){ rc_msg m; fill_hello(s, &m, 0); tx_to(s, s->conf.hub_ip, s->conf.hub_port, &m); }
 }
 void rc_bump_epoch(rc_session *s){ s->epoch++; s->nlast = 0; }
 void rc_bump_clock(rc_session *s){ s->clock++; s->nlast = 0; }
@@ -938,7 +1015,9 @@ int rc_push_state(rc_session *s, const rc_state *st, int64_t now){
         memmove(&s->last[1], &s->last[0], sizeof s->last[0] * (RC_SNAP_STATES - 1));
         s->last[0] = *st; if (s->nlast < RC_SNAP_STATES) s->nlast++;
     }
-    if (!rc_established(s)) return 1;
+    /* the hub gets one too, now and then: where we are */
+    int to_hub = s->conf.hub_ip && now - s->hub_snap_tx >= T_HUB_SNAP;
+    if (!rc_established(s) && !to_hub) return 1;
     s->seq++;
     rc_msg m; hdr(s, &m, RC_MSG_SNAP);
     m.u.snap.status = s->status; m.u.snap.epoch = s->epoch; m.u.snap.clock = s->clock; m.u.snap.cfg_rev = s->cfg_rev;
@@ -951,6 +1030,10 @@ int rc_push_state(rc_session *s, const rc_state *st, int64_t now){
         if (p->state != RC_PS_EST || !s->io.send) continue;
         s->io.send(s->io.user, p->ip, p->port, b, n); s->tx++; s->tx_bytes += (uint32_t)n;
     }
+    if (to_hub && s->io.send){
+        s->io.send(s->io.user, s->conf.hub_ip, s->conf.hub_port, b, n); s->tx++; s->tx_bytes += (uint32_t)n;
+        s->hub_snap_tx = now;
+    }
     return 2;
 }
 void rc_shutdown(rc_session *s, uint8_t reason){
@@ -960,5 +1043,6 @@ void rc_shutdown(rc_session *s, uint8_t reason){
             if (p->state != RC_PS_EST && p->state != RC_PS_HEARD) continue;
             rc_msg m; hdr(s, &m, RC_MSG_BYE); m.u.bye.reason = reason; tx(s, p, &m);
         }
+    if (s->conf.hub_ip){ rc_msg m; hdr(s, &m, RC_MSG_BYE); m.u.bye.reason = reason; tx_to(s, s->conf.hub_ip, s->conf.hub_port, &m); }
     s->closed = 1;
 }

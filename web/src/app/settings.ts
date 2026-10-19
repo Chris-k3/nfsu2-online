@@ -300,10 +300,12 @@ export const TEMPLATE = `# NFSU2 settings, read at every launch.
 #roam_room =
 # Port, the same for every player (1024 to 65535).  [NFSU2_ROAM_PORT]
 #roam_port = 47210
-# Look for players with a broadcast every 2 s.  [NFSU2_ROAM_DISCOVERY]
+# Look for players with a broadcast every 2 s when the server does not pick
+# the players near you (its free-roam hub).  [NFSU2_ROAM_DISCOVERY]
 #roam_discovery = on
-# Largest group, you included (2 to 8), and other players' cars shown at
-# once (0 to 5, the nearest).  [NFSU2_ROAM_MAX_PLAYERS, NFSU2_ROAM_MAX_CARS]
+# Largest group: you and the players you exchange cars with at once (2 to
+# 8; the server picks the nearest), and other players' cars shown at once
+# (0 to 5, the nearest).  [NFSU2_ROAM_MAX_PLAYERS, NFSU2_ROAM_MAX_CARS]
 #roam_max_players = 8
 #roam_max_cars = 5
 # on = the other players' cars are solid: drawn where they are now, and one

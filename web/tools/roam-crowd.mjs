@@ -1,0 +1,142 @@
+// Simulated free-roam players for load tests: n players, each the real core (runtime/roam_core.c in hub mode,
+// tests/roam_crowd.c, built here for wasm without a C library) on its own WebSocket to a server's switch,
+// driving along a track.  Real game pages (web/tools/roam-pair.mjs) can join the same server meanwhile.
+//
+//   node web/tools/roam-crowd.mjs [--base http://localhost:8655] [--n 62] [--seconds 120] [--room <name>]
+//        [--track <pose.csv>] [--speed 15] [--car 350Z] [--stagger 50] [--out <summary.json>]
+//
+// --track  a pose log (NFSU2_ROAM_POSELOG): the first player's L rows, a real drive; every simulated player
+//          follows it from its own point along it, so they spread over the route.  Without one: circles of 20 to
+//          120 m around the new career's start (1695, -884, 24).
+// Each player is its own client address for the server's per-address limits (X-Forwarded-For, which the
+// server takes from this machine, its trusted proxy).  Every 10 s one line: players on the switch, their peers
+// (min, mean, max: the hub gives each at most 7), datagrams a second in and out, joins and "out of range"
+// leaves.  Needs wasi-sdk in deps/ (its clang) and the ws package (web/node_modules).
+import fs from 'node:fs';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { WebSocket } from 'ws';
+
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const argv = process.argv.slice(2);
+const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && i + 1 < argv.length ? argv[i + 1] : d; };
+const BASE = opt('base', 'http://localhost:8655'), N = +opt('n', 62), SECONDS = +opt('seconds', 120), ROOM = opt('room', '');
+const SPEED = +opt('speed', 15), CAR = opt('car', '350Z'), STAGGER = +opt('stagger', 50), TRACK = opt('track', ''), OUTF = opt('out', '');
+const HUB = 0x0A4D00FD, PORT = 47210;
+
+// the core for wasm: no C library, bulk memory for the copies
+const WASI = fs.readdirSync(path.join(REPO, 'deps')).filter(d => d.startsWith('wasi-sdk-')).map(d => path.join(REPO, 'deps', d)).pop();
+const WASM = path.join(REPO, 'out/web/test/roam_crowd.wasm');
+fs.mkdirSync(path.dirname(WASM), { recursive: true });
+execFileSync(path.join(WASI, 'bin/clang'), ['--target=wasm32', '-O2', '-ffreestanding', '-nostdlib', '-mbulk-memory', '-ffp-contract=off',
+  '-Iruntime', '-Wl,--no-entry', '-Wl,--export-dynamic', '-o', WASM, 'tests/roam_crowd.c', 'runtime/roam_core.c'], { cwd: REPO, stdio: 'inherit' });
+const mod = await WebAssembly.compile(fs.readFileSync(WASM));
+
+const fnv1a = s => { if (!s) return 0; let h = 0x811C9DC5; for (const c of Buffer.from(s, 'latin1')) { h ^= c; h = Math.imul(h, 0x01000193) >>> 0; } return h || 1; };
+const bhash = s => { let h = 0xFFFFFFFF; for (const c of Buffer.from(s, 'latin1')) h = (Math.imul(h, 33) + c) >>> 0; return h; };   // the game's bStringHash
+const nowUs = () => (performance.timeOrigin + performance.now()) * 1000;
+
+// the track: (t s) -> { p, v }
+let track;
+if (TRACK) {
+  const rows = fs.readFileSync(TRACK, 'utf8').split('\n').filter(l => l.startsWith('L,')).map(l => l.split(','));
+  const id = rows[0][3], pts = rows.filter(r => r[3] === id).map(r => ({ t: +r[1] / 1e6, p: [+r[4], +r[5], +r[6]] }));
+  const t0 = pts[0].t, T = pts[pts.length - 1].t - t0;
+  for (const q of pts) q.t -= t0;
+  track = (t, i) => {
+    const u = ((t + (i / N) * T) % T + T) % T;
+    let lo = 0, hi = pts.length - 2;
+    while (lo < hi) { const m = (lo + hi + 1) >> 1; if (pts[m].t <= u) lo = m; else hi = m - 1; }
+    const k = lo;
+    const a = pts[k], b = pts[k + 1], dt = Math.max(1e-3, b.t - a.t), f = Math.min(1, Math.max(0, (u - a.t) / dt));
+    return { p: a.p.map((x, j) => x + f * (b.p[j] - x)), v: a.p.map((x, j) => (b.p[j] - x) / dt) };
+  };
+  console.log(`roam-crowd: track ${TRACK}: ${pts.length} points over ${T.toFixed(0)} s`);
+} else {
+  track = (t, i) => {
+    const r = 20 + (i % 6) * 20, w = SPEED / r, a = w * t + i;
+    return { p: [1695 + r * Math.cos(a), -884 + r * Math.sin(a), 24.1], v: [-r * w * Math.sin(a), r * w * Math.cos(a), 0] };
+  };
+}
+
+const st = { inDg: 0, outDg: 0, joins: 0, outOfRange: 0, otherLeaves: 0, notes: 0 }, why = {};
+const tally = t => { const k = t.replace(/^Bot\d+/, '<bot>').replace(/\d+(\.\d+)*(:\d+)?/g, '#'); why[k] = (why[k] ?? 0) + 1; };
+class Bot {
+  constructor(i) {
+    this.i = i; this.name = `Bot${String(i + 1).padStart(2, '0')}`; this.vip = 0; this.ready = false;
+    this.id = (Math.random() * 0xfffffffe + 1) >>> 0;
+  }
+  async start() {
+    this.inst = await WebAssembly.instantiate(mod, { crowd: {
+      send: (ip, port, ptr, n) => this.out(ip, port, ptr, n),
+      event: (ev, ptr, n) => {
+        const t = Buffer.from(this.mem().subarray(ptr, ptr + n)).toString('latin1');
+        if (ev === 1) st.joins++;
+        else if (ev === 2) { if (t.includes('out of range')) st.outOfRange++; else { st.otherLeaves++; tally(t); } }
+        else if (ev !== 4) { st.notes++; tally(t); }
+      },
+    } });
+    this.x = this.inst.exports;
+    const ws = this.ws = new WebSocket(BASE.replace(/^http/, 'ws') + '/lan', { headers: { 'X-Forwarded-For': `10.200.${this.i >> 8}.${this.i & 255}` } });
+    ws.binaryType = 'nodebuffer';
+    ws.on('error', e => console.log(`${this.name}: ${e.message}`));
+    ws.on('close', (c, r) => { if (this.ready) console.log(`${this.name}: closed ${c} ${r}`); this.ready = false; });
+    ws.on('message', (d, bin) => {
+      if (!bin) {
+        const m = JSON.parse(String(d));
+        if (m.t === 'welcome' && !this.vip) {
+          this.vip = m.vip >>> 0; ws.send(JSON.stringify({ t: 'hello', name: this.name }));
+          const io = this.x.crowd_io(), m8 = this.mem();
+          const b = Buffer.from(`${this.name}\0${CAR}\0`, 'latin1'); m8.set(b, io);
+          this.x.crowd_init(this.id, fnv1a(ROOM), HUB, PORT, bhash(CAR), nowUs());
+          this.ready = true;
+        }
+        return;
+      }
+      if (d.length < 16 || d[0] !== 1 || d.readUInt16BE(14) !== PORT || d.length - 16 > 1200) return;
+      st.inDg++;
+      this.mem().set(d.subarray(16), this.x.crowd_io());
+      this.x.crowd_recv(d.readUInt32BE(4), d.readUInt16BE(12), d.length - 16, nowUs());
+    });
+  }
+  mem() { return new Uint8Array(this.x.memory.buffer); }
+  out(ip, port, ptr, n) {
+    if (!this.ready || this.ws.readyState !== 1) return;
+    const f = Buffer.alloc(16 + n);
+    f[0] = 1; f.writeUInt32BE(this.vip, 4); f.writeUInt32BE(ip >>> 0, 8); f.writeUInt16BE(PORT, 12); f.writeUInt16BE(port, 14);
+    f.set(this.mem().subarray(ptr, ptr + n), 16);
+    this.ws.send(f); st.outDg++;
+  }
+  tick(t) {
+    if (!this.ready) return;
+    const { p, v } = track(t, this.i);
+    this.x.crowd_tick(nowUs(), p[0], p[1], p[2], v[0], v[1], v[2], Math.atan2(v[1], v[0]));
+  }
+  stop() { if (this.ready) this.x.crowd_stop(); setTimeout(() => this.ws.close(), 200); }
+}
+
+const bots = [];
+for (let i = 0; i < N; i++) { const b = new Bot(i); bots.push(b); await b.start(); await new Promise(r => setTimeout(r, STAGGER)); }
+const t0 = performance.now();
+const timer = setInterval(() => { const t = (performance.now() - t0) / 1000; for (const b of bots) b.tick(t); }, 50);
+let last = { ...st }, lastT = performance.now();
+const samples = [];
+const report = setInterval(() => {
+  const dt = (performance.now() - lastT) / 1000, on = bots.filter(b => b.ready), peers = on.map(b => b.x.crowd_peers());
+  const s = { t: Math.round((performance.now() - t0) / 1000), players: on.length, peersMin: Math.min(...peers), peersMean: +(peers.reduce((a, b) => a + b, 0) / Math.max(1, peers.length)).toFixed(2),
+    peersMax: Math.max(...peers), inPerS: Math.round((st.inDg - last.inDg) / dt), outPerS: Math.round((st.outDg - last.outDg) / dt),
+    joins: st.joins - last.joins, outOfRange: st.outOfRange - last.outOfRange, otherLeaves: st.otherLeaves - last.otherLeaves };
+  samples.push(s);
+  console.log(`roam-crowd: t=${s.t}s players ${s.players}, peers ${s.peersMin}/${s.peersMean}/${s.peersMax}, datagrams ${s.inPerS}/s in ${s.outPerS}/s out, ` +
+    `joins ${s.joins}, out of range ${s.outOfRange}, other leaves ${s.otherLeaves}`);
+  last = { ...st }; lastT = performance.now();
+}, 10_000);
+await new Promise(r => setTimeout(r, SECONDS * 1000));
+clearInterval(timer); clearInterval(report);
+for (const b of bots) b.stop();
+await new Promise(r => setTimeout(r, 1000));
+if (OUTF) fs.writeFileSync(OUTF, JSON.stringify({ n: N, seconds: SECONDS, track: TRACK || 'circles', totals: st, why, samples }, null, 1));
+for (const [k, v] of Object.entries(why).sort((a, b) => b[1] - a[1]).slice(0, 8)) console.log(`roam-crowd:   ${v} x ${k}`);
+console.log(`roam-crowd: done, ${st.joins} joins, ${st.outOfRange} out of range, ${st.otherLeaves} other leaves, ${st.notes} notes`);
+process.exit(0);

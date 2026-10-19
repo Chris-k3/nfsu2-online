@@ -132,6 +132,9 @@ Free roam is shared with **everyone** on the server who turns it on. Use a Room 
 
 Good to know:
 
+- **How many:** up to 64 players on a server (its owner can change that). The server pairs each player with the 7
+  players nearest to them, and your game shows the 5 nearest cars at once; as you drive, nearer cars take the place
+  of farther ones.
 - **Solid cars:** you collide with the other players' cars (Settings, Free roam, More free roam settings, Solid
   cars; off: you drive through them). A car that appears on top of yours, at a garage or after a jump, lets you
   through until you are apart. Each player's own game moves their car: a car you hit is pushed in its owner's game,
@@ -143,7 +146,8 @@ Good to know:
   people you would show your name and car to.
 - **Who sees what:** with free roam off (the default), the game does not join the server's network at all. With it
   on, everyone on the server sees your name and status, and players in free roam with you see your car and where it
-  is. Nobody sees your real address: the server gives each player a virtual one (`10.77.0.x`).
+  is. The server reads where your car is, to pick the players near you, and keeps nothing of it. Nobody sees your
+  real address: the server gives each player a virtual one (`10.77.0.x`).
 - **A tab in the background** (or another window in front) pauses your game. The others see you as paused: your car stays where you stopped until you come back.
 - **Closing the tab:** the others see your car disappear after a few seconds.
 - **Messages over the game** say when a player comes online, goes into a race or a shop, is back in free roam, or

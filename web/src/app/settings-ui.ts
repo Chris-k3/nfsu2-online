@@ -62,10 +62,10 @@ const GROUPS: Group[] = [
   { title: 'Free roam', items: [
     { key: 'roam', label: 'Play with others', help: 'Everyone on this server who turns this on sees your car in career free roam, and you see theirs, with their names over them.', c: { t: 'switch' } },
     { key: 'roam_room', label: 'Room', help: 'Only players in the same room see each other\'s cars. A filter, not privacy: everyone on this server still sees your name and whether you play.', c: { t: 'text', placeholder: 'none' } },
-    { key: 'roam_max_players', label: 'Largest group', help: 'You included, 2 to 8.', c: { t: 'num', min: 2, max: 8, step: 1 }, more: true },
+    { key: 'roam_max_players', label: 'Largest group', help: 'You and the players you exchange cars with at once, 2 to 8: the server picks the nearest.', c: { t: 'num', min: 2, max: 8, step: 1 }, more: true },
     { key: 'roam_max_cars', label: 'Players\' cars shown', help: 'The nearest, 0 to 5.', c: { t: 'num', min: 0, max: 5, step: 1 }, more: true },
     { key: 'roam_collide', label: 'Solid cars', help: 'You collide with the other players\' cars. A car that appears on yours lets you through until you are apart. Off: you drive through them.', c: { t: 'switch' }, more: true },
-    { key: 'roam_discovery', label: 'Find players automatically', help: 'Looks for players on this server with a broadcast every 2 s.', c: { t: 'switch' }, more: true },
+    { key: 'roam_discovery', label: 'Find players automatically', help: 'When the server does not pick the players near you: looks for players on this server with a broadcast every 2 s.', c: { t: 'switch' }, more: true },
     { key: 'roam_peers', label: 'Players\' addresses', help: 'a.b.c.d or a.b.c.d:port, separated by commas.', c: { t: 'text', placeholder: 'none' }, more: true },
     { key: 'roam_port', label: 'Port', help: 'The same for every player, 1024 to 65535.', c: { t: 'num', min: 1024, max: 65535, step: 1 }, more: true },
     { key: 'roam_rate', label: 'Updates per second', help: 'How often your car is sent to the others, 10 to 60.', c: { t: 'num', min: 10, max: 60, step: 1 }, more: true },

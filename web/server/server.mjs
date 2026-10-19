@@ -11,7 +11,10 @@
 //   /data-manifest     those files: path, size, mtime
 //   /lan               WebSocket: the virtual LAN switch for multiplayer, with
 //                      the game's Online mode served on its 10.77.0.1 (online/;
-//                      --online off: none, the game then cannot connect)
+//                      --online off: none, the game then cannot connect) and
+//                      free roam's hub on 10.77.0.253 (roam-hub.mjs: each
+//                      player's peers are the players nearest to it; --roam-hub
+//                      off: none, players find each other by broadcast)
 //   /robots.txt        nothing to index
 //   /players           how many play on this server now: { players, online }, two
 //                      counts and nothing else (never cached)
@@ -59,7 +62,7 @@
 //        [--tls-cert <pem> --tls-key <pem> [--port 8443] [--bind <address>] | --behind-proxy --host <name>[,<name>...]]
 //        [--host <name>[,<name>...]] [--state <dir>]
 //        [--trusted-proxies cloudflare,<ip>,<cidr>,...] [--real-ip-header x-forwarded-for|cf-connecting-ip]
-//        [--max-peers 16] [--online on|off] [--access-log] [--dev [--artifacts <dir>] [--lan-impair <spec>] [--online-trace <file>]]
+//        [--max-peers 64] [--online on|off] [--roam-hub on|off] [--access-log] [--dev [--artifacts <dir>] [--lan-impair <spec>] [--online-trace <file>]]
 // Options with a value can also come from the environment as NFSU2_<OPTION>
 // (NFSU2_DATA, NFSU2_PORT, NFSU2_TLS_CERT, ...); switches only from the command line.
 import http from 'node:http';
@@ -74,6 +77,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { LanSwitch, LAN_WSS_OPTIONS, vipStr } from './lan.mjs';
 import { OnlineHost } from './online/index.mjs';
+import { RoamHub } from './roam-hub.mjs';
 import { LobbyTrace } from './online/trace.mjs';
 import { securityHeaders, cacheHeaders, etagMatches, makeProxyTrust,
   clientIp, viaHttps, forwardedHost, isLocalOrIp, bareIp, addressKey, siteKey, makeHostCheck, hostName } from './headers.mjs';
@@ -83,7 +87,8 @@ const REPO = path.resolve(HERE, '../..');
 
 // ---- options ----
 const VALUE_OPTS = ['--data', '--dist', '--wasm', '--port', '--http-port', '--bind', '--state', '--tls-cert', '--tls-key',
-  '--trusted-proxies', '--real-ip-header', '--max-peers', '--artifacts', '--lan-impair', '--host', '--online', '--online-trace'];
+  '--trusted-proxies', '--real-ip-header', '--max-peers', '--artifacts', '--lan-impair', '--host', '--online', '--online-trace',
+  '--roam-hub'];
 const FLAG_OPTS = ['--behind-proxy', '--dev', '--access-log'];
 function die(msg) { console.error(msg); process.exit(1); }
 for (let i = 2; i < process.argv.length; i++) {
@@ -119,13 +124,15 @@ const TLS_KEY = arg('--tls-key', '') ? path.resolve(arg('--tls-key', '')) : '';
 const DEV = flag('--dev');
 const ACCESS_LOG = flag('--access-log');
 const ARTIFACTS = arg('--artifacts', '') ? path.resolve(arg('--artifacts', '')) : '';
-const MAX_PEERS = +arg('--max-peers', 16);
+const MAX_PEERS = +arg('--max-peers', 64);
 // the public names (a domain), comma-separated; '*.' covers one label
 const HOSTS = String(arg('--host', '')).split(',').map(h => h.trim().toLowerCase().replace(/\.$/, '')).filter(Boolean);
 // a test aid of the LAN-play tests (delay, loss, reordering on the switch; lan.mjs where it is implemented)
 const LAN_IMPAIR = arg('--lan-impair', '');
 // the game's Online mode (online/index.mjs): on unless --online off
 const ONLINE = String(arg('--online', 'on')).toLowerCase();
+// free roam's hub (roam-hub.mjs): each player's peers are the players nearest to it; on unless --roam-hub off
+const ROAM_HUB = String(arg('--roam-hub', 'on')).toLowerCase();
 // a test aid: the lobby protocol's messages, decoded and with every secret redacted, into a file (online/trace.mjs)
 const ONLINE_TRACE = arg('--online-trace', '') ? path.resolve(arg('--online-trace', '')) : '';
 
@@ -139,6 +146,7 @@ for (const h of HOSTS) if (!hostName(h.replace(/^\*\./, ''))) die(`--host: "${h}
 if (ARTIFACTS && !DEV) die('--artifacts is a test aid: it needs --dev');
 if (LAN_IMPAIR && !DEV) die('--lan-impair is a test aid: it needs --dev');
 if (!['on', 'off'].includes(ONLINE)) die('--online: on or off');
+if (!['on', 'off'].includes(ROAM_HUB)) die('--roam-hub: on or off');
 if (ONLINE_TRACE && !DEV) die('--online-trace is a test aid: it needs --dev');
 if (!Number.isInteger(MAX_PEERS) || MAX_PEERS < 1 || MAX_PEERS > 250) die('--max-peers: 1 to 250');
 // how TLS is done: by a proxy in front, with the given certificate, or not at all (this machine only)
@@ -644,7 +652,8 @@ const online = ONLINE === 'on' ? new OnlineHost({ tap: trace ? f => trace.frame(
   log: (line, key) => key == null ? console.log(line) : logLimited('online', 'Online lines', key, line, 30) }) : null;
 // the switch's addresses outlive a restart (by the hashes of their tokens, lan.mjs): the players come back to them
 const LAN_STORE = path.join(STATE, 'lan-addresses.json');
-const lan = new LanSwitch({ maxPeers: MAX_PEERS, impair: DEV ? LAN_IMPAIR : '', online, tap: trace ? f => trace.frame(f) : null, store: {
+const roamHub = ROAM_HUB === 'on' ? new RoamHub() : null;
+const lan = new LanSwitch({ maxPeers: MAX_PEERS, impair: DEV ? LAN_IMPAIR : '', online, roam: roamHub, tap: trace ? f => trace.frame(f) : null, store: {
   load: () => JSON.parse(fs.readFileSync(LAN_STORE, 'utf8')),
   save: list => { fs.writeFileSync(LAN_STORE + '.tmp', JSON.stringify(list), { mode: 0o600 }); fs.renameSync(LAN_STORE + '.tmp', LAN_STORE); },
 } });
@@ -824,6 +833,7 @@ const lines = [
   `  proxies   : this machine${trust.entries.length ? ', ' + trust.entries.join(', ') : ''} (client address from ${REAL_IP})`,
   `  names     : ${[...new Set(['localhost', ...hostCheck.names()])].join(', ')} (other Host names get 421)`,
   `  switch    : at most ${MAX_PEERS} players`,
+  `  free roam : ${roamHub ? 'the hub at 10.77.0.253 on the switch links each player to the 7 nearest (--roam-hub off: groups of 8 by broadcast)' : 'no hub (--roam-hub off): players find each other by broadcast, groups of 8'}`,
   `  online    : ${online ? `the game's Online mode at 10.77.0.1 on the switch (any name logs in; race results per persona in ${path.join(STATE, 'online')})` : 'off (--online off)'}`,
   ONLINE_TRACE ? `  trace     : lobby messages (secrets redacted) into ${ONLINE_TRACE}` : null,
   DEV ? `  dev       : test pages (/test/), test scripts (/tests/), source maps${ARTIFACTS ? `, PUT /artifacts/<name>.png into ${ARTIFACTS}` : ''}` : null,

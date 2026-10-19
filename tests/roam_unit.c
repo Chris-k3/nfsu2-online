@@ -242,7 +242,21 @@ static uint32_t node_ip(int i){ return 0x7f000001u; (void)i; }
 static uint16_t node_port(int i){ return (uint16_t)(50000 + i); }
 static int node_of(uint32_t ip, uint16_t port){ if (ip != 0x7f000001u) return -1; for (int i = 0; i < NN; i++) if (node_port(i) == port) return i; return -1; }
 static int g_bcast_calls;
+/* a stand-in for the server's free-roam hub (web/server/roam-hub.mjs): it
+ * counts what each node sends it and, while on, lists g_hub_link[i] for node
+ * i every second */
+#define HUB_IP   0x7f0000FDu
+#define HUB_PORT 47210
+static int g_hub_on, g_hub_link[NN][NN], g_hub_hello[NN], g_hub_snap[NN], g_hub_bye[NN];
+static int64_t g_hub_next;
+static void hub_in(int from, const uint8_t *b, int len){
+    rc_msg m; if (rc_decode(b, len, &m) != RC_OK) return;
+    if (m.h.type == RC_MSG_HELLO) g_hub_hello[from]++;
+    else if (m.h.type == RC_MSG_SNAP) g_hub_snap[from]++;
+    else if (m.h.type == RC_MSG_BYE) g_hub_bye[from]++;
+}
 static void net_send(void *u, uint32_t ip, uint16_t port, const uint8_t *buf, int len){
+    if (ip == HUB_IP && port == HUB_PORT){ hub_in((int)(intptr_t)u, buf, len); return; }
     int from = (int)(intptr_t)u, to = node_of(ip, port);
     if (to < 0 || g_drop[from][to]) return;
     if (g_loss_pct && (int)(rnd() % 100u) < g_loss_pct) return;
@@ -261,11 +275,11 @@ static void net_send(void *u, uint32_t ip, uint16_t port, const uint8_t *buf, in
 }
 static void net_bcast(void *u, uint16_t port, const uint8_t *buf, int len){ (void)u; (void)port; (void)buf; (void)len; g_bcast_calls++; }
 static int g_join[NN], g_leave[NN], g_note[NN], g_restart[NN];
-static char g_note_text[NN][200];
+static char g_note_text[NN][200], g_leave_text[NN][200];
 static void net_event(void *u, int ev, int peer, const char *t){
     (void)peer; int i = (int)(intptr_t)u;
     if (ev == RC_EV_JOIN) g_join[i]++;
-    if (ev == RC_EV_LEAVE) g_leave[i]++;
+    if (ev == RC_EV_LEAVE){ g_leave[i]++; snprintf(g_leave_text[i], sizeof g_leave_text[i], "%s", t); }
     if (ev == RC_EV_RESTART) g_restart[i]++;
     if (ev == RC_EV_NOTE){ g_note[i]++; snprintf(g_note_text[i], sizeof g_note_text[i], "%s", t); }
 }
@@ -291,6 +305,18 @@ static void net_run(int64_t until, int nn){
             }
         }
         if (g_now % 10000 == 0) for (int i = 0; i < nn; i++) rc_tick(&g_n[i], g_now);
+        if (g_hub_on && g_now >= g_hub_next){
+            g_hub_next = g_now + 1000000;
+            for (int i = 0; i < nn && g_qn < 20000; i++){
+                rc_msg m; memset(&m, 0, sizeof m); m.h.type = RC_MSG_PEERS; m.h.sender = 0xB0B;
+                for (int j = 0; j < nn; j++)
+                    if (g_hub_link[i][j] && m.u.peers.n < RC_MAX_PEERS){
+                        m.u.peers.e[m.u.peers.n].ip = node_ip(j); m.u.peers.e[m.u.peers.n].port = node_port(j);
+                        m.u.peers.e[m.u.peers.n].id = g_n[j].conf.self_id; m.u.peers.n++; }
+                Pkt *p = &g_q[g_qn++];
+                p->at = g_now + g_lat_us; p->to = i; p->ip = HUB_IP; p->port = HUB_PORT; p->len = rc_encode(&m, p->b, sizeof p->b);
+            }
+        }
     }
 }
 static int est(int i){ return rc_established(&g_n[i]); }
@@ -408,6 +434,49 @@ static void drive(int n, int64_t until){
         net_run(g_now + 10000, n);
     }
 }
+/* ---- 4c. the server's free-roam hub: its list is who the peers are -- */
+static void hub_links(int a, int b){ g_hub_link[a][b] = g_hub_link[b][a] = 1; }
+static void t_hub(void){
+    mesh(4, 8);
+    g_hub_on = 1; g_hub_next = 0; memset(g_hub_link, 0, sizeof g_hub_link);
+    memset(g_hub_hello, 0, sizeof g_hub_hello); memset(g_hub_snap, 0, sizeof g_hub_snap); memset(g_hub_bye, 0, sizeof g_hub_bye);
+    for (int i = 0; i < 4; i++){ g_n[i].conf.hub_ip = HUB_IP; g_n[i].conf.hub_port = HUB_PORT; g_n[i].conf.discovery = 1; }
+    uint32_t id[4]; for (int i = 0; i < 4; i++) id[i] = g_n[i].conf.self_id;
+    hub_links(0, 1); hub_links(2, 3);
+    g_bcast_calls = 0;
+    int64_t t0 = g_now;
+    drive(4, g_now + 4000000);
+    CHECK(est(0) == 1 && est(1) == 1 && est(2) == 1 && est(3) == 1 && peer_of(0, id[1]) >= 0 && peer_of(0, id[2]) < 0,
+          "hub: the pairs it lists establish, nobody else (%d %d %d %d)", est(0), est(1), est(2), est(3));
+    CHECK(g_bcast_calls == 0, "hub: no discovery broadcast while it answers (%d)", g_bcast_calls);
+    CHECK(g_n[0].hub_was == 2, "hub: answering");
+    CHECK(g_hub_hello[0] >= 3 && g_hub_snap[0] >= 6 && g_hub_snap[0] <= 9, "hub: a HELLO every second (%d) and a SNAP twice a second (%d) in %.0f s",
+          g_hub_hello[0], g_hub_snap[0], (double)(g_now - t0) / 1e6);
+    /* a player the hub does not list for us: its HELLOs are ignored */
+    int k2 = rc_add_peer(&g_n[2], node_ip(0), node_port(0), 1, g_now);
+    drive(4, g_now + 2000000);
+    CHECK(g_n[0].rx_unlisted > 0 && peer_of(0, id[2]) < 0, "hub: an unlisted player's HELLO is ignored (%u)", g_n[0].rx_unlisted);
+    if (k2 >= 0) g_n[2].peer[k2].state = RC_PS_FREE;
+    /* the hub links others: the old peer goes (out of range), the new one comes */
+    memset(g_hub_link, 0, sizeof g_hub_link); hub_links(0, 2); hub_links(1, 3);
+    int lv = g_leave[0];
+    drive(4, g_now + 5000000);
+    CHECK(peer_of(0, id[2]) >= 0 && g_n[0].peer[peer_of(0, id[2])].state == RC_PS_EST && peer_of(0, id[1]) < 0 && est(0) == 1,
+          "hub: a new list, new peers (%d)", est(0));
+    CHECK(g_leave[0] == lv + 1 && strstr(g_leave_text[0], "out of range"), "hub: the unlisted peer left \"out of range\" ('%s')", g_leave_text[0]);
+    /* the hub goes silent: discovery again after 10 s, nobody dropped for it */
+    g_hub_on = 0; g_bcast_calls = 0;
+    drive(4, g_now + 13000000);
+    CHECK(g_bcast_calls > 0 && g_n[0].hub_was == 0 && est(0) == 1, "hub silent: discovery again, peers kept (%d broadcasts, state %d, %d peers)", g_bcast_calls, g_n[0].hub_was, est(0));
+    /* it answers again; a BYE tells it we stop */
+    g_hub_on = 1; g_hub_next = 0;
+    drive(4, g_now + 2000000);
+    CHECK(g_n[0].hub_was == 2, "hub back: answering again");
+    rc_shutdown(&g_n[3], 0);
+    CHECK(g_hub_bye[3] == 1, "hub: a BYE when we stop");
+    g_hub_on = 0;
+}
+
 static void t_review(void){
     /* a late state of the previous epoch (a datagram sent before a teleport,
      * reordered) or of the previous clock epoch is dropped */
@@ -727,6 +796,7 @@ int main(int argc, char **argv){
     t_fuzz(fuzz);
     t_session();
     t_review();
+    t_hub();
     t_interp();
     t_guard();
     printf("roam_unit: %d passed, %d failed\n", g_pass, g_fail);

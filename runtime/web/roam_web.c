@@ -20,11 +20,15 @@
  *
  * Addresses (what the core sees):
  *   player   our own virtual address and port; peers are virtual addresses
- *            (roam_peers takes 10.77.0.x literals, the page shows them);
- *            discovery (roam_discovery = on) is one datagram to the switch's
- *            broadcast address, i.e. every other browser on the server.  A
- *            destination outside the virtual subnet cannot be reached: a send
- *            error, logged.
+ *            (roam_peers takes 10.77.0.x literals, the page shows them).  Who
+ *            our peers are comes from the server's free-roam hub
+ *            (NET_ROAM_HUB, web/server/roam-hub.mjs: the players nearest to
+ *            us, rc_config.hub_ip), so a server takes far more players than
+ *            one group; NFSU2_ROAM_HUB=0 does without it.  Without a hub
+ *            answering, discovery (roam_discovery = on) is one datagram to
+ *            the switch's broadcast address, i.e. every other browser on the
+ *            server.  A destination outside the virtual subnet cannot be
+ *            reached: a send error, logged.
  *   test     (roam_plat_test_mode(): an automated run, the same rule as the
  *            Mac) the Mac's guard is kept word for word: only 127/8
  *            destinations, no broadcast, peers only 127/8, every refusal
@@ -226,6 +230,15 @@ void roam_game_event(int ev, int peer, const char *text);    /* roam_game.c prov
  * lock held. */
 #define NOTICE_HOLD_US 1500000
 static struct { uint32_t id; uint8_t told, cand; int64_t since; } g_where[RC_TABLE];
+/* the players whose joining was told: once each (with the hub, a player
+ * near us now and then, or passing by, comes and goes as a peer) */
+#define TOLD_IDS 256
+static uint32_t g_told[TOLD_IDS]; static int g_ntold;
+static int told_once(uint32_t id){
+    for (int i = 0; i < g_ntold && i < TOLD_IDS; i++) if (g_told[i] == id) return 0;
+    g_told[g_ntold++ % TOLD_IDS] = id;
+    return 1;
+}
 static void notice(const char *name, const char *what){
     char t[96];
     int n = snprintf(t, sizeof t, "%s%s", name && *name ? name : "A player", what);
@@ -254,9 +267,10 @@ static void io_event(void *u, int ev, int peer, const char *text){
     if (ev == RC_EV_JOIN){
         uint8_t st = place(p);
         g_where[peer].id = p->id; g_where[peer].told = g_where[peer].cand = st; g_where[peer].since = roam_plat_now_us();
-        notice(p->name, st == RC_ST_ROAM ? " joined free roam" : st == RC_ST_EVENT ? " is online (in a race)" : " is online");
+        if (told_once(p->id)) notice(p->name, st == RC_ST_ROAM ? " joined free roam" : st == RC_ST_EVENT ? " is online (in a race)" : " is online");
     } else if (ev == RC_EV_LEAVE){
-        /* roam_core.c drop_peer: "<name> left: <why>"; a restart joins again at once, another room was never ours */
+        /* roam_core.c drop_peer: "<name> left: <why>"; a restart joins again at once, another room was never ours,
+         * one out of range (the hub's list) is still playing */
         const char *why = strstr(text, " left: ");
         why = why ? why + 7 : "";
         if (!strcmp(why, "quit")) notice(p->name, " left");
@@ -412,19 +426,26 @@ int roam_plat_start(const roam_plat_cfg *cfg, rc_session *s){
     st(&MB->port, g_cfg.port);
     st(&MB->mode, g_cfg.test_mode ? NET_MODE_LOOP : NET_MODE_VLAN);
     imp_parse(g_cfg.impair);
-    memset(g_q, 0, sizeof g_q); memset(g_where, 0, sizeof g_where);
+    memset(g_q, 0, sizeof g_q); memset(g_where, 0, sizeof g_where); g_ntold = 0;
     rc_io io = { 0, io_send, io_broadcast, io_event };
-    roam_plat_lock(); s->io = io; roam_plat_unlock();
+    const char *hub = getenv("NFSU2_ROAM_HUB");
+    int use_hub = !g_cfg.test_mode && !(hub && !strcmp(hub, "0"));
+    roam_plat_lock();
+    s->io = io;
+    if (use_hub){ s->conf.hub_ip = NET_ROAM_HUB; s->conf.hub_port = g_cfg.port; }
+    roam_plat_unlock();
     atomic_store(&g_stop, 0);
     if (pthread_create(&g_thr, 0, net_main, 0) != 0){ st(&MB->mode, NET_MODE_CLOSED); return -1; }
     g_thr_on = 1;
     if (webtest_vlan())
         fprintf(stderr, "[roam] automated run on the virtual LAN (NFSU2_ROAM_WEBTEST=vlan): virtual addresses and discovery as "
                         "for players; the switch reaches only browsers on this server\n");
-    fprintf(stderr, "[roam] virtual LAN UDP port %u open%s\n", g_cfg.port,
+    fprintf(stderr, "[roam] virtual LAN UDP port %u open%s%s\n", g_cfg.port,
             g_cfg.test_mode ? " (test harness: loopback only; the switch stands for the loopback, 127.0.0.1:<port> "
                               "reaches the test instance on that port)" :
-            g_cfg.discovery ? ", LAN discovery on (broadcast to every browser on the switch)" : "");
+            use_hub ? ", the players near us from the server's free-roam hub (10.77.0.253)" : "",
+            g_cfg.test_mode ? "" : g_cfg.discovery ? (use_hub ? "; LAN discovery if it does not answer" :
+                                                      ", LAN discovery on (broadcast to every browser on the switch)") : "");
     return 0;
 }
 void roam_plat_stop(uint8_t reason){

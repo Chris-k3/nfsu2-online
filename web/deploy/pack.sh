@@ -4,8 +4,8 @@
 #   web/deploy/pack.sh [--out <dir>] [--no-build] [--data "<game folder>"]
 #
 # out/web/deploy/nfsu2-web-<rev>.tar.gz holds nfsu2-web/ with
-#   web/server/       the server (server.mjs, headers.mjs, lan.mjs, cloudflare-ips.txt, online/*.mjs: the
-#                     game's Online mode)
+#   web/server/       the server (server.mjs, headers.mjs, lan.mjs, roam-hub.mjs: free roam's hub,
+#                     cloudflare-ips.txt, online/*.mjs: the game's Online mode)
 #   web/node_modules/ its one dependency (ws), copied from this checkout; web/package.json
 #   web/dist/         the page (the test pages and source maps are in web/dist-dev, never copied)
 #   out/web/          the game module (nfsu2.wasm, nfsu2.json), built here with web/build.sh
@@ -41,7 +41,7 @@ rm -rf "$STAGE"; mkdir -p "$STAGE/nfsu2-web"
 B="$STAGE/nfsu2-web"
 mkdir -p "$B/web/server/online" "$B/web/node_modules" "$B/out/web" "$B/deploy"
 # ---- the fixed list ----
-cp web/server/server.mjs web/server/headers.mjs web/server/lan.mjs web/server/cloudflare-ips.txt "$B/web/server/"
+cp web/server/server.mjs web/server/headers.mjs web/server/lan.mjs web/server/roam-hub.mjs web/server/cloudflare-ips.txt "$B/web/server/"
 cp web/server/online/*.mjs "$B/web/server/online/"
 cp -R web/node_modules/ws "$B/web/node_modules/ws"
 WS_VERSION="$(node -p "require('./web/node_modules/ws/package.json').version")"

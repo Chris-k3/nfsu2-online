@@ -227,6 +227,15 @@ typedef struct {
     int      test_mode;            /* only 127/8 peers are accepted */
     int      max_players;          /* 2 .. RC_MAX_PLAYERS */
     int      rate_hz;              /* snapshots per second (10 .. 60) */
+    /* a free-roam hub (the browser's server, web/server/roam-hub.mjs), or 0:
+     * it gets a HELLO every second and a SNAP twice a second, and answers
+     * every second with a PEERS list of the players near us.  While it
+     * answers, that list is who our peers are: nobody else is taken, a peer
+     * it no longer lists goes ("out of range"), and there is no discovery
+     * and no gossip.  Silent for 10 s (or from the start): discovery and
+     * gossip as without one. */
+    uint32_t hub_ip;
+    uint16_t hub_port;
 } rc_config;
 
 enum { RC_PS_FREE = 0, RC_PS_CANDIDATE = 1, RC_PS_HEARD = 2, RC_PS_EST = 3 };
@@ -237,10 +246,12 @@ typedef struct {
     uint32_t ip;  uint16_t port;
     uint32_t id;
     int64_t  added_us, last_rx_us, last_hello_tx, last_ping_tx, last_cfgreq_tx, last_snap_rx;
+    int64_t  hub_listed_us;        /* the hub's list named it last (0: never) */
     char     name[RC_NAME_MAX + 1];
     uint8_t  platform, status;
     uint16_t cfg_rev_seen;         /* what the peer announces */
     int      hears_us, lost;
+    int      hears_miss;           /* with the hub: one HELLO without our id forgiven (hub mode only) */
     /* rate limit */
     int64_t  rl_t0;  int rl_n, rl_bytes;
     /* statistics; seq_lost counts gaps in the sender's snapshot sequence */
@@ -279,6 +290,12 @@ typedef struct {
     int       closed;
     struct { uint32_t id; int64_t at; } bye[4];  int nbye;
     uint32_t  rx_after_bye;
+    /* the hub (conf.hub_ip): the first tick, its last list, our last HELLO
+     * and SNAP to it, whether it is the one that decides now (logged when
+     * that changes) */
+    int64_t   hub_since, hub_heard_us, hub_hello_tx, hub_snap_tx;  int hub_was;
+    uint32_t  hub_lists;           /* PEERS lists from the hub */
+    uint32_t  rx_unlisted;         /* HELLOs of players the hub does not list for us: ignored */
 } rc_session;
 
 void rc_session_init(rc_session *s, const rc_config *cfg, const rc_io *io);

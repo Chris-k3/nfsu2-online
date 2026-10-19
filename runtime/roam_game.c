@@ -1085,6 +1085,10 @@ static void periodic_log(int64_t host){
             rh_frame(), est, g_s.tx, g_s.tx_bytes / 1024.0, g_s.rx, g_s.rx_bad, g_s.rx_version, g_s.rx_room, g_s.rx_policy, g_s.rx_ratelimit,
             g_s.rx_stray, g_s.rx_dup_id, (unsigned long long)ps.blocked, g_cost_win_n ? g_cost_win_sum / 1000.0 / (double)g_cost_win_n : 0.0,
             g_cost_win_max / 1000.0, (unsigned long long)g_cost_win_n, rh_heap_mb());
+    if (g_s.conf.hub_ip)
+        rlog("[roam]   the server's hub: %s, %u lists, %u HELLOs of players it did not list ignored\n",
+                g_s.hub_was == 2 ? "answering (it picks the players near us)" : g_s.hub_was == 1 ? "no answer yet" : "silent (broadcast discovery)",
+                g_s.hub_lists, g_s.rx_unlisted);
     for (int i = 0; i < RC_TABLE; i++){
         const rc_peer *p = &g_s.peer[i];
         if (p->state != RC_PS_EST) continue;
@@ -1101,7 +1105,9 @@ static void periodic_log(int64_t host){
 }
 
 /* choose which friends get the slots: visible ones, nearest first; a slot
- * keeps its friend while the friend stays visible.  A friend whose car
+ * keeps its friend while the friend stays visible, unless a much nearer
+ * friend has none (step 5: with the server's hub there can be more
+ * friends near us than slots).  A friend whose car
  * cannot be made now (no car memory, a record not understood) is skipped
  * for this frame and the next one is served: a farther friend whose look a
  * parked car already wears, or one with a car that fits, is not kept
@@ -1156,8 +1162,21 @@ static void assign(CPU *c, int64_t host){
             int far = -1;
             for (int j = 0; j < nslots; j++)
                 if (g_sl[j].st == SL_ACTIVE && g_sl[j].unseen_since && (far < 0 || g_sl[j].unseen_since < g_sl[far].unseen_since)) far = j;
+            /* 5. else the farthest shown one, for a friend much nearer (well
+             *    within 60 % of its distance and 50 m nearer: no swapping
+             *    back and forth at the edge) -- with more players than
+             *    slots, the cars shown are the nearest ones */
+            if (far < 0){
+                float fd = 0.f; int fj = -1;
+                for (int j = 0; j < nslots; j++){
+                    if (g_sl[j].st != SL_ACTIVE) continue;
+                    for (int i = 0; i < g_npv; i++)
+                        if (g_pv[i].idx == g_sl[j].peer && g_pv[i].id == g_sl[j].peer_id && g_pv[i].dist > fd){ fd = g_pv[i].dist; fj = j; }
+                }
+                if (fj >= 0 && v->dist < fd * 0.6f && fd - v->dist > 50.f) far = fj;
+            }
             if (far < 0) return;
-            release(c, far, "slot needed for a nearer friend");
+            release(c, far, g_sl[far].unseen_since ? "slot needed for a nearer friend" : "a much nearer friend takes the slot");
             continue;
         }
         Slot *s = &g_sl[k];

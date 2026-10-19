@@ -124,6 +124,10 @@
 // sent more, and the host closes the stream it was for, instead of the whole
 // connection being cut (the Online audit's ONL-2).
 //
+// roam (server.mjs, roam-hub.mjs): the server's free-roam hub, 10.77.0.253, the same way: frames to it go to
+// roam.frame(from, frame), it sends through sendTo() (its own lists, every second: charged to nobody), and
+// roam.peerGone(vip) hears of every browser that left.  It is on no peer list.
+//
 // tap (a test aid, server option --online-trace): sees every frame the switch
 // takes from a browser or sends for the online host (online/trace.mjs).
 //
@@ -143,7 +147,7 @@ const STREAM_LOW = 64 << 10;    // a receiver with less than this queued gets st
 export const LAN_WSS_OPTIONS = Object.freeze({ autoPong: false });
 
 export const LAN_DEFAULTS = Object.freeze({
-  maxPeers: 16, maxFrame: 8192, frameRate: 1000, byteRate: 256 << 10, groupFrameRate: 2000, groupByteRate: 512 << 10,
+  maxPeers: 64, maxFrame: 8192, frameRate: 1000, byteRate: 256 << 10, groupFrameRate: 2000, groupByteRate: 512 << 10,
   siteFrameRate: 4000, siteByteRate: 1 << 20,
   textRate: 20, maxText: 1024, ctlRate: 10, shedQueue: 256 << 10, streamQueue: 2 << 20, streamShare: 1 << 20, stallMs: 1000,
   sendBuffer: 8 << 20, keepaliveMs: 25_000, idleMs: 10 * 60_000, reserveMs: 60_000, groupReserve: 8, siteReserve: 16,
@@ -217,6 +221,8 @@ export class LanSwitch {
     // whether they ran dry
     this.cause = null; this.causeOver = false;
     this.online?.attachSwitch?.((vip, data) => this.sendTo(vip, data));
+    this.roam = opts.roam ?? null;
+    this.roam?.attachSwitch?.((vip, data) => this.sendTo(vip, data));
   }
   /** the store gets the addresses held and reserved, shortly after a change */
   persist() {
@@ -249,7 +255,7 @@ export class LanSwitch {
       frames: this.frames, bytes: this.bytes, dropped: this.dropped, limited: this.limited, refused: this.refused, shed: this.shed,
       resumed: this.resumed, reserved: this.reserved.size, evicted: this.evicted, cuts: { ...this.cuts },
       ...(this.impair ? { impair: this.impair, lost: this.lost } : {}),
-      ...(this.online ? { online: this.online.info() } : {}) };
+      ...(this.online ? { online: this.online.info() } : {}), ...(this.roam ? { roam: this.roam.info() } : {}) };
   }
   /** one frame to one peer: through the impairment when it is on, always through send() (the queue rules) */
   deliver(from, p, data) {
@@ -451,6 +457,7 @@ export class LanSwitch {
       data.writeUInt32BE(vip, 4);
       this.frames++; this.bytes += n; peer.framesIn++;
       this.tap?.(data);
+      if (this.roam && dst === this.roam.vip) { this.roam.frame(vip, data); return; }
       if (this.online && dst === this.online.vip) {
         this.cause = buckets; this.causeOver = false;
         try { this.online.frame(vip, data, { group: group.id, site: site?.id ?? null }); } finally { this.cause = null; }
@@ -469,6 +476,7 @@ export class LanSwitch {
       this.persist();
       for (const k of this.tcpLast.keys()) if (k.startsWith(`${vip}>`) || k.endsWith(`>${vip}`)) this.tcpLast.delete(k);
       this.online?.peerGone(vip);
+      this.roam?.peerGone(vip);
       this.broadcastPeers();
       opts.onLeave?.(vip, peer.name);
     });
@@ -503,7 +511,7 @@ export class LanSwitch {
       try { p.ws.ping(p.pingData); } catch { /* closing */ }
     }
   }
-  stop() { clearInterval(this.timer); this.flush(); this.online?.stop?.(); }
+  stop() { clearInterval(this.timer); this.flush(); this.online?.stop?.(); this.roam?.stop?.(); }
 }
 function parseImpair(spec) {
   if (!spec) return null;

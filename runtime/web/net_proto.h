@@ -62,6 +62,8 @@
 #define NET_KIND_NOTICE   16u   /* TX ring only, never on the switch: a line of UTF-8 text the page shows
                                    over the game (free roam: a friend joined, left, went into a race) */
 #define NET_BROADCAST      0xFFFFFFFFu
+#define NET_ROAM_HUB       0x0A4D00FDu  /* 10.77.0.253: the server's free-roam hub (web/server/roam-hub.mjs),
+                                   an address the switch never hands out */
 
 /* LAN header: the first NET_LAN_HDR bytes of a NET_KIND_LAN_* payload
  *   [0] op  [1] ttl (informative)  [2..3] 0  [4..7] conn (TCP: the
