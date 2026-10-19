@@ -452,6 +452,7 @@ def gen_c(fns, body):
     o=[]
     o.append('#include "cpu.h"\n#include <stdio.h>\n#include <string.h>\n#include <math.h>')
     o.append('void mem_commit(uint32_t,uint32_t);')
+    o.append('guest_fn_t g_dtab[DISPATCH_TEXT_SIZE];   /* empty: indirect calls go to the stub below */')
     o.append('void dispatch_indirect(CPU*c,uint32_t a){(void)c;(void)a;}')
     o.append('void unsupported_insn(CPU*c,uint32_t a,const char*m){(void)c;(void)a;(void)m;fprintf(stderr,"TRAP 0x%x %s\\n",a,m);}')
     o.append('void guest_hook(CPU*c,uint32_t a){(void)c;(void)a;}')

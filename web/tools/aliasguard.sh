@@ -1,7 +1,8 @@
 #!/bin/bash
 # Structural guard for guest memory type punning on WebAssembly: every guest
 # access macro of runtime/cpu.h (MR8 ... MRF64), as the wasm build expands it,
-# plain and with NFSU2_MEMCHECK, must go through a may_alias type (gm_u16,
+# plain, with NFSU2_MEMCHECK and as the lifted shards see it (NFSU2_GUEST_OBJ),
+# must go through a may_alias type (gm_u16,
 # gm_u32, gm_u64, gm_f32, gm_f64; MR8's uint8_t is a character type and
 # aliases anything already).  A plain uint32_t/float access lets clang assume
 # an f32 store and an i32 load of the same guest address apart and reorder
@@ -14,7 +15,7 @@
 # Run by web/build.sh before it compiles anything, and by web/test/alias.test.mjs.
 set -e -o pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"; cd "$ROOT"
-WASI="${WASI:-$(ls -d "$ROOT"/deps/wasi-sdk-*-arm64-macos 2>/dev/null | tail -1)}"
+WASI="${WASI:-$(ls -d "$ROOT"/deps/wasi-sdk-*-arm64-macos "$ROOT"/deps/wasi-sdk-*-x86_64-linux 2>/dev/null | tail -1 || true)}"
 [ -x "$WASI/bin/clang" ] || { echo "aliasguard: wasi-sdk not found in deps/ (set WASI=...)"; exit 1; }
 INC="${CPU_H:-runtime}"
 [ -f "$INC/cpu.h" ] || { echo "aliasguard: no $INC/cpu.h"; exit 1; }
@@ -22,7 +23,7 @@ NAMES=$(grep -hoE '^[[:space:]]*#[[:space:]]*define[[:space:]]+MR[A-Z]*[0-9]+\('
         sed -E 's/.*define[[:space:]]+(MR[A-Z]*[0-9]+)\(/\1/' | sort -u)
 [ -n "$NAMES" ] || { echo "aliasguard: no MR* macros found in $INC/cpu.h"; exit 1; }
 bad=0; n=0
-for mc in "" "-DNFSU2_MEMCHECK"; do
+for mc in "" "-DNFSU2_MEMCHECK" "-DNFSU2_GUEST_OBJ"; do
   # the wasm build's preprocessor (web/build.sh's target and forced include)
   OUT=$( { echo '#include "cpu.h"'; for m in $NAMES; do echo "@@ $m = $m(0x1000)"; done; } |
          "$WASI/bin/clang" --target=wasm32-wasip1-threads -pthread $mc -E -P -x c \

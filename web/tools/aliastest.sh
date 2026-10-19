@@ -14,7 +14,7 @@
 # Also run by node --test (web/test/alias.test.mjs).
 set -e
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"; cd "$ROOT"
-WASI="${WASI:-$(ls -d "$ROOT"/deps/wasi-sdk-*-arm64-macos 2>/dev/null | tail -1)}"
+WASI="${WASI:-$(ls -d "$ROOT"/deps/wasi-sdk-*-arm64-macos "$ROOT"/deps/wasi-sdk-*-x86_64-linux 2>/dev/null | tail -1)}"
 [ -x "$WASI/bin/clang" ] || { echo "wasi-sdk not found in deps/ (set WASI=...)"; exit 1; }
 WASI="$WASI" web/tools/aliasguard.sh
 OUT="$ROOT/out/web/alias"; mkdir -p "$OUT"
@@ -24,8 +24,12 @@ TARGET="--target=wasm32-wasip1-threads -pthread"
 FEAT="-msimd128 -mbulk-memory -mnontrapping-fptoint -mtail-call -mexception-handling -mllvm -wasm-enable-sjlj -mllvm -wasm-use-legacy-eh=false"
 DEFS="-D_WASI_EMULATED_MMAN -D_WASI_EMULATED_SIGNAL -D_WASI_EMULATED_PROCESS_CLOCKS"
 CFLAGS="$TARGET $OPT $FEAT $DEFS -fno-delete-null-pointer-checks -include runtime/web/compat/wasm_plat.h -Iruntime/web/compat -Iruntime"
-"$WASI/bin/clang" $CFLAGS -o "$OUT/aliastest.wasm" tests/web/aliastest.c \
-  -Wl,--import-memory,--export-memory,--shared-memory,--max-memory=4294967296 \
-  -Wl,--initial-memory=1073741824,--global-base=671088640 -Wl,--no-stack-first \
-  -lsetjmp -lwasi-emulated-mman -lwasi-emulated-signal -lwasi-emulated-process-clocks
-node --no-warnings web/tools/wasi-run.mjs "$OUT/aliastest.wasm"
+# as the runtime is compiled, and as web/build.sh compiles the lifted shards (SHARDFLAGS)
+for SF in "" "-DNFSU2_GUEST_OBJ"; do
+  "$WASI/bin/clang" $CFLAGS $SF -o "$OUT/aliastest.wasm" tests/web/aliastest.c \
+    -Wl,--import-memory,--export-memory,--shared-memory,--max-memory=4294967296 \
+    -Wl,--initial-memory=1073741824,--global-base=671088640 -Wl,--no-stack-first \
+    -lsetjmp -lwasi-emulated-mman -lwasi-emulated-signal -lwasi-emulated-process-clocks
+  echo "aliastest ${SF:-(runtime flags)}:"
+  node --no-warnings web/tools/wasi-run.mjs "$OUT/aliastest.wasm"
+done

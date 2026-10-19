@@ -47,6 +47,12 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
 - **Toolchain:** wasi-sdk 34 (clang 23.1), `wasm32-wasip1-threads`.
   - Flags: `-O3 -mtail-call -msimd128 -mbulk-memory -mnontrapping-fptoint -mexception-handling` (setjmp/longjmp via
     wasm EH), `-fno-delete-null-pointer-checks`.
+  - The lifted shards also get `-DNFSU2_GUEST_OBJ`: their guest accesses go through `g_guest`, a weak undefined
+    symbol that wasm-ld puts at address 0, instead of `(uint8_t *)0`. Same addresses, but clang then knows a guest
+    store cannot touch the `restrict` CPU struct, and keeps the registers in wasm locals until the next call (before,
+    it reloaded them after every guest store). With the fused x87 rounding (`X87R2`) and an inline indirect-call
+    fast path (`DISPATCH_CALL`, `g_dtab`): race game-thread time p50 −25 %, p95 and p99 about −20 % (Ryzen 5900X,
+    Chrome 155, `web/tools/bench.mjs --env NFSU2_FIXED_DT=120`).
   - The compat headers (`runtime/web/compat/`) are force-included: Mach time, `os_unfair_lock`, kqueue, Mach task info,
     `pthread_exit` through a trampoline.
   - No Emscripten: the host is our own TypeScript (`web/src/host`).

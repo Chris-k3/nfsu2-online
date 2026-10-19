@@ -14,7 +14,7 @@
 # the gen/all symlink of a worktree; gen/all itself is never touched).
 set -e
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"; cd "$ROOT"
-WASI="${WASI:-$(ls -d "$ROOT"/deps/wasi-sdk-*-arm64-macos 2>/dev/null | tail -1)}"
+WASI="${WASI:-$(ls -d "$ROOT"/deps/wasi-sdk-*-arm64-macos "$ROOT"/deps/wasi-sdk-*-x86_64-linux 2>/dev/null | tail -1)}"
 [ -x "$WASI/bin/clang" ] || { echo "wasi-sdk not found in deps/ (set WASI=...)"; exit 1; }
 PY="$ROOT/.venv/bin/python"; [ -x "$PY" ] || PY=python3
 OUT="$ROOT/out/web/isa"; mkdir -p "$OUT" gen
@@ -32,7 +32,8 @@ TARGET="--target=wasm32-wasip1-threads -pthread"
 FEAT="-msimd128 -mbulk-memory -mnontrapping-fptoint -mtail-call -mexception-handling -mllvm -wasm-enable-sjlj -mllvm -wasm-use-legacy-eh=false"
 DEFS="-D_WASI_EMULATED_MMAN -D_WASI_EMULATED_SIGNAL -D_WASI_EMULATED_PROCESS_CLOCKS"
 CFLAGS="$TARGET $OPT $FEAT $DEFS -fno-delete-null-pointer-checks -include runtime/web/compat/wasm_plat.h -Iruntime/web/compat -Iruntime"
-"$WASI/bin/clang" $CFLAGS -Wno-unused-label -Wno-parentheses-equality -c -o "$OUT/isatest.o" gen/isatest.c
+# the lifted code as web/build.sh compiles the shards (SHARDFLAGS there)
+"$WASI/bin/clang" $CFLAGS -DNFSU2_GUEST_OBJ -Wno-unused-label -Wno-parentheses-equality -c -o "$OUT/isatest.o" gen/isatest.c
 "$WASI/bin/clang" $CFLAGS -c -o "$OUT/mem.o" runtime/mem.c
 # dispatch_tail: the lifted DISPATCH_TAIL target; the tests never jump indirectly
 printf '#include "cpu.h"\nvoid dispatch_tail(CPU *c){ dispatch_indirect(c, c->eip); }\n' > "$OUT/tail.c"

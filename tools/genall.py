@@ -114,7 +114,7 @@ INLINE_MAX = int(os.environ.get('INLINE','0') or 0)
 _INL = {}
 import re as _re
 _INL_CALL = _re.compile(r'\bsub_([0-9a-f]{8})\(c\)')
-_INL_DENY = ('dispatch_indirect', 'unsupported_insn', 'cpuid_shim', 'guest_hook', 'rdtsc_shim', 'cov_hit')
+_INL_DENY = ('dispatch_indirect', 'DISPATCH_CALL', 'DISPATCH_TAIL', 'unsupported_insn', 'cpuid_shim', 'guest_hook', 'rdtsc_shim', 'cov_hit')
 OVERRIDES = {int(x,16) for x in os.environ.get('OVERRIDE','').replace('0x','').split(',') if x.strip()}
 
 def _init(inl=None):

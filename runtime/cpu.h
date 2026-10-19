@@ -45,6 +45,25 @@ typedef float    __attribute__((may_alias)) gm_f32;
 typedef double   __attribute__((may_alias)) gm_f64;
 #endif
 
+#if defined(__wasm__) && defined(NFSU2_GUEST_OBJ)
+/* Lifted code (web/build.sh compiles the shards with NFSU2_GUEST_OBJ) reaches
+ * guest memory through g_guest: an undefined weak data symbol, which wasm-ld
+ * places at address 0, so g_guest + a is the same address as g_mem + a.  The
+ * difference is for clang's alias analysis.  g_mem + a is an inttoptr, which
+ * may point anywhere, the restrict CPU struct included: every guest store
+ * forced a reload of every register the function used next (c->esp after each
+ * push) and every register write was stored at once.  g_guest is an object of
+ * its own, and a global never aliases a restrict argument, so the registers
+ * stay in wasm locals across guest loads and stores until the next call.
+ * True because the CPU structs (and all of the runtime's data) live above
+ * GUEST_END, where no guest access goes.  The runtime keeps g_mem: its own
+ * accesses may well mix guest and host pointers. */
+extern __attribute__((weak)) uint8_t g_guest[];
+#define GMEM_ g_guest
+#else
+#define GMEM_ g_mem
+#endif
+
 #if defined(__wasm__) && defined(NFSU2_MEMCHECK)
 /* debug build (web/build.sh MEMCHECK=shard_0025,...): every guest access is
  * checked against the guest span and reported with the lifted function */
@@ -56,12 +75,12 @@ uint8_t *guest_memchk(uint32_t a, unsigned n, const char *fn);
 #define MRF32(a) (*(gm_f32  *)guest_memchk((uint32_t)(a), 4, __func__))
 #define MRF64(a) (*(gm_f64  *)guest_memchk((uint32_t)(a), 8, __func__))
 #elif defined(__wasm__)
-#define MR8(a)   (*(uint8_t *)(g_mem + (uint32_t)(a)))
-#define MR16(a)  (*(gm_u16  *)(g_mem + (uint32_t)(a)))
-#define MR32(a)  (*(gm_u32  *)(g_mem + (uint32_t)(a)))
-#define MR64(a)  (*(gm_u64  *)(g_mem + (uint32_t)(a)))
-#define MRF32(a) (*(gm_f32  *)(g_mem + (uint32_t)(a)))
-#define MRF64(a) (*(gm_f64  *)(g_mem + (uint32_t)(a)))
+#define MR8(a)   (*(uint8_t *)(GMEM_ + (uint32_t)(a)))
+#define MR16(a)  (*(gm_u16  *)(GMEM_ + (uint32_t)(a)))
+#define MR32(a)  (*(gm_u32  *)(GMEM_ + (uint32_t)(a)))
+#define MR64(a)  (*(gm_u64  *)(GMEM_ + (uint32_t)(a)))
+#define MRF32(a) (*(gm_f32  *)(GMEM_ + (uint32_t)(a)))
+#define MRF64(a) (*(gm_f64  *)(GMEM_ + (uint32_t)(a)))
 #else
 #define MR8(a)   (*(uint8_t  *)(g_mem + (uint32_t)(a)))
 #define MR16(a)  (*(uint16_t *)(g_mem + (uint32_t)(a)))
@@ -83,8 +102,27 @@ enum { R_EAX=0,R_ECX,R_EDX,R_EBX,R_ESP,R_EBP,R_ESI,R_EDI };
 struct CPU;
 void dispatch_indirect(struct CPU *c, uint32_t addr);
 void dispatch_tail(struct CPU *c);
+/* The dispatch table (dispatch.c): .text address -> lifted function, or the
+ * run-time patch that replaces it; NULL for anything else.  An indirect call
+ * or jump in lifted code (DISPATCH_CALL, DISPATCH_TAIL) that finds its target
+ * there calls it directly: one load and one call_indirect instead of a call
+ * into the dispatcher.  Everything else (COM, Win32, server.dll, generated
+ * code, misses, the addresses ICALL/EFXSTAT watch) takes dispatch_indirect /
+ * dispatch_tail as before. */
+#define DISPATCH_TEXT_BASE 0x00401000u
+#define DISPATCH_TEXT_SIZE 0x00381af1u
+typedef void (*guest_fn_t)(struct CPU *);
+extern guest_fn_t g_dtab[DISPATCH_TEXT_SIZE];
+static inline guest_fn_t dispatch_fast(uint32_t a){
+    uint32_t o = a - DISPATCH_TEXT_BASE;
+    return o < DISPATCH_TEXT_SIZE ? g_dtab[o] : (guest_fn_t)0;
+}
+#define DISPATCH_CALL(c_, t_) do { uint32_t _dc = (uint32_t)(t_); guest_fn_t _df = dispatch_fast(_dc); \
+    if (_df) _df(c_); else dispatch_indirect((c_), _dc); } while (0)
 #ifdef __wasm__
-#define DISPATCH_TAIL(c_, t_) { (c_)->eip = (uint32_t)(t_); __attribute__((musttail)) return dispatch_tail(c_); }
+#define DISPATCH_TAIL(c_, t_) { uint32_t _dc = (uint32_t)(t_); guest_fn_t _df = dispatch_fast(_dc); \
+    if (_df) { __attribute__((musttail)) return _df(c_); } \
+    (c_)->eip = _dc; __attribute__((musttail)) return dispatch_tail(c_); }
 #else
 #define DISPATCH_TAIL(c_, t_) { dispatch_indirect((c_), (uint32_t)(t_)); return; }
 #endif
@@ -391,6 +429,23 @@ static inline double x87_r1(double a, double r){
     if (a != a) return a;
     return X87_INDEF;
 }
+/* X87R(x87_r2(a, b, r)) in one test (tools/lift.py emits X87R2 for the x87
+ * arithmetic).  On the game thread's word (PC=24, RC=nearest) a result in the
+ * normal float range is no NaN, so the NaN test of x87_r2 is only made on the
+ * way to the out-of-line path, which does the two in a row.  Same results:
+ * that path is taken for everything the fast tests below do not decide. */
+static __attribute__((noinline, cold, unused)) double x87_r2pc_slow(uint16_t fcw, double a, double b, double r){
+    return x87_pcround(fcw, x87_r2(a, b, r));
+}
+static inline double x87_r2pc(uint16_t fcw, double a, double b, double r){
+    if (__builtin_expect((fcw & 0x0F00u) == 0u, 1)){
+        float f = (float)r, m = __builtin_fabsf(f);
+        if (__builtin_expect(m > 0x1p-126f && m <= 0x1.fffffep127f, 1)) return (double)f;
+        if (r == 0.0) return r;                  /* exact (see x87_pcround) */
+    } else if ((fcw & 0x0300u) && __builtin_expect(r == r, 1)) return r;   /* PC=53/64 */
+    return x87_r2pc_slow(fcw, a, b, r);
+}
+#define X87R2(a, b, r) x87_r2pc(c->fcw, (a), (b), (r))
 static inline float sse_r2f(float a, float b, float r){
     if (r == r) return r;
     if (a != a) return a;

@@ -11,7 +11,7 @@
 # the page's own host (web/src/host): no Emscripten.
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
-WASI="${WASI:-$(ls -d "$ROOT"/deps/wasi-sdk-*-arm64-macos 2>/dev/null | tail -1)}"
+WASI="${WASI:-$(ls -d "$ROOT"/deps/wasi-sdk-*-arm64-macos "$ROOT"/deps/wasi-sdk-*-x86_64-linux 2>/dev/null | tail -1)}"
 [ -x "$WASI/bin/clang" ] || { echo "wasi-sdk not found in deps/ (set WASI=...)"; exit 1; }
 # guest memory accesses must keep their may_alias types (cpu.h)
 WASI="$WASI" web/tools/aliasguard.sh > /dev/null || { WASI="$WASI" web/tools/aliasguard.sh; exit 1; }
@@ -23,7 +23,7 @@ web/tools/gencheck.sh
 LIFT="$(cat gen/all/web-lift.txt 2>/dev/null || echo unknown)"
 [ "$LIFT" != unknown ] || echo "note: gen/all was not made by web/gen.sh (lift options unknown; web/gen.sh turns on FLAGABI and X87OPT)"
 CC="$WASI/bin/clang"
-J="${J:-$(sysctl -n hw.ncpu)}"
+J="${J:-$(sysctl -n hw.ncpu 2>/dev/null || nproc)}"
 OPT="${OPT:--O3}"
 OUT="$ROOT/out/web"; mkdir -p "$OUT/obj" "$OUT/obj/srv" "$OUT/rt"
 OBJCACHE="${OBJCACHE:-$HOME/.cache/nsfu2-web/obj}"; mkdir -p "$OBJCACHE"
@@ -38,8 +38,10 @@ FEAT="-msimd128 -mbulk-memory -mnontrapping-fptoint -mtail-call -mexception-hand
 DEFS="-D_WASI_EMULATED_MMAN -D_WASI_EMULATED_SIGNAL -D_WASI_EMULATED_PROCESS_CLOCKS"
 # -fno-delete-null-pointer-checks: guest address 0 is real wasm memory (cpu.h)
 CFLAGS="$TARGET $OPT $FEAT $DEFS -fno-delete-null-pointer-checks -include runtime/web/compat/wasm_plat.h -Iruntime/web/compat -Iruntime -Igen/all"
-export CC CFLAGS OUT FULL MEMCHECK OBJCACHE
-HDRSUM="$( (cat runtime/cpu.h runtime/web/compat/wasm_plat.h; echo "$CFLAGS") | shasum | cut -c1-16)"; export HDRSUM
+# the lifted shards only: guest memory as an object of its own (cpu.h, NFSU2_GUEST_OBJ)
+SHARDFLAGS="-DNFSU2_GUEST_OBJ"
+export CC CFLAGS SHARDFLAGS OUT FULL MEMCHECK OBJCACHE
+HDRSUM="$( (cat runtime/cpu.h runtime/web/compat/wasm_plat.h; echo "$CFLAGS $SHARDFLAGS") | shasum | cut -c1-16)"; export HDRSUM
 
 # ---- lifted shards (content-hash incremental, as build.sh) ----
 # gen/all (SPEED2.EXE) -> out/web/obj, gen/server (server.dll, the LAN server
@@ -60,7 +62,7 @@ HDRSUM="$( (cat runtime/cpu.h runtime/web/compat/wasm_plat.h; echo "$CFLAGS") | 
   # and flags reuses one compile
   if [ -z "$FULL" ] && [ -f "$OBJCACHE/$sum.o" ]; then ln -f "$OBJCACHE/$sum.o" "$obj" 2>/dev/null || cp "$OBJCACHE/$sum.o" "$obj"
     echo "$sum" > "$obj.sum"; exit 0; fi
-  o=$($CC $CFLAGS $mc -I"gen/$1" -Wno-unused-label -Wno-parentheses-equality -c -o "$obj" "$src" 2>&1); r=$?
+  o=$($CC $CFLAGS $SHARDFLAGS $mc -I"gen/$1" -Wno-unused-label -Wno-parentheses-equality -c -o "$obj" "$src" 2>&1); r=$?
   [ -z "$o" ] || printf "%s\n" "$o" | head -5
   [ $r -eq 0 ] || { echo "FAILED: $src" >&2; exit $r; }
   echo "$sum" > "$obj.sum"; ln -f "$obj" "$OBJCACHE/$sum.o" 2>/dev/null || cp "$obj" "$OBJCACHE/$sum.o"
@@ -102,7 +104,7 @@ $CC $TARGET $OPT $FEAT -o "$OUT/nfsu2.wasm" $OBJS \
 if [ ! -f "$OUT/nfsu2.wasm" ]; then
   echo "link FAILED ($(grep -c "undefined symbol" "$OUT/link.log") undefined symbols):"; grep -E "error" "$OUT/link.log" | head -80; exit 1; fi
 REV="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)$(git diff --quiet 2>/dev/null || echo +)"
-SIZE=$(stat -f %z "$OUT/nfsu2.wasm")
+SIZE=$(wc -c < "$OUT/nfsu2.wasm" | tr -d ' ')
 printf '{"pages":%d,"maxPages":65536,"guestEnd":%d,"rev":"%s","size":%d,"opt":"%s","lift":"%s"}\n' \
   "$PAGES" "$GUEST_END" "$REV" "$SIZE" "$OPT" "$LIFT" > "$OUT/nfsu2.json"
 echo "link OK: out/web/nfsu2.wasm ($(( SIZE / 1048576 )) MB, $PAGES initial pages, rev $REV, lift $LIFT)"

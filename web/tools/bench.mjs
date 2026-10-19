@@ -160,10 +160,14 @@ function analyse(prof, interval) {
 }
 
 // ---- per-thread CPU time of this run's Chrome renderer (web/tools/threadcpu.c, built on first use) ----
-const TMP = '/private/tmp/nsfu2-web-perf';
+// macOS only (Mach thread info); elsewhere the CPU columns stay empty and the guest busy times still count
+const MAC = process.platform === 'darwin';
+const TMP = MAC ? '/private/tmp/nsfu2-web-perf' : path.join(os.tmpdir(), 'nsfu2-web-perf');
+fs.mkdirSync(TMP, { recursive: true });
 const TCPU = path.join(TMP, 'threadcpu/threadcpu');
-if (!fs.existsSync(TCPU)) { fs.mkdirSync(path.dirname(TCPU), { recursive: true }); execFileSync('clang', ['-O2', '-o', TCPU, path.join(ROOT, 'web/tools/threadcpu.c')]); }
+if (MAC && !fs.existsSync(TCPU)) { fs.mkdirSync(path.dirname(TCPU), { recursive: true }); execFileSync('clang', ['-O2', '-o', TCPU, path.join(ROOT, 'web/tools/threadcpu.c')]); }
 function threadCpu(dir) {
+  if (!MAC) return null;
   const ps = execFileSync('ps', ['-axo', 'pid=,ppid=,command='], { encoding: 'utf8', maxBuffer: 1 << 26 }).split('\n')
     .map(l => /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(l)).filter(Boolean).map(m => ({ pid: +m[1], ppid: +m[2], cmd: m[3] }));
   const br = ps.find(p => p.cmd.includes(`--user-data-dir=${dir}`) && !p.cmd.includes('--type='));

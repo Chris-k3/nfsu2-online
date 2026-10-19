@@ -670,7 +670,7 @@ class Lifter:
                 targets.add(t)
                 return [f"PUSH32(0x{i.address+i.size:x}u); sub_{t:08x}(c);"]
             # x86: the call target is read BEFORE the return address is pushed (call [esp+N]!)
-            return [f"{{ uint32_t _ct = {E(0)}; PUSH32(0x{i.address+i.size:x}u); dispatch_indirect(c, _ct); }}"]
+            return [f"{{ uint32_t _ct = {E(0)}; PUSH32(0x{i.address+i.size:x}u); DISPATCH_CALL(c, _ct); }}"]
         if m in ('ret','retf'):
             n = o[0].imm if o else 0
             # RETEIP=0: the return address is not written to c->eip (only popped off the stack).
@@ -686,7 +686,12 @@ class Lifter:
         # and FSQRT go through X87R(), which rounds them to a 24-bit
         # significand when the guest thread's control word selects single
         # precision (PC=00), like the hardware.  PC=53/64 stay plain double.
-        PCR = (lambda e: f"X87R({e})") if _X87PC else (lambda e: e)
+        # X87R(x87_r2(a, b, r)) is emitted as X87R2(a, b, r): one test on the
+        # fast path instead of two (cpu.h).
+        def PCR(e):
+            if not _X87PC: return e
+            if e.startswith('x87_r2(') and e.endswith(')'): return 'X87R2(' + e[len('x87_r2('):]
+            return f"X87R({e})"
         ST_REGS = {X86_REG_ST0:0,X86_REG_ST1:1,X86_REG_ST2:2,X86_REG_ST3:3,
                    X86_REG_ST4:4,X86_REG_ST5:5,X86_REG_ST6:6,X86_REG_ST7:7}
         def is_st(k): return o[k].type==X86_OP_REG and o[k].reg in ST_REGS

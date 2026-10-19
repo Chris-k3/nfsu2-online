@@ -1,5 +1,6 @@
 /* Indirect call dispatch: guest address -> lifted native function.
- * O(1) direct index table (a uint32 array the size of .text).          */
+ * O(1) direct table the size of .text: the function itself (or the run-time
+ * patch that replaces it), so a hit is one load and one call.          */
 #include "cpu.h"
 uint64_t g_icall_hits = 0;
 #include <stdio.h>
@@ -11,10 +12,26 @@ extern const uint32_t g_fn_addr[];
 extern const guest_fn g_fn_ptr[];
 extern const uint32_t g_fn_count;
 
-#define TEXT_BASE 0x00401000u
-#define TEXT_SIZE 0x00381af1u
+#define TEXT_BASE DISPATCH_TEXT_BASE
+#define TEXT_SIZE DISPATCH_TEXT_SIZE
 
-static uint32_t *g_idx;
+guest_fn_t g_dtab[DISPATCH_TEXT_SIZE];   /* cpu.h */
+static int g_dtab_ready;
+static uint32_t g_icall_want;         /* ICALL=<address> (diagnostics), 0 = off */
+static void icall_note(CPU *c, uint32_t addr);
+/* ICALL and EFXSTAT watch indirect calls to some functions: those stay out of
+ * the table, so the lifted code's inline fast path (cpu.h) passes them to
+ * dispatch_indirect, which finds them here. */
+static int g_diag;
+static int diag_watched(uint32_t a){
+    extern int g_efx_stat;
+    return (g_icall_want && a == g_icall_want) || (g_efx_stat && a - 0x650000u < 0x40000u);
+}
+static guest_fn diag_fn(uint32_t a){
+    uint32_t lo = 0, hi = g_fn_count;
+    while (lo < hi){ uint32_t m = (lo + hi) / 2; if (g_fn_addr[m] < a) lo = m + 1; else hi = m; }
+    return lo < g_fn_count && g_fn_addr[lo] == a ? g_fn_ptr[lo] : 0;
+}
 
 /* statistics */
 uint64_t g_stat_indirect_ok = 0, g_stat_indirect_miss = 0, g_stat_unsupported = 0;
@@ -26,20 +43,24 @@ static uint32_t g_unsup[MISS_MAX]; static int g_unsup_n = 0;
 extern void (*g_backtrace_fn)(struct CPU*,int);
 void guest_backtrace(CPU*,int);
 
+static void patch_apply(void);
 void dispatch_init(void){
-    if (g_idx) return;
+    if (g_dtab_ready) return;
+    g_dtab_ready = 1;
     g_backtrace_fn = (void(*)(struct CPU*,int))guest_backtrace;
-    g_idx = calloc(TEXT_SIZE, sizeof(uint32_t));
-    if (!g_idx){ fprintf(stderr,"dispatch table could not be allocated\n"); exit(1); }
+    { extern int g_efx_stat; const char *e = getenv("ICALL");
+      g_icall_want = e ? (uint32_t)strtoul(e,0,0) : 0;
+      g_diag = g_icall_want || g_efx_stat; }
     uint32_t dup = 0, oob = 0;
     for (uint32_t i = 0; i < g_fn_count; i++){
         uint32_t a = g_fn_addr[i];
         if (a - TEXT_BASE >= TEXT_SIZE){ oob++; continue; }
-        if (g_idx[a - TEXT_BASE]) dup++;
-        g_idx[a - TEXT_BASE] = i + 1;
+        if (g_dtab[a - TEXT_BASE]) dup++;
+        g_dtab[a - TEXT_BASE] = g_fn_ptr[i];
     }
+    patch_apply();
     fprintf(stderr, "dispatch: %u functions registered (%u duplicates, %u out of range), table %.1f MB\n",
-            g_fn_count, dup, oob, TEXT_SIZE*4.0/1048576.0);
+            g_fn_count, dup, oob, TEXT_SIZE*(double)sizeof(guest_fn)/1048576.0);
 }
 
 int  win32_call(CPU*, uint32_t);
@@ -49,48 +70,84 @@ int  com_call(CPU*, uint32_t);
 int  g_guest_exited = 0;
 
 /* --- run-time patches: replace indirect call targets ---
- * Without regenerating (only functions that are called indirectly). */
+ * Without regenerating (only functions that are called indirectly).  A
+ * patch inside .text goes into the dispatch table itself (at dispatch_init,
+ * or at once when that has run); one elsewhere (a lifted DLL) is looked up
+ * in this list before the DLL's own functions. */
 #define PATCH_MAX 24
 static struct { uint32_t addr; guest_fn fn; } g_patch[PATCH_MAX];
 static int g_patch_n = 0;
+static void patch_apply(void){
+    for (int i = 0; i < g_patch_n; i++)
+        if (g_patch[i].addr - TEXT_BASE < TEXT_SIZE) g_dtab[g_patch[i].addr - TEXT_BASE] = g_patch[i].fn;
+    if (g_diag)
+        for (uint32_t i = 0; i < g_fn_count; i++)
+            if (g_fn_addr[i] - TEXT_BASE < TEXT_SIZE && diag_watched(g_fn_addr[i])) g_dtab[g_fn_addr[i] - TEXT_BASE] = 0;
+}
 void dispatch_patch(uint32_t a, guest_fn f){
     if (a >= 0xE0000000u){        /* the order in dispatch_indirect relies on this */
         fprintf(stderr,"dispatch_patch: address %08x outside the text range, ignored\n", a);
         return; }
     if (g_patch_n < PATCH_MAX){ g_patch[g_patch_n].addr=a; g_patch[g_patch_n].fn=f; g_patch_n++; }
+    if (g_dtab_ready) patch_apply();
+}
+static guest_fn patch_at(uint32_t addr){
+    for (int i = 0; i < g_patch_n; i++) if (g_patch[i].addr == addr) return g_patch[i].fn;
+    return 0;
+}
+/* a .text function the table leaves out for ICALL/EFXSTAT (patch_apply) */
+static guest_fn diag_lookup(uint32_t a){
+    if (!diag_watched(a)) return 0;
+    guest_fn f = patch_at(a);
+    return f ? f : diag_fn(a);
 }
 
 /* A tail jump (DISPATCH_TAIL in cpu.h): target in c->eip.  Lifted targets
  * and patches are tail-called so the jumping function's frame is gone; COM,
  * Win32 and generated code return here and end the chain like a call would. */
 void dispatch_tail(CPU *c){
-    uint32_t addr = c->eip;
-    if (addr < 0xE0000000u){
-        for (int i = 0; i < g_patch_n; i++)
-            if (g_patch[i].addr == addr){ g_stat_indirect_ok++;
+    uint32_t addr = c->eip, off = addr - TEXT_BASE;
+    if (off < TEXT_SIZE){
+        guest_fn f = g_dtab[off];
+        if (!f && g_diag) f = diag_lookup(addr);
+        if (f){ g_stat_indirect_ok++;
 #ifdef __wasm__
-                __attribute__((musttail))
+            __attribute__((musttail))
 #endif
-                return g_patch[i].fn(c); }
-        uint32_t off = addr - TEXT_BASE;
-        if (off < TEXT_SIZE){
-            uint32_t k = g_idx[off];
-            if (k){ g_stat_indirect_ok++;
+            return f(c); }
+    }
+    /* a lifted DLL (server.dll, module.c): its loops jump through tables
+     * too, so its targets are tail calls as well */
+    else if (addr < 0xE0000000u){
+        guest_fn f = patch_at(addr);
+        if (!f) f = module_fn_at(addr);
+        if (f){ g_stat_indirect_ok++;
 #ifdef __wasm__
-                __attribute__((musttail))
+            __attribute__((musttail))
 #endif
-                return g_fn_ptr[k-1](c); }
-        }
-        /* a lifted DLL (server.dll, module.c): its loops jump through tables
-         * too, so its targets are tail calls as well */
-        else { mod_fn f = module_fn_at(addr);
-               if (f){ g_stat_indirect_ok++;
-#ifdef __wasm__
-                   __attribute__((musttail))
-#endif
-                   return f(c); } }
+            return f(c); }
     }
     dispatch_indirect(c, addr);
+}
+
+/* ICALL=<address>: count the INDIRECT calls to that function and dump the
+ * call chain for the first few.  Needed because virtual calls do not show up
+ * in the static graph. */
+static void icall_note(CPU *c, uint32_t addr){
+    g_icall_hits++;
+    { static uint32_t seen[256]; static int ns=0;
+      uint32_t h2 = MR32(c->esp+8);
+      int f3=0; for(int q=0;q<ns;q++) if(seen[q]==h2) f3=1;
+      if(!f3 && ns<256){ seen[ns++]=h2;
+        fprintf(stderr,"  [bind] hash=0x%08X %s\n", h2,
+                h2==0x3EE7363Fu ? "  <<< WORLDVIEWPROJECTION" :
+               (h2==0x04191C37u ? "  <<< TEXTUREOFFSET" : "")); } }
+    static int shown = 0;
+    if (shown < 3){ shown++;
+        fprintf(stderr,"  [icall] 0x%08x called (arg1=%08x arg2=%08x arg3=%08x)\n",
+                addr, MR32(c->esp+4), MR32(c->esp+8), MR32(c->esp+12));
+        guest_backtrace(c, 10);
+    }
 }
 
 void dispatch_indirect(CPU *c, uint32_t addr){
@@ -109,43 +166,25 @@ void dispatch_indirect(CPU *c, uint32_t addr){
         if (win32_call(c, addr - 0xF0000000u) < 0) g_guest_exited = 1;
         return;
     }
-    for (int i = 0; i < g_patch_n; i++)
-        if (g_patch[i].addr == addr){ g_stat_indirect_ok++; g_patch[i].fn(c); return; }
     /* EFXSTAT: inventory of the D3DX effect vtable calls (d3dx_hle.c) */
     { extern int g_efx_stat; extern void efx_stat_note(CPU *c, uint32_t addr);
       if (g_efx_stat && addr - 0x650000u < 0x40000u) efx_stat_note(c, addr); }
     uint32_t off = addr - TEXT_BASE;
     if (off < TEXT_SIZE){
-        uint32_t k = g_idx[off];
-        if (k){
-            /* ICALL=<address>: count the INDIRECT calls to that function and
-             * dump the call chain for the first few.  Needed because virtual
-             * calls do not show up in the static graph. */
-            static uint32_t want = 0xFFFFFFFFu;
-            if (want == 0xFFFFFFFFu){ const char *e = getenv("ICALL");
-                                      want = e ? (uint32_t)strtoul(e,0,0) : 0; }
-            if (want && addr == want){
-                extern uint64_t g_icall_hits; g_icall_hits++;
-                { static uint32_t seen[256]; static int ns=0;
-                  uint32_t h2 = MR32(c->esp+8);
-                  int f3=0; for(int q=0;q<ns;q++) if(seen[q]==h2) f3=1;
-                  if(!f3 && ns<256){ seen[ns++]=h2;
-                    fprintf(stderr,"  [bind] hash=0x%08X %s\n", h2,
-                            h2==0x3EE7363Fu ? "  <<< WORLDVIEWPROJECTION" :
-                           (h2==0x04191C37u ? "  <<< TEXTUREOFFSET" : "")); } }
-                static int shown = 0;
-                if (shown < 3){ shown++;
-                    fprintf(stderr,"  [icall] 0x%08x called (arg1=%08x arg2=%08x arg3=%08x)\n",
-                            addr, MR32(c->esp+4), MR32(c->esp+8), MR32(c->esp+12));
-                    guest_backtrace(c, 10);
-                }
-            }
-            g_stat_indirect_ok++; g_fn_ptr[k-1](c); return; }
+        guest_fn f = g_dtab[off];
+        if (!f && g_diag) f = diag_lookup(addr);
+        if (f){
+            if (__builtin_expect(g_icall_want != 0, 0) && addr == g_icall_want) icall_note(c, addr);
+            g_stat_indirect_ok++; f(c); return; }
     }
-    /* A lifted DLL (server.dll at 0x00A00000, module.c): its own index,
-     * before the interpreter would take the address as generated code. */
-    { mod_fn f = module_fn_at(addr);
-      if (f){ g_stat_indirect_ok++; f(c); return; } }
+    /* A run-time patch outside .text, then a lifted DLL (server.dll at
+     * 0x00A00000, module.c): its own index, before the interpreter would take
+     * the address as generated code. */
+    else {
+        guest_fn f = patch_at(addr);
+        if (!f) f = module_fn_at(addr);
+        if (f){ g_stat_indirect_ok++; f(c); return; }
+    }
     /* No lifted counterpart.  The game may have generated code at this
      * address AT RUN TIME (NFSU2's material pipeline does this heavily).
      * Try a small x86 interpreter; on an unknown instruction it returns

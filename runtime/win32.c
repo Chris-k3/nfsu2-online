@@ -76,10 +76,20 @@ static _Atomic uint64_t g_vclock_creep = 0;   /* busy-wait compensation     */
 static _Atomic uint64_t g_real_base    = 0;   /* real time of that frame    */
 static _Atomic uint32_t g_vclock_polls = 0;
 
+#ifdef __wasm__
+#include "web/host_abi.h"
+#endif
 static uint64_t real_us(void){
+#ifdef __wasm__
+    /* The guest's most frequent host call (QueryPerformanceCounter, timeGetTime:
+     * ~1,000 a race frame).  The page's monotonic clock without WASI's
+     * clock_time_get, whose i64 argument costs a BigInt on every call into JS. */
+    return (uint64_t)(nfsu2_now_ms() * 1000.0);
+#else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000000ull + (uint64_t)ts.tv_nsec / 1000ull;
+#endif
 }
 
 /* Virtual clock.

@@ -96,9 +96,18 @@ static void unreg_cpu(CPU *c){
  * long computation (e.g. decoding an audio stream) starves the other threads.
  * The audio writes ~50 ms of silence every 30 s -- this measures whether
  * that is the culprit.  GILLOG=<ms> reports every hold above the threshold. */
+#ifdef __wasm__
+#include "web/host_abi.h"
+#endif
 static uint64_t gil_now_us(void){
+#ifdef __wasm__
+    /* the page's monotonic clock without WASI's clock_time_get (its i64 argument
+     * costs a BigInt per call into JS): this runs on every guest lock hand-off */
+    return (uint64_t)(nfsu2_now_ms() * 1000.0);
+#else
     struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec*1000000ull + (uint64_t)ts.tv_nsec/1000ull;
+#endif
 }
 static _Thread_local uint64_t tl_gil_t0 = 0;
 uint64_t g_gil_max_us = 0, g_gil_long = 0;

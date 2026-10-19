@@ -430,6 +430,7 @@ GUEST_HDR = """
 #include <string.h>
 #include <math.h>
 void mem_commit(uint32_t,uint32_t);
+guest_fn_t g_dtab[DISPATCH_TEXT_SIZE];
 void dispatch_indirect(CPU*c,uint32_t a){(void)c;(void)a;}
 void unsupported_insn(CPU*c,uint32_t a,const char*m){(void)c;(void)a;(void)m;}
 void guest_hook(CPU*c,uint32_t a){(void)c;(void)a;}

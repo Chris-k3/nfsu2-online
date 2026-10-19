@@ -46,6 +46,7 @@ void mem_init(void); void mem_commit(uint32_t, uint32_t);
 static sigjmp_buf g_jb;
 static volatile uint32_t g_left_at;          /* lifted: target of a call out of the module */
 static volatile uint32_t g_fault_at;
+guest_fn_t g_dtab[DISPATCH_TEXT_SIZE];      /* empty: every indirect call comes here */
 void dispatch_indirect(CPU *c, uint32_t a){
     mod_fn f = module_fn_at(a);
     if (f){ f(c); return; }
