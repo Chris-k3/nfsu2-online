@@ -12,9 +12,18 @@
 const PAGES = {
   '/news': {
     title: 'NFSU2 Online',
-    text: 'Welcome to Online play on this server. Everyone who plays from this server meets here: open the Lobby, ' +
-      'create a game or join one, chat in the game room, ready up and race. Any name and password log in; nothing ' +
-      'is kept but each persona\'s race results (Rankings) and EA Messenger friends.',
+    // the welcome, then only the important changes from the original game; CRLF breaks a line (the box scrolls),
+    // latin1: plain quotes and hyphens only
+    text: [
+      'Welcome to Online play on this server: open the Lobby, create a game or join one, ready up and race.',
+      '',
+      'Changes from the original game:',
+      '- Online works again, on this server instead of EA\'s. You play under your own name, with no EA account.',
+      '- Up to 6 players in every race type (the original had 4, and 6 only in Street X). Drag keeps one car per lane.',
+      '- Every track is open, whatever your career has unlocked, and a new game starts at 2 laps.',
+      '- Free roam with other players: their cars drive in your city, with their names over them.',
+      '- Widescreen, and up to 120 fps on a 120 Hz screen.',
+    ].join('\r\n'),
   },
   '/tos': {
     title: 'Terms of Service',
