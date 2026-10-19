@@ -232,6 +232,7 @@ typedef struct {
     int      ghost;                           /* solid cars: no collision body until clear of the player's car */
     float    drawn[3];                        /* where the car was drawn last frame (+0x60) */
     float    com[3];                          /* centre-of-mass offset in the car's frame (forward, left, up) */
+    float    spin[4], steer;                  /* the wheels' angles about the axle and the front wheels' steering (rad) */
     int64_t  unseen_since;                    /* the peer is not visible: release after a while */
     int64_t  release_after;
     char     carname[RC_CFG_TYPE_NAME + 1];
@@ -825,7 +826,64 @@ static int finish_load(CPU *c, int k){
     pool_log("after load");
     return 1;
 }
-static void apply_pose(CPU *c, Slot *s, const rc_pose *P){
+/* sin and cos of a in [-pi, pi] (Taylor to the x^15 / x^14 term, < 1e-5),
+ * from basic operations: this file has no libm */
+static void sincos_pi(float a, float *sn, float *cs){
+    float x2 = a * a;
+    *sn = a * (1.f - x2 / 6.f * (1.f - x2 / 20.f * (1.f - x2 / 42.f * (1.f - x2 / 72.f * (1.f - x2 / 110.f *
+               (1.f - x2 / 156.f * (1.f - x2 / 210.f)))))));
+    *cs = 1.f - x2 / 2.f * (1.f - x2 / 12.f * (1.f - x2 / 30.f * (1.f - x2 / 56.f * (1.f - x2 / 90.f *
+               (1.f - x2 / 132.f * (1.f - x2 / 182.f))))));
+}
+/* The wheels.  The renderer draws each wheel with its matrix in the car,
+ * +0x130 + 0x40 k for front left, front right, rear right, rear left (rows:
+ * forward, left, up, then the wheel's place, which is left alone), and the
+ * front brake calipers with +0x230 / +0x270; the game's physics writes them
+ * (the spin about the axle and the steering of the front wheels), and in
+ * physics mode 0 they stand still.  Spin: the wheel's angle goes down by
+ * speed / tyre radius (RidePhysicsInfo +0x20 + 0x30 k) as the car goes
+ * forward.  Steering: from the turn the car makes, tan = wheelbase x yaw rate
+ * / speed, smoothed over 80 ms, at most 35 degrees -- what the friend steers,
+ * without a field for it on the wire. */
+static void wheels_pose(Slot *s, const rc_pose *P, const float *u, float dt){
+    uint32_t car = s->car, ph = MR32(car + 0x20u);
+    if (!(dt > 0.f)) dt = 0.f;
+    if (dt > 0.1f) dt = 0.1f;
+    float wb = MRF32(car + 0x160u) - MRF32(car + 0x1e0u);          /* front axle x - rear axle x */
+    float yaw = P->w[0] * u[0] + P->w[1] * u[1] + P->w[2] * u[2], v = P->speed, want = s->steer;
+    if (__builtin_fabsf(v) > 1.f && wb > 1.f && wb < 5.f){
+        float t = wb * yaw / v;
+        if (t > 0.7f) t = 0.7f;
+        if (t < -0.7f) t = -0.7f;
+        want = rc_atan2f(t, 1.f);
+    }
+    float k = dt / 0.08f;
+    s->steer += (want - s->steer) * (k < 1.f ? k : 1.f);
+    if (!__builtin_isfinite(s->steer)) s->steer = 0.f;
+    float ss, cs; sincos_pi(s->steer, &ss, &cs);
+    for (uint32_t w = 0; w < 4; w++){
+        float r = ok(ph, 0xc0) ? MRF32(ph + 0x20u + 0x30u * w) : 0.f;
+        if (!(r > 0.05f && r < 2.f)) r = 0.33f;
+        float d = v / r * dt;                                        /* at most 100 m/s: a few turns per frame */
+        if (!__builtin_isfinite(d) || d > 32.f || d < -32.f) d = 0.f;
+        float a = s->spin[w] - d;
+        while (a > 3.14159265f) a -= 6.28318531f;
+        while (a < -3.14159265f) a += 6.28318531f;
+        s->spin[w] = a;
+        float sa, ca; sincos_pi(a, &sa, &ca);
+        float sy = w < 2 ? ss : 0.f, cy = w < 2 ? cs : 1.f;
+        uint32_t m = car + 0x130u + 0x40u * w;
+        MRF32(m + 0x00u) = ca * cy;  MRF32(m + 0x04u) = ca * sy;  MRF32(m + 0x08u) = sa;
+        MRF32(m + 0x10u) = -sy;      MRF32(m + 0x14u) = cy;       MRF32(m + 0x18u) = 0.f;
+        MRF32(m + 0x20u) = -sa * cy; MRF32(m + 0x24u) = -sa * sy; MRF32(m + 0x28u) = ca;
+        if (w < 2){
+            uint32_t b = car + 0x230u + 0x40u * w;
+            MRF32(b + 0x00u) = cy;  MRF32(b + 0x04u) = sy;
+            MRF32(b + 0x10u) = -sy; MRF32(b + 0x14u) = cy;
+        }
+    }
+}
+static void apply_pose(CPU *c, Slot *s, const rc_pose *P, float dt){
     uint32_t car = s->car;
     float f[3], l[3], u[3];
     rc_q2m(P->q, f, l, u);
@@ -850,6 +908,7 @@ static void apply_pose(CPU *c, Slot *s, const rc_pose *P){
     if (rd32(car + 0x28u) != 0){ gcall1(c, FN_CAR_SETPHYS, car, 0); s->remode++; }
     gcall1(c, FN_ROADTRACK, car + 0x8d8u, car + 0x60u);
     gcall0(c, FN_CAR_SECTION, car);
+    wheels_pose(s, P, u, dt);
     s->pose_frames++;
 }
 
@@ -1413,7 +1472,7 @@ void roam_game_frame(CPU *c){
                  * ghost until clear, never shoving the player's car out */
                 float jx = v->pose.p[0] - s->drawn[0], jy = v->pose.p[1] - s->drawn[1], jz = v->pose.p[2] - s->drawn[2];
                 if (s->hidden || jx * jx + jy * jy + jz * jz > JUMP_M * JUMP_M) s->ghost = 1;
-                apply_pose(c, s, &v->pose);
+                apply_pose(c, s, &v->pose, (float)frame_dt / 1e6f);
                 body_update(c, k);
                 for (int i = 0; i < 3; i++) s->drawn[i] = v->pose.p[i];
                 s->hidden = 0;
