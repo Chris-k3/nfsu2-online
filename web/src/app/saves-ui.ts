@@ -1,11 +1,13 @@
-// The saves section of the start page: the profiles in this browser, a backup of the whole save
+// The saves section of the start page: the profiles in this browser (each can
+// be renamed: profile.ts renameProfile), a backup of the whole save
 // overlay as a zip (profiles, registry.txt, settings.ini, screenshots) and
 // restoring one.  And the section at the bottom of the page, the game data on
 // this PC: how much of it, all of it downloaded ahead (predownload.ts), or
 // deleted.  The game data is never part of a backup and never written back:
 // it stays on the server.
 
-import { cacheBytes, clearCache, clearSaveDir, listFiles, listProfiles, PROFILES_DIR, readBytes, writeFile } from './savefs';
+import { cacheBytes, clearCache, clearSaveDir, filesOf, listFiles, listProfiles, PROFILES_DIR, readBytes, writeFile, type Profile } from './savefs';
+import { NAME_MAX, renameProfile } from './profile';
 import { listZip, unzip, zip, ZipError, type ZipEntry } from './zip';
 import { downloadBlob, stamp } from './logs';
 import { fmtBytes } from './checks';
@@ -14,7 +16,7 @@ import { gameDataKept, type DownloadState, type DownloadStatus, type Predownload
 
 export interface SavesDeps {
   saveDir: string;
-  /** true while a game runs in this tab: no restore, no cache delete */
+  /** true while a game runs in this tab: no rename, no restore, no cache delete */
   busy(): boolean;
   confirm(title: string, body: Node | string, ok: string, danger?: boolean): Promise<boolean>;
   /** after a restore: settings.ini may have changed */
@@ -133,31 +135,30 @@ export class SavesPanel {
   private kept = { bytes: 0, files: 0 };
   private counted = 0;                     // the latest count wins (one may start while the data is deleted)
   private shownState: DownloadState = 'idle';
+  private profiles: Profile[] = [];
+  /** the profile whose name is being edited; focusName: whose Rename button gets the focus when the list is shown */
+  private renaming: string | null = null;
+  private focusName: string | null = null;
+  /** what the section is writing into the saves (a rename, a restore): settled() waits for it */
+  private writing: Promise<unknown> = Promise.resolve();
+
+  /** Resolves when the section writes nothing into the saves: a game starts after that. */
+  settled(): Promise<void> { return this.writing.then(() => {}, () => {}); }
+  private write<T>(job: Promise<T>): Promise<T> { this.writing = job; return job; }
 
   /** Show the profiles and the downloaded game data as they are now. */
   async refresh() {
     const files = await listFiles(this.deps.saveDir);
-    const profiles = await listProfiles(this.deps.saveDir, files);
-    const ul = this.root.querySelector('#profiles')!;
-    ul.replaceChildren();
-    if (!profiles.length) {
-      const li = document.createElement('li'); li.className = 'empty';
-      li.textContent = 'No profiles yet. Create one in the game: it is saved in this browser.';
-      ul.append(li);
-    }
-    for (const p of profiles) {
-      const li = document.createElement('li');
-      const n = document.createElement('span'); n.className = 'name'; n.textContent = p.name;
-      const m = document.createElement('span'); m.className = 'meta';
-      m.textContent = `saved ${new Date(p.mtime).toLocaleString()}, ${fmtBytes(p.size)}`;
-      li.append(n, m); ul.append(li);
-    }
+    this.profiles = await listProfiles(this.deps.saveDir, files);
     const busy = this.deps.busy();
+    // a name being typed stays as it is (the list is shown again when the edit ends)
+    if (!this.profiles.some(p => p.name === this.renaming)) { this.renaming = null; this.showProfiles(); }
+    for (const b of this.root.querySelectorAll<HTMLButtonElement>('.profiles .rename-btn, .profiles .renaming [type="submit"]')) b.disabled = busy;
     this.root.querySelector<HTMLLabelElement>('.file-btn')!.toggleAttribute('aria-disabled', busy);
     this.root.querySelector<HTMLInputElement>('#import')!.disabled = busy;
     this.dataPanel.querySelector<HTMLButtonElement>('#clear-cache')!.disabled = busy;
     const waiting = /^Quit the game \(or close/;
-    if (busy) { this.msg('Quit the game (or close the other tab that runs it) to restore a backup.'); this.dataMsg('Quit the game (or close the other tab that runs it) to change the game data.'); }
+    if (busy) { this.msg('Quit the game (or close the other tab that runs it) to rename a profile or restore a backup.'); this.dataMsg('Quit the game (or close the other tab that runs it) to change the game data.'); }
     else {
       if (waiting.test(this.root.querySelector('#saves-msg')!.textContent ?? '')) this.msg('');
       if (waiting.test(this.dataPanel.querySelector('#data-msg')!.textContent ?? '')) this.dataMsg('');
@@ -211,6 +212,79 @@ export class SavesPanel {
       info.textContent = 'Nothing downloaded yet. The game streams its data from the server as it needs it and keeps it here. Download it now (all but the movies, compressed on the way) and no loading screen waits on the network.';
   }
 
+  /** The profiles, each with its Rename button, or the name being edited. */
+  private showProfiles() {
+    const ul = this.root.querySelector('#profiles')!, busy = this.deps.busy();
+    let focus: HTMLElement | null = null;
+    ul.replaceChildren();
+    if (!this.profiles.length) {
+      const li = document.createElement('li'); li.className = 'empty';
+      li.textContent = 'No profiles yet. Create one in the game: it is saved in this browser.';
+      ul.append(li);
+    }
+    for (const p of this.profiles) {
+      const li = document.createElement('li');
+      if (p.name === this.renaming) {
+        const { form, input } = this.renameForm(p.name, busy);
+        const help = document.createElement('p'); help.className = 'hint'; help.id = 'rename-help';
+        help.textContent = `Letters and digits, up to ${NAME_MAX}, as in the game.`;
+        const m = document.createElement('p'); m.className = 'msg warn'; m.id = 'rename-msg'; m.setAttribute('role', 'alert');
+        li.className = 'renaming'; li.append(form, help, m); ul.append(li);
+        focus = input;
+        continue;
+      }
+      const n = document.createElement('span'); n.className = 'name'; n.textContent = p.name;
+      const m = document.createElement('span'); m.className = 'meta';
+      m.textContent = `saved ${new Date(p.mtime).toLocaleString()}, ${fmtBytes(p.size)}`;
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'text-btn rename-btn'; b.textContent = 'Rename';
+      b.setAttribute('aria-label', `Rename ${p.name}`); b.disabled = busy;
+      b.onclick = () => { this.renaming = p.name; this.showProfiles(); };
+      if (p.name === this.focusName) focus = b;
+      li.append(n, m, b); ul.append(li);
+    }
+    this.focusName = null;
+    if (focus) { focus.focus(); if (focus instanceof HTMLInputElement) focus.select(); }
+  }
+
+  private renameForm(name: string, busy: boolean) {
+    const form = document.createElement('form'); form.className = 'row';
+    const input = document.createElement('input');
+    input.type = 'text'; input.value = name; input.maxLength = NAME_MAX; input.spellcheck = false; input.autocomplete = 'off';
+    input.setAttribute('aria-label', `New name for ${name}`); input.setAttribute('aria-describedby', 'rename-help rename-msg');
+    // what the game's field keeps: other characters never appear
+    input.oninput = () => {
+      const v = input.value, keep = (t: string) => t.replace(/[^A-Za-z0-9]/g, '');
+      if (keep(v) === v) return;
+      const at = keep(v.slice(0, input.selectionStart ?? v.length)).length;
+      input.value = keep(v); input.setSelectionRange(at, at);
+    };
+    const ok = document.createElement('button'); ok.type = 'submit'; ok.className = 'btn'; ok.textContent = 'Rename'; ok.disabled = busy;
+    const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'text-btn'; cancel.textContent = 'Cancel';
+    cancel.onclick = () => this.endRename(name);
+    form.append(input, ok, cancel);
+    form.onsubmit = e => { e.preventDefault(); void this.doRename(name, input.value); };
+    form.onkeydown = e => { if (e.key === 'Escape') { e.preventDefault(); this.endRename(name); } };
+    return { form, input };
+  }
+
+  private endRename(name: string) { this.renaming = null; this.focusName = name; this.showProfiles(); }
+
+  private async doRename(from: string, to: string) {
+    const say = (s: string) => { this.root.querySelector('#rename-msg')!.textContent = s; };
+    if (to === from) { this.endRename(from); return; }
+    if (this.deps.busy()) { say('Quit the game (or close the other tab that runs it) to rename a profile.'); return; }
+    const ok = this.root.querySelector<HTMLButtonElement>('.profiles .renaming [type="submit"]')!;
+    if (ok.disabled) return;
+    ok.disabled = true;
+    let r: Awaited<ReturnType<typeof renameProfile>>;
+    try { r = await this.write(renameProfile(filesOf(this.deps.saveDir), PROFILES_DIR, from, to)); }
+    catch (err) { this.renaming = null; this.msg(`Renaming ${from} stopped: ${err}`); await this.refresh(); return; }
+    if ('refused' in r) { ok.disabled = this.deps.busy(); say(r.refused); return; }
+    this.renaming = null; this.focusName = to;
+    this.msg(`Renamed ${from} to ${to}.`);
+    await this.refresh();
+  }
+
   private async doDownload() {
     const dl = this.deps.download;
     if (dl.running) { await dl.stop(); this.dataMsg('Download stopped. What it downloaded is kept: Download the rest goes on from there.'); return; }
@@ -250,7 +324,7 @@ export class SavesPanel {
     body.append(p, ul);
     if (!await this.deps.confirm('Restore this backup?', body, 'Restore backup', true)) { this.msg('Nothing changed.'); return; }
     try {
-      await restoreSaves(this.deps.saveDir, r);
+      await this.write(restoreSaves(this.deps.saveDir, r));
       this.msg(`Restored ${r.entries.length} files from ${file.name}.`);
       this.deps.onRestored();
     } catch (err) { this.msg(`Restoring stopped halfway: ${err}. Restore the backup again before playing.`); }

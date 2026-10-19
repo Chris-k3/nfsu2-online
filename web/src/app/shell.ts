@@ -231,6 +231,7 @@ async function startGame() {
   await Promise.race([refreshMeasured, new Promise(r => setTimeout(r, 2000))]);
   canvas.focus();
 
+  await saves.settled();              // a rename or restore the Saves section is writing ends first
   // the save overlay: registry seed (bundle.m app_seed_registry), test inputs
   const host: Record<string, string> = {
     HOME: '/save', NFSU2_DATA: '/data', NFSU2_SAVEDIR: '/save', NFSU2_REGFILE: '/save/registry.txt',

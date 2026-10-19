@@ -1,6 +1,7 @@
 // A profile the game saved ("NFS Underground 2/<NAME>/<NAME>", 54,966 bytes)
 // as far as the page reads or changes it: the file's checksums and the game's
-// own Save option (Options, Gameplay, Save: Autosave, Prompt or Off).
+// own Save option (Options, Gameplay, Save: Autosave, Prompt or Off), and
+// its name (renameProfile).
 //
 // Layout and checksum: the clean-room description of this SPEED2.EXE (v1.2 NA,
 // the README's SHA-256) in github.com/whoismept/OpenUG2,
@@ -22,8 +23,8 @@
 // Save at Autosave and every other Gameplay option as before.  Every check
 // below must still hold before the page writes a byte.
 //
-// Pure (no DOM, no OPFS) so it can be checked under node; turnOnAutosave
-// takes the save folder's file functions.
+// Pure (no DOM, no OPFS) so it can be checked under node; turnOnAutosave and
+// renameProfile take the save folder's file functions.
 
 export const PROFILE_SIZE = 54966;
 const PAYLOAD = 54930, VERSION = 0x10D;
@@ -56,28 +57,48 @@ const lowerAscii = (s: string) => s.replace(/[A-Z]/g, c => String.fromCharCode(c
  * against its folder's (ASCII letters in any case), and both Save bytes 0 or 1.
  */
 export function readSaveMode(file: Uint8Array, name: string): { mode: SaveMode } | { bad: string } {
-  if (file.length !== PROFILE_SIZE) return { bad: `${file.length} bytes, not ${PROFILE_SIZE}` };
-  if (file[0] !== 0x32 || file[1] !== 0x30 || file[2] !== 0x43 || file[3] !== 0x4D) return { bad: 'not a profile file (no "20CM")' };
-  if (u32(file, 4) !== file.length || u32(file, 8) !== 8 || u32(file, 12) !== PAYLOAD) return { bad: 'unexpected block sizes' };
-  if (u32(file, 24) !== checksum(file.subarray(0, 24)) || u32(file, 16) !== checksum(file.subarray(28, B)) ||
-      u32(file, 20) !== checksum(file.subarray(B))) return { bad: 'its checksums do not match (edited outside the game?)' };
-  if (u32(file, 28) !== VERSION || u32(file, 32) !== PAYLOAD) return { bad: `version ${u32(file, 28)}, not ${VERSION}` };
-  let inside = '';
-  for (let i = NAME; i < NAME + 32 && file[i]; i++) inside += String.fromCharCode(file[i]);
-  if (lowerAscii(inside) !== lowerAscii(name)) return { bad: `the name inside is "${inside}"` };
+  const bad = checkProfile(file, name);
+  if (bad) return { bad };
   const a = file[AUTOSAVE], p = file[PROMPT];
   if (a > 1 || p > 1) return { bad: `unexpected Save bytes ${a}, ${p}` };
   return { mode: a ? 'autosave' : p ? 'prompt' : 'off' };
+}
+
+/** Why a file is not a profile the game saved under this name (readSaveMode's checks but the Save bytes), or null. */
+function checkProfile(file: Uint8Array, name: string): string | null {
+  if (file.length !== PROFILE_SIZE) return `${file.length} bytes, not ${PROFILE_SIZE}`;
+  if (file[0] !== 0x32 || file[1] !== 0x30 || file[2] !== 0x43 || file[3] !== 0x4D) return 'not a profile file (no "20CM")';
+  if (u32(file, 4) !== file.length || u32(file, 8) !== 8 || u32(file, 12) !== PAYLOAD) return 'unexpected block sizes';
+  if (u32(file, 24) !== checksum(file.subarray(0, 24)) || u32(file, 16) !== checksum(file.subarray(28, B)) ||
+      u32(file, 20) !== checksum(file.subarray(B))) return 'its checksums do not match (edited outside the game?)';
+  if (u32(file, 28) !== VERSION || u32(file, 32) !== PAYLOAD) return `version ${u32(file, 28)}, not ${VERSION}`;
+  let inside = '';
+  for (let i = NAME; i < NAME + 32 && file[i]; i++) inside += String.fromCharCode(file[i]);
+  if (lowerAscii(inside) !== lowerAscii(name)) return `the name inside is "${inside}"`;
+  return null;
+}
+
+/** The checksums a change to the payload moves (B's and the header's), made again. */
+function seal(f: Uint8Array): Uint8Array {
+  const dv = new DataView(f.buffer, f.byteOffset, f.byteLength);
+  dv.setUint32(20, checksum(f.subarray(B)), true);
+  dv.setUint32(24, checksum(f.subarray(0, 24)), true);
+  return f;
 }
 
 /** A copy of a profile file readSaveMode accepted, with Save at Autosave (both bytes 1, as the game's menu sets it) and its checksums made again. */
 export function withAutosave(file: Uint8Array): Uint8Array {
   const f = file.slice();
   f[AUTOSAVE] = 1; f[PROMPT] = 1;
-  const dv = new DataView(f.buffer);
-  dv.setUint32(20, checksum(f.subarray(B)), true);
-  dv.setUint32(24, checksum(f.subarray(0, 24)), true);
-  return f;
+  return seal(f);
+}
+
+/** A copy of a profile file the checks accepted, with another name inside (NUL-padded, as the game writes it) and its checksums made again. */
+export function withName(file: Uint8Array, name: string): Uint8Array {
+  const f = file.slice();
+  f.fill(0, NAME, NAME + 32);
+  for (let i = 0; i < name.length; i++) f[NAME + i] = name.charCodeAt(i);
+  return seal(f);
 }
 
 // ------------------------------------------------- once per profile --
@@ -126,4 +147,82 @@ export async function turnOnAutosave(fs: SaveFiles, profilesDir: string): Promis
   const text = SEEN_HEAD + now.map(n => n + '\n').join('');
   if (text !== seenText && (now.length || seenText)) await fs.writeFile(AUTOSAVE_SEEN, text);
   return { turnedOn, notes };
+}
+
+// ------------------------------------------------------------- rename --
+
+/**
+ * A name the game's own name field takes: letters and digits, up to 7 of them
+ * (tests/scripts/kb_profile.txt: the field at 0x4ff310 keeps nothing else).
+ */
+export const NAME_MAX = 7;
+export const isProfileName = (s: string) => /^[A-Za-z0-9]+$/.test(s) && s.length <= NAME_MAX;
+
+/**
+ * A cover shoot's save, a folder of its own beside its profile's: "<NAME> DVD 1",
+ * "<NAME> Magazine 2" (the game puts "DVD %d" or "Magazine %d", 0x79acc0 and
+ * 0x79acb4, after the profile's name).  Its file (1,048,612 bytes) does not
+ * hold the name, so the folder's name is all that ties it to the profile.
+ * A profile's name has no spaces, so no profile looks like one.
+ */
+export function coverOf(folder: string): { profile: string; cover: string } | null {
+  const m = /^(.+) ((?:DVD|Magazine) [0-9]+)$/.exec(folder);
+  return m ? { profile: m[1], cover: m[2] } : null;
+}
+
+export interface RenameFiles extends SaveFiles {
+  /** a file, or a folder with everything in it */
+  remove(path: string): Promise<void>;
+}
+
+/**
+ * Rename a profile as if the game had made it under the new name: its folder and
+ * file, the name inside (checksums made again), its cover shoots' folders, and
+ * its line in AUTOSAVE_SEEN (so a Save choice made in the game stays).  Refused,
+ * with nothing written, when the new name is not one the game's field takes,
+ * when another save has it (the I/O worker finds names in any case), or when the
+ * file fails readSaveMode's checks.  A change of case only is a rename too.  The
+ * new folders are written in full before the old ones go: a rename that stops
+ * halfway leaves the profile as it was, under its old name.
+ */
+export async function renameProfile(fs: RenameFiles, profilesDir: string, from: string, to: string):
+    Promise<{ files: number } | { refused: string }> {
+  if (!isProfileName(to)) return { refused: `A profile's name is 1 to ${NAME_MAX} letters and digits, as in the game.` };
+  if (to === from) return { files: 0 };
+  const folders = new Map<string, string[]>();      // each folder in profilesDir: its files
+  for (const { path } of await fs.listFiles()) {
+    const p = path.split('/');
+    if (p.length >= 3 && p[0] === profilesDir) folders.set(p[1], [...folders.get(p[1]) ?? [], path]);
+  }
+  const same = (a: string, b: string) => lowerAscii(a) === lowerAscii(b);
+  const own = (folder: string, path: string) => { const p = path.split('/'); return p.length === 3 && same(p[2], folder); };
+  const main = folders.get(from)?.find(path => own(from, path));
+  if (!main) return { refused: `There is no profile ${from} in this browser.` };
+  const file = await fs.readBytes(main);
+  const bad = checkProfile(file, from);
+  if (bad) return { refused: `${from} cannot be renamed here: ${bad}.` };
+  const moves: [string, string][] = [[from, to]];
+  for (const f of folders.keys()) { const c = coverOf(f); if (c && same(c.profile, from)) moves.push([f, `${to} ${c.cover}`]); }
+  const moving = new Set(moves.map(m => m[0]));
+  for (const f of folders.keys()) {
+    if (moving.has(f)) continue;
+    if (same(f, to)) return { refused: `There is a profile ${f} already.` };
+    if (same(coverOf(f)?.profile ?? '', to)) return { refused: `There is a cover shoot ${f} of that name already.` };
+  }
+  let files = 0;
+  try {
+    for (const [old, now] of moves) for (const path of folders.get(old)!) {
+      const rest = path.slice(profilesDir.length + old.length + 2);
+      await fs.writeFile(`${profilesDir}/${now}/${own(old, path) ? now : rest}`, path === main ? withName(file, to) : await fs.readBytes(path));
+      files++;
+    }
+  } catch (e) {
+    for (const [, now] of moves) await fs.remove(`${profilesDir}/${now}`).catch(() => {});
+    throw e;
+  }
+  const seen = await fs.readText(AUTOSAVE_SEEN);
+  const renamed = seen?.split('\n').map(l => l.trim() === from ? to : l).join('\n');
+  if (seen !== null && renamed !== seen) await fs.writeFile(AUTOSAVE_SEEN, renamed!);
+  for (const [old] of moves) await fs.remove(`${profilesDir}/${old}`);
+  return { files };
 }

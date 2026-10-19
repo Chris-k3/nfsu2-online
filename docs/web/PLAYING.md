@@ -116,6 +116,9 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
   alone.
 - **When it saved:** "Progress saved" shows over the game each time it saves your profile, F9 shows the last save, and
   after the game closes the start page says when it last saved (or that nothing was saved during that game).
+- **Rename:** Rename next to a profile in Saves gives it another name: letters and digits, up to 7, as the game's
+  own name field takes them. Its career, cars and DVD and magazine covers go with it. Quit the game first. When
+  "Your name" is empty, the other players see the new name.
 - **Backup:** Saves, Download a backup gives one zip with your profiles, the game's options (`registry.txt`),
   `settings.ini` and F12 screenshots.
 - **Restore:** Saves, Restore a backup puts a zip back, on this PC or on another one. It replaces what this browser

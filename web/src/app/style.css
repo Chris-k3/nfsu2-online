@@ -93,7 +93,7 @@ button, .file-btn { cursor: pointer; }
   border: 2px solid var(--lime); background: var(--lime-fill); color: var(--lime); box-shadow: 0 0 12px var(--lime-glow);
 }
 .btn.danger { border-color: var(--bad); color: var(--bad); }
-.btn:disabled, .file-btn[aria-disabled] { opacity: 0.5; cursor: not-allowed; }
+.btn:disabled, .file-btn[aria-disabled], .text-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .file-btn { position: relative; }
 .file-btn input { position: absolute; inset: 0; opacity: 0; width: 100%; cursor: pointer; }
 .file-btn:focus-within { outline: 2px solid var(--lime); outline-offset: 2px; box-shadow: 0 0 12px var(--lime-glow); }
@@ -172,17 +172,17 @@ kbd {
 }
 .switch:disabled { cursor: not-allowed; opacity: 0.5; }
 
-.set input[type="number"], .set input[type="text"] {
+.set input[type="number"], .set input[type="text"], .profiles input[type="text"] {
   width: 128px; height: 40px; padding: 0 12px; border: 2px solid var(--edge); border-radius: 8px;
   background: var(--field); color: var(--lime); font: italic 700 16px/24px var(--font);
 }
 .set input::placeholder { color: var(--edge); font-weight: 400; }
-/* a small action as underlined text: a setting's Reset, the hero's Download log */
+/* a small action as underlined text: a setting's Reset, the hero's Download log, Rename and Cancel in Saves */
 .text-btn {
   height: 32px; padding: 0 8px; border: 0; border-radius: 8px; background: none;
   color: var(--muted); font-size: 14px; line-height: 20px; text-decoration: underline; text-underline-offset: 4px;
 }
-.text-btn:hover { color: var(--lime); }
+.text-btn:hover:not(:disabled) { color: var(--lime); }
 
 summary { display: flex; align-items: center; gap: 8px; min-height: 48px; color: var(--muted); font-size: 14px; line-height: 20px; cursor: pointer; list-style: none; }
 summary::-webkit-details-marker { display: none; }
@@ -198,10 +198,14 @@ summary:hover { color: var(--text); }
 
 /* ----------------------------------------------------------------- saves */
 .profiles { list-style: none; padding: 0; display: grid; gap: 4px; margin-bottom: 16px; }
-.profiles li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; padding: 8px 12px; border-radius: 8px; background: var(--field); }
+.profiles li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; padding: 8px 12px; border-radius: 8px; background: var(--field); }
 .profiles li.empty { color: var(--muted); font-size: 14px; line-height: 20px; }
-.profiles .name { color: var(--lime); }
-.profiles .meta { color: var(--muted); font-size: 14px; line-height: 20px; align-self: center; }
+.profiles .name { color: var(--lime); margin-right: auto; }
+.profiles .meta { color: var(--muted); font-size: 14px; line-height: 24px; }   /* the name's line: on the grid beside it */
+.profiles .text-btn { padding: 0; }                 /* in line with the text above when wrapped */
+.profiles li > .text-btn { height: 24px; }            /* a row stays as tall as its name */
+.profiles li.renaming { flex-direction: column; align-items: stretch; gap: 8px; }
+.profiles li.renaming .msg { margin-top: 0; }
 #saves .hint + .row { margin-top: 12px; }
 #saves h3 + .hint { margin-bottom: 0; }
 #cache-info { font-variant-numeric: tabular-nums; }

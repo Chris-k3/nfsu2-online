@@ -7,6 +7,7 @@
 // shell enforces it), so they never race the I/O worker's sync handles.
 
 import { BLOCK, CACHE_DIR } from '../host/datacache';
+import { coverOf } from './profile';
 
 export const PROFILES_DIR = 'NFS Underground 2';   // what the game creates under the save root
 
@@ -77,11 +78,22 @@ export async function readBytes(saveDir: string, path: string): Promise<Uint8Arr
   return new Uint8Array(await (await (await d.getFileHandle(p[p.length - 1])).getFile()).arrayBuffer());
 }
 
-/** The save dir's file functions, bound to it (profile.ts turnOnAutosave). */
+/** Remove a file, or a folder with everything in it; nothing if it is not there. */
+export async function removePath(saveDir: string, path: string): Promise<void> {
+  const p = parts(path);
+  if (!p.length) throw new Error('empty path');
+  let d: FileSystemDirectoryHandle;
+  try { d = await dirOf(await saveRoot(saveDir, false), p.slice(0, -1), false); } catch { return; }
+  try { await d.removeEntry(p[p.length - 1], { recursive: true }); }
+  catch (e) { if ((e as DOMException).name !== 'NotFoundError') throw e; }
+}
+
+/** The save dir's file functions, bound to it (profile.ts turnOnAutosave, renameProfile). */
 export function filesOf(saveDir: string) {
   return {
     listFiles: () => listFiles(saveDir), readBytes: (path: string) => readBytes(saveDir, path),
     readText: (path: string) => readText(saveDir, path), writeFile: (path: string, data: string | Uint8Array) => writeFile(saveDir, path, data),
+    remove: (path: string) => removePath(saveDir, path),
   };
 }
 
@@ -103,14 +115,15 @@ export interface Profile { name: string; size: number; mtime: number; files: num
 /**
  * Profiles the game saved: "NFS Underground 2/<NAME>/<NAME>" (54,966 bytes
  * each).  A folder without its file is skipped:
- * the game would not list it either.
+ * the game would not list it either.  So are the cover shoots' saves beside
+ * them ("<NAME> DVD 1", profile.ts coverOf): they belong to their profile.
  */
 export async function listProfiles(saveDir: string, files?: Entry[]): Promise<Profile[]> {
   files ??= await listFiles(saveDir);
   const by = new Map<string, Profile>();
   for (const f of files) {
     const p = f.path.split('/');
-    if (p.length < 3 || p[0] !== PROFILES_DIR) continue;
+    if (p.length < 3 || p[0] !== PROFILES_DIR || coverOf(p[1])) continue;
     const name = p[1];
     const pr = by.get(name) ?? { name, size: 0, mtime: 0, files: 0 };
     pr.files++;

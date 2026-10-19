@@ -9,6 +9,9 @@
 //   two Save bytes and the two checksums it moves, nothing else
 // - each profile is set once: Autosave or Off stay, a Prompt chosen in the game
 //   after the change stays, a file the checks refuse is left and looked at again
+// - renaming a profile (profile.ts renameProfile) moves its folder, file and
+//   cover shoots, changes the name inside and the two checksums it moves, and
+//   nothing else; a refused rename, or one that fails halfway, leaves the saves as they were
 // The profiles here are synthetic (the layout of profile.ts's header comment).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -101,6 +104,7 @@ function folder(files) {
     readBytes: async p => { if (!m.has(p)) throw new Error(`no ${p}`); const v = m.get(p); return typeof v === 'string' ? new TextEncoder().encode(v) : v; },
     readText: async p => { const v = m.get(p); return v === undefined ? null : typeof v === 'string' ? v : new TextDecoder().decode(v); },
     writeFile: async (p, d) => { writes.push(p); m.set(p, d); },
+    remove: async p => { writes.push(`-${p}`); for (const k of [...m.keys()]) if (k === p || k.startsWith(p + '/')) m.delete(k); },
   };
 }
 const at = n => `${DIR}/${n}/${n}`;
@@ -157,4 +161,77 @@ test('settings.ini: autosave is on unless the file says off, and older files get
   const up = S.settingsUpgrade(old);
   assert.ok(up && up.added.includes('autosave'), JSON.stringify(up?.added));
   assert.match(up.text, /\n#autosave = on\n/);
+});
+
+const name = f => { let n = ''; for (let i = 36 + 53761; f[i]; i++) n += String.fromCharCode(f[i]); return n; };
+const cover = () => { const c = new Uint8Array(1048612); c.set([0x32, 0x30, 0x43, 0x4D]); c[5000] = 7; return c; };
+
+test('a rename moves the profile, its cover shoots and its autosave line, and changes the name inside', async () => {
+  const dvd = cover(), mag = cover();
+  const fs = folder({
+    [at('THOM')]: profile('THOM', 0, 0), [`${DIR}/THOM/notes.txt`]: 'x', [`${DIR}/THOM DVD 1/THOM DVD 1`]: dvd,
+    [`${DIR}/THOM Magazine 12/THOM Magazine 12`]: mag, [at('AUTO')]: profile('AUTO', 1, 1), [`${DIR}/AUTO DVD 1/AUTO DVD 1`]: cover(),
+    [P.AUTOSAVE_SEEN]: '# head\nAUTO\nTHOM\nTHOMAS\n', 'registry.txt': 'r',
+  });
+  const before = new Map(fs.m);
+  assert.deepEqual(await P.renameProfile(fs, DIR, 'THOM', 'Bob7'), { files: 4 });
+  const f = before.get(at('THOM')), g = fs.m.get(at('Bob7'));
+  assert.deepEqual(mode(g, 'Bob7'), { mode: 'off' }, 'the checks hold under the new name, the Save option as it was');
+  assert.equal(name(g), 'Bob7');
+  const changed = [];
+  for (let i = 0; i < f.length; i++) if (f[i] !== g[i]) changed.push(i);
+  assert.ok(changed.every(i => (i >= 20 && i < 28) || (i >= 36 + 53761 && i < 36 + 53761 + 32)), `changed bytes ${changed}`);
+  assert.equal(new TextDecoder().decode(fs.m.get(`${DIR}/Bob7/notes.txt`)), 'x');
+  assert.equal(fs.m.get(`${DIR}/Bob7 DVD 1/Bob7 DVD 1`), dvd);
+  assert.equal(fs.m.get(`${DIR}/Bob7 Magazine 12/Bob7 Magazine 12`), mag);
+  assert.equal(fs.m.get(P.AUTOSAVE_SEEN), '# head\nAUTO\nBob7\nTHOMAS\n');
+  assert.ok(![...fs.m.keys()].some(k => k.startsWith(`${DIR}/THOM`)), [...fs.m.keys()].join('\n'));
+  for (const k of [at('AUTO'), `${DIR}/AUTO DVD 1/AUTO DVD 1`, 'registry.txt']) assert.equal(fs.m.get(k), before.get(k), `${k} untouched`);
+  assert.equal(fs.writes.findIndex(w => w.startsWith('-')), fs.writes.length - 3, 'the old folders go last');
+});
+
+test('a change of case only is a rename; a longer name inside is cleared', async () => {
+  const fs = folder({ [at('thom')]: profile('thom', 1, 1, { inside: 'THOM' }) });
+  assert.deepEqual(await P.renameProfile(fs, DIR, 'thom', 'Thom'), { files: 1 });
+  assert.deepEqual([...fs.m.keys()], [at('Thom')]);
+  assert.deepEqual(mode(fs.m.get(at('Thom')), 'Thom'), { mode: 'autosave' });
+  const fs2 = folder({ [at('ABCDEFG')]: profile('ABCDEFG') });
+  await P.renameProfile(fs2, DIR, 'ABCDEFG', 'X');
+  const g = fs2.m.get(at('X'));
+  assert.equal(name(g), 'X');
+  assert.ok(g.subarray(36 + 53762, 36 + 53761 + 32).every(b => b === 0), 'NUL-padded');
+});
+
+test('a refused rename writes nothing', async () => {
+  const corrupt = Buffer.from(profile('BROKEN')); corrupt[500] ^= 0xff;
+  const files = { [at('THOM')]: profile('THOM'), [at('AUTO')]: profile('AUTO'), [at('BROKEN')]: corrupt, [`${DIR}/NEW DVD 2/NEW DVD 2`]: cover() };
+  const refused = async (from, to, re) => {
+    const fs = folder(files);
+    const r = await P.renameProfile(fs, DIR, from, to);
+    assert.match(r.refused ?? '', re, `${from} -> ${to}: ${JSON.stringify(r)}`);
+    assert.deepEqual(fs.writes, []);
+  };
+  for (const bad of ['', 'ABCDEFGH', 'A B', 'A-B', 'Thé', 'A/B', '..']) await refused('THOM', bad, /1 to 7 letters and digits/);
+  await refused('THOM', 'auto', /There is a profile AUTO already/);
+  await refused('THOM', 'new', /cover shoot NEW DVD 2/);
+  await refused('BROKEN', 'FIXED', /BROKEN cannot be renamed here: its checksums/);
+  await refused('NOBODY', 'X', /no profile NOBODY/);
+  assert.deepEqual(await P.renameProfile(folder(files), DIR, 'THOM', 'THOM'), { files: 0 });
+});
+
+test('a rename that fails halfway leaves the profile as it was', async () => {
+  const fs = folder({ [at('THOM')]: profile('THOM'), [`${DIR}/THOM DVD 1/THOM DVD 1`]: cover() });
+  const before = new Map(fs.m);
+  const write = fs.writeFile;
+  let n = 0;
+  fs.writeFile = async (p, d) => { if (++n === 2) throw new Error('disk full'); return write(p, d); };
+  await assert.rejects(P.renameProfile(fs, DIR, 'THOM', 'BOB'), /disk full/);
+  assert.deepEqual([...fs.m.keys()].sort(), [...before.keys()].sort());
+  for (const [k, v] of before) assert.equal(fs.m.get(k), v);
+});
+
+test('cover shoots are told from profiles by their folder name', () => {
+  assert.deepEqual(P.coverOf('CLAUDE DVD 1'), { profile: 'CLAUDE', cover: 'DVD 1' });
+  assert.deepEqual(P.coverOf('A B Magazine 10'), { profile: 'A B', cover: 'Magazine 10' });
+  for (const f of ['CLAUDE', 'DVD 1', 'CLAUDE DVD', 'CLAUDE dvd 1', 'CLAUDE DVD 1x']) assert.equal(P.coverOf(f), null, f);
 });
