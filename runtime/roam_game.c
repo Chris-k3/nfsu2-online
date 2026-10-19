@@ -96,6 +96,7 @@
 #define FN_LOADER_PURGE 0x0063a1b0u   /* thiscall (phase), callee pops: phase 0 unloads one unreferenced entry -> 1, none -> 0 */
 #define FN_CREATECAR    0x00606480u   /* ecx grid {vec3, +0x10 u16 heading}, edx record, (driver, start) */
 #define FN_INDEXCARS    0x005f0d20u   /* thiscall World */
+#define FN_MM_REBUILD   0x004f92a0u   /* cdecl (): the minimap's icons made again (0x4ECC80), as Player 0x5EA980 does */
 #define FN_EM_OVER      0x00500ca0u   /* thiscall G_ENCOUNTERS: the outrun is over (the manager's state 5 calls it) */
 #define G_ENCOUNTERS    0x0085ef70u   /* the career's outrun bookkeeping (the manager asks it whether one is due) */
 #define EM_TABLE        0x1b10u       /* manager: 3 x {+0 time, +4 state, +8 flag, +0xC car} */
@@ -189,6 +190,7 @@ static int env_int(const char *k, int def, int lo, int hi){
 }
 static struct {
     int on, test, collide, max_cars, rate, delay_ms, extrap_ms, carpool_kb, labels;
+    int test_owncars;                         /* NFSU2_ROAM_TEST_OWNCARS (test aid): friends only in cars of our own (slots 3, 4) */
     char name[RC_NAME_MAX + 1], room[64];
 } O;
 
@@ -736,6 +738,10 @@ static int finish_create(CPU *c, int k){
     if (!car){ rlog("[roam] f=%ld slot %d: CreateCar made no car\n", rh_frame(), k); return -1; }
     s->car = car; s->created = 1; s->world = w; s->activated = 1; g_created_n++; g_creates++;
     keep_out_of_window(c, w);
+    /* the minimap makes its icons when the HUD is built: an AI racer's arrow
+     * for each car of the World's AI range then (by racer number, 0x4EC950),
+     * so a car made later has none.  They are made again, now with this one */
+    gcall0(c, FN_MM_REBUILD, 0);
     memcpy(GPTR(s->ride_orig), GPTR(s->rec + 0x10u), 0x8f0); s->have_orig = 1;
     make_inert(c, car);
     body_set(c, car, 0); s->ghost = 1;
@@ -1083,6 +1089,7 @@ static void init_once(CPU *c){
     O.collide = env_int("NFSU2_ROAM_COLLIDE", 1, 0, 1);
 #endif
     O.labels = env_int("NFSU2_ROAM_LABELS", 1, 0, 1);
+    O.test_owncars = env_int("NFSU2_ROAM_TEST_OWNCARS", 0, 0, 1);
     O.max_cars = env_int("NFSU2_ROAM_MAX_CARS", NSLOT, 0, NSLOT);
     O.rate = env_int("NFSU2_ROAM_RATE", 20, 10, 60);
     O.delay_ms = env_int("NFSU2_ROAM_DELAY", 100, 0, 1000);
@@ -1213,6 +1220,7 @@ static void assign(CPU *c, int64_t host){
         for (int j = 0; j < nslots && k < 0; j++){
             if (g_sl[j].st != SL_FREE) continue;
             if (j < 3){
+                if (O.test_owncars) continue;
                 uint32_t w = world(), car = w && g_em == EM_HELD ? free_opponent_car(w) : 0;
                 if (!car) continue;
                 g_sl[j].car = car; g_sl[j].world = w; g_sl[j].created = 0;
