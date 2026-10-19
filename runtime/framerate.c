@@ -380,6 +380,13 @@ void hfr_note_vsync(double ts, double dur){
     }
     atomic_store(&g_vs_ts, (uint64_t)llround(ts * 1e9));
 }
+/* The display clock ticked in the last 250 ms: the page is drawing (a hidden
+ * tab gets no requestAnimationFrame).  win32_ext.c spins the end of the
+ * pacer's sleep only then. */
+int hfr_display_live(void){
+    uint64_t tv = atomic_load(&g_vs_ts);
+    return tv && (int64_t)(mono_ns() - tv) < 250000000ll;
+}
 
 /* ---- the pacer ----------------------------------------------------------
  * Slots of the content period (MW kit SlotPacer semantics): a frame that is

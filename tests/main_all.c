@@ -89,6 +89,186 @@ static void ftol_tests(void){
         }
     char nm[64]; snprintf(nm, sizeof nm, "_ftol2 equivalent (%d inputs)", n);
     CHKI(nm, (uint32_t)bad, 0u);
+    /* A lifted caller: 0x48AC70(a, b) on an object with v at +0xC returns
+     * (int)(v / b * a) when a * 0.5 < b, else (int)(v + v), each step rounded
+     * to float (the game thread's control word).  The x87 values the caller
+     * keeps in locals must reach _ftol2, and its pop must reach the caller. */
+    int bad2 = 0, n2 = 0;
+    for (int i = 0; i < 2000; i++){
+        float a = (float)((int)(rnd() % 20001) - 10000) / 64.0f, b = (float)(1 + rnd() % 8000) / 32.0f;
+        float v = (float)((int)(rnd() % 200001) - 100000) / 16.0f;
+        if (i & 1) b = -b;
+        reset(); cpu.fcw = 0x007f; cpu.top = (int32_t)(i & 7);
+        uint32_t OBJ = 0x00E00000u; MRF32(OBJ + 0xcu) = v; cpu.ecx = OBJ;
+        uint32_t ab, bb; memcpy(&ab, &a, 4); memcpy(&bb, &b, 4);
+        PUSH32(bb); PUSH32(ab); PUSH32(0xC0DE0000u + (uint32_t)i);
+        uint32_t e = cpu.esp;
+        sub_0048ac70(&cpu);
+        float h = a * 0.5f, r = h < b ? v / b * a : v + v;
+        n2++;
+        if (cpu.eax != (uint32_t)(int32_t)truncf(r) || cpu.top != (int32_t)(i & 7) || cpu.esp != e + 12u){
+            if (bad2++ < 8) printf("  differs: 0x48AC70(%g, %g) v %g: %d (top %d), expected %d\n", (double)a, (double)b, (double)v,
+                                   (int32_t)cpu.eax, cpu.top, (int32_t)truncf(r)); }
+    }
+    snprintf(nm, sizeof nm, "_ftol2 from a lifted caller (%d inputs)", n2);
+    CHKI(nm, (uint32_t)bad2, 0u);
+}
+
+/* --- 7. The view-frustum box test (0x5BC300, its jmp thunk 0x48AC60) and
+ * the box transform (0x5BC210): the runtime's f32 versions (runtime/
+ * overrides.c, wasm) against the lifted bodies, from the same CPU state and
+ * memory: the general registers, eip, top, the x87 condition bits, the
+ * outputs and the stores at or above esp; the flags unless the lift is
+ * FLAGABI's (no caller reads them).  Inputs: boxes of world-sized numbers
+ * through rotation/scale/translation matrices (with exact zeros), against
+ * the planes of a view frustum (inside, crossing, outside), the game
+ * thread's control word; some with a NaN, an infinity, a tiny or a huge
+ * value, or another control word, which the runtime leaves to the lifted
+ * body. */
+void sub_005bc210_orig(CPU *c); void sub_005bc300_orig(CPU *c); void sub_0048ac60_orig(CPU *c);
+extern uint64_t g_cull_lifted;
+static float frnd(float lo, float hi){ return lo + (hi - lo) * (float)(rnd() & 0xffffff) / 16777216.0f; }
+static float fspecial(void){
+    static const float v[] = { NAN, -NAN, INFINITY, -INFINITY, 1e-40f, -1e-42f, 1e-30f, 3e38f, -3e38f, 1e30f, 0.0f, -0.0f };
+    return v[rnd() % (sizeof v / sizeof *v)];
+}
+#define CULL_M 0x00E10000u   /* matrix */
+#define CULL_A 0x00E10100u   /* lo */
+#define CULL_B 0x00E10200u   /* hi */
+#define CULL_V 0x00E10300u   /* the view: [+0] -> planes base */
+#define CULL_P 0x00E10400u   /* planes base (planes at +0xC0) */
+static int cull_inputs(int i){
+    /* a box somewhere in the world */
+    float cx = frnd(-3000, 3000), cy = frnd(-3000, 3000), cz = frnd(-200, 200), e = frnd(0.05f, 150);
+    float lo[3] = { cx - e * frnd(0.2f, 1), cy - e * frnd(0.2f, 1), cz - e * frnd(0.2f, 1) };
+    float hi[3] = { cx + e * frnd(0.2f, 1), cy + e * frnd(0.2f, 1), cz + e * frnd(0.2f, 1) };
+    for (int j = 0; j < 3; j++){ MRF32(CULL_A + 4u * j) = lo[j]; MRF32(CULL_B + 4u * j) = hi[j]; }
+    /* rotation about z (sometimes axis-aligned: exact zeros), a scale, a translation */
+    float a = (i % 5 == 0) ? 0.0f : frnd(-3.2f, 3.2f), s = frnd(0.5f, 2.0f), ca = cosf(a) * s, sa = sinf(a) * s;
+    float m[16] = { ca, sa, 0, 0,  -sa, ca, 0, 0,  0, 0, s, 0,  frnd(-500, 500), frnd(-500, 500), frnd(-20, 20), 1 };
+    if (i % 7 == 1){ m[2] = frnd(-0.3f, 0.3f); m[8] = frnd(-0.3f, 0.3f); }
+    for (int k = 0; k < 16; k++) MRF32(CULL_M + 4u * k) = m[k];
+    /* six planes around a camera near the box, some of them past it */
+    float px = cx + frnd(-400, 400), py = cy + frnd(-400, 400), pz = cz + frnd(-50, 50);
+    MR32(CULL_V) = CULL_P;
+    for (int k = 0; k < 6; k++){
+        float nx = frnd(-1, 1), ny = frnd(-1, 1), nz = frnd(-0.3f, 0.3f), l = sqrtf(nx * nx + ny * ny + nz * nz) + 1e-3f;
+        nx /= l; ny /= l; nz /= l;
+        if (i % 11 == 3) nz = 0.0f;
+        float d = -(nx * px + ny * py + nz * pz) + frnd(-300, 300);
+        uint32_t p = CULL_P + 0xC0u + 16u * k;
+        MRF32(p) = nx; MRF32(p + 4) = ny; MRF32(p + 8) = nz; MRF32(p + 12) = d;
+    }
+    /* some special values (the runtime hands those to the lifted body) */
+    if (i % 13 == 5){
+        static const uint32_t where[] = { CULL_A, CULL_A + 4, CULL_B + 8, CULL_M, CULL_M + 20, CULL_M + 52,
+                                          CULL_P + 0xC4, CULL_P + 0xD0 + 12, CULL_P + 0x11C };
+        MRF32(where[rnd() % (sizeof where / sizeof *where)]) = fspecial();
+        return 1;
+    }
+    return 0;
+}
+static int cull_same(const CPU *a, const CPU *b, int nslots, uint32_t T){
+    if (memcmp(a->r, b->r, sizeof a->r) || a->eip != b->eip || a->top != b->top) return 0;
+    if ((a->fsw & (FSW_C0 | FSW_C2 | FSW_C3)) != (b->fsw & (FSW_C0 | FSW_C2 | FSW_C3))) return 0;
+#ifndef LIFT_FLAGABI
+    const uint32_t *fa = &a->cf, *fb = &b->cf;
+    for (int k = 0; k < 7; k++) if (fa[k] != fb[k]) return 0;
+#endif
+    for (uint32_t k = 0; k < 8; k++){              /* the slots below top that the call used are empty */
+        int used = 0;
+        for (int q = 1; q <= nslots; q++) if (k == ((T - (uint32_t)q) & 7u)) used = 1;
+        if (!used && memcmp(&a->st[k], &b->st[k], 8)) return 0;
+    }
+    return 1;
+}
+static void cull_tests(void){
+    printf("\n--- 7. View-frustum box test (0x5BC300, 0x48AC60) and box transform (0x5BC210): runtime vs lifted ---\n");
+    static const uint16_t cws[] = { 0x007f, 0x007f, 0x007f, 0x027f };   /* the game thread's (PC=24, nearest); PC=53 */
+    static const char *const names[] = { "0x5BC210 transform", "0x5BC300 (no matrix)", "0x5BC300 (matrix)", "0x48AC60 (matrix)" };
+    int n = 0, bad = 0, res[3] = { 0, 0, 0 }, slow = 0, ordinary_slow = 0;
+    for (int f = 0; f < 4; f++)
+        for (int i = 0; i < 3000; i++){
+            int special = cull_inputs(i);
+            static uint8_t in[0x600], outL[0x600];
+            memcpy(in, g_mem + CULL_M, sizeof in);
+            reset(); cpu.fcw = cws[i & 3]; cpu.top = (int32_t)(i & 7);
+            for (int k = 0; k < 8; k++) cpu.st[k] = 1000.0 + k;
+            cpu.ebx = 0x11111111u; cpu.ebp = 0x22222222u; cpu.esi = 0x33333333u; cpu.edi = 0x44444444u;
+            cpu.eax = 0xdeadbeefu; cpu.ecx = CULL_V; cpu.edx = 0x55aa55aau; cpu.fsw = 0x0100u;
+            { uint32_t *fl = &cpu.cf; for (int k = 0; k < 7; k++) fl[k] = FTOL_SENT; }
+            if (f == 0){ PUSH32(CULL_B); PUSH32(CULL_A); PUSH32(CULL_M); }
+            else { PUSH32(f >= 2 ? CULL_M : 0u); PUSH32(CULL_B); PUSH32(CULL_A); }
+            PUSH32(0xC0DE0000u + (uint32_t)i);
+            uint32_t e = cpu.esp;
+            uint8_t stk[64], stkL[64]; memcpy(stk, g_mem + e, sizeof stk);
+            CPU a = cpu; CPU *s = &a;
+            if (f == 0) sub_005bc210_orig(s); else if (f == 3) sub_0048ac60_orig(s); else sub_005bc300_orig(s);
+            memcpy(outL, g_mem + CULL_M, sizeof outL); memcpy(stkL, g_mem + e, sizeof stkL);
+            memcpy(g_mem + CULL_M, in, sizeof in); memcpy(g_mem + e, stk, sizeof stk);
+            uint64_t lifted0 = g_cull_lifted;
+            if (f == 0) sub_005bc210(&cpu); else if (f == 3) sub_0048ac60(&cpu); else sub_005bc300(&cpu);
+            n++;
+            if (g_cull_lifted != lifted0){ slow++; if (!special && cws[i & 3] == 0x007f) ordinary_slow++; }
+            int same = cull_same(&a, &cpu, f == 1 ? 3 : 8, (uint32_t)(i & 7)) && !memcmp(outL, g_mem + CULL_M, sizeof outL)
+                       && !memcmp(stkL, g_mem + e, sizeof stkL);
+            if (f && a.eax < 3u) res[a.eax]++;
+            if (!same && bad++ < 8)
+                printf("  differs: %s #%d cw %04x: lifted eax %08x ecx %08x edx %08x fsw %04x, runtime eax %08x ecx %08x edx %08x fsw %04x\n",
+                       names[f], i, cws[i & 3], a.eax, a.ecx, a.edx, a.fsw, cpu.eax, cpu.ecx, cpu.edx, cpu.fsw);
+        }
+    printf("  %d calls, %d of them by the lifted body; boxes outside %d, crossing %d, inside %d\n",
+           n, slow, res[0], res[1], res[2]);
+    char nm[64]; snprintf(nm, sizeof nm, "frustum test equivalent (%d inputs)", n);
+    CHKI(nm, (uint32_t)bad, 0u);
+    CHKI("frustum test: ordinary calls by the lifted body", (uint32_t)ordinary_slow, 0u);
+    CHKI("frustum test: special values by the lifted body", (uint32_t)(slow > 0), 1u);
+}
+
+/* --- 8. D3DXMatrixMultiply, SSE (0x68CE7C): the runtime's f32x4 version
+ * (runtime/overrides.c, wasm) against the lifted body: the product, the
+ * general registers, eip, xmm0-7 and the flags.  Inputs: random matrices
+ * with zeros, denormals and overflows, the output aliased with either
+ * input; some with a NaN, which the runtime leaves to the lifted body. */
+void sub_0068ce7c_orig(CPU *c);
+extern uint64_t g_mmul_lifted;
+static void mmul_tests(void){
+    printf("\n--- 8. D3DXMatrixMultiply SSE (0x68CE7C): runtime vs lifted ---\n");
+    const uint32_t MA = 0x00E20000u, MB = 0x00E20100u, MO = 0x00E20200u;
+    int n = 0, bad = 0, slow = 0, ordinary_slow = 0;
+    for (int i = 0; i < 6000; i++){
+        int special = 0;
+        for (int k = 0; k < 16; k++){ MRF32(MA + 4u * k) = frnd(-4, 4); MRF32(MB + 4u * k) = frnd(-1000, 1000); }
+        if (i % 3 == 0) for (int k = 0; k < 16; k++) if (rnd() & 1) MRF32(MA + 4u * k) = 0.0f;
+        if (i % 17 == 2) MRF32(MB + 4u * (rnd() % 16)) = 1e-41f;                       /* a denormal */
+        if (i % 19 == 4){ MRF32(MA + 4u * (rnd() % 16)) = 3e38f; special = 1; }       /* an overflow */
+        if (i % 13 == 5){ MRF32((rnd() & 1 ? MA : MB) + 4u * (rnd() % 16)) = fspecial(); special = 1; }
+        uint32_t out = i % 7 == 0 ? MA : i % 7 == 1 ? MB : MO;
+        static uint8_t in[0x300], outL[0x300];
+        memcpy(in, g_mem + MA, sizeof in);
+        reset();
+        cpu.eax = 0xdeadbeefu; cpu.ecx = 0x1234u; cpu.edx = 0x55aa55aau; cpu.ebx = 0x11111111u; cpu.ebp = 0x22222222u;
+        { uint32_t *fl = &cpu.cf; for (int k = 0; k < 7; k++) fl[k] = FTOL_SENT; }
+        for (int k = 0; k < 8; k++) for (int q = 0; q < 4; q++) cpu.xmm[k].u32[q] = rnd();
+        PUSH32(MB); PUSH32(MA); PUSH32(out); PUSH32(0xC0DE0000u + (uint32_t)i);
+        CPU a = cpu; CPU *s = &a;
+        sub_0068ce7c_orig(s);
+        memcpy(outL, g_mem + MA, sizeof outL); memcpy(g_mem + MA, in, sizeof in);
+        uint64_t slow0 = g_mmul_lifted;
+        sub_0068ce7c(&cpu);
+        n++;
+        if (g_mmul_lifted != slow0){ slow++; if (!special) ordinary_slow++; }
+        int same = !memcmp(a.r, cpu.r, sizeof a.r) && a.eip == cpu.eip && !memcmp(a.xmm, cpu.xmm, sizeof a.xmm)
+                   && !memcmp(&a.cf, &cpu.cf, 7 * sizeof(uint32_t)) && !memcmp(outL, g_mem + MA, sizeof outL);
+        if (!same && bad++ < 8)
+            printf("  differs: #%d out %08x: lifted eax %08x xmm0 %08x out[0] %08x, runtime eax %08x xmm0 %08x out[0] %08x\n",
+                   i, out, a.eax, a.xmm[0].u32[0], *(uint32_t *)(outL + (out - MA)), cpu.eax, cpu.xmm[0].u32[0], MR32(out));
+    }
+    printf("  %d calls, %d of them by the lifted body\n", n, slow);
+    char nm[64]; snprintf(nm, sizeof nm, "D3DXMatrixMultiply equivalent (%d inputs)", n);
+    CHKI(nm, (uint32_t)bad, 0u);
+    CHKI("D3DXMatrixMultiply: ordinary calls by the lifted body", (uint32_t)ordinary_slow, 0u);
+    CHKI("D3DXMatrixMultiply: NaNs by the lifted body", (uint32_t)(slow > 0), 1u);
 }
 
 static void heap_tests(void){
@@ -281,6 +461,8 @@ int main(int argc,char**argv){
     heap_tests();
     clock_tests();
     ftol_tests();
+    cull_tests();
+    mmul_tests();
 
     printf("\n---------------------------------------------\n  PASSED: %d    FAILED: %d\n",pass,fail);
     dispatch_report();

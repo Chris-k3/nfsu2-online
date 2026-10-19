@@ -302,6 +302,40 @@ void guest_wait_begin(void){ ts_set(TS_IDLE, 0); guest_yield_begin(); }   /* wat
 void guest_wait_end(void){ guest_yield_end(); }
 /* Sleep with the big lock released (win32.c: the game's frame wait loop). */
 uint64_t g_sleep_late_ns, g_sleep_gil_ns, g_sleep_n;    /* diagnostics: sleep lateness / lock wait */
+#ifdef __wasm__
+/* wasm: nanosleep is the worker's Atomics.wait with a timeout, which wakes on
+ * the OS timer.  On Windows that timer ticks every 1 ms or every 15.6 ms,
+ * depending on what else the browser is doing (Chrome 155, 2026-10-19: a
+ * 1 ms wait took 15.5 ms at the median, a few came back after ~1 ms), and
+ * every oversleep of the frame pacer cost a 120 Hz slot: a race ran at
+ * 94 fps where the game thread's work alone allows 119.  So the wait ends a
+ * margin before the deadline and the rest is spun on the clock, with the
+ * guest lock still released.  The margin is learned from the waits: it
+ * jumps to a late wake-up and comes down slowly, so with a precise timer the
+ * spin stays short; with the 15.6 ms one the pacer spins its whole sleep and
+ * tries a wait again every few seconds.  No spin while the page does not draw
+ * (a hidden tab): nobody sees the frames then. */
+int hfr_display_live(void);              /* framerate.c */
+static void sleep_precise_ns(int64_t ns){
+    static _Thread_local double margin = 2.0;               /* ms */
+    if (!hfr_display_live()){
+        struct timespec ts = { (time_t)(ns / 1000000000LL), (long)(ns % 1000000000LL) };
+        nanosleep(&ts, 0);
+        return;
+    }
+    double t0 = nfsu2_now_ms(), until = t0 + (double)ns / 1e6, coarse = until - margin - t0;
+    if (coarse >= 0.25){
+        int64_t cns = (int64_t)(coarse * 1e6);
+        struct timespec ts = { (time_t)(cns / 1000000000LL), (long)(cns % 1000000000LL) };
+        nanosleep(&ts, 0);
+        double want = (nfsu2_now_ms() - (t0 + coarse)) * 1.25 + 0.25;
+        margin = want > margin ? want : margin - (margin - want) * 0.02;
+    } else margin *= 0.997;                                  /* no wait made */
+    if (margin < 0.5) margin = 0.5;
+    if (margin > 20.0) margin = 20.0;
+    while (nfsu2_now_ms() < until) {}
+}
+#else
 /* On macOS nanosleep wakes up with the timer coalescing slack: in the game a
  * 3 ms request is 447 us late on average (separate measurement: median
  * ~770 us, QoS makes no difference).  A kevent timer with NOTE_CRITICAL is
@@ -317,6 +351,7 @@ static void sleep_precise_ns(int64_t ns){
     struct timespec ts = { (time_t)(ns / 1000000000LL), (long)(ns % 1000000000LL) };
     nanosleep(&ts, 0);
 }
+#endif
 void guest_sleep_ns(int64_t ns){
     struct timespec a, b, d;
     guest_yield_begin();

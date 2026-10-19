@@ -57,6 +57,8 @@ const monoNs = () => BigInt(Math.round(performance.now() * 1e3)) * 1000n + BigIn
 // in a race frame).  It writes the same values as BigInt µs × 1000 would, but from integer microseconds held in doubles
 // (exact below 2^53) as two u32 halves: no BigInt and no DataView per call.
 const T0US = Math.round(performance.timeOrigin * 1e3);
+// the time origin is fixed for the worker's life: read once, not on each of the guest's ~1,000 timer reads a frame
+const T0MS = performance.timeOrigin;
 let u32v: Uint32Array | null = null;
 function writeUsAsNs(p: number, us: number) {
   if (p & 7) { dv().setBigUint64(p, BigInt(us) * 1000n, true); return; }
@@ -88,7 +90,7 @@ function wasi(): Record<string, (...a: any[]) => any> {
     clock_res_get: (_id: number, p: number) => { dv().setBigUint64(p, 1000n, true); return 0; },
     clock_time_get: (id: number, _prec: bigint, p: number) => {
       // 0 realtime, 1 monotonic, 2/3 process/thread CPU time (wall time here)
-      writeUsAsNs(p, id === 0 ? Math.round((performance.timeOrigin + performance.now()) * 1e3) : Math.round(performance.now() * 1e3) + T0US);
+      writeUsAsNs(p, id === 0 ? Math.round((T0MS + performance.now()) * 1e3) : Math.round(performance.now() * 1e3) + T0US);
       return 0; },
     random_get: (p: number, n: number) => {
       const b = new Uint8Array(n); for (let o = 0; o < n; o += 65536) crypto.getRandomValues(b.subarray(o, Math.min(n, o + 65536)));
@@ -195,7 +197,7 @@ function hostImports(): Record<string, (...a: any[]) => any> {
     // nfsu2_host_register(kind, ptr, size): tells the page where a shared structure lives
     register: (kind: number, ptr: number, size: number) => { (self as unknown as Worker).postMessage({ t: 'register', kind, ptr, size }); return 0; },
     // milliseconds since the page's time origin (same clock in every worker)
-    now_ms: () => performance.timeOrigin + performance.now(),
+    now_ms: () => T0MS + performance.now(),
     // ms this thread has spent blocked in host waits (I/O, sleeps) so far
     blocked_ms: () => blockedMs,
     stack_frames: () => stackFrames(),

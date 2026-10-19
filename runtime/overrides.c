@@ -537,6 +537,184 @@ ret:
 #endif
 }
 
+/* --- the view-frustum box test ---------------------------------------------
+ * sub_005bc210(M, lo, hi), cdecl: the box lo..hi (3 floats each, in and out)
+ * through the matrix M (rows 0-2, translation in row 3), min and max per
+ * axis summed term by term.  sub_005bc300(lo, hi, M), thiscall, ret 0xC: the
+ * box (through M when M is not 0) against the six planes (n.x n.y n.z d) at
+ * [ecx] + 0xC0: 0 outside one of them, 1 crossing one, 2 inside all.
+ * sub_0048ac60 is a jmp to it that the lift copies whole.  The three were
+ * ~6 % of a race frame in Chrome: run per object, with the x87 stack in
+ * memory and every result tested.
+ * On wasm they run in f32 here: at PC=24 and RC=nearest the x87 rounds each
+ * result to 24 bits once, as f32 arithmetic does, while the result is a
+ * normal float or zero (the lifted X87R gives the same: for float operands
+ * the double result rounded to float is the correctly rounded one).  Every
+ * result is checked for that; anything else (a NaN, an infinity, a float
+ * subnormal, another control word) runs the lifted body from the untouched
+ * state.  Same registers, flags, x87 top and condition bits, outputs and
+ * stores at or above the caller's esp as the lifted bodies; not the scratch
+ * stores below it, nor the x87 slots they leave empty.  tests/main_all.c
+ * section 7 checks them against the lifted bodies.  The Mac keeps those. */
+void sub_005bc210_orig(CPU *c);
+void sub_005bc300_orig(CPU *c);
+void sub_0048ac60_orig(CPU *c);
+uint64_t g_cull_lifted;            /* calls that ran the lifted body (tests) */
+#ifdef __wasm__
+/* the x87 at PC=24 has this result too: a normal float or zero */
+static inline uint32_t cull_ok(float x){
+    float a = __builtin_fabsf(x);
+    return (uint32_t)(x == 0.0f) | ((uint32_t)(a >= 0x1p-126f) & (uint32_t)(a <= 0x1.fffffep127f));
+}
+/* sub_005bc210's arithmetic on lo/hi (in place); 0 if the lifted body must
+ * run.  *cmp: its last fcom (row 2, column 2: lo product vs hi product),
+ * *pb: the hi product it stored in its first argument's slot then. */
+static int cull_xform(uint32_t M, float lo[3], float hi[3], int *cmp, float *pb_last){
+    float mn[3], mx[3], pa = 0, pb = 0;
+    uint32_t ok = 1;
+    for (int j = 0; j < 3; j++) mn[j] = mx[j] = MRF32(M + 0x30u + 4u * (uint32_t)j);
+    for (int i = 0; i < 3; i++)
+        for (int j = 0; j < 3; j++){
+            float m = MRF32(M + 16u * (uint32_t)i + 4u * (uint32_t)j);
+            pa = lo[i] * m; pb = hi[i] * m;
+            if (pa < pb){ mn[j] += pa; mx[j] += pb; } else { mn[j] += pb; mx[j] += pa; }
+            ok &= cull_ok(pa) & cull_ok(pb) & cull_ok(mn[j]) & cull_ok(mx[j]);
+        }
+    if (!ok) return 0;
+    *cmp = pa < pb ? -1 : pa > pb ? 1 : 0; *pb_last = pb;
+    for (int j = 0; j < 3; j++){ lo[j] = mn[j]; hi[j] = mx[j]; }
+    return 1;
+}
+static void cull_fsw(CPU *restrict c, int cmp){
+    c->fsw &= (uint16_t)~(FSW_C0 | FSW_C2 | FSW_C3);
+    if (cmp < 0) c->fsw |= FSW_C0; else if (cmp == 0) c->fsw |= FSW_C3;
+}
+static int xform_native(CPU *restrict c){
+    if (c->fcw & 0x0F00u) return 0;
+    uint32_t e = c->esp, M = MR32(e + 4u), A = MR32(e + 8u), B = MR32(e + 12u);
+    float lo[3], hi[3]; int cmp; float pb;
+    for (int j = 0; j < 3; j++){ lo[j] = MRF32(A + 4u * (uint32_t)j); hi[j] = MRF32(B + 4u * (uint32_t)j); }
+    if (!cull_xform(M, lo, hi, &cmp, &pb)) return 0;
+    for (int j = 0; j < 3; j++){ MRF32(A + 4u * (uint32_t)j) = lo[j]; MRF32(B + 4u * (uint32_t)j) = hi[j]; }
+    MRF32(e + 4u) = pb;                                   /* its fstp [esp+0x20] scratch */
+    cull_fsw(c, cmp);
+    c->eax = (M & 0xffff0000u) | fsw_get_top(c, ((uint32_t)c->top - 7u) & 7u);   /* fnstsw ax */
+    c->ecx = A + 12u; c->edx = M + 0x38u;
+    { uint32_t a = e - 12u, r = e; FLAGS_ADD_M(a, 0xcu, r, 32, F_ALL); }         /* add esp, 0xc */
+    POP32(c->eip);
+    return 1;
+}
+static int frustum_native(CPU *restrict c){
+    if (c->fcw & 0x0F00u) return 0;
+    uint32_t e = c->esp, P1 = MR32(e + 4u), P2 = MR32(e + 8u), M = MR32(e + 12u);
+    float lo[3], hi[3], C[3], H[3]; int cmp; float pb;
+    for (int j = 0; j < 3; j++){ lo[j] = MRF32(P1 + 4u * (uint32_t)j); hi[j] = MRF32(P2 + 4u * (uint32_t)j); }
+    if (M && !cull_xform(M, lo, hi, &cmp, &pb)) return 0;
+    float half = MRF32(0x00784260u), K = MRF32(0x007d7d3cu);
+    uint32_t ok = 1;
+    for (int j = 0; j < 3; j++){
+        float s = hi[j] + lo[j]; C[j] = s * half; H[j] = hi[j] - C[j];
+        ok &= cull_ok(s) & cull_ok(C[j]) & cull_ok(H[j]);
+    }
+    if (!ok) return 0;
+    uint32_t base = MR32(c->ecx), p = base + 0xc0u, inter = 0;
+    int k, last = 0;
+    for (k = 0; k < 6; k++, p += 16u){
+        float nx = MRF32(p), ny = MRF32(p + 4u), nz = MRF32(p + 8u), d = MRF32(p + 12u);
+        float r1 = __builtin_fabsf(nz) * H[2], r2 = __builtin_fabsf(nx) * H[0], r3 = __builtin_fabsf(ny) * H[1];
+        float r12 = r1 + r2, r = r12 + r3;
+        float s1 = C[2] * nz, s2 = C[0] * nx, s3 = C[1] * ny;
+        float s12 = s1 + s2, s123 = s12 + s3, s = s123 + d, sp = s + r;
+        if (!(cull_ok(r1) & cull_ok(r2) & cull_ok(r3) & cull_ok(r12) & cull_ok(r) & cull_ok(s1) & cull_ok(s2)
+              & cull_ok(s3) & cull_ok(s12) & cull_ok(s123) & cull_ok(s) & cull_ok(sp))) return 0;
+        if (sp < K) break;                                /* outside this plane */
+        float sm = s - r;
+        if (!cull_ok(sm)) return 0;
+        if (sm < K) inter = 1;
+        last = sm < K ? -1 : sm > K ? 1 : 0;
+    }
+    if (k < 6){                                           /* fcomp; ...; fstp st0; xor eax, eax */
+        cull_fsw(c, -1);
+        c->eax = 0; c->ecx = base + 0xc4u + 16u * (uint32_t)k; c->edx = (uint32_t)k + 1u;
+        FLAGS_LOG_M(0u, 32, F_ALL);
+    } else {                                              /* test esi, esi; sete al; inc eax */
+        cull_fsw(c, last);
+        uint32_t a = inter ? 0u : 1u, r = a + 1u;
+        c->eax = r; c->ecx = base + 0xc4u + 0x60u; c->edx = 7u;
+        FLAGS_LOG_M(inter, 32, F_ALL);
+        { uint32_t cf = c->cf; FLAGS_ADD_M(a, 1u, r, 32, F_ALL); c->cf = cf; }
+    }
+    POP32(c->eip); c->esp += 12u;
+    return 1;
+}
+#endif
+void sub_005bc210(CPU *restrict c){
+#ifdef __wasm__
+    if (xform_native(c)) return;
+#endif
+    g_cull_lifted++;
+    sub_005bc210_orig(c);
+}
+void sub_005bc300(CPU *restrict c){
+#ifdef __wasm__
+    if (frustum_native(c)) return;
+#endif
+    g_cull_lifted++;
+    sub_005bc300_orig(c);
+}
+void sub_0048ac60(CPU *restrict c){
+#ifdef __wasm__
+    if (frustum_native(c)) return;
+#endif
+    g_cull_lifted++;
+    sub_0048ac60_orig(c);
+}
+
+/* --- sub_0068ce7c: D3DXMatrixMultiply, the SSE version ---------------------
+ * (out, a, b), stdcall: out = a * b, 4x4 floats, returns out.  D3DX calls it
+ * through its CPU table for every matrix product: 2.7 % of a race frame in
+ * Chrome, where the lift does each packed operation lane by lane through the
+ * SSE NaN rule.  On wasm it runs here as f32x4 operations in the same order
+ * (row 0 (a0 b0 + a1 b1) + (a2 b2 + a3 b3), rows 1 and 2 summed left to
+ * right, row 3 as row 0): IEEE results like SSE's, denormals included (the
+ * game leaves MXCSR at its default).  A NaN anywhere runs the lifted body
+ * (wasm does not keep SSE's NaN operand order).  The same memory, eax, ecx,
+ * edx and xmm0-7 as the lifted body; tests/main_all.c section 8 checks it.
+ * The Mac keeps the lifted body. */
+void sub_0068ce7c_orig(CPU *c);
+uint64_t g_mmul_lifted;            /* calls that ran the lifted body (tests) */
+void sub_0068ce7c(CPU *restrict c){
+#ifdef __wasm__
+#pragma clang fp contract(off)
+    typedef float v4 __attribute__((vector_size(16), aligned(4)));
+    uint32_t e = c->esp, out = MR32(e + 4u), A = MR32(e + 8u), B = MR32(e + 12u);
+    v4 r0, r1, r2, r3; float a[16];
+    memcpy(&r0, g_mem + B, 16); memcpy(&r1, g_mem + B + 16u, 16);
+    memcpy(&r2, g_mem + B + 32u, 16); memcpy(&r3, g_mem + B + 48u, 16);
+    memcpy(a, g_mem + A, 64);
+#define BC(x_) ((v4){ (x_), (x_), (x_), (x_) })
+    v4 o0 = (BC(a[0]) * r0 + BC(a[1]) * r1) + (BC(a[2]) * r2 + BC(a[3]) * r3);
+    v4 o1 = ((BC(a[4]) * r0 + BC(a[5]) * r1) + BC(a[6]) * r2) + BC(a[7]) * r3;
+    v4 o2 = ((BC(a[8]) * r0 + BC(a[9]) * r1) + BC(a[10]) * r2) + BC(a[11]) * r3;
+    v4 p0 = r0 * BC(a[12]), p1 = r1 * BC(a[13]), p3 = r3 * BC(a[15]), q = r2 * BC(a[14]) + p3;
+    v4 o3 = (p0 + p1) + q;
+    __typeof__(o0 != o0) nan = (o0 != o0) | (o1 != o1) | (o2 != o2) | (o3 != o3);
+    if (!(nan[0] | nan[1] | nan[2] | nan[3])){
+        memcpy(g_mem + out, &o0, 16); memcpy(g_mem + out + 16u, &o1, 16);
+        memcpy(g_mem + out + 32u, &o2, 16); memcpy(g_mem + out + 48u, &o3, 16);
+        v4 x7 = BC(a[15]);
+        memcpy(&c->xmm[0], &o3, 16); memcpy(&c->xmm[1], &p1, 16); memcpy(&c->xmm[2], &q, 16); memcpy(&c->xmm[3], &p3, 16);
+        memcpy(&c->xmm[4], &o0, 16); memcpy(&c->xmm[5], &o1, 16); memcpy(&c->xmm[6], &o2, 16); memcpy(&c->xmm[7], &x7, 16);
+        c->eax = out; c->ecx = B; c->edx = out;
+        POP32(c->eip); c->esp += 12u;
+        return;
+    }
+#undef BC
+    g_mmul_lifted++;
+#endif
+    sub_0068ce7c_orig(c);
+}
+
 /* --- UI_ChoosePerformancePackage: a field the game never initialises ------
  * The Performance Shop's package screen (vtable 0x79D2D0, 0x250 bytes from
  * operator new, constructor sub_00559c90) never writes its field +0xC0, but

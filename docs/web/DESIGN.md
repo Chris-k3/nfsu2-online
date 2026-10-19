@@ -53,6 +53,12 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
     it reloaded them after every guest store). With the fused x87 rounding (`X87R2`) and an inline indirect-call
     fast path (`DISPATCH_CALL`, `g_dtab`): race game-thread time p50 −25 %, p95 and p99 about −20 % (Ryzen 5900X,
     Chrome 155, `web/tools/bench.mjs --env NFSU2_FIXED_DT=120`).
+  - A few hot routines run natively on wasm (`runtime/overrides.c`) where the result is provably the lifted body's,
+    and take the lifted body otherwise: the CRT's `_ftol2`, the view-frustum box test and its box transform (f32 at
+    PC=24; a NaN, an infinity or a float subnormal goes to the lifted body) and D3DXMatrixMultiply's SSE version
+    (f32x4; NaNs go to the lifted body). The last two were 8.5 % of a race frame, 2.9 % now. `tests/main_all.c`
+    sections 6 to 8 compare each with its lifted body. Tried and dropped: ThinLTO of the shards (slower), `_ftol2`
+    inline at the lifted call sites (no gain).
   - The compat headers (`runtime/web/compat/`) are force-included: Mach time, `os_unfair_lock`, kqueue, Mach task info,
     `pthread_exit` through a trampoline.
   - No Emscripten: the host is our own TypeScript (`web/src/host`).
@@ -103,6 +109,11 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
   The runtime runs as on the Mac with `NFSU2_SAVEDIR=/save` and `NFSU2_READONLY_DATA=1`.
 - **Clock:** `clock_gettime(MONOTONIC)` is `performance.timeOrigin + performance.now()`, which is one clock across
   workers.
+- **Frame pacing on Windows:** a worker's `Atomics.wait` timeout wakes on the OS timer, which Chrome on Windows runs
+  at 1 ms or at 15.6 ms (Chrome 155: a 1 ms wait took 15.5 ms at the median). The pacer's sleep
+  (`runtime/win32_ext.c`) therefore waits until a learned margin before its deadline and spins on the clock for the
+  rest, while the page draws (not in a hidden tab). A race at 4K on a 160 Hz screen (content rate 120, Ryzen 5900X)
+  went from ~105 to ~119.5 fps in the warm drive; before, one frame in five was presented late.
 
 ## 3. The renderer contract (C recorder ↔ TypeScript WebGPU encoder)
 
