@@ -56,7 +56,10 @@ h1, h2, h3, .status, .btn, .play, kbd, .set-label, .opt, .val, summary, .profile
   display: grid; grid-template-columns: 384px minmax(0, 1fr); gap: 24px; align-items: start;
 }
 .top { grid-column: 1 / -1; background: var(--frame); border-radius: 12px; padding: 16px 24px 24px; }
-.top-row { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; }
+.top-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 16px; }
+/* the note and the Discord button; the note on a 24 px line, on the grid beside the 40 px title and button */
+.top-end { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.top-end .hint { line-height: 24px; }
 .side, .content { display: grid; gap: 24px; min-width: 0; }
 .panel { background: var(--panel); border-radius: 12px; padding: 24px; min-width: 0; }
 .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
@@ -86,7 +89,7 @@ button, .file-btn { cursor: pointer; }
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   height: 40px; padding: 0 16px; border: 2px solid var(--edge); border-radius: 12px;
-  background: #080808; color: var(--text); font-size: 16px; line-height: 24px; white-space: nowrap;
+  background: #080808; color: var(--text); font-size: 16px; line-height: 24px; white-space: nowrap; text-decoration: none;
 }
 .btn:hover:not(:disabled) { border-color: var(--lime); }
 .btn.selected, .play {
