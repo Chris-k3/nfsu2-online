@@ -75,7 +75,7 @@ async function cacheFile(n: DNode) {
   const k = cacheKey(n);
   let p = cacheFiles.get(k);
   if (!p) {
-    p = openCacheFile(cacheDir, n).catch(e => { console.warn('cache disabled for', n.path, e); return null; });
+    p = openCacheFile(cacheDir, n).catch(e => { note(`[data] ${n.path} is not kept on this PC: ${e}`); return null; });
     cacheFiles.set(k, p);
   }
   return p;
@@ -85,26 +85,78 @@ function memPut(key: string, b: Uint8Array) {
   memBlocks.set(key, b); memBytes += b.length;
   for (const [k, v] of memBlocks) { if (memBytes <= MEM_BUDGET) break; memBlocks.delete(k); memBytes -= v.length; }
 }
+// a line for the game's log (F9 > Download log), as "[data] ...": what a read waited for on the server
+const note = (s: string) => (self as unknown as Worker).postMessage({ t: 'log', s });
 // At most FETCHES block requests in flight (the server holds each client address to 64 requests at once, so a
-// household of players behind one address stays well inside it), and a busy answer (429, 503) is tried again
-// after a pause instead of failing the game's read.  A block comes compressed when the server offers it (the
-// browser undoes the Content-Encoding), else as a byte range of the file.
-const FETCHES = 8;
-let fetching = 0;
+// household of players behind one address stays well inside it).  A block comes compressed when the server offers
+// it (the browser undoes the Content-Encoding), else as a byte range of the file.  A try that fails on the way (no
+// connection, a reset, a busy server's 429, 5xx or Cloudflare's 52x) or stalls (no byte for STALL_MS) is made
+// again after a pause, for as long as it takes, as the game's read of a slow disc would wait: the game cannot go
+// on without the bytes, and a failed read reaches it as one of 0 bytes.  Only an answer that cannot change by
+// asking again (another 4xx) fails the read, and a body of the wrong length after three tries.
+// NFSU2_DATA_FAULT (tests, the web suite's datafault): fail:N fails every Nth try as a lost connection, hang:N
+// leaves every Nth unanswered until its stall timer, stall:MS sets that timer.
+const FETCHES = 8, STALL_MS = 20000, SLOW_MS = 5000;
+let fetching = 0, tries = 0, fault: { fail: number; hang: number; stall: number } | null = null;
 const fetchWait: (() => void)[] = [];
+function faults() {
+  if (!fault) {
+    const kv = new Map((cfg.env?.NFSU2_DATA_FAULT ?? '').split(',').map(p => p.split(':') as [string, string]));
+    fault = { fail: +(kv.get('fail') ?? 0) || 0, hang: +(kv.get('hang') ?? 0) || 0, stall: +(kv.get('stall') ?? 0) || STALL_MS };
+  }
+  return fault;
+}
+/** one try: the block, or why it failed and whether asking again can help */
+async function fetchOnce(url: string, start: number, len: number): Promise<Uint8Array | { why: string; again: boolean; size?: boolean }> {
+  const f = faults(), ac = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const alive = () => { clearTimeout(timer); timer = setTimeout(() => ac.abort(), f.stall); };
+  alive();
+  try {
+    const k = ++tries;
+    if (f.fail && k % f.fail === 0) throw new TypeError('lost connection (NFSU2_DATA_FAULT)');
+    if (f.hang && k % f.hang === 0) await new Promise((_, no) => ac.signal.addEventListener('abort', () => no(new Error('aborted'))));
+    const r = await fetch(url, { headers: runs ? {} : { Range: `bytes=${start}-${start + len - 1}` }, cache: 'no-store', signal: ac.signal });
+    if (r.status !== 206 && r.status !== 200) {
+      await r.body?.cancel().catch(() => {});
+      return { why: `HTTP ${r.status}`, again: r.status === 408 || r.status === 429 || r.status >= 500 };
+    }
+    // the body as it comes, so that only a stalled one runs into the timer
+    const parts: Uint8Array[] = [];
+    let got = 0;
+    if (r.body) for (const rd = r.body.getReader(); ;) {
+      alive();
+      const { done, value } = await rd.read();
+      if (done) break;
+      parts.push(value); got += value.length;
+    }
+    let b = new Uint8Array(got);
+    for (let i = 0, o = 0; i < parts.length; o += parts[i].length, i++) b.set(parts[i], o);
+    if (r.status === 200 && !runs) b = b.slice(start, start + len);           // a range answered with the whole file: our block of it
+    return b.length === len ? b : { why: `${b.length} of ${len} bytes`, again: true, size: true };
+  } catch (e) {
+    return { why: ac.signal.aborted ? `no answer for ${f.stall / 1000} s` : String((e as Error)?.message ?? e), again: true };
+  } finally { clearTimeout(timer); }
+}
 async function fetchBlock(n: DNode, bi: number, start: number, len: number): Promise<Uint8Array> {
   while (fetching >= FETCHES) await new Promise<void>(r => fetchWait.push(r));
   fetching++;
+  const what = `${n.path} block ${bi}`, t0 = performance.now();
+  const slow = setTimeout(() => note(`[data] ${what}: waiting for the server for ${SLOW_MS / 1000} s`), SLOW_MS);
   try {
     const url = runs ? runUrl(runs.url, n.path, bi, 1, n) : dataUrl(cfg.dataBase, n.path);
-    for (let attempt = 0, wait = 250; ; attempt++, wait = Math.min(wait * 2, 4000)) {
-      const r = await fetch(url, { headers: runs ? {} : { Range: `bytes=${start}-${start + len - 1}` }, cache: 'no-store' });
-      if ((r.status === 429 || r.status === 503) && attempt < 12) { await r.body?.cancel(); await new Promise(res => setTimeout(res, wait)); continue; }
-      if (r.status !== 206 && r.status !== 200) throw new Error(`HTTP ${r.status} for ${n.path}`);
-      const b = new Uint8Array(await r.arrayBuffer());
-      return r.status === 200 && !runs ? b.slice(start, start + len) : b;      // a range answered with the whole file: our block of it
+    for (let k = 1, wait = 250, sized = 0; ; k++, wait = Math.min(wait * 2, 8000)) {
+      const r = await fetchOnce(url, start, len);
+      if (r instanceof Uint8Array) {
+        const s = (performance.now() - t0) / 1000;
+        if (k > 1 || s >= SLOW_MS / 1000) note(`[data] ${what}: in after ${s.toFixed(1)} s${k > 1 ? `, ${k} tries` : ''}`);
+        return r;
+      }
+      if (!r.again || (r.size && ++sized >= 3)) throw new Error(`${what}: ${r.why}`);
+      if (k <= 3 || k % 10 === 0) note(`[data] ${what}: ${r.why}; again in ${wait / 1000} s (try ${k + 1})`);
+      await new Promise(res => setTimeout(res, wait));
     }
-  } finally { fetching--; fetchWait.shift()?.(); }
+  } finally { clearTimeout(slow); fetching--; fetchWait.shift()?.(); }
 }
 async function getBlock(n: DNode, bi: number): Promise<Uint8Array> {
   const key = n.path + '#' + bi;
@@ -119,7 +171,6 @@ async function getBlock(n: DNode, bi: number): Promise<Uint8Array> {
       const b = new Uint8Array(len); cf.h.read(b, { at: start }); memPut(key, b); return b;
     }
     const b = await fetchBlock(n, bi, start, len);
-    if (b.length !== len) throw new Error(`short read ${n.path} block ${bi}: ${b.length}/${len}`);
     if (cf) putBlock(cf, bi, b);
     memPut(key, b);
     return b;
@@ -274,7 +325,7 @@ async function op(o: Op, a: bigint[]): Promise<number> {
       if (f.mount === 'dev') {
         if (f.path !== 'null') { const mem = u8(); for (const d of dst) { const b = new Uint8Array(d.len); if (f.path === 'urandom') crypto.getRandomValues(b); mem.set(b, d.ptr); got += d.len; } }
       }
-      else if (f.mount === 'data') { try { got = await dataRead(f.node!, pos, dst); } catch (e) { console.error(e); return E.IO; } }
+      else if (f.mount === 'data') { try { got = await dataRead(f.node!, pos, dst); } catch (e) { note(`[data] a read of ${f.path} failed: ${(e as Error)?.message ?? e}`); return E.IO; } }
       else {
         const mem = u8(); let p = pos;
         for (const d of dst) { const b = new Uint8Array(d.len); const k = f.sh!.read(b, { at: p }); mem.set(b.subarray(0, k), d.ptr); p += k; got += k; if (k < d.len) break; }

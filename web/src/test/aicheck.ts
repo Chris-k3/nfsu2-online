@@ -46,6 +46,7 @@ const proc = await startProcess({
     dataBase: '/data/', manifestUrl: '/data-manifest', saveDir,
   },
   onLog: (s, fd, tid) => log(`[${tid}${fd === 2 ? '!' : ''}] ${s}`),
+  onNote: log,
 });
 
 let audio: AudioHandle | null = null, input: InputHandle | null = null;

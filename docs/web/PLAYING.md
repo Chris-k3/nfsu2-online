@@ -270,7 +270,7 @@ Good to know:
 | "A new version of the game is on the server" | Press **Reload**: the page loads the new version, and your saves and settings stay. The log is cleared by the reload, so download it first if you want to keep it. |
 | "Open elsewhere" | The game runs in another tab of this browser. Switch to it, or close it. |
 | No sound | Click the game or press a key. Check the sound setting and the output latency (try "Robust"). |
-| Stuck on a loading screen | F9, Quit game; then "Close the game now"; then "Stop the game". |
+| Stuck on a loading screen | F9, Quit game; then "Close the game now"; then "Stop the game". When the log ends in `[data]` lines, the game was waiting for its data from the server: it goes on when the data comes. |
 | Anything odd | F9, Download log (or "Download log" on the start page after the game ended) and keep the file. It has the game's own log. Before you post it anywhere: it names your browser, its version and your system, your graphics chip, your time zone, and the names and virtual addresses of the players you met (not the server's address: only whether it was this machine, on the LAN or remote). |
 | `Port 8080 is in use` when starting | The server already runs; open its address. Or start on another port: `web/start.sh --http-port 9080`. |
 | Full screen | The game plays in the browser window. F9, Full screen goes full screen, and holding Esc leaves it (in Firefox, a press). "Full screen on Play" in Settings starts every game full screen. |

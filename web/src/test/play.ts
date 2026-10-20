@@ -56,6 +56,7 @@ let r: Renderer | null = null;
 const p = await startProcess({
   module: mod, pool: +(q.get('pool') ?? 24), initialPages: q.get('pages') ? +q.get('pages')! : undefined,
   cfg: { args: ['nfsu2', ...q.getAll('arg')], env: { HOME: '/save', NFSU2_DATA: '/data', ...env }, dataBase: '/data/', manifestUrl: '/data-manifest', saveDir },
+  onNote: log,
   onLog: (s, fd, tid) => {
     log(`[${tid}${fd === 2 ? '!' : ''}] ${s}`);
     if (bench && s.includes('tapuntil PC_Loading.fng satisfied')) loadT0 = performance.now();

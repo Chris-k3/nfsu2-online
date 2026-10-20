@@ -13,6 +13,8 @@ export interface ProcessOptions {
   onRegister?: (kind: number, ptr: number, size: number) => void;
   /** the game closed a file of the save overlay it had written (a profile, registry.txt ...), path relative to /save */
   onSaved?: (path: string) => void;
+  /** a line of the host's own for the log, from no game thread (the I/O worker's "[data] ...") */
+  onNote?: (s: string) => void;
 }
 
 export interface GameProcess {
@@ -65,7 +67,7 @@ export async function startProcess(o: ProcessOptions): Promise<GameProcess> {
     io.onmessage = (e) => { if (e.data.t === 'io-ready') res(); else if (e.data.t === 'io-error') rej(new Error(e.data.msg)); };
     io.postMessage({ memory, ctl: ctlBuf, rpc, cfg });
   });
-  io.onmessage = (e) => { if (e.data.t === 'saved') o.onSaved?.(e.data.path); };
+  io.onmessage = (e) => { if (e.data.t === 'saved') o.onSaved?.(e.data.path); else if (e.data.t === 'log') o.onNote?.(e.data.s); };
 
   const ready: Promise<void>[] = [];
   for (let s = 0; s < pool; s++) {

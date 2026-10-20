@@ -60,6 +60,7 @@ export class GameSession {
       cfg: { args: ['nfsu2', '/data/SPEED2.EXE'], env: o.env, dataBase: DATA_BASE, manifestUrl: MANIFEST_URL, saveDir: o.saveDir },
       onLog: (line, fd, t) => o.log(`${tid(t, fd)} ${line}`),
       onSaved: o.onSaved,
+      onNote: o.log,
     });
     s.exited = s.proc.exited.then(code => { s.exitCode = code; s.detach(); return code; });
     void s.proc.registered(HostKind.Status).then(r => { if (!s.detached) s.status = new StatusReader(s.proc.memory, r.ptr); });
