@@ -242,10 +242,13 @@ int roam_game_racing(void);                                  /* roam_game.c: the
  * told, and a shop and loading are in between: a friend who goes into a shop
  * and comes back is not announced.  A place is told once it has held for
  * 1.5 s, so a friend passing through a loading screen is not announced
- * either.  While the player races (a race, or an outrun with a friend)
- * nothing is shown; the places are still followed, so no pile of old
- * notices comes when it ends.  All with the lock held. */
+ * either.  Going from free roam into a race, and quitting, are told only of
+ * a friend whose car was near ours (NEAR_M): one far away is not missed.
+ * While the player races (a race, or an outrun with a friend) nothing is
+ * shown; the places are still followed, so no pile of old notices comes
+ * when it ends.  All with the lock held. */
 #define NOTICE_HOLD_US 1500000
+#define NEAR_M 150.f
 static struct { uint32_t id; uint8_t told, cand, roam; int64_t since; } g_where[RC_TABLE];   /* roam: "joined free roam" told since the menus */
 /* the players whose joining was told: once each (with the hub, a player
  * near us now and then, or passing by, comes and goes as a peer) */
@@ -264,6 +267,15 @@ static void notice(const char *name, const char *what){
     if (MB && n > 0) tx_push(NET_KIND_NOTICE, 0, 0, (const uint8_t *)t, n);
 }
 static uint8_t place(const rc_peer *p){ return p->status == RC_ST_PAUSED ? RC_ST_ROAM : p->status; }
+/* we are in free roam and the friend's car was within NEAR_M of ours (on the
+ * ground) when last seen: SNAPs come only from free roam, so its newest state
+ * is where it was before a race or a quit */
+static int nearby(const rc_peer *p){
+    if ((g_s->status != RC_ST_ROAM && g_s->status != RC_ST_PAUSED) || !g_s->nlast || !p->mo.n) return 0;
+    const float *a = g_s->last[0].p, *b = p->mo.s[p->mo.n - 1].p;
+    float dx = a[0] - b[0], dy = a[1] - b[1];
+    return dx * dx + dy * dy <= NEAR_M * NEAR_M;
+}
 static void where_watch(int64_t now){
     for (int i = 0; i < RC_TABLE; i++){
         const rc_peer *p = &g_s->peer[i];
@@ -278,7 +290,7 @@ static void where_watch(int64_t now){
         if (g_where[i].cand == g_where[i].told || now - g_where[i].since < NOTICE_HOLD_US) continue;
         uint8_t was = g_where[i].told;
         g_where[i].told = g_where[i].cand;
-        if (st == RC_ST_EVENT) notice(p->name, " is in a race");
+        if (st == RC_ST_EVENT){ if (was == RC_ST_ROAM && nearby(p)) notice(p->name, " is in a race"); }
         else if (st == RC_ST_MENUS) g_where[i].roam = 0;                   /* out of free roam: not told */
         else if (!g_where[i].roam){ g_where[i].roam = 1; told_once(p->id); notice(p->name, " joined free roam"); }
         else if (was == RC_ST_EVENT) notice(p->name, " is in free roam");
@@ -289,18 +301,18 @@ static void io_event(void *u, int ev, int peer, const char *text){
     if (peer < 0 || peer >= RC_TABLE) return;
     const rc_peer *p = &g_s->peer[peer];
     if (ev == RC_EV_JOIN){
-        /* in the menus (or a shop, or loading): told when the car gets to free roam */
+        /* in the menus, a race (or a shop, or loading): told when the car gets to free roam */
         uint8_t st = place(p);
         g_where[peer].id = p->id; g_where[peer].told = g_where[peer].cand = st; g_where[peer].roam = st == RC_ST_ROAM;
         g_where[peer].since = roam_plat_now_us();
         if (st == RC_ST_ROAM && told_once(p->id)) notice(p->name, " joined free roam");
-        else if (st == RC_ST_EVENT && told_once(p->id)) notice(p->name, " is online (in a race)");
     } else if (ev == RC_EV_LEAVE){
         /* roam_core.c drop_peer: "<name> left: <why>"; a restart joins again at once, another room was never ours,
-         * one out of range (the hub's list) is still playing */
+         * one out of range (the hub's list) is still playing.  Quitting: the place held last (the
+         * game's last frames may be another), and only from free roam near us */
         const char *why = strstr(text, " left: ");
         why = why ? why + 7 : "";
-        if (!strcmp(why, "quit")) notice(p->name, " left");
+        if (!strcmp(why, "quit")){ if (g_where[peer].id == p->id && g_where[peer].told == RC_ST_ROAM && nearby(p)) notice(p->name, " left"); }
         else if (!strcmp(why, "switched off")) notice(p->name, " turned free roam off");
         else if (!strcmp(why, "timeout") || !strcmp(why, "no longer hears us")) notice(p->name, " lost the connection");
         g_where[peer].id = 0;

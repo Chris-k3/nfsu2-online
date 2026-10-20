@@ -36,8 +36,8 @@ const p = await startProcess({
   cfg: { args: ['nfsu2', ...(q.getAll('arg'))], env: { HOME: '/save', NFSU2_DATA: '/data', ...env, ...Object.fromEntries(q.getAll('env').map(e => [e.slice(0, e.indexOf('=')), e.slice(e.indexOf('=') + 1)])) }, dataBase: '/data/', manifestUrl: '/data-manifest', saveDir: q.get('save') ?? 'save-test' },
   onLog: (s, fd, tid) => log(`[${tid}${fd === 2 ? '!' : ''}] ${s}`),
 });
-// ?net=<name>: the virtual LAN (web/src/net) under that player name
-const net = q.has('net') ? attachNet(p, { name: q.get('net') || 'test', log }) : null;
+// ?net=<name>: the virtual LAN (web/src/net) under that player name; the notices the app shows over the game, logged
+const net = q.has('net') ? attachNet(p, { name: q.get('net') || 'test', log, onNotice: t => log(`[notice] ${t}`) }) : null;
 (globalThis as any).nfsu2Net = net;
 const code = await p.exited;
 if (net) log(`NET ${JSON.stringify(net.stats())}`);
