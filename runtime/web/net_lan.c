@@ -710,7 +710,7 @@ int vlan_hello(const char *path, NetIdent *id){
     /* a page that never attached the network (web/src/net): waited for once,
      * then every later WSAStartup fails at once instead of stalling the game */
     static int waited_unattached;
-    if (ld(&MB->page_state) == NET_PAGE_NONE && waited_unattached) return WSAENETDOWN;
+    if (ld(&MB->page_state) == NET_PAGE_NONE && waited_unattached){ set_want(0); return WSAENETDOWN; }
     if (!wait_online()){
         uint32_t ps = ld(&MB->page_state);
         set_want(0);                                     /* no session opened (the game's WSAStartup fails) */
@@ -730,16 +730,19 @@ int vlan_hello(const char *path, NetIdent *id){
     return 0;
 }
 /* At every WSAStartup after the first.  A session that starts while the page
- * has let the switch go (NET_PAGE_IDLE) waits for it to connect again, at
- * most 5 s.  A new address from the switch (it gave this browser another one
- * after the page let go, or the server restarted) is taken at the start of a
- * session; within a session the sockets are bound to the old one, so the
- * network is down for it, as with the Mac's hub. */
+ * is not on the switch (it let it go: NET_PAGE_IDLE, or it is still
+ * connecting again after that, or lost it) waits for it, at most 5 s, as
+ * the first does: after an idle the switch gives another address, and a
+ * session started on the old one would stay without network.  A new
+ * address from the switch (it gave this browser another one after the page
+ * let go, or the server restarted) is taken at the start of a session;
+ * within a session the sockets are bound to the old one, so the network is
+ * down for it, as with the Mac's hub. */
 int vlan_alive(void){
     if (!MB || !g_hello) return 0;
     if (!winsock_session_active()){
         set_want(1);
-        if (ld(&MB->page_state) == NET_PAGE_IDLE && !wait_online()){
+        if (!wait_online()){
             ws_log("virtual LAN: not connected again after 5 s (%s): no LAN play",
                    ld(&MB->page_state) == NET_PAGE_IDLE ? "the page did not answer" : "the page is still connecting to the server's switch");
             set_want(0);

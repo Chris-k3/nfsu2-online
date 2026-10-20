@@ -523,6 +523,11 @@ int main(void){
       r = WS("WSAStartup", 2, 0x0202u, GA(g_wsa));
       check("WSAStartup while the page has let go and does not come back in 5 s: fails, no session",
             r != 0 && MB->want == 0 && MB->tx_bell == bell + 2, "r=%u want %u bells %u", r, MB->want, MB->tx_bell - bell); }
+    /* still connecting again (after an idle the switch gives another address): no session on the old one */
+    MB->page_state = NET_PAGE_CONNECTING; vlan_test_pump();
+    r = WS("WSAStartup", 2, 0x0202u, GA(g_wsa));
+    check("WSAStartup while the page is still connecting again, 5 s: fails, no session on the old address",
+          r != 0 && MB->want == 0, "r=%u want %u", r, MB->want);
     /* the page is back with another address, on 10.77.0.0/22 */
     MB->vip = 0x0A4D0211u; MB->netmask = 0xFFFFFC00u; MB->generation = 3;              /* 10.77.2.17 */
     memset(MB->peer_bits, 0, sizeof MB->peer_bits);
