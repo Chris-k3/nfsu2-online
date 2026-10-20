@@ -1261,20 +1261,34 @@ static void tags_update(CPU *c){
 #define FN_POOL_ALLOC   0x0043f8f0u   /* cdecl (pool) */
 #define FN_NODE_ALLOC   0x00440ec0u   /* cdecl (): a list node, +8 its data */
 #define MM_AIRACER      3u
-static struct { uint32_t hud, icons, copy[NSLOT]; int ncopy; uint32_t icon_car[NSLOT]; int said; } g_mm;
+static struct { uint32_t hud, icons, copy[NSLOT], hash[NSLOT]; int ncopy; uint32_t icon_car[NSLOT]; int said; } g_mm;
 /* a visual (a free one, or one for a copy of AIRACERINDICATOR_0) in the free list */
 static int mm_visual_held(uint32_t icons, uint32_t fo){
     for (uint32_t n = rd32(G_MM_VISUALS), m = 0; n && n != G_MM_VISUALS && m < 256; n = rd32(n), m++) if (rd32(rd32(n + 8u)) == fo) return 1;
     for (uint32_t n = rd32(icons), m = 0; n && n != icons && m < 256; n = rd32(n), m++) if (rd32(rd32(n + 0x1cu)) == fo) return 1;
     return 0;
 }
+/* a copy is the HUD package's object: a HUD made again (after a shop the
+ * new one can have the old one's address, and g_mm.hud is the same) has
+ * none of ours, they were freed with the old package.  So a copy is taken
+ * again only while the package still holds it under its name (a freed one
+ * drawn by the minimap faulted in the arrow's rotation, 0x517C80) */
+static int mm_copy_live(CPU *c, uint32_t icons, int i){
+    uint32_t pk = gcall1(c, FN_FE_PACKAGE, 0, rd32(icons + 0x18u));
+    return ok(pk, 0x54) && fe_list_of(pk + 0x4cu, g_mm.copy[i], 0) && rd32(g_mm.copy[i] + 0x10u) == g_mm.hash[i];
+}
 static int mm_visual(CPU *c, uint32_t icons){
     for (uint32_t n = rd32(G_MM_VISUALS), m = 0; n && n != G_MM_VISUALS && m < 256; n = rd32(n), m++){
         uint32_t v = rd32(n + 8u);
         if (ok(v, 8) && MR32(v + 4u) == MM_AIRACER) return 1;
     }
-    uint32_t fo = 0;
-    for (int i = 0; i < g_mm.ncopy && !fo; i++) if (!mm_visual_held(icons, g_mm.copy[i])) fo = g_mm.copy[i];
+    int i = 0;
+    while (i < g_mm.ncopy && mm_visual_held(icons, g_mm.copy[i])) i++;
+    uint32_t fo = i < g_mm.ncopy ? g_mm.copy[i] : 0;
+    if (fo && !mm_copy_live(c, icons, i)){
+        rlog("[roam] f=%ld minimap: a new HUD at the old one's address: its %d copies of AIRACERINDICATOR_0 forgotten\n", rh_frame(), g_mm.ncopy);
+        g_mm.ncopy = 0; fo = 0;
+    }
     if (!fo){
         if (g_mm.ncopy >= NSLOT) return 0;
         uint32_t pkg = rd32(icons + 0x18u), sa = g_gmem + TAG_SCR + 0x48u;
@@ -1283,7 +1297,7 @@ static int mm_visual(CPU *c, uint32_t icons){
         char nm[24]; snprintf(nm, sizeof nm, "ROAM_AIRACER_%d", g_mm.ncopy);
         fo = ok(o0, 0x5c) ? fe_clone(c, pkg, o0, nm) : 0;
         if (!fo) return 0;
-        g_mm.copy[g_mm.ncopy++] = fo;
+        g_mm.hash[g_mm.ncopy] = MR32(fo + 0x10u); g_mm.copy[g_mm.ncopy++] = fo;
     }
     uint32_t pool = rd32(G_MM_VISPOOL), v = pool ? rh_call(c, FN_POOL_ALLOC, 0, 0, 1, &pool) : 0, n = v ? rh_call(c, FN_NODE_ALLOC, 0, 0, 0, 0) : 0;
     if (!ok(v, 8) || !ok(n, 12)) return 0;
@@ -2033,6 +2047,7 @@ void roam_game_frame(CPU *c){
             world_gone();
             flush_unloads(c);                           /* before the next world loads its own cars */
             memset(&g_tag, 0, sizeof g_tag);            /* never touch the old HUD's objects */
+            memset(&g_mm, 0, sizeof g_mm);              /* (nor its minimap's: the next HUD may be at its address) */
         }
         g_world_seen = w;
     }
