@@ -241,7 +241,9 @@ disk and a 1 Gbit/s port with a few TB of traffic a month.
 - **In every mode the server:**
   - answers only `GET` and `HEAD`, and only for its own names (any other `Host` gets 421);
   - sends HSTS when the page arrived over https for its name (not for `localhost` or an IP address);
-  - keeps proxies and CDNs from storing anything (`Cache-Control: private`, `CDN-Cache-Control: no-store`);
+  - keeps proxies and CDNs from storing anything (`Cache-Control: private`, `CDN-Cache-Control: no-store`), but
+    the game data's runs (`/data-blocks/`), which a CDN may keep for good when their address names the file's
+    version (the Cache Rule in [Cloudflare](#cloudflare));
   - limits what one client can make it hold (`web/test/deploy.test.mjs`, `web/test/audit.test.mjs`). A client is
     an IPv4 address or an IPv6 /56; all clients of one IPv6 /48 (a site) together get twice one client's share:
     - 64 connections at once per client and 128 per site, for TCP peers that are not a trusted proxy (a proxy
@@ -323,8 +325,15 @@ The console names paths and addresses: it is yours.
 
    The page's Content-Security-Policy blocks injected scripts, and Rocket Loader would also rewrite the page's own
    module scripts.
-7. **Caching:** add a Cache Rule "Bypass cache" for your hostname. The server's headers already say `no-store` to
-   Cloudflare (`Cloudflare-CDN-Cache-Control`); the rule makes it explicit.
+7. **Caching:** one Cache Rule, which lets Cloudflare keep the game data (Caching, Cache Rules): URI Path wildcard
+   `/data-blocks/*` (the `*` matters: without it only `/data-blocks/` itself matches), Eligible for cache, Edge TTL
+   "Use cache-control header if present, bypass cache if not", Browser TTL "Respect origin TTL", the cache key as it
+   is (it must keep the query string). Turn on Smart Tiered Caching too. The server then says which runs Cloudflare
+   may keep, for good: those whose address names the file's version, compressed or not compressible (the movies
+   too). A run asked twice answers `cf-cache-status: MISS`, then `HIT`. At about 110 players the 1 Gbit uplink was
+   full without it. Everything else already says `no-store` to Cloudflare (`Cloudflare-CDN-Cache-Control`), so no
+   "Bypass cache" rule is needed; delete one from before: of the rules that match, the last one's settings win, and
+   a bypass for the whole hostname after this rule turns the game data's cache off.
 8. **WebSockets** are on by default on every plan. The server pings each connection every 25 s, well inside
    Cloudflare's idle limit.
 
@@ -347,13 +356,8 @@ Through a real Cloudflare: **UNVERIFIED**. The client's address was checked with
 
 3. Run `docker compose up -d`. Skip the setup's firewall step for 80 and 443 (`ufw allow 22/tcp && ufw --force
    enable`).
-4. Let Cloudflare keep the game data (Caching, Cache Rules, one rule): URI Path wildcard `/data-blocks/*` (the
-   `*` matters: without it only `/data-blocks/` itself matches), Eligible for cache, Edge TTL "Use cache-control
-   header if present, bypass cache if not", Browser TTL "Respect origin TTL", the cache key as it is (it must keep
-   the query string). Turn on Smart Tiered Caching too. The server then says which runs Cloudflare may keep, for
-   good: those whose address names the file's version, compressed or not compressible (the movies too). A run
-   asked twice answers `cf-cache-status: MISS`, then `HIT`. At about 110 players the 1 Gbit uplink was full
-   without it.
+4. Let Cloudflare keep the game data: the Cache Rule for `/data-blocks/*` of the proxy's step 7 above, and no
+   "Bypass cache" rule for the hostname.
 
 What follows from this setup:
 
@@ -363,7 +367,7 @@ What follows from this setup:
 - **The client's address** comes from Cloudflare's `CF-Connecting-IP`, and only from `cloudflared`. It opens a
   connection to the server for each request in progress and has no limit of its own per client: the server's own
   limits per client address hold.
-- **Settings:** 6 to 8 of the proxy's list above apply too.
+- **Settings:** 6 and 8 of the proxy's list above apply too (7 is step 4 here).
 
 A real tunnel was **not** opened here (**UNVERIFIED**). The layout was: `cloudflared` stood in by a container that
 reaches the server on 127.0.0.1, crashes of either side, a reboot.

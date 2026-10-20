@@ -87,8 +87,11 @@ export function securityHeaders({ hsts = false, csp = CSP, noindex = true } = {}
 }
 
 // ---- caching -------------------------------------------------------------------
-// Shared caches never keep anything: 'private' says so to every cache, and
+// Shared caches keep nothing: 'private' says so to every cache, and
 // CDN-Cache-Control / Cloudflare-CDN-Cache-Control speak to the CDN alone.
+// One exception, set over these: a run of the game data whose address names
+// the file's version may stay at the CDN for good (server.mjs sendBlocks,
+// EDGE_KEEP).
 // no-transform: a proxy hands the bytes on as they are (the brotli module, the
 // byte ranges of the game files).  The browser keeps nothing ('store'), or
 // keeps a copy it must revalidate each time ('revalidate': the game module,
