@@ -230,6 +230,7 @@ static void io_broadcast(void *u, uint16_t port, const uint8_t *buf, int len){
     do_send(NET_BROADCAST, port, buf, len, 1);                 /* every other browser on the switch */
 }
 void roam_game_event(int ev, int peer, const char *text);    /* roam_game.c provides the log */
+int roam_game_racing(void);                                  /* roam_game.c: the player races (no notices) */
 
 /* ---- notices: what the page shows over the game ----------------------------------
  * A friend joining free roam, going into a race, back in free roam after it, and
@@ -241,7 +242,9 @@ void roam_game_event(int ev, int peer, const char *text);    /* roam_game.c prov
  * told, and a shop and loading are in between: a friend who goes into a shop
  * and comes back is not announced.  A place is told once it has held for
  * 1.5 s, so a friend passing through a loading screen is not announced
- * either.  All with the lock held. */
+ * either.  While the player races (a race, or an outrun with a friend)
+ * nothing is shown; the places are still followed, so no pile of old
+ * notices comes when it ends.  All with the lock held. */
 #define NOTICE_HOLD_US 1500000
 static struct { uint32_t id; uint8_t told, cand, roam; int64_t since; } g_where[RC_TABLE];   /* roam: "joined free roam" told since the menus */
 /* the players whose joining was told: once each (with the hub, a player
@@ -254,6 +257,7 @@ static int told_once(uint32_t id){
     return 1;
 }
 static void notice(const char *name, const char *what){
+    if (roam_game_racing()) return;
     char t[96];
     int n = snprintf(t, sizeof t, "%s%s", name && *name ? name : "A player", what);
     if (n > (int)sizeof t - 1) n = (int)sizeof t - 1;

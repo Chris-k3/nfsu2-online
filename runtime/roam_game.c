@@ -1940,6 +1940,10 @@ static void du_hud(CPU *c, int64_t host){
 /* the app has parked the game in the background (macOS: lifecycle.c; the
  * game thread then waits in GetMessageA and this file runs no frame) */
 static int g_parked;
+/* the player races: a race of the game's, or an outrun with a friend (set
+ * each frame with the lock held; roam_web.c shows no notices then) */
+static int g_racing;
+int roam_game_racing(void){ return g_racing; }     /* with the lock held */
 static uint8_t local_status(int in_roam){
     uint32_t flow = rd32(G_FLOW);
     if (in_roam) return g_sync_paused > 1 || g_parked ? RC_ST_PAUSED : RC_ST_ROAM;
@@ -2275,7 +2279,9 @@ void roam_game_frame(CPU *c){
         memcpy(g_lp, ls.p, sizeof g_lp); g_lp_ok = 1;
     }
     roam_plat_lock();
-    rc_set_status(&g_s, local_status(in_roam));
+    uint8_t st = local_status(in_roam);
+    rc_set_status(&g_s, st);
+    g_racing = st == RC_ST_EVENT || (in_roam && du_racing(rd32(G_RACE)));
     if (cfgn > 0){
         uint16_t before = g_s.cfg_rev;
         rc_set_cfg(&g_s, cfgb, cfgn, host);

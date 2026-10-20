@@ -20,6 +20,7 @@ static int g_fail, g_pass;
 /* roam_bsd.c logs events through the game; here they are counted */
 static int g_ev[8];
 void roam_game_event(int ev, int peer, const char *text){ (void)peer; (void)text; if (ev >= 0 && ev < 8) g_ev[ev]++; }
+int roam_game_racing(void){ return 0; }      /* roam_web.c (the wasm build of these tests) */
 
 static uint32_t rng = 12345;
 static uint32_t rnd(void){ rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return rng; }
