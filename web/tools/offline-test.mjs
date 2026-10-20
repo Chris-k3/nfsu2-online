@@ -103,7 +103,7 @@ try {
     }, null, { timeout: 30000, polling: 250 });
     await page.waitForFunction(() => !!navigator.serviceWorker.controller, null, { timeout: 30000 });
     const kept = await page.waitForFunction(async () => {
-      const c = await caches.open('nfsu2-offline-1'), keys = (await c.keys()).map(r => new URL(r.url).pathname);
+      const c = await caches.open('nfsu2-offline-2'), keys = (await c.keys()).map(r => new URL(r.url).pathname);
       return keys.length >= 10 && keys;
     }, null, { timeout: 60000, polling: 500 }).then(h => h.jsonValue(), () => null);
     await page.waitForFunction(() => !/Counting/.test(document.querySelector('#cache-info').textContent), null, { timeout: 30000 });

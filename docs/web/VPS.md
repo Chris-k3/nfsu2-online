@@ -126,7 +126,8 @@ disk and a 1 Gbit/s port with a few TB of traffic a month.
 - The server relays and serves files. It used about 110 MB of memory here, plus up to 10 MB queued towards each
   player who falls behind (8 MB on the connection, 2 MB more of LAN-race data in the switch's own queue).
 - The game folder takes about 3 GB of disk.
-- Each new player downloads the 7 MB module and then the game data they play (about 70 MB for a quick race, up to
+- Each new player downloads the 7 MB module (again after each new build; with the Cache Rule below from Cloudflare,
+  which takes it from the server once) and then the game data they play (about 70 MB for a quick race, up to
   the whole 3 GB over a career), once: the browser keeps it. The data is compressed on the way (zstd, or br through
   Cloudflare): all but the movies is 1.37 GB on the network for 1.98 GB, the tracks about 40 %; the movies' video
   does not compress and goes as it is. "Preload the game data" on the start page fetches all but the movies at
@@ -242,8 +243,8 @@ disk and a 1 Gbit/s port with a few TB of traffic a month.
   - answers only `GET` and `HEAD`, and only for its own names (any other `Host` gets 421);
   - sends HSTS when the page arrived over https for its name (not for `localhost` or an IP address);
   - keeps proxies and CDNs from storing anything (`Cache-Control: private`, `CDN-Cache-Control: no-store`), but
-    the game data's runs (`/data-blocks/`), which a CDN may keep for good when their address names the file's
-    version (the Cache Rule in [Cloudflare](#cloudflare));
+    the game data's runs (`/data-blocks/`) and the module (`/game.wasm`), which a CDN may keep for good when their
+    address names the file's version or the module's hash (the Cache Rule in [Cloudflare](#cloudflare));
   - limits what one client can make it hold (`web/test/deploy.test.mjs`, `web/test/audit.test.mjs`). A client is
     an IPv4 address or an IPv6 /56; all clients of one IPv6 /48 (a site) together get twice one client's share:
     - 64 connections at once per client and 128 per site, for TCP peers that are not a trusted proxy (a proxy
@@ -325,13 +326,16 @@ The console names paths and addresses: it is yours.
 
    The page's Content-Security-Policy blocks injected scripts, and Rocket Loader would also rewrite the page's own
    module scripts.
-7. **Caching:** one Cache Rule, which lets Cloudflare keep the game data (Caching, Cache Rules): URI Path wildcard
-   `/data-blocks/*` (the `*` matters: without it only `/data-blocks/` itself matches), Eligible for cache, Edge TTL
-   "Use cache-control header if present, bypass cache if not", Browser TTL "Respect origin TTL", the cache key as it
-   is (it must keep the query string). Turn on Smart Tiered Caching too. The server then says which runs Cloudflare
-   may keep, for good: those whose address names the file's version, compressed or not compressible (the movies
-   too). A run asked twice answers `cf-cache-status: MISS`, then `HIT`. At about 110 players the 1 Gbit uplink was
-   full without it. Everything else already says `no-store` to Cloudflare (`Cloudflare-CDN-Cache-Control`), so no
+7. **Caching:** one Cache Rule, which lets Cloudflare keep the game data and the module (Caching, Cache Rules): URI
+   Path wildcard `/data-blocks/*` (the `*` matters: without it only `/data-blocks/` itself matches) or URI Path
+   equals `/game.wasm`, Eligible for cache, Edge TTL "Use cache-control header if present, bypass cache if not",
+   Browser TTL "Respect origin TTL", the cache key as it is (it must keep the query string). Turn on Smart Tiered
+   Caching too. The server then says what Cloudflare may keep, for good: the runs whose address names the file's
+   version, compressed or not compressible (the movies too), and the module at the address that names its hash
+   (`/game.wasm?v=`, as the page asks for it). A run or the module asked twice answers `cf-cache-status: MISS`,
+   then `HIT`. At about 110 players the 1 Gbit uplink was full without it; without the module in the rule, each new
+   build is 7 MB from the server for every player. Everything else already says `no-store` to Cloudflare
+   (`Cloudflare-CDN-Cache-Control`), so no
    "Bypass cache" rule is needed; delete one from before: of the rules that match, the last one's settings win, and
    a bypass for the whole hostname after this rule turns the game data's cache off.
 8. **WebSockets** are on by default on every plan. The server pings each connection every 25 s, well inside
@@ -356,8 +360,8 @@ Through a real Cloudflare: **UNVERIFIED**. The client's address was checked with
 
 3. Run `docker compose up -d`. Skip the setup's firewall step for 80 and 443 (`ufw allow 22/tcp && ufw --force
    enable`).
-4. Let Cloudflare keep the game data: the Cache Rule for `/data-blocks/*` of the proxy's step 7 above, and no
-   "Bypass cache" rule for the hostname.
+4. Let Cloudflare keep the game data and the module: the Cache Rule of the proxy's step 7 above, and no "Bypass
+   cache" rule for the hostname.
 
 What follows from this setup:
 

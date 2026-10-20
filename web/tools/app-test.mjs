@@ -15,7 +15,8 @@
 //   quit      F9 -> Quit game: the game's own quit path (WM_CLOSE) -> exit 0 -> back on the start page
 //   instance  a second tab on the same saves waits, and takes over when the first closes
 //   readonly  that second tab's Settings are read-only; Play reads settings.ini again
-//   retry     a failed game.wasm download is its own check, retried by itself and by Retry
+//   retry     a failed game.wasm download is its own check, retried by itself and by Retry; a new build
+//             between /game.json and /game.wasm (409) is no failure: the page asks /game.json again
 //   update    the server on the loaded version: nothing offered after a game or when the tab is shown again;
 //             on another one: offered then (with the log's note once a game ran), offline mode's copy of
 //             /game.json untouched, and Reload loads the new page and module
@@ -371,7 +372,7 @@ try {
       const c2 = await browser.newContext({ viewport: { width: 1280, height: 800 } });
       const p = watch(await c2.newPage(), useButton ? 'R2' : 'R1');
       let n = 0;
-      await p.route('**/game.wasm', route => (++n === 1 ? route.abort('internetdisconnected') : route.continue()));
+      await p.route(u => u.pathname === '/game.wasm', route => (++n === 1 ? route.abort('internetdisconnected') : route.continue()));
       await p.goto(`${BASE}/?save=${RUN}-r${useButton ? 2 : 1}&fresh`);
       await p.waitForFunction(() => window.__nfsu2?.checks().find(c => c.id === 'module')?.state === 'fail', null, { timeout: 30000, polling: 50 });
       const failed = await p.evaluate(() => ({ phase: window.__nfsu2.phase, status: document.querySelector('#status').textContent,
@@ -386,10 +387,24 @@ try {
       await c2.close();
       return r;
     };
-    const auto = await run1(false), button = await run1(true);
+    // a new build between /game.json and /game.wasm (the server answers 409): the page asks /game.json again at once
+    const rebuilt = async () => {
+      const c2 = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+      const p = watch(await c2.newPage(), 'R3');
+      let n = 0, infos = 0;
+      await p.route(u => u.pathname === '/game.json' && !u.search, route => { infos++; return route.continue(); });
+      await p.route(u => u.pathname === '/game.wasm', route => (++n === 1 ? route.fulfill({ status: 409, body: 'The game module changed' }) : route.continue()));
+      await p.goto(`${BASE}/?save=${RUN}-r3&fresh`);
+      const ph = await waitPhase(p, ['ready'], 30000).catch(() => phase(p));
+      const lines = (await p.evaluate(() => window.__nfsu2.log.tail(80))).filter(l => /game module/.test(l));
+      await c2.close();
+      return { after: ph, wasmRequests: n, gameJsonRequests: infos, lines };
+    };
+    const auto = await run1(false), button = await run1(true), rb = await rebuilt();
     const ok = (r) => r.whileFailed.status === 'Not ready' && r.whileFailed.retryShown && r.whileFailed.playDisabled && /did not load/.test(r.whileFailed.problem ?? '') &&
       r.after === 'ready' && r.wasmRequests === 2 && r.retryHiddenAfter;
-    report('retry', ok(auto) && ok(button) && button.recoveredMs < 1500, { byItself: auto, retryButton: button });
+    const rbOk = rb.after === 'ready' && rb.wasmRequests === 2 && rb.gameJsonRequests >= 2 && !rb.lines.some(l => /did not load/.test(l));
+    report('retry', ok(auto) && ok(button) && button.recoveredMs < 1500 && rbOk, { byItself: auto, retryButton: button, newBuildInBetween: rb });
   }
 
   // ----------------------------------------------------------- update --

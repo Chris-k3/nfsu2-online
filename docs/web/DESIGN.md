@@ -135,8 +135,16 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
     movies ahead of play from its own worker (`predownload-worker.ts`, 4 blocks at once, each at the address the game's
     own reads use, so one copy in Cloudflare's cache serves both). It runs only while no game
     runs in the tab: Play pauses it, and the game's end resumes it.
+  - The module: `/game.json` (no cache keeps it) names it by the hash of its content (`module`, the server's own),
+    and the page asks for `/game.wasm?v=<hash>` (`web/src/app/loader.ts`). That address the browser and Cloudflare
+    keep for good (`immutable`): a start reads it from the disk cache without asking, Cloudflare serves every player
+    after the first, and a new build is a new address, so no copy anywhere is an older module. The server says so
+    only when the hash is the one of the module it sends; another hash (a build that arrived after the page read
+    `/game.json`) gets 409, and the page asks `/game.json` again. The bare `/game.wasm`, and the module as it is (no
+    br, a byte range), are revalidated and kept by no shared cache.
   - Offline mode: a service worker (`web/src/sw.ts`, registered once the module has loaded) keeps the start page,
-    its scripts, the module, `game.json` and the manifest in Cache Storage, network first: the server's answer when
+    its scripts, the module (at its own address, one at a time: offline, a start gets the module its `game.json`
+    names or none), `game.json` and the manifest in Cache Storage, network first: the server's answer when
     there is one (the copy replaced when its ETag changes; after each start page from the server the workers and the
     manifest are brought up to date too, so the copies are one version), the copies when it fails, answers 5xx or
     keeps the start page waiting 4 s, and then for 30 s first. Nothing else passes through it. At Play the page asks
@@ -240,7 +248,8 @@ struct VOut { @builtin(position) pos: vec4f; @location(0) col0: vec4f; @location
     deployment, the security and privacy audit's regressions: `audit.test.mjs`, `page-audit.test.mjs`). They build their wasm programs with wasi-sdk from `deps/`.
 - `node web/tools/predownload-test.mjs` checks "Preload the game data" in Chrome against its own server and a
   made-up game folder: byte-exact cache, no movies, zstd where the bytes compress, stop and resume, retries, a refused
-  file, Play pausing it, a second tab. `web/test/data-blocks.test.mjs` checks the server's `/data-blocks/`.
+  file, Play pausing it, a second tab. `web/test/data-blocks.test.mjs` checks the server's `/data-blocks/`,
+  `web/test/module.test.mjs` the module's address (`/game.wasm?v=`) and what caches may keep.
 - `node web/tools/offline-test.mjs` checks offline mode with the real game folder and a server it starts and stops:
   the copies kept, Play to the title screen with the server gone, behind a proxy answering 502, and with a server
   that never answers, then online again.

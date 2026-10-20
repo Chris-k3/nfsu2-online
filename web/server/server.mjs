@@ -82,7 +82,7 @@ import { LanSwitch, LAN_WSS_OPTIONS, vipStr } from './lan.mjs';
 import { OnlineHost } from './online/index.mjs';
 import { RoamHub } from './roam-hub.mjs';
 import { LobbyTrace } from './online/trace.mjs';
-import { securityHeaders, cacheHeaders, etagMatches, makeProxyTrust,
+import { securityHeaders, cacheHeaders, EDGE_KEEP, etagMatches, makeProxyTrust,
   clientIp, viaHttps, forwardedHost, isLocalOrIp, bareIp, addressKey, siteKey, makeHostCheck, hostName, pickEncoding } from './headers.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -466,7 +466,6 @@ async function sendFile(q, s, root, file, { type, cache = 'store', extra = {}, f
 // that does not compress; not one sent as it is because the compressors were taken).  The movies too.  At about
 // 110 players the 1 Gbit uplink was full without it.
 const BLOCK = 1 << 20, BLOCKS_MAX = 8, PROBE = 64 << 10;
-const EDGE_KEEP = 'public, max-age=31536000, immutable';
 const COMPRESSORS = { perClient: 8, perSite: 16, total: 128 };
 const compressors = new Budget(COMPRESSORS.perClient, COMPRESSORS.perSite, COMPRESSORS.total);
 // fast settings: within a few percent of the best ratio for this data, at a fraction of the CPU (zstd 3:
@@ -590,14 +589,17 @@ function sendShared(s, buf, slice = 64 << 10) {
   pump();
 }
 
+// hash: the module's content (the raw bytes the body is made from), which /game.json names and the page asks
+// /game.wasm?v= for, so a copy kept anywhere under that address is this module
 async function compressedWasm() {
   let st; try { st = await fsp.stat(WASM); } catch { return null; }
   const etag = etagOf('br', WASM, st.size, st.mtimeMs);
   if (wasmBr && wasmBr.etag === etag) return wasmBr.pending ?? wasmBr;
-  const entry = { etag, body: null, pending: null };
+  const entry = { etag, hash: null, body: null, pending: null };
   wasmBr = entry;
   entry.pending = (async () => {
     const raw = await fsp.readFile(WASM);
+    entry.hash = crypto.createHash('sha256').update(raw).digest('base64url').slice(0, 22);
     const t0 = Date.now();
     entry.body = await new Promise((res, rej) => zlib.brotliCompress(raw, { params: {
       [zlib.constants.BROTLI_PARAM_QUALITY]: 5, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: raw.length } }, (e, b) => e ? rej(e) : res(b)));
@@ -642,20 +644,32 @@ async function handler(q, s) {
   if (p.startsWith('/data/')) return sendFile(q, s, DATA, resolveGame(p.slice(5)), { type: 'application/octet-stream' });
   if (p.startsWith('/data-blocks/')) return sendBlocks(q, s, resolveGame(p.slice(12)), u);
   if (p === '/game.wasm') {
+    // ?v=<hash>: the module /game.json named.  This one: every cache may keep it for good (the compressed body is
+    // made from the bytes hashed).  Another (a new build since): 409, and the page asks /game.json again; a
+    // copy of this module is never kept under another's address.
+    const v = u.searchParams.get('v'), c = await compressedWasm();
+    if (v !== null && c && v !== c.hash) return plain(q, s, 409, 'The game module changed: ask /game.json again');
     // 65 MB of code compresses to ~7 MB: other PCs start much sooner
-    if (!q.headers.range && /\bbr\b/.test(q.headers['accept-encoding'] || '')) {
-      const c = await compressedWasm();
-      if (c) {
-        const h = headers(q, { 'content-type': TYPES['.wasm'], etag: c.etag, vary: 'accept-encoding' }, 'revalidate');
-        if (etagMatches(q.headers['if-none-match'], c.etag)) { s.writeHead(304, h); return s.end(); }
-        s.writeHead(200, { ...h, 'content-encoding': 'br', 'content-length': c.body.length });
-        if (q.method === 'HEAD') return s.end();
-        return sendShared(s, c.body);
-      }
+    if (c && !q.headers.range && /\bbr\b/.test(q.headers['accept-encoding'] || '')) {
+      const h = headers(q, { 'content-type': TYPES['.wasm'], etag: c.etag, vary: 'accept-encoding' }, v === c.hash ? 'immutable' : 'revalidate');
+      if (etagMatches(q.headers['if-none-match'], c.etag)) { s.writeHead(304, h); return s.end(); }
+      s.writeHead(200, { ...h, 'content-encoding': 'br', 'content-length': c.body.length });
+      if (q.method === 'HEAD') return s.end();
+      return sendShared(s, c.body);
     }
+    // as it is (a client without br, a byte range): read from the disk again, so revalidated, never kept for good
     return sendFile(q, s, path.dirname(WASM), WASM, { cache: 'revalidate', extra: { vary: 'accept-encoding' } });
   }
-  if (p === '/game.json') return sendFile(q, s, path.dirname(GAME_JSON), GAME_JSON);
+  if (p === '/game.json') {
+    // what was built, and which module this server sends now (module: its hash, for /game.wasm?v=)
+    const f = await locate(path.dirname(GAME_JSON), GAME_JSON), c = f && await compressedWasm();
+    let info = null;
+    try { if (c) info = JSON.parse(await fsp.readFile(f.real, 'utf8')); } catch { /* sent as it is */ }
+    if (!info || typeof info !== 'object' || Array.isArray(info)) return sendFile(q, s, path.dirname(GAME_JSON), null, { found: f });
+    const body = JSON.stringify({ ...info, module: c.hash });
+    s.writeHead(200, headers(q, { 'content-type': TYPES['.json'], 'content-length': Buffer.byteLength(body) }));
+    return s.end(q.method === 'HEAD' ? undefined : body);
+  }
   if (p === '/players') {
     // how many play on this server now (the start page's Multiplayer settings): two counts and whether it is
     // full, nothing else, no names, addresses or times; online: in the game's Online mode (logged in, or racing

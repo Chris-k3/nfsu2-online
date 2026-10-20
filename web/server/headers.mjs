@@ -89,15 +89,19 @@ export function securityHeaders({ hsts = false, csp = CSP, noindex = true } = {}
 // ---- caching -------------------------------------------------------------------
 // Shared caches keep nothing: 'private' says so to every cache, and
 // CDN-Cache-Control / Cloudflare-CDN-Cache-Control speak to the CDN alone.
-// One exception, set over these: a run of the game data whose address names
-// the file's version may stay at the CDN for good (server.mjs sendBlocks,
-// EDGE_KEEP).
+// Two exceptions: a run of the game data whose address names the file's
+// version may stay at the CDN for good (server.mjs sendBlocks, EDGE_KEEP),
+// and so may the module at the address that names its content ('immutable').
 // no-transform: a proxy hands the bytes on as they are (the brotli module, the
 // byte ranges of the game files).  The browser keeps nothing ('store'), or
-// keeps a copy it must revalidate each time ('revalidate': the game module,
-// so a start reads the 65 MB module and Chrome's compiled code for it from the
-// disk cache after a 304, and the page's scripts, which 25 workers load).
+// keeps a copy it must revalidate each time ('revalidate': the page's scripts,
+// which 25 workers load).  'immutable': an address that names its content (the
+// game module's /game.wasm?v=<hash>), which every cache, the CDN's too, keeps
+// for good: a start reads the 65 MB module and Chrome's compiled code for it
+// from the disk cache without asking, and a new build is a new address.
+export const EDGE_KEEP = 'public, max-age=31536000, immutable';
 export function cacheHeaders(kind = 'store') {
+  if (kind === 'immutable') return { 'cache-control': EDGE_KEEP + ', no-transform', 'cdn-cache-control': EDGE_KEEP, 'cloudflare-cdn-cache-control': EDGE_KEEP };
   return {
     'cache-control': kind === 'revalidate' ? 'private, no-cache, no-transform' : 'private, no-store, no-transform',
     'cdn-cache-control': 'no-store',

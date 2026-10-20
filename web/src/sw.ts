@@ -15,18 +15,20 @@
 // the copies are one version.  Nothing else is touched: the game data, /lan,
 // /players, the test pages go to the network as they always did.
 //
-// The page registers it once the game module has loaded (shell.ts), so the
-// first visit downloads the module once, and the copy comes from the HTTP cache.
+// The module is kept at its own address (/game.wasm?v=<hash>, loader.ts), one
+// at a time: offline, a start gets the module its /game.json names, or none.
+// The page registers this once the module has loaded (shell.ts), so the first
+// visit downloads the module once, and the copy comes from the HTTP cache.
 
 declare const self: ServiceWorkerGlobalScope;
 export {};
 
-const CACHE = 'nfsu2-offline-1';
-const PAGE = '/';
-/** what a start needs; the page loads the first six itself before Play */
-const KEPT = ['/', '/main.js', '/main.css', '/game.json', '/game.wasm', '/data-manifest',
+const CACHE = 'nfsu2-offline-2';
+const PAGE = '/', MODULE = '/game.wasm';
+/** what a start needs, and the module; the page loads the first five itself before Play */
+const KEPT = ['/', '/main.js', '/main.css', '/game.json', '/data-manifest',
   '/host/game-worker.js', '/host/io-worker.js', '/host/predownload-worker.js', '/audio/worklet.js'];
-const LATER = KEPT.slice(5);
+const LATER = KEPT.slice(4);
 const NAV_WAIT_MS = 4000, OFFLINE_MS = 30_000;
 let offlineUntil = 0;
 
@@ -36,15 +38,27 @@ function keyOf(r: Request): string | null {
   const u = new URL(r.url);
   if (u.origin !== self.location.origin) return null;
   if (r.mode === 'navigate') return u.pathname === '/' || u.pathname === '/index.html' ? PAGE : null;
+  if (u.pathname === MODULE) return /^\?v=[\w-]+$/.test(u.search) ? MODULE + u.search : null;
   return !u.search && KEPT.includes(u.pathname) ? u.pathname : null;
 }
 
-/** keep a 200 answer, unless the copy has its ETag already */
+/** keep a 200 answer, unless the copy has its ETag already; a module replaces the one kept before */
 async function keep(cache: Cache, key: string, res: Response, kept?: Response) {
   if (res.status !== 200 || res.type !== 'basic') return;
   const tag = res.headers.get('etag');
   if (kept && tag && kept.headers.get('etag') === tag) { await res.body?.cancel(); return; }
   await cache.put(key, res);
+  if (key.startsWith(MODULE + '?'))
+    for (const r of await cache.keys()) { const u = new URL(r.url); if (u.pathname === MODULE && MODULE + u.search !== key) await cache.delete(r); }
+}
+
+/** the module the kept /game.json names (from the HTTP cache once the page has loaded it) */
+async function keepModule(cache: Cache) {
+  const info = await (await cache.match('/game.json', { ignoreVary: true }))?.json() as { module?: string } | undefined;
+  if (!info?.module) return;
+  const key = `${MODULE}?v=${encodeURIComponent(info.module)}`;
+  const kept = await cache.match(key, { ignoreVary: true });
+  if (!kept) await keep(cache, key, await fetch(key));
 }
 
 async function refresh(cache: Cache, paths: string[]) {
@@ -83,7 +97,12 @@ async function answer(e: FetchEvent, key: string): Promise<Response> {
 }
 
 self.addEventListener('install', e => {
-  e.waitUntil((async () => { await refresh(await caches.open(CACHE), KEPT); await self.skipWaiting(); })());
+  e.waitUntil((async () => {
+    const cache = await caches.open(CACHE);
+    await refresh(cache, KEPT);
+    await keepModule(cache).catch(() => {});
+    await self.skipWaiting();
+  })());
 });
 self.addEventListener('activate', e => {
   e.waitUntil((async () => {

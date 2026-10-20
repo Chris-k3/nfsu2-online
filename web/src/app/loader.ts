@@ -2,24 +2,36 @@
 // and /game.wasm, compiled while it streams in.  The progress comes from a
 // clone of the response, so the original response still goes to
 // compileStreaming and Chrome can reuse its compiled-code cache for it.
-// The server sends the module brotli-compressed and with an ETag, so a
-// reload revalidates and reads it from Chrome's HTTP cache.
+// The server sends the module brotli-compressed, at an address that names its
+// content (/game.wasm?v=<hash>, the hash from /game.json, which no cache
+// keeps): the browser and Cloudflare keep it for good, a reload reads it from
+// Chrome's HTTP cache without asking, and a new build is a new address.
 
-export interface GameInfo { pages: number; maxPages: number; guestEnd: number; rev: string; size: number; opt: string }
+export interface GameInfo { pages: number; maxPages: number; guestEnd: number; rev: string; size: number; opt: string; module?: string }
 export interface Loaded {
   module: WebAssembly.Module; info: GameInfo;
   ms: number;              // fetch + compile, wall time
   transferred: number;     // bytes over the network (0 = from the HTTP cache), -1 unknown
 }
 
+/** /game.json and the module it names (a server without module: /game.wasm, revalidated) */
+async function fetchModule(signal?: AbortSignal) {
+  for (let tries = 1; ; tries++) {
+    const ir = await fetch('/game.json', { cache: 'no-store', signal });
+    if (!ir.ok) throw new Error(`/game.json: HTTP ${ir.status} (build the game module on the Mac: web/build.sh)`);
+    const info = await ir.json() as GameInfo;
+    const url = new URL(info.module ? `/game.wasm?v=${encodeURIComponent(info.module)}` : '/game.wasm', location.href).href;
+    const r = await fetch(url, { cache: info.module ? 'default' : 'no-cache', signal });
+    // 409: a new build arrived between the two answers: its /game.json
+    if (r.status === 409 && tries < 3) { await r.body?.cancel(); continue; }
+    if (!r.ok) throw new Error(`/game.wasm: HTTP ${r.status}`);
+    return { info, url, r };
+  }
+}
+
 export async function loadGame(onProgress: (got: number, total: number) => void, signal?: AbortSignal): Promise<Loaded> {
   const t0 = performance.now();
-  const ir = await fetch('/game.json', { cache: 'no-store', signal });
-  if (!ir.ok) throw new Error(`/game.json: HTTP ${ir.status} (build the game module on the Mac: web/build.sh)`);
-  const info = await ir.json() as GameInfo;
-  const url = new URL('/game.wasm', location.href).href;
-  const r = await fetch(url, { cache: 'no-cache', signal });
-  if (!r.ok) throw new Error(`/game.wasm: HTTP ${r.status}`);
+  const { info, url, r } = await fetchModule(signal);
   const total = info.size || +(r.headers.get('content-length') ?? 0);
   const counting = (async () => {
     const rd = r.clone().body!.getReader();
