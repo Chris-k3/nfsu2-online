@@ -273,7 +273,10 @@ and HTTP/3's UDP, and port 80 stays with whatever has it (another API, say), whi
 
 `docker compose logs server` is the server's console: start-up, players joining (by virtual address, `10.77.x.x`)
 and leaving (by virtual address and nickname), refused requests and connections, and errors (method, path and the
-server's own stack, never the client's details).
+server's own stack, never the client's details). Every 5 minutes while anyone is on, a `[players]` line says what
+the players on the switch do, each counted once: in Online mode, on the LAN or Online screens, in free roam, on an
+older page (one loaded before the page let its place go; it holds the place until its tab closes), and leaving or
+starting (the page lets the place go 10 s after the last network feature). Counts only, no names or addresses.
 
 - **No player's real IP address** is written, and the page sends the server nothing about the player but the
   nickname.

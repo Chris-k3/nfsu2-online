@@ -296,6 +296,17 @@ export class LanSwitch {
     p.framesOut++;
     return true;
   }
+  /** what the players on the switch do, each counted once, in this order: Online mode (the online host's
+   *  vips()), the LAN or Online screens open, free roam (the hub's vips()), a page from before the page said
+   *  whether LAN play is open (it holds its place until its tab closes), the rest (leaving: the page lets go
+   *  10 s after the last network feature; or starting: free roam not yet heard by the hub) */
+  breakdown() {
+    const online = this.online?.vips?.() ?? new Set(), roam = this.roam?.vips?.() ?? new Set();
+    const n = { players: this.peers.size, online: 0, lan: 0, roam: 0, older: 0, other: 0 };
+    for (const p of this.peers.values())
+      n[online.has(p.vip) ? 'online' : p.lan === true ? 'lan' : roam.has(p.vip) ? 'roam' : p.lan === null ? 'older' : 'other']++;
+    return n;
+  }
   /** for the tests: names and virtual addresses only, never a real address */
   info() {
     return { peers: [...this.peers.values()].map(p => ({ vip: vipStr(p.vip), name: p.name, framesIn: p.framesIn, framesOut: p.framesOut })),

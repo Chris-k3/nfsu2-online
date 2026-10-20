@@ -1097,3 +1097,21 @@ test('the page: the switch let go when no mailbox wants it, taken again when one
     } finally { l2.close(); }
   } finally { await sw2.close(); }
 });
+
+// the server's console says what the players on the switch do (server.mjs, every 5 minutes): each counted once
+test('breakdown: Online mode, the LAN or Online screens, free roam, an older page, leaving or starting', async () => {
+  const inOnline = new Set(), inRoam = new Set();
+  const online = { vip: 0x0A4D0001, name: 'online', vips: () => inOnline, peerGone() {} };
+  const roam = { vip: 0x0A4D00FD, vips: () => inRoam, peerGone() {} };
+  const sw = await startSwitch({ online, roam });
+  try {
+    const c = (name, lan) => new Client(sw.port, name, '', null, { lan });
+    const ol = c('Online', 1), ls = c('LanScreens', 1), fr = c('Roamer', 0), oldRoam = c('OldRoamer'), old = c('Old'), going = c('Leaving', 0);
+    const all = [ol, ls, fr, oldRoam, old, going];
+    for (const x of all) await x.welcome();
+    for (const x of all) await x.until(() => x.ctl.some(m => m.t === 'peers'));
+    inOnline.add(ol.vip); inRoam.add(fr.vip); inRoam.add(oldRoam.vip); inRoam.add(ol.vip);
+    assert.deepEqual(sw.lan.breakdown(), { players: 6, online: 1, lan: 1, roam: 2, older: 1, other: 1 });
+    for (const x of all) await x.close();
+  } finally { await sw.close(); }
+});

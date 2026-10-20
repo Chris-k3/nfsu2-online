@@ -747,6 +747,16 @@ const lan = new LanSwitch({ maxPeers: MAX_PEERS, impair: DEV ? LAN_IMPAIR : '', 
   load: () => JSON.parse(fs.readFileSync(LAN_STORE, 'utf8')),
   save: list => { fs.writeFileSync(LAN_STORE + '.tmp', JSON.stringify(list), { mode: 0o600 }); fs.renameSync(LAN_STORE + '.tmp', LAN_STORE); },
 } });
+// what the players on the switch do, every 5 minutes while any are on (counts only: lan.mjs breakdown())
+const BREAKDOWN_MS = 5 * 60_000;
+let breakdownShown = false;
+setInterval(() => {
+  const b = lan.breakdown();
+  if (!b.players && !breakdownShown) return;
+  breakdownShown = b.players > 0;
+  console.log(`[players] ${b.players} on the switch: ${b.online} in Online mode, ${b.lan} on the LAN or Online screens, ` +
+    `${b.roam} in free roam, ${b.older} on an older page (until its tab closes), ${b.other} leaving or starting`);
+}, BREAKDOWN_MS).unref();
 const wss = new WebSocketServer({ noServer: true, maxPayload: LIMITS.wsMaxPayload, perMessageDeflate: false, clientTracking: false,
   ...LAN_WSS_OPTIONS });
 // a handshake the ws library itself refuses (a malformed Sec-WebSocket-Protocol, ...): our answer, not its own

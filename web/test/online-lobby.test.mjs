@@ -438,7 +438,8 @@ test('EA Messenger: the login by LKEY, friends, presence, messages, blocking, le
 
 test('the count of players in Online mode (the server\'s /players): logged in, or racing until back', () => {
   const w = world(), a = w.client('10.77.0.2').login('Alpha'), b = w.client('10.77.0.3').login('Bravo');
-  const count = () => { const i = w.host.info(); return [i.personas, i.racing]; };
+  // and the browsers it counts (vips(): the server's console), the same
+  const count = () => { const i = w.host.info(), v = [...w.host.vips()].sort(); assert.equal(v.length, i.personas + i.racing); return [i.personas, i.racing]; };
   assert.deepEqual(count(), [2, 0]);
   a.send('gcre', [['NAME', 'c1'], ['PARAMS', 'TRACK=4014']]); b.send('gjoi', [['NAME', 'c1']]);
   a.send('gsta', [['NAME', 'c1']]);
@@ -446,6 +447,7 @@ test('the count of players in Online mode (the server\'s /players): logged in, o
   assert.deepEqual(count(), [0, 2], 'racing: still in Online mode');
   w.host.peerGone(ip('10.77.0.3'));                      // Bravo's browser leaves during the race
   assert.deepEqual(count(), [0, 1]);
+  assert.deepEqual([...w.host.vips()], [ip('10.77.0.2')], 'Alpha, racing');
   w.advance(200_000);
   w.client('10.77.0.2').login('Alpha');                  // back online under the name: counted once
   assert.deepEqual(count(), [1, 0]);

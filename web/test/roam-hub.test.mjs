@@ -149,10 +149,12 @@ test('links stay put at the edge, players come and go', () => {
   sent.length = 0; step(1000); at(0, 0); at(1, 100); at(2, -40); hub.tick();
   assert.equal(lists(sent).get(`${V(0)}:47210`)[0].vip, V(2), 'under half the distance: the link moves');
   // BYE, silence, a departure from the switch
+  assert.deepEqual([...hub.vips()].sort(), [V(0), V(1), V(2)].sort(), 'the browsers in free roam (the server\'s console)');
   hub.frame(V(2), frame(V(2), bye(202)));
   assert.equal(hub.info().players, 2, 'BYE: forgotten at once');
   step(7000); at(0, 0); hub.tick();
   assert.equal(hub.info().players, 1, '6 s without a word: forgotten');
+  assert.deepEqual([...hub.vips()], [V(0)]);
   hub.peerGone(V(0));
   assert.equal(hub.info().players, 0, 'left the switch: forgotten');
 });

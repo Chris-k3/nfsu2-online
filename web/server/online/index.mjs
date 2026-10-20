@@ -59,5 +59,7 @@ export class OnlineHost {
   overrun(from, data) { this.vh.overrun(from, data); }
   peerGone(vip) { this.here.delete(vip); this.vh.peerGone(vip); this.lobby.peerGone(vip); }
   info() { return { ...this.vh.info(), ...this.lobby.info(v => this.here.has(v)) }; }
+  /** the browsers in Online mode now (the ones info() counts) */
+  vips() { return this.lobby.vips(v => this.here.has(v)); }
   stop() { this.lobby.stop(); this.buddies.stop(); }
 }

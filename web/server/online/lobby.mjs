@@ -167,10 +167,17 @@ export class Lobby {
   /** here(vip): that browser is still on the switch.  racing: players of a started race not back in the lobby
    *  yet (their lobby link is closed while they race) and not online under their name again */
   info(here = () => true) {
-    let racing = 0;
+    return { sessions: this.sessions.size, personas: this.byPersona.size, racing: this.racers(here).length, games: this.games.size, ...this.stats };
+  }
+  /** the browsers in Online mode, as info() counts them: a persona in the lobby, or racing (the server's console) */
+  vips(here = () => true) {
+    return new Set([...[...this.byPersona.values()].map(s => s.vip), ...this.racers(here).map(p => p.vip)]);
+  }
+  racers(here) {
+    const out = [];
     for (const g of this.games.values()) if (g.started) for (const p of g.players)
-      if (!p.back && !this.byPersona.has(p.name.toLowerCase()) && here(p.vip)) racing++;
-    return { sessions: this.sessions.size, personas: this.byPersona.size, racing, games: this.games.size, ...this.stats };
+      if (!p.back && !this.byPersona.has(p.name.toLowerCase()) && here(p.vip)) out.push(p);
+    return out;
   }
   stop() {
     clearInterval(this.timer);

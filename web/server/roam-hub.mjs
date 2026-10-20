@@ -163,6 +163,8 @@ export class RoamHub {
     this.st.ticks++; if (ms > this.st.tickMsMax) this.st.tickMsMax = ms;
   }
   /** for the tests and the server's console: counts only, never a position */
+  /** the browsers in free roam now (a HELLO within goneMs) */
+  vips() { return new Set([...this.players.values()].map(p => p.vip)); }
   info() {
     let linked = 0, links = 0;
     for (const p of this.players.values()) { if (p.links.size) linked++; links += p.links.size; }
