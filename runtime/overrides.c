@@ -735,3 +735,32 @@ void sub_0073b900(CPU *c){
     sub_0073b900_orig(c);
     guest_noyield(-1);
 }
+
+/* --- sub_00483e40: a positional sound's source goes ----------------------
+ * The world's positional sounds (the list at [[0x82B884]+0x3C], vtable
+ * 0x78BFD0) keep their sound objects at +0x24 and the frame's voice requests
+ * at +4: bPNode list nodes, one per object waiting for a voice, their count
+ * at +0xC.  A request recounts the list (0x479770).  The voice arbitration
+ * (0x481850, from the list's update 0x481BD0) gives the requesters voices;
+ * when the count and the voices in use [0x82B950] pass the limit [0x7ECBC8]
+ * (5), it takes voices from quieter objects instead, walking its sorted copy
+ * of the requests from the first node without checking that there is one
+ * (0x481AB4).  Removing a source (0x483E40 -> 0x481E50, from the source's
+ * destructor 0x5A9570) takes its object's request out of the list and
+ * destroys the object, but leaves the count.  With every voice in use and
+ * that the only request, the arbitration took its empty list's head for a
+ * request, read an object pointer off the stack, and trapped (memory access
+ * out of bounds) or called 0 (0x481B1C).  32 friends' cars round the player
+ * keep all five voices busy, so requests wait, and a jump away (shopgo, the
+ * world map's jump) frees the old place's world objects (0x5AEFA0) with
+ * their sources.  After a removal the count is made again, as a request does
+ * (0x43BE80: the list's length). */
+void sub_00483e40_orig(CPU *c);
+void sub_00483e40(CPU *c){
+    uint32_t list = MR32(c->ecx + 0x3cu);
+    sub_00483e40_orig(c);
+    if (!MR32(0x7faaa8u) || !list) return;           /* sound off: nothing was removed */
+    uint32_t head = list + 4u, n = 0;
+    for (uint32_t e = MR32(head); e && e != head && n < 1024u; e = MR32(e)) n++;
+    MR32(list + 0xcu) = n;
+}
