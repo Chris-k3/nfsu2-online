@@ -50,6 +50,7 @@ static void all_reports(void){
     com_report(); win32_report(); { void vclock_report(void); vclock_report(); }
     { void metal_budget_report(void); metal_budget_report(); }
     { void hfr_report(void); hfr_report(); }
+    { void pacer_sleep_report(void); pacer_sleep_report(); }
     { void roam_game_report(void); roam_game_report(); }
     { void gcpu_report(void); gcpu_report(); }
     { void stackprobe_report(void); stackprobe_report(); }

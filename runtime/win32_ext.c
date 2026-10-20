@@ -312,12 +312,70 @@ uint64_t g_sleep_late_ns, g_sleep_gil_ns, g_sleep_n;    /* diagnostics: sleep la
  * margin before the deadline and the rest is spun on the clock, with the
  * guest lock still released.  The margin is learned from the waits: it
  * jumps to a late wake-up and comes down slowly, so with a precise timer the
- * spin stays short; with the 15.6 ms one the pacer spins its whole sleep and
- * tries a wait again every few seconds.  No spin while the page does not draw
- * (a hidden tab): nobody sees the frames then. */
+ * spin stays short.  No spin while the page does not draw (a hidden tab):
+ * nobody sees the frames then.
+ *
+ * Whether a wait can be tried at all comes from a probe thread, not from
+ * the pacer's own waits.  Before, with the 15.6 ms timer the pacer spun its
+ * whole sleep until its margin had come down below the sleep, every 1.5 to
+ * 5 s, and the wait it then tried mostly overslept by up to 15 ms: one or two
+ * slots lost, a hitch every few seconds.  The probe waits 1 ms right after a
+ * wake-up, every ~10 ms, and keeps the lateness: up at once to a late one,
+ * down in about a second to the fine timer's.  The pacer's margin is never
+ * below what that lateness needs, so on the coarse timer it does not try.
+ * The timer is the process's, so the probe's waits stand for the pacer's.
+ * Without a probe (no thread to be had) the margin alone decides, as before. */
 int hfr_display_live(void);              /* framerate.c */
+static _Atomic int g_probe_late_us = -1;                    /* the probe's lateness, -1 = no probe (yet) */
+static uint64_t g_probe_n, g_probe_coarse;                  /* diagnostics: probes, those > 4 ms late */
+static uint64_t g_ps_n, g_ps_waits, g_ps_over;              /* pacer sleeps, waits tried, waits past the deadline */
+static double g_ps_over_max;
+static void *timer_probe_main(void *unused){
+    (void)unused;
+    double est = -1.0;
+    int run = 0, logged = 0;                                /* probes in a row > 4 ms late */
+    for (;;){
+        struct timespec one = { 0, 1000000L }, rest = { 0, 9000000L };
+        double t0 = nfsu2_now_ms();
+        nanosleep(&one, 0);
+        double late = nfsu2_now_ms() - t0 - 1.0;
+        if (late < 0.0) late = 0.0;
+        est = est < 0.0 || late > est ? late : est + (late - est) * 0.03;
+        atomic_store(&g_probe_late_us, (int)(est * 1000.0));
+        g_probe_n++;
+        if (!(late > 4.0)) run = 0;
+        else {
+            g_probe_coarse++;
+            if (++run == 10 && !logged){                    /* once: a coarse timer, not a blip */
+                logged = 1;
+                fprintf(stderr, "[timer] 1 ms waits take %.1f ms: the frame pacer spins its sleeps while the browser's timer is this coarse\n",
+                        late + 1.0);
+            }
+        }
+        if (!hfr_display_live()) rest.tv_nsec = 250000000L;
+        nanosleep(&rest, 0);
+    }
+    return 0;
+}
+static void timer_probe_start(void){
+    pthread_t th;
+    if (pthread_create(&th, 0, timer_probe_main, 0) == 0) pthread_detach(th);
+}
+/* exit report (main_web.c), under the frame-rate section */
+void pacer_sleep_report(void){
+    if (!g_ps_n) return;
+    int pl = atomic_load(&g_probe_late_us);
+    fprintf(stderr, "  pacer sleeps: %llu, an OS wait tried in %llu (%.1f %%), %llu of them woke past the deadline (worst %.2f ms)\n",
+            (unsigned long long)g_ps_n, (unsigned long long)g_ps_waits, 100.0 * g_ps_waits / g_ps_n,
+            (unsigned long long)g_ps_over, g_ps_over_max);
+    if (pl >= 0)
+        fprintf(stderr, "  timer probe: %llu waits of 1 ms, %.1f %% more than 4 ms late, lateness now %.2f ms\n",
+                (unsigned long long)g_probe_n, g_probe_n ? 100.0 * g_probe_coarse / g_probe_n : 0.0, pl / 1000.0);
+    else fprintf(stderr, "  timer probe: none (no thread)\n");
+}
 static void sleep_precise_ns(int64_t ns){
     static _Thread_local double margin = 2.0;               /* ms */
+    static pthread_once_t probe_once = PTHREAD_ONCE_INIT;
     /* NFSU2_PACE_SPIN=0 (benchmarks): no spin, so the game thread's
      * instruction count is its work alone (web/tools/bench.mjs) */
     static int spin = -1;
@@ -327,13 +385,19 @@ static void sleep_precise_ns(int64_t ns){
         nanosleep(&ts, 0);
         return;
     }
-    double t0 = nfsu2_now_ms(), until = t0 + (double)ns / 1e6, coarse = until - margin - t0;
+    pthread_once(&probe_once, timer_probe_start);
+    int pl = atomic_load(&g_probe_late_us);
+    double need = pl < 0 ? 0.0 : pl / 1000.0 * 1.25 + 0.25;   /* what the probe's lateness needs */
+    double t0 = nfsu2_now_ms(), until = t0 + (double)ns / 1e6, coarse = until - (margin > need ? margin : need) - t0;
+    g_ps_n++;
     if (coarse >= 0.25){
         int64_t cns = (int64_t)(coarse * 1e6);
         struct timespec ts = { (time_t)(cns / 1000000000LL), (long)(cns % 1000000000LL) };
         nanosleep(&ts, 0);
-        double want = (nfsu2_now_ms() - (t0 + coarse)) * 1.25 + 0.25;
+        double t1 = nfsu2_now_ms(), want = (t1 - (t0 + coarse)) * 1.25 + 0.25;
         margin = want > margin ? want : margin - (margin - want) * 0.02;
+        g_ps_waits++;
+        if (t1 > until){ g_ps_over++; if (t1 - until > g_ps_over_max) g_ps_over_max = t1 - until; }
     } else margin *= 0.997;                                  /* no wait made */
     if (margin < 0.5) margin = 0.5;
     if (margin > 20.0) margin = 20.0;

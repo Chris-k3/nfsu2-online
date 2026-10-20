@@ -67,8 +67,13 @@ function writeUsAsNs(p: number, us: number) {
   u32v[p >>> 2] = lo - carry * 4294967296; u32v[(p >>> 2) + 1] = hi * 1000 + carry;
 }
 
+// NFSU2_TEST_TIMER_MS=15.625 (tests): every sleep ends on that grid of the clock, as a wait does in Chrome on
+// Windows while the OS timer ticks every 15.6 ms (runtime/win32_ext.c, the frame pacer's sleep)
+let timerGrid = -1;
 function sleepNs(ns: bigint) {
-  const ms = Number(ns) / 1e6;
+  let ms = Number(ns) / 1e6;
+  if (timerGrid < 0) timerGrid = Number(cfg.env.NFSU2_TEST_TIMER_MS) || 0;
+  if (ms > 0 && timerGrid > 0) { const now = T0MS + performance.now(); ms = Math.ceil((now + ms) / timerGrid) * timerGrid - now; }
   if (ms > 0) { const t0 = performance.now(); Atomics.wait(ctl, CTL_SLEEP, 0, ms); blockedMs += performance.now() - t0; }
 }
 

@@ -151,6 +151,13 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
   (`runtime/win32_ext.c`) therefore waits until a learned margin before its deadline and spins on the clock for the
   rest, while the page draws (not in a hidden tab). A race at 4K on a 160 Hz screen (content rate 120, Ryzen 5900X)
   went from ~105 to ~119.5 fps in the warm drive; before, one frame in five was presented late.
+  Whether the pacer tries a wait at all comes from a probe thread that waits 1 ms every ~10 ms and keeps the
+  lateness (up at once, down in about a second). Before, on the 15.6 ms timer the pacer tried a wait of its own every
+  1.5 to 5 s, and that wait mostly cost one or two slots: a hitch every few seconds. `NFSU2_TEST_TIMER_MS=15.625`
+  (`web/src/host/game-worker.ts`) ends every sleep on that grid, as on Windows. With it (M4 Pro, `bench.mjs --fps
+  120`, 2 runs each) late frames in the warm drive went from 10 and 10 of 4,224 to 0 and 2, missed slots from 6 and 3
+  to 2 and 1. With the Mac's fine timer the pacer still waits on 97 % of its sleeps, as before. The exit report
+  has a "pacer sleeps" and a "timer probe" line, and a coarse timer logs a `[timer]` line once.
 
 ## 3. The renderer contract (C recorder ↔ TypeScript WebGPU encoder)
 
