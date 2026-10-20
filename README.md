@@ -12,8 +12,9 @@ Web Audio. You bring your own copy of the game.
 
 - **The game:** your own PC copy, patched to v1.2 (North America), with this exact `SPEED2.EXE` (other versions
   will not work): 4,800,512 bytes, SHA-256 `f9dd86c054878ce6276beb07c1fd61874f7a1e4bf1f241b084c65b73e24168a7`.
-- **To build:** an Apple Silicon Mac (the tested setup), Python 3, Node.js 20 or newer, and
-  [wasi-sdk](https://github.com/WebAssembly/wasi-sdk/releases) 34 unpacked into `deps/`.
+- **To build:** an Apple Silicon Mac (the tested setup) or Linux, Python 3, Node.js 20 or newer, and
+  [wasi-sdk](https://github.com/WebAssembly/wasi-sdk/releases) 34 for that system unpacked into `deps/`. On Windows,
+  build in WSL 2 with the clone in the Linux file system (`~/nfsu2-web`): under `/mnt/c` it builds much slower.
 - **To play:** the latest Google Chrome, or Firefox where it has WebGPU (Windows, macOS).
 
 ## Build

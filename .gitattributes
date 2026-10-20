@@ -1,0 +1,3 @@
+# LF in every checkout, also on Windows (where Git for Windows sets core.autocrlf): the
+# scripts then run in WSL and in Docker, and a file copied into WSL needs no conversion.
+* text=auto eol=lf

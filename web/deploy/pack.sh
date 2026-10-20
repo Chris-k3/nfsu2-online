@@ -94,7 +94,13 @@ SIZE_MB=$(( $(du -sk "$B" | cut -f1) / 1024 ))
 find "$B" -type d -exec chmod 755 {} +; find "$B" -type f -exec chmod 644 {} +
 mkdir -p "$OUT"
 TGZ="$OUT/nfsu2-web-$REV.tar.gz"
-COPYFILE_DISABLE=1 tar -C "$STAGE" --no-mac-metadata --no-xattrs --uid 0 --gid 0 --uname root --gname root -czf "$TGZ" nfsu2-web
+# owner root, no extended attributes: bsdtar (macOS) and GNU tar (Linux, WSL) spell it differently
+if tar --version 2>/dev/null | grep -q bsdtar; then
+  TAR_OWNER=(--no-mac-metadata --no-xattrs --uid 0 --gid 0 --uname root --gname root)
+else
+  TAR_OWNER=(--no-xattrs --owner=root:0 --group=root:0)
+fi
+COPYFILE_DISABLE=1 tar -C "$STAGE" "${TAR_OWNER[@]}" -czf "$TGZ" nfsu2-web
 rm -rf "$STAGE"
 echo "$TGZ"
 echo "  $(du -h "$TGZ" | cut -f1), $(tar -tzf "$TGZ" | grep -vc '/$') files, sha256 $(shasum -a 256 "$TGZ" | cut -d' ' -f1)"
