@@ -29,7 +29,8 @@
  *   NFSU2_LAN_TIMING = pc | exact
  *       pc (default): in a network race (World::IsOnline) ticks and timer
  *       are off, so the clocks run as on an unmodified Windows PC at the
- *       same frame rate (fixes_follow_rate); exact: the fix set as above.
+ *       same frame rate (fixes_follow_rate), and 240 plays at 120, the
+ *       fastest such a PC runs (content_rate); exact: the fix set as above.
  *   NFSU2_NOS_TRAIL_LEN = x     NOS/streak trail length factor (default 1)
  *   NFSU2_HFR_LOG = 1 | 2       one [hfr] line per second of racing (2: of
  *                               every frame, menus too) and the exit report
@@ -238,10 +239,19 @@ int hfr_uncapped(void){ resolve(); return g_mode == M_UNCAPPED; }
 /* ---- current content rate --------------------------------------------- */
 /* The game's own request in [0x865558]: 1/120 by default (= "the mode's
  * rate"), 1/30 in NIS and online/LAN races.  Requests are honoured only
- * downwards: the default 1/120 must not cap 240. */
+ * downwards: the default 1/120 must not cap 240.
+ * A network race on the game's own clocks (NFSU2_LAN_TIMING=pc) runs at
+ * most 120: no unmodified PC gets past its limiter's 1/120, and 1/240 is
+ * 7.5 ticks of 1/1800 s, which the game's quantiser makes 8 a frame.
+ * Measured at 240: simulation 1.06 x the wall clock, WorldTimer 1.011 per
+ * unit of world dt (0.7 % less car physics per race second than a PC at
+ * 60, 1.6 % less than one at 120), and a 240 host ran a LAN race about
+ * 7 % fast for every player. */
+static int net_race(void);
 static _Atomic int g_rate_now = 0;
 static int content_rate(void){
     int m = mode_rate();
+    if (m > 120 && g_lan_pc && net_race()) m = 120;
     float cap = MRF32(A_CAP);
     if (cap > 0.f && cap != MRF32(A_CAP_DEF)){
         int req = (int)lround(1.0 / (double)cap);
@@ -617,7 +627,8 @@ static void fixes_follow_rate(void){
     if (net) fx &= ~(FX_TICKS | FX_TIMER);
     if (!first && net != net_prev){
         char a[96], b[96]; fix_str(g_fix, a, sizeof a); fix_str(fx, b, sizeof b);
-        fprintf(stderr, "[hfr] network race %s: content rate %d, fixes %s -> %s%s\n", net ? "begins" : "over", r, a, b,
+        fprintf(stderr, "[hfr] network race %s: content rate %d, fixes %s -> %s%s\n", net ? "begins" : "over",
+                net && r > 120 ? 120 : r, a, b,
                 net ? " (the game's own clocks, as on an unmodified PC at this rate)" : "");
     } else if (!first && fx != g_fix){
         char a[96], b[96]; fix_str(g_fix, a, sizeof a); fix_str(fx, b, sizeof b);
