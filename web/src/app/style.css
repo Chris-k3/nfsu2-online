@@ -233,6 +233,9 @@ summary:hover { color: var(--text); }
 
 /* ----------------------------------------------------------------- stage */
 .stage { position: fixed; inset: 0; z-index: 10; background: #000; }
+/* the start page behind the game does not scroll: its scrollbar would stay beside the game out of full screen
+ * (full screen refused, or left), and the game a scrollbar narrower */
+html:has(> body > .stage:not([hidden])) { overflow: hidden; }
 .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: none; touch-action: none; }
 .stage.cursor canvas { cursor: default; }
 .hud-fps {
