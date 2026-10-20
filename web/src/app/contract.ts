@@ -46,7 +46,7 @@ export interface NetOptions extends CommonOptions {
   /** the name other browsers see on the server's LAN */
   name: string;
   /** a line for the player from the game (a friend joined, left, went into a race) */
-  notice?: (text: string) => void;
+  notice?: (text: string, who?: string) => void;
 }
 
 /** What an attach call returns.  Everything but detach is optional. */

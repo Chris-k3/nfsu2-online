@@ -24,7 +24,7 @@ export const NET_KIND_UDP_LOOP = 2;           // test harness: the emulated loop
 export const NET_KIND_LAN_UDP = 3;            // LAN play (Winsock): a UDP datagram
 export const NET_KIND_LAN_TCP = 4;            // LAN play: a TCP segment of the virtual LAN's stream protocol
 export const NET_KIND_LAN_ICMP = 5;           // LAN play: an ICMP message
-export const NET_KIND_NOTICE = 16;            // TX ring only, never sent: a line of text the page shows over the game
+export const NET_KIND_NOTICE = 16;            // TX ring only, never sent: a line of text the page shows over the game, a friend's name first, ended by 0x1F
 export const NET_BROADCAST = 0xffffffff;
 export const NET_ROAM_HUB = 0x0a4d00fd;       // 10.77.0.253: the server's free-roam hub (web/server/roam-hub.mjs)
 

@@ -25,7 +25,7 @@ export interface SessionOptions {
   /** the name other browsers see on the server's virtual LAN (LAN races, free roam); null: network = off */
   netName: string | null;
   /** free roam: a line for the player (a friend joined, left, went into a race) */
-  notice?(text: string): void;
+  notice?(text: string, who?: string): void;
   /** the game finished writing a file of the save overlay (path relative to /save) */
   onSaved?(path: string): void;
   /** tests: where frame dumps go, and their scale */
@@ -48,9 +48,11 @@ export class GameSession {
   exitCode: number | null = null;
   exited!: Promise<number>;
   private detached = false;
+  private canvas!: HTMLCanvasElement;
 
   static async start(o: SessionOptions): Promise<GameSession> {
     const s = new GameSession();
+    s.canvas = o.canvas;
     const tid = (t: number, fd: number) => fd === 2 ? `[${t}!]` : `[${t}]`;
     s.proc = await startProcess({
       module: o.module,
@@ -89,18 +91,19 @@ export class GameSession {
       if (!a) void o.audio?.close().catch(() => {});
     });
     void attach('input', () => attachInput(s.proc, o.canvas, {
-      ...common, stage: o.stage, toggleFullscreen: o.toggleFullscreen,
-      // the renderer's aspect-fit image, in CSS px of the canvas
-      viewRect: () => {
-        const c = o.canvas, r = s.renderer?.imageRect();
-        if (!r || !c.width || !c.height) return { x: 0, y: 0, w: c.clientWidth, h: c.clientHeight };
-        const kx = c.clientWidth / c.width, ky = c.clientHeight / c.height;
-        return { x: r.x * kx, y: r.y * ky, w: r.w * kx, h: r.h * ky };
-      },
+      ...common, stage: o.stage, toggleFullscreen: o.toggleFullscreen, viewRect: () => s.viewRect(),
     })).then(i => { s.input = i; });
     if (o.netName !== null)
       void attach('network', () => attachNet(s.proc, { ...common, name: o.netName!, notice: o.notice })).then(n => { s.net = n; });
     return s;
+  }
+
+  /** the renderer's aspect-fit image, in CSS px of the canvas (the whole canvas until the renderer is there) */
+  viewRect(): { x: number; y: number; w: number; h: number } {
+    const c = this.canvas, r = this.renderer?.imageRect();
+    if (!r || !c.width || !c.height) return { x: 0, y: 0, w: c.clientWidth, h: c.clientHeight };
+    const kx = c.clientWidth / c.width, ky = c.clientHeight / c.height;
+    return { x: r.x * kx, y: r.y * ky, w: r.w * kx, h: r.h * ky };
   }
 
   /** counters the subsystems offer for the detailed overlay */

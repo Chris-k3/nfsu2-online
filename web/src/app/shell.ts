@@ -75,6 +75,7 @@ let displayHz = 60;
 // at most 2 s (a hidden tab has no animation frames)
 let refreshMeasured: Promise<void> = Promise.resolve();
 let session: GameSession | null = null;
+let hudWide = true;                      // the running game's HUD is edge-anchored (hud = wide), not 4:3
 let away: AwayCheck | null = null;
 let lastExit: { code: number; seconds: number } | null = null;
 const checks = new Map<string, Check>();
@@ -290,6 +291,7 @@ async function startGame() {
   // roam all need it; only network = off stays off it (the game then shows its own network error)
   const net = !/^(off|0|none)$/i.test(r.env.NFSU2_NET?.trim() ?? '');
   const netName = net ? (r.env.NFSU2_ROAM_NAME?.trim() || 'Player') : null;
+  hudWide = !/^(43|4:3)$/i.test(r.env.NFSU2_HUD?.trim() ?? '');
   fatal = null;
   quitAt = null;
   saved = null;
@@ -457,14 +459,32 @@ function openHelp() {
   $<HTMLDialogElement>('#help').showModal();
 }
 
-/** free roam: a friend joined, left, went into a race; the server full; four at most, each for 5 s (also in the log) */
-function notice(text: string) {
+/** free roam: a friend joined, left, went into a race (who: the friend's name the text starts with); the server
+ *  full; four at most, each for 5 s (also in the log) */
+function notice(text: string, who?: string) {
   log.add(`[notice] ${text}`);
   const box = $('#notices'), line = document.createElement('div');
-  line.textContent = text;
+  if (who && text.startsWith(who)) { const b = document.createElement('b'); b.textContent = who; line.append(b, text.slice(who.length)); }
+  else line.textContent = text;
+  placeNotices();
   box.append(line);
   while (box.childElementCount > 4) box.firstElementChild!.remove();
   setTimeout(() => line.remove(), 5000);
+}
+/** The notices' place: on the left, between the game's SMS icon (down to y -80 from the middle) and its radar
+ *  (from +64; a GPS icon may sit just above it), lined up with the radar's left rim (x -301), in the game's HUD
+ *  units: runtime/widescreen.c shows a 640x480 HUD in the middle of the image, and with hud = wide moves the
+ *  radar's side out by up to 109 units (the edge of the image, at most of a centred 16:9 area).  So no size or
+ *  shape of the screen puts them over the HUD.  --u: CSS px per HUD unit. */
+function placeNotices() {
+  const v = session?.viewRect();
+  if (!v || !v.w || !v.h) return;
+  const u = Math.min(v.w / 640, v.h / 480), e169 = 320 * (16 / 9 * 0.75 - 1);
+  const out = hudWide ? Math.min(Math.max(320 * (v.w / v.h * 0.75 - 1), 0), e169) * 109 / e169 : 0;
+  const s = $('#notices').style;
+  s.left = `${v.x + v.w / 2 - (301 + out) * u}px`;
+  s.top = `${v.y + v.h / 2 - 72 * u}px`;
+  s.setProperty('--u', `${u}px`);
 }
 
 /** the away check's message over the game (away.ts), null: none */
@@ -665,6 +685,7 @@ export async function boot() {
   // who plays on this server now (Online): only while no game runs here
   players = watchPlayers(line => settings.setStatus(line), () => !session && !starting, setReach);
   window.addEventListener('online', () => players?.now());
+  window.addEventListener('resize', placeNotices);
   download = new Predownload(s => saves.showData(s), logLine);
   saves = new SavesPanel($('#saves'), $('#game-data'), {
     saveDir: SAVE, busy: () => !!session || starting || !instance.owner, confirm: confirmBox,

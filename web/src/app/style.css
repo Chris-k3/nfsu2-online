@@ -250,15 +250,21 @@ summary:hover { color: var(--text); }
 }
 /* the away check (away.ts): in the middle, until the player is back */
 .toast.away { top: 50%; transform: translate(-50%, -50%); width: max-content; max-width: min(560px, calc(100vw - 32px)); text-align: center; }
-/* free roam: friends joining, leaving, going into a race; newest at the bottom, each for a few seconds */
+/* free roam: friends joining, leaving, going into a race; a quiet log on the left between the game's SMS
+ * icon and its radar (shell.ts placeNotices: the place, and --u, one HUD unit), sized with the HUD: small
+ * dim italic text, the friend's name in lime; newest at the bottom, each fading out after 5 s (when
+ * notice() removes it) */
 .notices {
-  position: absolute; left: 50%; top: 64px; transform: translateX(-50%); z-index: 3; max-width: calc(100vw - 32px);
-  display: flex; flex-direction: column; align-items: center; gap: 4px; pointer-events: none;
+  --u: 1px;
+  position: absolute; left: 16px; top: 40%; z-index: 3; height: calc(88 * var(--u)); max-width: calc(240 * var(--u));
+  display: flex; flex-direction: column; justify-content: flex-end; align-items: flex-start; gap: calc(2 * var(--u));
+  overflow: hidden; pointer-events: none;
+  font: italic 400 max(11px, calc(5.5 * var(--u))) / 1.35 var(--font); color: rgba(255, 255, 255, 0.62);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85), 0 0 calc(3 * var(--u)) rgba(0, 0, 0, 0.5);
 }
-.notices div {
-  padding: 4px 12px; border-radius: 8px; background: rgba(0, 0, 0, 0.72);
-  font-size: 14px; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
-}
+.notices div { animation: notice-fade 5s linear both; }
+.notices b { font-weight: 700; color: rgba(200, 240, 136, 0.9); }    /* --lime */
+@keyframes notice-fade { 0% { opacity: 0; } 4%, 84% { opacity: 1; } 100% { opacity: 0; } }
 
 /* --------------------------------------------------------------- dialogs */
 dialog { color: var(--text); }

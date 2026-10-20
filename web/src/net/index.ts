@@ -54,8 +54,9 @@ export interface NetOptions {
   log?: (s: string) => void;
   /** the switch's peer list changed */
   onPeers?: (peers: NetPeer[]) => void;
-  /** a line for the player: from the game (NET_KIND_NOTICE: a friend joined, left, went into a race), or the server full */
-  onNotice?: (text: string) => void;
+  /** a line for the player: from the game (NET_KIND_NOTICE: a friend joined, left, went into a race; who: the
+   *  friend's name the text starts with), or the server full */
+  onNotice?: (text: string, who?: string) => void;
   /** milliseconds between pings to the switch (default 2000) */
   pingMs?: number;
   /** milliseconds no mailbox wants the switch before the page lets it go (default 10000) */
@@ -428,7 +429,10 @@ class Link implements NetLink {
       const len = dv.getUint32(s + P.S_LEN, true);
       if (dv.getUint32(s + P.S_KIND, true) === P.NET_KIND_NOTICE) {
         // for this page only, online or not; a copy: TextDecoder does not read shared memory
-        if (len <= P.NET_MAX_PAYLOAD) this.o.onNotice?.(new TextDecoder().decode(ep.u8.slice(s + P.S_DATA, s + P.S_DATA + len)));
+        if (len <= P.NET_MAX_PAYLOAD) {
+          const t = new TextDecoder().decode(ep.u8.slice(s + P.S_DATA, s + P.S_DATA + len)), k = t.indexOf('\x1f');
+          this.o.onNotice?.(k < 0 ? t : t.slice(0, k) + t.slice(k + 1), k < 0 ? undefined : t.slice(0, k));
+        }
       } else if (open && len <= P.NET_MAX_PAYLOAD) {
         const f = new Uint8Array(P.F_DATA + len), fv = new DataView(f.buffer);
         f[P.F_KIND] = dv.getUint32(s + P.S_KIND, true);
