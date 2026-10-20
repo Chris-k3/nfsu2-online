@@ -215,6 +215,17 @@ def abi_liveness(g, ent, callee_in, returns_flags):
         if not changed: break
     return live_in.get(ent, F_ALL), after, call_after
 
+_FTOL2INL = __import__('os').environ.get('FTOL2INL', '') == '1'
+_LREGS = None
+def _lregs():
+    """tools/lregs.py (LREGS=1), next to this file"""
+    global _LREGS
+    if _LREGS is None:
+        import importlib.util as _iu, os as _os
+        sp = _iu.spec_from_file_location('lregs', _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'lregs.py'))
+        _LREGS = _iu.module_from_spec(sp); sp.loader.exec_module(_LREGS)
+    return _LREGS
+
 _ABI = None
 def abi_table():
     """FLAGABI=<json> (output of tools/flagabi.py) -> (live_in, flags_out) or None"""
@@ -668,6 +679,9 @@ class Lifter:
                     self.oob_calls = getattr(self,'oob_calls',0)+1
                     return [f"PUSH32(0x{i.address+i.size:x}u); dispatch_indirect(c, 0x{t & 0xffffffff:x}u);"]
                 targets.add(t)
+                if t == 0x0075bed4 and _FTOL2INL:
+                    # FTOL2INL=1: the CRT's _ftol2 in place (cpu.h FTOL2_INL), not a call
+                    return [f"PUSH32(0x{i.address+i.size:x}u); FTOL2_INL(c);"]
                 return [f"PUSH32(0x{i.address+i.size:x}u); sub_{t:08x}(c);"]
             # x86: the call target is read BEFORE the return address is pushed (call [esp+N]!)
             return [f"{{ uint32_t _ct = {E(0)}; PUSH32(0x{i.address+i.size:x}u); DISPATCH_CALL(c, _ct); }}"]
@@ -1873,7 +1887,12 @@ class Lifter:
         out.append(f"    goto L_{entry:08x};")
         out += body
         out.append("}")
-        return "\n".join(out), targets|calls
+        code = "\n".join(out)
+        if _os.environ.get('LREGS', '') == '1':
+            # registers and flags as locals, stored only where others look (tools/lregs.py)
+            abi = abi_table()
+            code = _lregs().transform(code, abi[0] if abi else None, abi[1] if abi else None)
+        return code, targets|calls
 
 if __name__=='__main__':
     exe=sys.argv[1]; L=Lifter(exe)

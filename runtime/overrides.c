@@ -495,42 +495,7 @@ void sub_005c7ec0(CPU *c){
 void sub_0075bed4_orig(CPU *c);
 void sub_0075bed4(CPU *restrict c){
 #ifdef __wasm__
-    uint32_t T = (uint32_t)c->top & 7u, Tm = (T - 1u) & 7u;
-    double v = c->st[T];
-    uint64_t q = x86_cvt_i64(x87_round(c->fcw, v));      /* fld st(0); fst m32; fistp m64 */
-    double rq = (double)(int64_t)q;                        /* fild m64 */
-    c->st[Tm] = rq;
-    uint32_t lo = (uint32_t)q, hi = (uint32_t)(q >> 32);
-    float fv = (float)v; uint32_t edx; memcpy(&edx, &fv, 4);
-    c->eax = lo;
-    if (lo == 0u){
-        edx = hi;
-        if ((hi & 0x7fffffffu) == 0u){                     /* 0 or integer indefinite: both popped */
-            c->edx = hi;
-            FLAGS_LOG_M(0u, 32, 0x3fu);
-            c->top = (int32_t)((T + 1u) & 7u);
-            goto ret;
-        }
-    }
-    {
-        double d = X87R(x87_r2(v, rq, v - rq));            /* fsubp: ST(1) = v - r, pop */
-        c->st[T] = d;
-        float fd = (float)d; uint32_t ecx; memcpy(&ecx, &fd, 4);   /* fstp m32 */
-        c->top = (int32_t)((T + 1u) & 7u);
-        if (edx >> 31) ecx ^= 0x80000000u;                 /* negative: +1 when rounded down */
-        uint32_t e2 = ecx + 0x7fffffffu, cf = e2 < ecx;
-        c->ecx = e2;
-        if (edx >> 31){
-            uint32_t a = lo + cf, cf2 = cf ? a <= lo : a < lo;
-            c->eax = a;
-            uint32_t r = hi + cf2; FLAGS_ADC_M(hi, 0u, cf2, r, 32, 0x3fu); c->edx = r;
-        } else {
-            uint32_t a = lo - cf, cf2 = cf ? lo <= 0u : 0u;
-            c->eax = a;
-            uint32_t r = hi - cf2; FLAGS_SBB_M(hi, 0u, cf2, r, 32, 0x3fu); c->edx = r;
-        }
-    }
-ret:
+    FTOL2_BODY(c);                                          /* cpu.h */
     POP32(c->eip);
 #else
     sub_0075bed4_orig(c);

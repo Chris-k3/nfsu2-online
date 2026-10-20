@@ -202,9 +202,14 @@ void cov_report(const char *path){
         if (g_cov[i]){ fprintf(f, "%08x %u\n", 0x00401000u + i, g_cov[i]); n++; }
     fclose(f);
     fprintf(stderr, "  coverage: %lu functions ran -> %s\n", n, path);
-    /* MOST CALLED: a direct measurement of "what is the game doing?". */
+    /* MOST CALLED: a direct measurement of "what is the game doing?".
+     * COVTOP=<n> lists n of them (30; tools/inline_pick.py reads ~1000). */
+    { unsigned long long tot = 0; for (uint32_t i = 0; i < COV_SIZE; i++) tot += g_cov[i];
+      fprintf(stderr, "  coverage: %llu calls in all\n", tot); }
+    const char *ct = getenv("COVTOP");
+    int top = ct && *ct ? atoi(ct) : 30;
     fprintf(stderr, "  --- MOST CALLED GUEST FUNCTIONS ---\n");
-    for (int k = 0; k < 30; k++){
+    for (int k = 0; k < top; k++){
         uint32_t bi = 0, best = 0;
         for (uint32_t i = 0; i < COV_SIZE; i++)
             if (g_cov[i] > best){ best = g_cov[i]; bi = i; }

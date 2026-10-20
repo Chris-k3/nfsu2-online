@@ -27,6 +27,13 @@
 //                       another server: name=http://host:port/url (a page A/B against an older build's server)
 //     --run NAME        output directory out/web/bench/NAME (default bench-<date>-<time>)
 //     --timeout S       per-run limit (default 400)
+// Comparing builds' work: an uncapped race is not the same race twice (camera, HUD and AI timers follow real
+// time), and run to run it differs by several percent.  This plays the same race every time, and the game
+// thread's P-core cycles per frame (the cpu_begin..cpu_end window) agree within ~1-2 % between runs:
+//   --fps 120 --script /tests/web/scripts/perf_short.txt --env NFSU2_FIXED_DT=120 --env NFSU2_HFR_LOCKSTEP=1
+//   --env VCLOCK=fixed --env NFSU2_PACE_SPIN=0 --runs 3 --wasm a=http://localhost:A/game.wasm,b=http://localhost:B/game.wasm
+// (NFSU2_PACE_SPIN=0: the pacer sleeps without spinning, so the counters see the work alone; the guest busy
+// times of the race's first ~1,700 frames compare well too, later the runs drift apart.)
 // Every run writes <mode>-<i>.log (the console), .json (the parsed numbers) and, with --cpuprofile,
 // .cpuprofile + -prof.txt; summary.md/summary.json hold the table.
 //

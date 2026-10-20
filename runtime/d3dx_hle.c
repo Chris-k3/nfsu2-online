@@ -1080,13 +1080,54 @@ static inline int n8_init(void){
  * Reset: write after free at 0x65c88d).  The count is still updated
  * directly, without the guest dispatch; NFSU2_COMFREE=0 restores the skip. */
 uint32_t com_obj_addref(CPU *c, uint32_t o); uint32_t com_obj_release(CPU *c, uint32_t o); int com_frees(void);
-static inline void n8_ref(CPU *c, uint32_t obj, uint32_t off, uint32_t ret){
+void com_obj_refn(CPU *c, uint32_t o, int32_t n);
+static inline int n8_frees(void){ static int v = -1; if (v < 0) v = com_frees(); return v; }
+/* AddRef / Release of obj (vtable +4 / +8) are com.c's texture methods */
+static inline int n8_com(uint32_t obj, uint32_t off){
     uint32_t fn = MR32(MR32(obj) + off);
-    if ((fn & 0xF0000000u) == 0xE0000000u && ((fn >> 16) & 0x1fffu) == 3u && !(g_fxtr && fxtr_now())){
+    return (fn & 0xF0000000u) == 0xE0000000u && ((fn >> 16) & 0x1fffu) == 3u;
+}
+static inline void n8_ref(CPU *c, uint32_t obj, uint32_t off, uint32_t ret){
+    if (n8_com(obj, off) && !(g_fxtr && fxtr_now())){
         n8_refskip++;
-        if (com_frees()){ if (off == 4u) com_obj_addref(c, obj); else com_obj_release(c, obj); }
+        if (n8_frees()){ if (off == 4u) com_obj_addref(c, obj); else com_obj_release(c, obj); }
         return; }
-    PUSH32(obj); PUSH32(ret); dispatch_indirect(c, fn);
+    PUSH32(obj); PUSH32(ret); dispatch_indirect(c, MR32(MR32(obj) + off));
+}
+/* The pool ring of n8_store when every reference in it is a com.c texture and
+ * no node is the slot y itself: the same slot stores and reference counts as
+ * the loop in n8_store, with the AddRefs of the new texture made first and
+ * the Releases of equal old textures in one call each (a ring of ~13 effects
+ * made ~27 calls into com.c per SetTexture, ~2,700 a race frame).  Neither
+ * runs guest code, so the order only moves when a texture's last Release
+ * frees it, which no other step of the loop reads.  0: not applicable. */
+static int n8_ring(CPU *c, uint32_t y, uint32_t ix, uint32_t o40){
+    if (g_fxtr && fxtr_now()) return 0;
+    uint32_t nw = MR32(y+4u), k = 0;
+    if (nw && !(n8_com(nw, 4u) && n8_com(nw, 8u))) return 0;
+    for (uint32_t nd = MR32(o40+0x10u); nd != o40; nd = MR32(nd+0x10u)){
+        uint32_t ef = MR32(nd);
+        if (!ef) continue;
+        uint32_t y2 = MR32(ef+0x18u) + MR32(MR32(nd+8u) + ix*4u)*24u, o2 = MR32(y2+4u);
+        if (y2 == y || (o2 && !(n8_com(o2, 4u) && n8_com(o2, 8u)))) return 0;
+        k++;
+    }
+    int fr = n8_frees();
+    if (nw && k){ n8_refskip += k; if (fr) com_obj_refn(c, nw, (int32_t)k); }
+    uint32_t run = 0; int32_t rn = 0;
+    for (uint32_t nd = MR32(o40+0x10u); nd != o40; nd = MR32(nd+0x10u)){
+        uint32_t ef = MR32(nd);
+        if (!ef) continue;
+        uint32_t y2 = MR32(ef+0x18u) + MR32(MR32(nd+8u) + ix*4u)*24u, o2 = MR32(y2+4u);
+        if (o2){
+            n8_refskip++;
+            if (o2 != run){ if (rn && fr) com_obj_refn(c, run, -rn); run = o2; rn = 0; }
+            rn++;
+        }
+        MR32(y2+4u) = nw;
+    }
+    if (rn && fr) com_obj_refn(c, run, -rn);
+    return 1;
 }
 static void n8_store(CPU *c, uint32_t th, uint32_t tex, uint32_t ix, uint32_t o40){
     n8_tex++;
@@ -1096,7 +1137,7 @@ static void n8_store(CPU *c, uint32_t th, uint32_t tex, uint32_t ix, uint32_t o4
     uint32_t old = MR32(y+4u);
     if (old){ n8_ref(c, old, 8u, 0x65cd0du); MR32(y+4u) = 0; }
     MR32(y+4u) = tex;
-    if (!o40) return;
+    if (!o40 || n8_ring(c, y, ix, o40)) return;
     for (uint32_t nd = MR32(o40+0x10u); nd != o40; nd = MR32(nd+0x10u)){
         uint32_t ef = MR32(nd);
         if (!ef) continue;

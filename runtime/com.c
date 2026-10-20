@@ -818,6 +818,12 @@ static uint32_t com_release(uint32_t o){
  * thread that has ended since (its CPU lived on that thread's stack). */
 uint32_t com_obj_addref(CPU *c, uint32_t o){ g_com_cpu = c; return com_addref(o); }
 uint32_t com_obj_release(CPU *c, uint32_t o){ g_com_cpu = c; return com_release(o); }
+/* n AddRefs (n > 0) or -n Releases of o in a row (d3dx_hle.c n8_ring) */
+void com_obj_refn(CPU *c, uint32_t o, int32_t n){
+    g_com_cpu = c;
+    for (; n > 0; n--) com_addref(o);
+    for (; n < 0; n++) com_release(o);
+}
 /* win32_ext.c: a guest thread ends; its CPU must not be used again. */
 void com_forget_cpu(CPU *c){ if (g_com_cpu == c) g_com_cpu = 0; }
 /* The device holds a reference on whatever is bound. */

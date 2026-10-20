@@ -7,13 +7,21 @@
 #   X87OPT   x87 stack slots as locals within a basic block
 #   JTSWITCH MSVC switch jump tables as C switches inside the function, not
 #            tail calls into a lifted copy of the rest of the body per target
+#   LREGS    the guest registers and flags as locals of each lifted function,
+#            stored to the CPU struct only around calls, returns and tail
+#            jumps (tools/lregs.py)
+#   FTOL2INL the CRT's _ftol2 in place at its call sites (cpu.h FTOL2_INL)
+#   INLINE_LIST  the hot callees of tools/inline_hot.txt inlined at their
+#            direct call sites (tools/inline_pick.py made the list from a
+#            race's call counts; INLINE_LIST= turns it off)
 # Measured in Chrome (race, NFSU2_FIXED_DT=120): -16 to -29 % instructions
 # per frame and a 50 MB module instead of 65 MB (FLAGABI + X87OPT).  The Mac's
 # gen.sh defaults are unchanged; this wrapper is the web build's generator.
 #
 #   web/gen.sh <path/to/SPEED2.EXE>      writes gen/all, gen/server (and out/flagabi.json)
 #   WEB_LIFT=plain web/gen.sh <exe>      without the options (A/B)
-#   JTSWITCH=0 web/gen.sh <exe>          the options without JTSWITCH (A/B)
+#   JTSWITCH=0 web/gen.sh <exe>          the options without JTSWITCH (A/B); LREGS=0, FTOL2INL=0 and
+#                                        INLINE_LIST= likewise
 # gen.sh stamps the result (gen/all/stamp.txt, tools/genstamp.sh), which
 # web/build.sh checks against the checkout.  In a worktree gen/all and
 # gen/server are links to the main clone's, which every other worktree builds
@@ -46,8 +54,9 @@ else
   "$PY" tools/flagabi.py "$EXE" out/flagabi.json > out/flagabi.log 2>&1 || { tail -20 out/flagabi.log; echo "web/gen.sh: flagabi.py failed"; exit 1; }
   grep -E "^summary|^  round" out/flagabi.log || true
   [ -s out/flagabi.json ] || { echo "web/gen.sh: flagabi.py wrote no out/flagabi.json"; exit 1; }
+  export LREGS="${LREGS:-1}" FTOL2INL="${FTOL2INL:-1}" INLINE_LIST="${INLINE_LIST-$ROOT/tools/inline_hot.txt}"
   FLAGABI="$ROOT/out/flagabi.json" X87OPT=1 ./gen.sh "$EXE"
-  LIFT="FLAGABI X87OPT$( [ "$JTSWITCH" = 1 ] && echo " JTSWITCH")"
+  LIFT="FLAGABI X87OPT$( [ "$JTSWITCH" = 1 ] && echo " JTSWITCH" || true)$( [ "$LREGS" = 1 ] && echo " LREGS" || true)$( [ "$FTOL2INL" = 1 ] && echo " FTOL2INL" || true)$( [ -n "$INLINE_LIST" ] && echo " INLINE_LIST" || true)"
 fi
 # a lift that failed function by function still says "gen OK": every function
 # became an unsupported_insn(..., "lift-error") stub.  Refuse that.  A good

@@ -457,7 +457,11 @@ def gen_c(fns, body):
     o.append('void unsupported_insn(CPU*c,uint32_t a,const char*m){(void)c;(void)a;(void)m;fprintf(stderr,"TRAP 0x%x %s\\n",a,m);}')
     o.append('void guest_hook(CPU*c,uint32_t a){(void)c;(void)a;}')
     o.append('void cpuid_shim(CPU*c){(void)c;} uint64_t rdtsc_shim(void){return 0;}')
+    # LREGS=1 (tools/lregs.py): the lifted bodies name the registers in locals; the harness below does not
+    lr = os.environ.get('LREGS', '') == '1'
+    if lr: o.append('#undef RG_\n#define RG_(x) _r_##x')
     o.append('\n'.join(body))
+    if lr: o.append('#undef RG_\n#define RG_(x) c->x')
     o.append('static CPU cpu; static CPU *const c=&cpu;')
     o.append('#define STK 0x00B00000u')
     o.append('static int pass=0, fail=0;')

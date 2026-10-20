@@ -63,8 +63,8 @@ h16(){ shasum -a 256 | cut -c1-16; }
 STAMP="$(echo "# gen.sh $(date -u +%Y-%m-%dT%H:%M:%SZ): what gen/all and gen/server were lifted from"
   echo "$STAMP_SOURCES"
   echo "exe $(h16 < "$EXE")$( [ -f "$SRV" ] && echo " server.dll $(h16 < "$SRV")")"
-  echo "options X87PC=$X87PC X87OPT=${X87OPT:-} JTSWITCH=${JTSWITCH:-} FLAGABI=$( [ -z "${FLAGABI:-}" ] && echo - || { [ -f "$FLAGABI" ] && h16 < "$FLAGABI" || echo missing; } )" \
-       "FLAGOPT=${FLAGOPT:-} RETEIP=${RETEIP:-} INLINE=${INLINE:-} NOCLOSURE=${NOCLOSURE:-} COMMENTS=${COMMENTS:-}" \
+  echo "options X87PC=$X87PC X87OPT=${X87OPT:-} JTSWITCH=${JTSWITCH:-} LREGS=${LREGS:-} FTOL2INL=${FTOL2INL:-} FLAGABI=$( [ -z "${FLAGABI:-}" ] && echo - || { [ -f "$FLAGABI" ] && h16 < "$FLAGABI" || echo missing; } )" \
+       "FLAGOPT=${FLAGOPT:-} RETEIP=${RETEIP:-} INLINE=${INLINE:-} INLINE_LIST=$( [ -z "${INLINE_LIST:-}" ] && echo - || basename "$INLINE_LIST") NOCLOSURE=${NOCLOSURE:-} COMMENTS=${COMMENTS:-}" \
        "WATCH=${WATCH:-} COVERAGE=${COVERAGE:-} NSHARD=${NSHARD:-128}/${NSHARD_SRV:-8} HOOKS=${HOOKS:-}")"
 echo "$STAMP" > gen/server/stamp.txt
 echo "$STAMP" > gen/all/stamp.txt

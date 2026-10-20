@@ -5,7 +5,7 @@ sys.path.insert(0,'tools')
 import pefile
 from capstone import *
 from capstone.x86 import *
-from lift import Lifter, Unsupported
+from lift import Lifter, Unsupported, _lregs
 
 EXE = sys.argv[1]
 NSHARD = int(sys.argv[2]) if len(sys.argv)>2 else 128
@@ -115,7 +115,18 @@ _INL = {}
 import re as _re
 _INL_CALL = _re.compile(r'\bsub_([0-9a-f]{8})\(c\)')
 _INL_DENY = ('dispatch_indirect', 'DISPATCH_CALL', 'DISPATCH_TAIL', 'unsupported_insn', 'cpuid_shim', 'guest_hook', 'rdtsc_shim', 'cov_hit')
+# INLINE_LIST=<file>: these functions (hex addresses; # comments) are inlined
+# the same way at their direct call sites, whatever their size, calls
+# included (an inline copy calls its callees as usual): the hot callees of a
+# profile (tools/inline_pick.py).  Not inlined: a tail jump (it would leave
+# the caller), a run-time helper call (hooks, traps, CPUID), an override, a
+# function that calls itself.
+INLINE_LIST = set()
+if os.environ.get('INLINE_LIST'):
+    INLINE_LIST = {int(x, 16) for ln in open(os.environ['INLINE_LIST']) for x in ln.split('#')[0].replace(',', ' ').split()}
+_INL_LIST_DENY = ('DISPATCH_TAIL', 'unsupported_insn', 'cpuid_shim', 'guest_hook', 'rdtsc_shim', 'cov_hit')
 OVERRIDES = {int(x,16) for x in os.environ.get('OVERRIDE','').replace('0x','').split(',') if x.strip()}
+LREGS = os.environ.get('LREGS', '') == '1'      # lift.py runs tools/lregs.py on every function
 
 def _init(inl=None):
     global _L, _INL
@@ -134,6 +145,9 @@ def _inlprobe(a):
         code, tg = _L.lift(a)
     except Exception:
         return a, None
+    if a in INLINE_LIST:
+        if any(y in code for y in _INL_LIST_DENY) or _L.traps or f"sub_{a:08x}(c)" in code.split('{', 1)[1]: return a, None
+        return a, code
     m = _re.search(r'\((\d+) insns,', code)
     if not m or int(m.group(1)) > INLINE_MAX: return a, None
     if _INL_CALL.search(code.split('{', 1)[1]) or any(y in code for y in _INL_DENY): return a, None
@@ -149,7 +163,8 @@ def _shard(args):
             code,tg = L.lift(a)
             left.update(_jt_left(L, L.last_blocks))
         except Exception as e:
-            parts.append(f"void sub_{a:08x}(CPU *c){{ unsupported_insn(c,0x{a:x}u,\"lift-error\"); POP32(c->eip); }}")
+            stub = f"void sub_{a:08x}(CPU *c){{ unsupported_insn(c,0x{a:x}u,\"lift-error\"); POP32(c->eip); }}"
+            parts.append(_lregs().transform(stub) if LREGS else stub)
             defined.append(a); kinds[f"<lift:{type(e).__name__}>"]+=1; continue
         if a in OVERRIDES:
             code = code.replace(f"void sub_{a:08x}(CPU *restrict c) {{",
@@ -165,7 +180,7 @@ def _shard(args):
         kinds.update(L.trap_kinds); L.trap_kinds.clear()
     path=f"{OUT}/shard_{idx:04d}.c"
     with open(path,'w') as f:
-        f.write('#include "cpu.h"\n#include "decls.h"\n#include <math.h>\n\n')
+        f.write((_lregs().SHARD_DEFINE if LREGS else '') + '#include "cpu.h"\n#include "decls.h"\n#include <math.h>\n\n')
         for x in sorted(used):
             f.write(_INL[x].replace(f"void sub_{x:08x}(CPU *restrict c) {{",
                     f"static inline __attribute__((always_inline)) void inl_{x:08x}(CPU *restrict c) {{") + "\n")
@@ -194,11 +209,12 @@ if __name__=='__main__':
           + ("  [COVERAGE measurement]" if os.environ.get('COVERAGE','')=='1' else "") + ("  [WATCHPOINT instrumentation]" if wt=='1' else ""))
     t1=time.time()
     inl = {}
-    if INLINE_MAX:
+    if INLINE_MAX or INLINE_LIST:
         with mp.Pool(mp.cpu_count(), initializer=_init) as pool:
-            for a, code in pool.imap_unordered(_inlprobe, funcs, chunksize=64):
+            for a, code in pool.imap_unordered(_inlprobe, funcs if INLINE_MAX else [f for f in funcs if f in INLINE_LIST], chunksize=64):
                 if code: inl[a] = code
-        print(f"  [inline: {len(inl)} leaf functions <= {INLINE_MAX} instructions]  ({time.time()-t1:.0f}s)")
+        print(f"  [inline: {len(inl)} functions: {len(INLINE_LIST & set(inl))} of the {len(INLINE_LIST)} in INLINE_LIST"
+              + (f", leaf functions <= {INLINE_MAX} instructions" if INLINE_MAX else "") + f"]  ({time.time()-t1:.0f}s)")
     defined=set(); refs=set(); traps=0; trunc=0; kinds=collections.Counter(); bytes_=0; jt_left=set()
     with mp.Pool(mp.cpu_count(), initializer=_init, initargs=(inl,)) as pool:
         for n,(idx,d,r,tp,tr,kk,sz,lf) in enumerate(pool.imap_unordered(_shard, chunks)):

@@ -7,7 +7,7 @@
 #
 #   web/tools/isatest.sh            regenerate gen/isatest.c, build, run
 #   OPT=-O2 web/tools/isatest.sh    another optimisation level (default -O3)
-#   WEB_LIFT=opt web/tools/isatest.sh   with web/gen.sh's lift options (X87OPT, FLAGABI, JTSWITCH)
+#   WEB_LIFT=opt web/tools/isatest.sh   with web/gen.sh's lift options (X87OPT, FLAGABI, JTSWITCH, LREGS)
 #
 # Output: out/web/isa/isatest.wasm and the test report; exit 0 = all passed.
 # gen/isatest.c is written into this checkout's own gen/ directory (next to
@@ -18,12 +18,12 @@ WASI="${WASI:-$(ls -d "$ROOT"/deps/wasi-sdk-*-arm64-macos "$ROOT"/deps/wasi-sdk-
 [ -x "$WASI/bin/clang" ] || { echo "wasi-sdk not found in deps/ (set WASI=...)"; exit 1; }
 PY="$ROOT/.venv/bin/python"; [ -x "$PY" ] || PY=python3
 OUT="$ROOT/out/web/isa"; mkdir -p "$OUT" gen
-# WEB_LIFT=opt: lift the tests the way web/gen.sh lifts the game (X87OPT, JTSWITCH and
+# WEB_LIFT=opt: lift the tests the way web/gen.sh lifts the game (X87OPT, JTSWITCH, LREGS and
 # FLAGABI's liveness with the test snippet declared flag-returning: the test
 # reads its flags after its ret, which a FLAGABI lift otherwise leaves dead)
 if [ "${WEB_LIFT:-}" = opt ]; then
   echo '{"live_in": {}, "flags_out": ["0x401000"], "indirect_rd": []}' > "$OUT/flagabi_isa.json"
-  export X87OPT=1 FLAGABI="$OUT/flagabi_isa.json" JTSWITCH="${JTSWITCH:-1}"
+  export X87OPT=1 FLAGABI="$OUT/flagabi_isa.json" JTSWITCH="${JTSWITCH:-1}" LREGS="${LREGS:-1}"
 fi
 "$PY" tools/isatest.py
 # Same target, features and defines as web/build.sh (keep in step with it).

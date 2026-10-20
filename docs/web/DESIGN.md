@@ -57,22 +57,47 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
     and take the lifted body otherwise: the CRT's `_ftol2`, the view-frustum box test and its box transform (f32 at
     PC=24; a NaN, an infinity or a float subnormal goes to the lifted body) and D3DXMatrixMultiply's SSE version
     (f32x4; NaNs go to the lifted body). The last two were 8.5 % of a race frame, 2.9 % now. `tests/main_all.c`
-    sections 6 to 8 compare each with its lifted body. Tried and dropped: ThinLTO of the shards (slower), `_ftol2`
-    inline at the lifted call sites (no gain).
+    sections 6 to 8 compare each with its lifted body. Tried and dropped: ThinLTO of the shards (slower). `_ftol2`
+    in place at the lifted call sites gained nothing on its own; with LREGS it does a little (FTOL2INL below).
   - The compat headers (`runtime/web/compat/`) are force-included: Mach time, `os_unfair_lock`, kqueue, Mach task info,
     `pthread_exit` through a trampoline.
   - No Emscripten: the host is our own TypeScript (`web/src/host`).
   - `web/gen.sh <SPEED2.EXE>` lifts the game and `server.dll` into `gen/all` and `gen/server` (`./gen.sh` with the
-    web's lift options FLAGABI, X87OPT and JTSWITCH). `gen.sh` stamps both (`stamp.txt`, `tools/genstamp.sh`: the
-    override list, the hook list, the lifter, the exe, the options).
+    web's lift options FLAGABI, X87OPT, JTSWITCH, LREGS, FTOL2INL and INLINE_LIST). `gen.sh` stamps both
+    (`stamp.txt`, `tools/genstamp.sh`: the override list, the hook list, the lifter with its inline list, the exe, the
+    options).
   - JTSWITCH: an MSVC switch (`cmp r, n; ja`, then `jmp [r*4+table]`, also through a byte table) becomes a C
     `switch` inside its function. Each case checks the table entry in guest memory and anything else still takes the
     dispatcher, so the semantics stay the same. Without it every table target was entered as a function of its own,
     a lifted copy of the rest of the parent's body (3,821 of them from 477 tables; `sub_00620ae0` alone had 20
     copies of ~660 KB of wasm). `genall.py` no longer makes functions of pointers that only such tables hold.
+  - LREGS (`tools/lregs.py`, run by `lift.py` on every function): the guest registers and the six arithmetic flags
+    are C locals of each lifted function (`_r_eax` ... `_r_of`; `cpu.h`'s `RG_()` names them in the shared macros).
+    The CPU struct outlives the function, so before, clang had to make every write to it: a flag only the next
+    branch reads was materialised and stored, a register written in a loop was stored on every pass. Now the
+    struct is brought up to date only where other code can read it: before a call (registers; flags when the callee
+    reads them at entry, FLAGABI's `live_in`), a tail jump, a return (flags in the functions FLAGABI says return
+    them) and the run-time helpers that take the CPU, and it is reloaded after calls. A forward dataflow over the
+    function's blocks stores only what may have changed since the struct was last in step.
+  - INLINE_LIST (`genall.py`): the functions in `tools/inline_hot.txt` are inlined at their direct call sites. A race
+    frame makes ~94,000 guest calls. `tools/inline_pick.py` chose the list (110 functions, 36 % of the calls) from a
+    call-count profile (a `COVERAGE=1` lift run through `tests/web/scripts/perf_cov.txt`), by calls per byte of
+    copies up to a 1 MB budget; 3 MB did the same, 6 MB was 3 % slower.
+  - FTOL2INL: the CRT's `_ftol2` (`cpu.h` `FTOL2_BODY`, which the runtime override runs too) in place at its 1,769
+    call sites (~11,000 calls a race frame), where its ecx and flags are dead.
+  - Measured (Chrome 155, M4 Pro; `web/tools/bench.mjs`'s lockstep recipe: the same race every run, 3 runs per
+    build): the game thread's P-core cycles per racing frame 16.45 M -> 15.48 M (−5.9 %), instructions 56.7 M ->
+    52.7 M (−7.1 %), its busy time −4 %. Of that LREGS −3.2 %, runtime fixes about −1 % (the vertex/index mirror
+    table's hash used the low bits of the product, so the 16-byte-aligned keys filled 256 of its 4,096 slots; an
+    effect texture's ~27 reference counts per SetTexture went through three calls each), the inlining −1.3 %,
+    FTOL2INL a little. The module is 1.2 MB smaller (35 MB). Uncapped the game thread's time per frame went from
+    2.73 to 2.25 ms, but there each build plays a different race. Tried and dropped: guest displacements folded into
+    the wasm load offset (+9 % instructions: V8 then zero-extends and adds in 64 bits per access), leaf-only
+    inlining (INLINE=8: nothing), a fast path or a split of `com_call` (nothing), and the x87 rounding at PC=24 is
+    not a bottleneck (`NFSU2_FPU_PRESERVE=1` keeps PC=53: the same time).
   - `web/build.sh` refuses a `gen/all` made from another override list, hook list or lifter than the checkout's,
     then does an incremental shard build through a shared content-addressed object cache
-    (`~/.cache/nsfu2-web/obj`), links `out/web/nfsu2.wasm` (38 MB) and writes `nfsu2.json`.
+    (`~/.cache/nsfu2-web/obj`), links `out/web/nfsu2.wasm` (35 MB) and writes `nfsu2.json`.
 - **Memory:** guest address == linear address (`cpu.h`).
   - The guest owns `[0, 0x28000000)` (640 MB):
     - image at 0x400000

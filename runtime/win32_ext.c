@@ -318,7 +318,11 @@ uint64_t g_sleep_late_ns, g_sleep_gil_ns, g_sleep_n;    /* diagnostics: sleep la
 int hfr_display_live(void);              /* framerate.c */
 static void sleep_precise_ns(int64_t ns){
     static _Thread_local double margin = 2.0;               /* ms */
-    if (!hfr_display_live()){
+    /* NFSU2_PACE_SPIN=0 (benchmarks): no spin, so the game thread's
+     * instruction count is its work alone (web/tools/bench.mjs) */
+    static int spin = -1;
+    if (spin < 0){ const char *e = getenv("NFSU2_PACE_SPIN"); spin = !(e && *e == '0'); }
+    if (!spin || !hfr_display_live()){
         struct timespec ts = { (time_t)(ns / 1000000000LL), (long)(ns % 1000000000LL) };
         nanosleep(&ts, 0);
         return;

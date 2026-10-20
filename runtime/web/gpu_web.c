@@ -376,7 +376,8 @@ void metal_z_forget(unsigned zid){
  * from it.  The game side keeps a CPU shadow (com.c scans index ranges in
  * it); every new mirror is also queued as a POOL_WRITE with its bytes, so
  * the shadow can move when it grows. */
-#define MIR_N     4096u
+#define MIR_BITS  12u
+#define MIR_N     (1u << MIR_BITS)
 #define MIR_TOMB  1u
 #define PF_N      4096
 #define PF_DELAY  8u
@@ -385,6 +386,10 @@ void metal_z_forget(unsigned zid){
 static uint8_t *g_pool;
 static uint32_t g_pool_cap = 0, g_pool_top = 0;
 static struct { uint32_t key, gen, off, size, imax, used; } g_mir[MIR_N];
+/* The keys are guest object addresses, 16-byte aligned: the top bits of the
+ * product (the low ones depend only on the key's low bits, and used to put
+ * every key in 256 of the 4,096 slots, 65 ns a lookup). */
+static inline unsigned mir_hash(uint32_t key){ return (key * 2654435761u) >> (32u - MIR_BITS); }
 static struct { uint32_t off, size, at; } g_pf[PF_N];
 static int g_pfn = 0;
 static unsigned long g_mir_build = 0, g_mir_drop = 0, g_mir_live = 0, g_mir_full = 0, g_pf_lost = 0;
@@ -429,17 +434,34 @@ static void pool_free(uint32_t off, uint32_t size){
     else g_pf_lost++;
 }
 static void mir_sweep(void){
+    unsigned tomb = 0;
     for (unsigned i = 0; i < MIR_N; i++){
+        if (g_mir[i].key == MIR_TOMB) tomb++;
         if (g_mir[i].key <= MIR_TOMB || g_gframe - g_mir[i].used < MIR_IDLE) continue;
         pool_free(g_mir[i].off, g_mir[i].size);
-        g_mir[i].key = MIR_TOMB; g_mir_drop++; g_mir_live--;
+        g_mir[i].key = MIR_TOMB; g_mir_drop++; g_mir_live--; tomb++;
+    }
+    /* A lookup probes past tombstones until it finds the key or an empty
+     * slot, so dropped mirrors made every DrawIndexedPrimitive's two lookups
+     * long walks (a race: ~750 live entries and ~2,000 tombstones of 4,096).
+     * Rebuilt without them once they are an eighth of the table. */
+    if (tomb > MIR_N / 8u){
+        static __typeof__(g_mir[0]) live[MIR_N];
+        unsigned n = 0;
+        for (unsigned i = 0; i < MIR_N; i++) if (g_mir[i].key > MIR_TOMB) live[n++] = g_mir[i];
+        memset(g_mir, 0, sizeof g_mir);
+        for (unsigned k = 0; k < n; k++){
+            unsigned h = mir_hash(live[k].key);
+            while (g_mir[h].key) h = (h + 1u) & (MIR_N - 1u);
+            g_mir[h] = live[k];
+        }
     }
 }
 int metal_mirror(uint32_t key, uint32_t gen, const void *src, uint32_t size, unsigned isz, uint32_t *off, uint32_t *imax){
     gw_init();
     if (!g_on || key <= MIR_TOMB || !size || size > (64u << 20)) return 0;
     { static uint32_t last = 0; if (g_gframe - last >= 256u){ last = g_gframe; mir_sweep(); } }
-    unsigned h = (key * 2654435761u) & (MIR_N - 1u), slot = MIR_N, q;
+    unsigned h = mir_hash(key), slot = MIR_N, q;
     for (q = 0; q < 64u; q++){
         unsigned i = (h + q) & (MIR_N - 1u);
         if (g_mir[i].key == key){ slot = i; break; }
@@ -475,7 +497,7 @@ int metal_mirror(uint32_t key, uint32_t gen, const void *src, uint32_t size, uns
 }
 void metal_mirror_forget(uint32_t key){
     if (key <= MIR_TOMB) return;
-    unsigned h = (key * 2654435761u) & (MIR_N - 1u);
+    unsigned h = mir_hash(key);
     for (unsigned q = 0; q < 64u; q++){
         unsigned i = (h + q) & (MIR_N - 1u);
         if (g_mir[i].key == key){ pool_free(g_mir[i].off, g_mir[i].size); g_mir[i].key = MIR_TOMB; g_mir_live--; g_mir_drop++; return; }
