@@ -31,6 +31,10 @@
 // switch frees the address at once) and tells C (NET_PAGE_IDLE); the next
 // want connects again.  The switch also hears whether LAN play is open
 // ({"t":"lan"}): LAN broadcasts go only to the browsers that have it open.
+// A player who is away (the app's check, web/src/app/away.ts) gives the place
+// back the same way, wanted or not: setAway(true) closes the socket ("idle")
+// and tells C NET_PAGE_IDLE (Online and LAN play lose their connections, free
+// roam its friends), and nothing connects until setAway(false).
 //
 // TCP frames are never dropped here: while the LAN RX ring is full they wait
 // in order (the C side's streams have no retransmission; the WebSocket and the
@@ -58,7 +62,7 @@ export interface NetOptions {
   idleMs?: number;
 }
 export interface NetPeer { vip: string; name: string; self: boolean }
-export type NetState = 'waiting' | 'connecting' | 'online' | 'offline' | 'idle' | 'closed';
+export type NetState = 'waiting' | 'connecting' | 'online' | 'offline' | 'idle' | 'away' | 'closed';
 export interface NetStats {
   state: NetState; vip: string | null; connections: number; reconnects: number;
   framesOut: number; bytesOut: number; framesIn: number; bytesIn: number;
@@ -85,6 +89,8 @@ export interface NetLink {
   /** resolves with our virtual address once the switch first assigned one */
   readonly online: Promise<string>;
   stats(): NetStats;
+  /** the player is away: the place on the switch goes back, and stays free until setAway(false) */
+  setAway(on: boolean): void;
   close(): void;
 }
 
@@ -208,7 +214,7 @@ class Link implements NetLink {
     this.publishPeers(ep);
     if (this.state === 'online') this.publishOnline(ep);
     else Atomics.store(ep.i32, P.W_PAGE_STATE, this.state === 'connecting' ? P.NET_PAGE_CONNECTING : this.state === 'offline' ? P.NET_PAGE_OFFLINE
-      : this.state === 'idle' ? P.NET_PAGE_IDLE : P.NET_PAGE_NONE);
+      : this.state === 'idle' || this.state === 'away' ? P.NET_PAGE_IDLE : P.NET_PAGE_NONE);
     this.checkWant();
     void this.txLoop(ep);
   }
@@ -243,7 +249,7 @@ class Link implements NetLink {
     if (want) {
       if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
       if (!this.ws && (this.state === 'waiting' || this.state === 'idle')) this.connect();
-    } else if (!this.idleTimer && this.state !== 'waiting' && this.state !== 'idle') {
+    } else if (!this.idleTimer && this.state !== 'waiting' && this.state !== 'idle' && this.state !== 'away') {
       this.idleTimer = setTimeout(() => this.goIdle(), this.o.idleMs ?? 10_000);
     }
     const lan = this.lanOpen(), ws = this.ws;
@@ -255,7 +261,7 @@ class Link implements NetLink {
   /** nothing wanted the switch for idleMs: its place goes back (the switch frees the address at once) */
   private goIdle() {
     this.idleTimer = null;
-    if (this.closed || this.state === 'idle') return;
+    if (this.closed || this.state === 'idle' || this.state === 'away') return;
     // C stores want, then reads page_state; this stores page_state, then reads want: one of the two sees the other
     for (const ep of this.eps()) Atomics.store(ep.i32, P.W_PAGE_STATE, P.NET_PAGE_IDLE);
     if (this.eps().some(ep => ep.wants())) {
@@ -263,15 +269,32 @@ class Link implements NetLink {
       else this.setPage(this.state === 'connecting' ? P.NET_PAGE_CONNECTING : P.NET_PAGE_OFFLINE);
       return;
     }
+    this.release('idle');
+    this.log('no network feature in use: the place on the server goes back until one is');
+  }
+  /** the socket goes with 1000 "idle" (the switch frees the address at once) and C hears NET_PAGE_IDLE */
+  private release(to: 'idle' | 'away') {
+    if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
     for (const ep of this.eps()) this.drainTx(ep);                 // what C queued last (free roam's BYEs)
     if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null; }
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     const ws = this.ws; this.ws = null;
     if (ws) { ws.onopen = null; ws.onmessage = null; ws.onerror = null; ws.onclose = null; ws.close(1000, 'idle'); }
     this.pings.clear();
-    this.state = 'idle'; this.token = ''; this.full = false; this.backoff = 250; this.failed = 0;
-    this.log('no network feature in use: the place on the server goes back until one is');
+    this.state = to; this.token = ''; this.full = false; this.backoff = 250; this.failed = 0;
+    this.setPage(P.NET_PAGE_IDLE);
     for (const ep of this.eps()) { Atomics.add(ep.i32, P.W_RX_BELL, 1); Atomics.notify(ep.i32, P.W_RX_BELL); }
+  }
+  setAway(on: boolean) {
+    if (this.closed || on === (this.state === 'away')) return;
+    if (on) {
+      this.release('away');
+      this.log('the player is away: the place on the server goes back until they are here again');
+    } else {
+      this.state = 'idle';
+      this.log('the player is here again');
+      this.checkWant();
+    }
   }
   private connect() {
     if (this.closed) return;

@@ -31,6 +31,7 @@ import { serverAnswers, watchPlayers } from './players';
 import { SavesPanel } from './saves-ui';
 import { FpsOverlay, FPS_MODES, type FpsMode } from './overlay';
 import { GameSession } from './game';
+import { AwayCheck, AWAY_LIMITS, type AwayLimits } from './away';
 import { moviesKept, Predownload } from './predownload';
 
 type Phase = 'boot' | 'ready' | 'error' | 'waiting' | 'starting' | 'playing' | 'exited';
@@ -38,7 +39,7 @@ type Phase = 'boot' | 'ready' | 'error' | 'waiting' | 'starting' | 'playing' | '
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 
 // the page address's test aids, once boot knows whether the server is a development server
-const TEST_PARAMS = ['env', 'save', 'fresh', 'reg', 'script', 'artifacts', 'dumpscale'];
+const TEST_PARAMS = ['env', 'save', 'fresh', 'reg', 'script', 'artifacts', 'dumpscale', 'away'];
 const addr = new URLSearchParams(location.search);
 let q = new URLSearchParams();
 let SAVE = 'save';
@@ -74,6 +75,7 @@ let displayHz = 60;
 // at most 2 s (a hidden tab has no animation frames)
 let refreshMeasured: Promise<void> = Promise.resolve();
 let session: GameSession | null = null;
+let away: AwayCheck | null = null;
 let lastExit: { code: number; seconds: number } | null = null;
 const checks = new Map<string, Check>();
 let instance: ReturnType<typeof claimInstance>;
@@ -312,6 +314,7 @@ async function startGame() {
   }
   setPhase('playing', 'Playing', '');
   document.body.dataset.phase = 'playing';
+  away = new AwayCheck(session, awayLimits(), awayLine, logLine);
   fps.memory = session.proc.memory;
   const st = session;
   const waitStatus = setInterval(() => { if (st.status) { fps.reader = st.status; clearInterval(waitStatus); } }, 100);
@@ -373,6 +376,7 @@ function toggleFullscreen() {
 }
 
 function endStage() {
+  away?.stop(); away = null;
   exitFullscreen();
   untrack?.(); untrack = null;
   fps.stop(); fps.reader = null; fps.memory = null;
@@ -459,6 +463,19 @@ function notice(text: string) {
   box.append(line);
   while (box.childElementCount > 4) box.firstElementChild!.remove();
   setTimeout(() => line.remove(), 5000);
+}
+
+/** the away check's message over the game (away.ts), null: none */
+function awayLine(text: string | null) {
+  const t = $('#away');
+  t.hidden = text === null;
+  t.textContent = text ?? '';
+}
+/** the away check's limits; a test page's address may give them in seconds (away=input,hidden,warning) */
+function awayLimits(): AwayLimits {
+  const [inputS, hiddenS, warnS] = (q.get('away') ?? '').split(',').map(Number);
+  const ms = (s: number, d: number) => Number.isFinite(s) && s > 0 ? s * 1000 : d;
+  return { inputMs: ms(inputS, AWAY_LIMITS.inputMs), hiddenMs: ms(hiddenS, AWAY_LIMITS.hiddenMs), warnMs: ms(warnS, AWAY_LIMITS.warnMs) };
 }
 
 function toast(msg: string, ms: number) {
@@ -626,7 +643,7 @@ function showOverrides(given: string[], dev: boolean) {
   const env = Object.entries(ENVIRONMENT).map(([k, v]) => `${k}=${v}`);
   o.textContent = `Test settings from this page's address (development server): save folder "${SAVE}"` +
     (env.length ? `; ${env.join(', ')} (wins over Settings)` : '') +
-    ['fresh', 'reg', 'script', 'artifacts', 'dumpscale'].filter(k => q.has(k)).map(k => `; ${k}`).join('') + '.';
+    ['fresh', 'reg', 'script', 'artifacts', 'dumpscale', 'away'].filter(k => q.has(k)).map(k => `; ${k}`).join('') + '.';
 }
 
 export async function boot() {

@@ -76,6 +76,9 @@ export interface InputSubsystem extends Subsystem {
   requestQuit?(): boolean;
   /** whether requestQuit() can (still) reach the game (default: whether it exists) */
   canQuit?(): boolean;
+  /** performance.now() of the player's last key, mouse or controller input; null: the page cannot tell
+   *  (the game's own driver plays an input script) */
+  lastInput?(): number | null;
 }
 
 export interface NetSubsystem extends Subsystem {
@@ -83,6 +86,10 @@ export interface NetSubsystem extends Subsystem {
   vip(): string | null;
   /** the other browsers on the server's LAN */
   peers(): string[];
+  /** whether the game holds a place on the server's LAN, or is getting one (free roam, the LAN and Online screens) */
+  holding?(): boolean;
+  /** the player is away: the place goes back, and stays free until away(false) */
+  away?(on: boolean): void;
 }
 
 export type AttachRenderer = (proc: GameProcess, canvas: HTMLCanvasElement, opts: RendererOptions) => RendererSubsystem | Promise<RendererSubsystem>;

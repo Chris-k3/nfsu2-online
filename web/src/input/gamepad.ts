@@ -67,6 +67,8 @@ export class PadPoller {
   private f32 = new Float32Array(1);
   private i32 = new Int32Array(this.f32.buffer);
   private pressedBefore = 0;
+  // the sticks and triggers where they last counted as the player's use (a drifting stick does not)
+  private usedAxes = [0, 0, 0, 0, 0, 0];
   // rumble: the last mailbox update seen and when, what is playing
   private rumbleSeq = 0;
   private rumbleSeen = 0;
@@ -86,8 +88,9 @@ export class PadPoller {
     this.poll();
   };
 
+  /** onPress: a button went down; onUse: that, or a stick or trigger moved a quarter of its range */
   constructor(h: Int32Array, u8: Uint8Array, private base: number,
-              private onPress: () => void, private log: (s: string) => void) {
+              private onPress: () => void, private log: (s: string) => void, private onUse?: () => void) {
     this.h = h; this.u8 = u8;
     addEventListener('gamepadconnected', this.onConnect);
     addEventListener('gamepaddisconnected', this.onDisconnect);
@@ -123,6 +126,7 @@ export class PadPoller {
     const pressed = s.buttons & ~this.pressedBefore;
     this.pressedBefore = s.buttons;
     if (pressed) this.onPress();
+    if (pressed || s.axes.some((v, i) => Math.abs(v - this.usedAxes[i]) > 0.25)) { this.usedAxes = s.axes; this.onUse?.(); }
     if (this.same(s)) return;
     this.publish(s, !this.last || this.last.connected !== s.connected || this.last.index !== s.index || this.last.name !== s.name);
     this.last = s;

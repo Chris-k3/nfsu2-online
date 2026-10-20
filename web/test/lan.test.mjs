@@ -1118,6 +1118,39 @@ test('the page: the switch let go when no mailbox wants it, taken again when one
   } finally { await sw2.close(); }
 });
 
+// an away player (the app's check, web/src/app/away.ts) gives the place back although the game still wants it,
+// and takes one again when they are back
+test('the page: away, the place goes back while the game wants it and stays free; back, it is taken again', async () => {
+  const sw = await startSwitch();
+  const { attachNet } = await pageNet(sw.port);
+  const memory = new WebAssembly.Memory({ initial: 10, maximum: 10, shared: true }), roam = mailbox(memory, 0);
+  const logs = [];
+  const link = attachNet(fakeGame(memory, { 4: roam }), { url: `ws://127.0.0.1:${sw.port}/lan`, name: 'P', pingMs: 60_000, idleMs: 100, log: l => logs.push(l) });
+  try {
+    want(roam, 1);                                                         // free roam runs
+    const v1 = await link.online;
+    await until(() => sw.lan.peers.size === 1);
+    link.setAway(true);
+    assert.equal(link.state, 'away');
+    assert.equal(Atomics.load(roam.w, P.W_PAGE_STATE), P.NET_PAGE_IDLE, 'C hears that the page let go');
+    await until(() => sw.lan.peers.size === 0);
+    assert.equal(sw.lan.info().released, 1, 'its address freed at once');
+    assert.equal(sw.lan.reserved.size, 0);
+    want(roam, 0); want(roam, 1); await sleep(300);                        // the game wants it again, and again
+    assert.equal(sw.lan.peers.size, 0, 'nothing connects while away');
+    want(roam, 0); await sleep(300);
+    assert.equal(link.state, 'away', 'the idle timer does not end away');
+    link.setAway(false);
+    assert.equal(link.state, 'idle', 'back, with nothing that wants the switch: no connection');
+    await sleep(200);
+    assert.equal(sw.lan.peers.size, 0);
+    link.setAway(true); want(roam, 1); link.setAway(false);                // back while free roam runs
+    await until(() => sw.lan.peers.size === 1 && Atomics.load(roam.w, P.W_PAGE_STATE) === P.NET_PAGE_ONLINE);
+    assert.notEqual(P.ipStr(Atomics.load(roam.w, P.W_VIP) >>> 0), v1, 'a new address');
+    assert.ok(logs.some(l => /the player is away/.test(l)) && logs.some(l => /here again/.test(l)), 'the console says so');
+  } finally { link.close(); await sw.close(); }
+});
+
 // the server's console says what the players on the switch do (server.mjs, every 5 minutes): each counted once
 test('breakdown: Online mode, the LAN or Online screens, free roam, an older page, leaving or starting', async () => {
   const inOnline = new Set(), inRoam = new Set();

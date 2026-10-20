@@ -18,6 +18,9 @@
 //        page reactivate it; requestQuit() is WM_CLOSE.  Fullscreen locks the
 //        keyboard (navigator.keyboard.lock) so Escape and the browser's
 //        reserved shortcuts reach the game; holding Escape leaves fullscreen.
+// Use:   lastInput() is when the player last pressed a key, moved or clicked
+//        the mouse anywhere on the page, pressed a controller button or moved
+//        a stick or trigger (the app's away check, away.ts).
 // Test:  the autotest's ns* requests become DOM events (synth.ts).
 import type { GameProcess } from '../host/process';
 import { HostKind } from '../host/abi';
@@ -73,12 +76,18 @@ export interface InputHandle {
   status(): InputStats;
   /** numbers only, for the app's detailed overlay */
   stats(): InputCounters;
+  /** performance.now() of the player's last key, mouse or controller input (the attach before any); null
+   *  while the game's own driver writes the event ring (an input script without the page's input) */
+  lastInput(): number | null;
   /** diagnostic: n empty events, each timed from the page's write until the
    *  input thread has handled it (busy-waits on the main thread, max 20 ms each);
    *  returns the times in microseconds */
   probeLatency(n?: number): number[];
   detach(): void;
 }
+
+/** what counts as the player's use of keyboard and mouse (lastInput) */
+const USE_EVENTS = ['keydown', 'pointerdown', 'pointermove', 'wheel'];
 
 const detectMac = () => {
   const p = (navigator as unknown as { userAgentData?: { platform?: string } }).userAgentData?.platform ?? navigator.platform ?? '';
@@ -103,6 +112,8 @@ export function attachInput(proc: GameProcess, element: HTMLElement, opts: Input
   // quit requests made before the mailbox registered: sent once it does
   let quitPending = 0;
   const dropped = { n: 0 };
+  let lastUse = performance.now();
+  const onUse = () => { lastUse = performance.now(); };
 
   // ---- the event ring -------------------------------------------------------
   function push(type: number, dik = 0, vk = 0, flags = 0, chars: number[] = [], a = 0, b = 0) {
@@ -309,6 +320,7 @@ export function attachInput(proc: GameProcess, element: HTMLElement, opts: Input
       const s = api.status();
       return { 'input events': s.events, 'keys held': s.keysHeld, 'pad connected': s.pad ? 1 : 0, 'input dropped': s.dropped };
     },
+    lastInput() { return refused ? null : lastUse; },
     detach() {
       if (detached) return;
       // whatever the game holds is let go (it may outlive the page's input, e.g. a test page)
@@ -321,6 +333,7 @@ export function attachInput(proc: GameProcess, element: HTMLElement, opts: Input
       kbTarget.removeEventListener('keyup', onKeyUp as EventListener, { capture: true });
       for (const [t, f] of listeners) element.removeEventListener(t, f);
       removeEventListener('blur', onBlur); removeEventListener('focus', onFocus); removeEventListener('pagehide', onPageHide);
+      for (const t of USE_EVENTS) removeEventListener(t, onUse, { capture: true });
       document.removeEventListener('visibilitychange', onVisibility);
       document.removeEventListener('fullscreenchange', onFullscreen);
       (keyboardApi() as { removeEventListener?(t: string, f: () => void): void } | undefined)?.removeEventListener?.('layoutchange', onLayout);
@@ -338,6 +351,8 @@ export function attachInput(proc: GameProcess, element: HTMLElement, opts: Input
   element.addEventListener('wheel', onWheel, { passive: false });
   listeners.push(['wheel', onWheel as EventListener]);
   addEventListener('blur', onBlur); addEventListener('focus', onFocus); addEventListener('pagehide', onPageHide);
+  // the page's own menus and dialogs count too: the player is there
+  for (const t of USE_EVENTS) addEventListener(t, onUse, { capture: true, passive: true });
   document.addEventListener('visibilitychange', onVisibility);
   document.addEventListener('fullscreenchange', onFullscreen);
   const onLayout = () => void loadLayout();
@@ -370,7 +385,7 @@ export function attachInput(proc: GameProcess, element: HTMLElement, opts: Input
       focus: (on) => { active = on; push(IEV_FOCUS, 0, 0, 0, [], on ? 1 : 0, IREASON_SCRIPT); },
     });
     if (opts.gamepads ?? true)
-      pads = new PadPoller(h, u8, base, () => dispatchEvent(new Event('nfsu2-gesture')), log);
+      pads = new PadPoller(h, u8, base, () => dispatchEvent(new Event('nfsu2-gesture')), log, onUse);
     void loadLayout();
     // the game starts active (CreateWindowEx posts the activation): tell it
     // if the page is not

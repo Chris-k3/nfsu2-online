@@ -45,6 +45,8 @@ export const attachNet: AttachNet = (proc, o) => {
     detach: () => link.close(),
     vip: () => link.vip,
     peers: () => friends().map(p => `${p.name} (${p.vip})`),
+    holding: () => link.state === 'connecting' || link.state === 'online' || link.state === 'offline',
+    away: (on: boolean) => link.setAway(on),
     stats: () => {
       const s = link.stats();
       return { 'lan online': s.state === 'online' ? 1 : 0, 'lan friends': friends().length, 'lan rtt ms': s.switchRttMs };

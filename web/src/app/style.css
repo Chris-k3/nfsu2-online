@@ -246,6 +246,8 @@ summary:hover { color: var(--text); }
   position: absolute; left: 50%; top: 16px; transform: translateX(-50%); z-index: 3; max-width: calc(100vw - 32px);
   padding: 8px 16px; border-radius: 8px; background: rgba(0, 0, 0, 0.8); font-size: 14px; line-height: 20px; pointer-events: none;
 }
+/* the away check (away.ts): in the middle, until the player is back */
+.toast.away { top: 50%; transform: translate(-50%, -50%); width: max-content; max-width: min(560px, calc(100vw - 32px)); text-align: center; }
 /* free roam: friends joining, leaving, going into a race; newest at the bottom, each for a few seconds */
 .notices {
   position: absolute; left: 50%; top: 64px; transform: translateX(-50%); z-index: 3; max-width: calc(100vw - 32px);
