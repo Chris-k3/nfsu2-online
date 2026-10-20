@@ -2,7 +2,7 @@
 //   node web/tools/offline-test.mjs [--data "<game folder>"] [--port 8659] [--out <dir>] [--headed]
 // Steps (each prints PASS/FAIL with evidence):
 //   kept      online: the service worker controls the page and keeps the page, its scripts, the module and the
-//             list of game files; one Play to the title screen fills the cache with the game data that start reads
+//             list of game files; "Download the game data" fills the cache
 //   offline   the server gone: the page reloads from the copies, says it is offline, and Play gets to the title
 //             screen with the movies off and no game data asked of the network
 //   proxy502  a proxy in front of a stopped server (every answer 502): the same, from the copies
@@ -104,11 +104,13 @@ try {
     await page.waitForFunction(() => !!navigator.serviceWorker.controller, null, { timeout: 30000 });
     const kept = await page.waitForFunction(async () => {
       const c = await caches.open('nfsu2-offline-1'), keys = (await c.keys()).map(r => new URL(r.url).pathname);
-      return keys.length >= 9 && keys;
+      return keys.length >= 10 && keys;
     }, null, { timeout: 60000, polling: 500 }).then(h => h.jsonValue(), () => null);
-    // the game data comes from playing: online, the start reads what it needs (the movies too) into the cache
-    const play = await toTitle();
-    report('kept', !!kept && play.ok && play.failedData === 0, { kept: kept?.sort(), playToTitleMs: play.ms, title: play.ok, failedData: play.failedData });
+    await page.waitForFunction(() => !/Counting/.test(document.querySelector('#cache-info').textContent), null, { timeout: 30000 });
+    await page.click('#fetch-all');
+    await page.waitForFunction(() => ['done', 'error'].includes(window.__nfsu2.download().state), null, { timeout: 600000, polling: 500 });
+    const dl = await page.evaluate(() => window.__nfsu2.download());
+    report('kept', !!kept && dl.state === 'done', { kept: kept?.sort(), download: dl.state, gameData: dl.total });
   }
 
   // ---------------------------------------------------------- offline --

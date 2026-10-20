@@ -1,9 +1,9 @@
-// The game data cache in OPFS "cache/": the I/O worker fills it with the
-// blocks the game reads, and the start page counts it (gamedata.ts).  One
-// sparse file per file of the install folder, named by its path, size and
-// mtime (a file changed on the server is a new name), next to a ".have" map of
-// one byte per 1 MiB block.  A block's data is written before its byte in the
-// map.
+// The game data cache in OPFS "cache/", shared by the I/O worker (which fills
+// it with the blocks the game reads) and the predownload worker (which fills
+// all of it ahead, predownload-worker.ts).  One sparse file per file of the
+// install folder, named by its path, size and mtime (a file changed on the
+// server is a new name), next to a ".have" map of one byte per 1 MiB block.
+// A block's data is written before its byte in the map.
 
 export const BLOCK = 1 << 20;
 export const CACHE_DIR = 'cache';
@@ -29,8 +29,8 @@ export interface DataFile { path: string; size: number; mtime: number }
 export interface CacheFile { h: FileSystemSyncAccessHandle; have: Uint8Array; haveH: FileSystemSyncAccessHandle }
 
 export const manifestFiles = (m: Manifest): DataFile[] => m.files.filter(f => !f.d).map(f => ({ path: f.p, size: f.s ?? 0, mtime: f.m ?? 0 }));
-/** The game data but the movies (MOVIES/, a third of the folder in VP6 video that does not compress), as Game data
- *  on this PC counts it.  The movies stream as they play, and with Movies off the game never opens them. */
+/** What "Download all game data" fetches: all but the movies (MOVIES/, a third of the folder in VP6 video that
+ *  does not compress).  They stream as they play, and with Movies off the game never opens them. */
 export const fetchedAhead = (f: DataFile) => f.path.split('/')[0].toLowerCase() !== 'movies';
 export const dataUrl = (base: string, path: string) => base + path.split('/').map(encodeURIComponent).join('/');
 export function cacheKey(f: DataFile) { return `${f.path.replace(/[^A-Za-z0-9._-]/g, '_')}.${f.size}.${f.mtime}`; }

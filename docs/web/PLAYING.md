@@ -36,10 +36,10 @@ the ways to set that up. Each player then opens that `https://` address in the l
 **Firefox** and presses **Play**.
 
 The first start on a PC downloads about 7 MB of game code and, while playing, the game data it needs, compressed on
-the way. That PC keeps the data, so later starts are quick. Downloading all of it up front (**Download the game
-data**, in Game data on this PC at the bottom of the start page) is off for now: the server's bandwidth cannot keep up
-with every player doing it. The movies stream from the server as they play; with Movies off (Settings, Game) the game
-never asks for them.
+the way. That PC keeps the data, so later starts are quick. To download it up front, press **Download the game data**
+in Game data on this PC, at the bottom of the start page: 2 GB (all but the movies), about 1.4 GB over the network.
+After that no loading screen waits on the network, which matters on a slow line to a remote server. The movies
+stream from the server as they play; with Movies off (Settings, Game) the game never asks for them.
 
 **Offline:** a PC that has opened the page once also starts the game when the server cannot be reached (no
 network, or the server is down): the page keeps its own copy of itself and of the game code, updated each time the
@@ -129,9 +129,10 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
 - **Backups are your safety net.** When the disk is nearly full, the browser may clear a site's storage unless it
   promised to keep it. Chrome decides that by itself, and the page cannot see how full the disk is, so it does not warn.
   Firefox asks by the address bar (the Saves section says so while it asks): allow it. Make a backup now and then.
-- **Downloading the game data:** "Download the game data" in Game data on this PC is off for now, with the reason
-  under it: the server's bandwidth cannot keep up with every player downloading all of it ahead. The game still
-  streams what it needs as it plays and keeps it in this browser.
+- **Downloading the game data:** "Download the game data" in Game data on this PC fetches the game folder but the
+  movies into this browser, compressed on the way, with its progress and the time left. You can play meanwhile: the download pauses while the game runs and goes on
+  when it ends. Stop it whenever you like; what came is kept, and "Download the rest" goes on from there, also after
+  a reload. It needs about 2 GB of free disk space. The page says so before it starts when the browser has less room.
 - **Downloaded game data:** "Delete the downloaded game data" in Game data on this PC frees disk space on this PC. Your saves stay;
   the data downloads again when needed.
 

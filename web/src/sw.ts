@@ -1,8 +1,8 @@
 // The service worker: offline mode.  It keeps the start page, its scripts,
 // the game module and the list of game files in the browser, so the game
 // starts without the server.  The game data itself is in OPFS (datacache.ts):
-// with all it reads already there (Game data on this PC) and the movies off, a
-// game needs nothing from the network.
+// with all of it downloaded (Game data on this PC) and the movies off, a game
+// needs nothing from the network.
 //
 // Network first: while the server answers, every one of these comes from it
 // as before (a new version arrives at once), and the copy here is replaced
@@ -25,7 +25,7 @@ const CACHE = 'nfsu2-offline-1';
 const PAGE = '/';
 /** what a start needs; the page loads the first six itself before Play */
 const KEPT = ['/', '/main.js', '/main.css', '/game.json', '/game.wasm', '/data-manifest',
-  '/host/game-worker.js', '/host/io-worker.js', '/audio/worklet.js'];
+  '/host/game-worker.js', '/host/io-worker.js', '/host/predownload-worker.js', '/audio/worklet.js'];
 const LATER = KEPT.slice(5);
 const NAV_WAIT_MS = 4000, OFFLINE_MS = 30_000;
 let offlineUntil = 0;
