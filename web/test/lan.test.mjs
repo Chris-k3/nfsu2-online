@@ -5,7 +5,8 @@
 // ping/pong, disconnects, reconnecting to the same address (only with the
 // token the welcome gave: the audit's F1), the latency of a frame through the
 // switch on this machine, what a peer learns about the others (names and
-// virtual addresses only), the limits (players, frame size and rate, control
+// virtual addresses only), the peer list (the changes to the page, the whole
+// list to a page of before; a rename costs nothing: the security review), the limits (players, frame size and rate, control
 // messages, a broadcast charged per receiver, limits shared by one client
 // address, a flood never getting a slower receiver cut: the audit's F2),
 // WebSocket keepalive and idle close, the page's notices when the switch is
@@ -52,17 +53,25 @@ async function startSwitch(opts) {
 }
 
 // a fake browser: collects control messages and frames; resume = { vip, token }: reconnects as the page
-// does (/lan?resume, then a hello with the old address and the token before anything else)
+// does (/lan?resume, then a hello with the old address and the token before anything else); deltas: its hello
+// asks for the changes to the peer list, as the page's does (a page of before did not: the whole list each time).
+// view: the peer list as the whole lists and the changes made it; ctlBytes: the bytes of control messages it got
 class Client {
-  constructor(port, name, query = '', resume = null) {
-    this.name = name; this.frames = []; this.ctl = []; this.waiters = []; this.resume = resume;
+  constructor(port, name, query = '', resume = null, { deltas = false } = {}) {
+    this.name = name; this.frames = []; this.ctl = []; this.waiters = []; this.resume = resume; this.deltas = deltas;
+    this.view = null; this.ctlBytes = 0;
     const q = resume ? (query ? query + '&resume' : '?resume') : query;
     this.ws = new WebSocket(`ws://127.0.0.1:${port}/lan${q}`);
     this.ws.binaryType = 'nodebuffer';
-    if (resume) this.ws.on('open', () => this.ws.send(JSON.stringify({ t: 'hello', name, vip: ipStr(resume.vip), token: resume.token })));
+    if (resume) this.ws.on('open', () => this.ws.send(JSON.stringify({ t: 'hello', name, vip: ipStr(resume.vip), token: resume.token, ...(deltas ? { deltas: 1 } : {}) })));
     this.ws.on('message', (d, bin) => {
       if (bin) this.frames.push({ buf: Buffer.from(d), t: performance.now() });
-      else this.ctl.push(JSON.parse(String(d)));
+      else {
+        const m = JSON.parse(String(d));
+        this.ctl.push(m); this.ctlBytes += d.length;
+        if (m.t === 'peers') this.view = new Map(m.peers.map(p => [p.vip >>> 0, p]));
+        if (m.t === 'delta' && this.view) { for (const v of m.gone) this.view.delete(v >>> 0); for (const p of m.peers) this.view.set(p.vip >>> 0, p); }
+      }
       for (const w of this.waiters.splice(0)) w();
     });
     this.closed = new Promise(r => this.ws.on('close', r));
@@ -70,7 +79,7 @@ class Client {
   async welcome() {
     const m = await this.until(() => this.ctl.find(m => m.t === 'welcome'));
     this.vip = m.vip >>> 0; this.token = m.token;
-    if (!this.resume) this.ws.send(JSON.stringify({ t: 'hello', name: this.name }));
+    if (!this.resume) this.ws.send(JSON.stringify({ t: 'hello', name: this.name, ...(this.deltas ? { deltas: 1 } : {}) }));
     return m;
   }
   until(f, ms = 2000) {
@@ -80,7 +89,7 @@ class Client {
       check();
     });
   }
-  lastPeers() { const l = this.ctl.filter(m => m.t === 'peers'); return l.length ? l[l.length - 1].peers : null; }
+  lastPeers() { return this.view && [...this.view.values()]; }
   udp(dst, sport, dport, data, kind = 1, fakeSrc = 0) {
     const f = Buffer.alloc(16 + data.length);
     f[0] = kind; f.writeUInt32BE(fakeSrc, 4); f.writeUInt32BE(dst >>> 0, 8);
@@ -242,7 +251,7 @@ test('server.mjs: /lan accepts its own pages and tools, refuses other sites; an 
 test('what a peer learns about the others: virtual addresses and cleaned names, nothing else', async () => {
   const sw = await startSwitch();
   try {
-    const a = new Client(sw.port, 'Alice'), b = new Client(sw.port, '  B‮ob\u0000​\n\tthe\u0007 driver with a very long name indeed  ');
+    const a = new Client(sw.port, 'Alice'), b = new Client(sw.port, '  B‮ob\u0000​\n\tthe\u0007 driver with a very long name indeed  ', '', null, { deltas: true });
     await a.welcome(); await b.welcome();
     const want = 'Bob the driver with a very long';   // bidi, zero-width and control characters gone, spaces folded, 32 characters
     await a.until(() => a.lastPeers()?.some(p => p.name.startsWith('Bob')));
@@ -254,10 +263,12 @@ test('what a peer learns about the others: virtual addresses and cleaned names, 
     assert.deepEqual(names, ['Alice', want.slice(0, 32)]);
     assert.equal([...names[1]].length <= 32, true);
     // every control message has only these fields, and no address but a virtual one
-    const shape = { welcome: ['t', 'vip', 'vipStr', 'mask', 'token'], peers: ['t', 'peers'], pong: ['t', 'id'] };
+    await b.until(() => b.ctl.some(m => m.t === 'delta'));
+    const shape = { welcome: ['t', 'vip', 'vipStr', 'mask', 'token'], peers: ['t', 'peers'], delta: ['t', 'peers', 'gone'], pong: ['t', 'id'] };
     for (const m of [...a.ctl, ...b.ctl]) {
       assert.deepEqual(Object.keys(m).sort(), [...shape[m.t]].sort(), `fields of ${m.t}`);
-      if (m.t === 'peers') for (const p of m.peers) assert.deepEqual(Object.keys(p).sort(), ['name', 'vip']);
+      if (m.t === 'peers' || m.t === 'delta') for (const p of m.peers) assert.deepEqual(Object.keys(p).sort(), ['name', 'vip']);
+      if (m.t === 'delta') assert.ok(m.gone.every(v => Number.isInteger(v)), 'gone: addresses only');
       for (const [, ip4] of JSON.stringify(m).matchAll(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/g))
         assert.ok(ip4.startsWith('10.77.0.') || ip4 === '255.255.255.0', `only virtual addresses (${ip4})`);
       assert.ok(!JSON.stringify(m).includes('127.0.0.1') && !/::1|::ffff/.test(JSON.stringify(m)), 'no real address');
@@ -271,6 +282,93 @@ test('what a peer learns about the others: virtual addresses and cleaned names, 
     assert.ok(!('from' in sw.lan.info().peers[0]), 'the switch keeps no real address');
     await a.close(); await b.close();
   } finally { await sw.close(); }
+});
+
+test('the peer list: the page hears what changed, a page of before the whole list; a name is the first hello\'s', async () => {
+  const sw = await startSwitch();
+  try {
+    const a = new Client(sw.port, 'Alice', '', null, { deltas: true }), b = new Client(sw.port, 'Bob');
+    const wa = await a.welcome(); await b.welcome();
+    const names = (c) => (c.lastPeers() ?? []).map(p => p.name).sort().join(',');
+    const same = (want) => Promise.all([a, b].map(c => c.until(() => names(c) === want)));
+    await same('Alice,Bob');
+    // Carol joins: the page gets her as a change, not the whole list again; the page of before the whole list
+    const c = new Client(sw.port, 'Carol', '', null, { deltas: true });
+    await c.welcome();
+    await same('Alice,Bob,Carol');
+    assert.equal(a.ctl.filter(m => m.t === 'peers').length, 1, 'the whole list once: at the page\'s hello');
+    assert.ok(a.ctl.some(m => m.t === 'delta' && m.peers.some(p => p.name === 'Carol')));
+    assert.equal(b.ctl.filter(m => m.t === 'delta').length, 0, 'a page of before gets no changes it cannot read');
+    // more hellos from Carol (the audit: each sent everyone the whole list): her name stays, nobody hears a thing
+    await sleep(300);
+    const n0 = a.ctl.length, m0 = b.ctl.length;
+    for (let i = 0; i < 30; i++) c.ws.send(JSON.stringify({ t: 'hello', name: `Mallory${i}`, deltas: 1 }));
+    c.ws.send(JSON.stringify({ t: 'ping', id: 5 }));
+    await c.until(() => c.ctl.some(m => m.t === 'pong' && m.id === 5));
+    await sleep(1300);
+    assert.equal(a.ctl.length, n0, 'nothing more to the page');
+    assert.equal(b.ctl.length, m0, 'nothing more to the page of before');
+    assert.equal(names(a), 'Alice,Bob,Carol');
+    // joins in a burst: one change to each player, the whole list to the page of before at most once a second
+    const d0 = a.ctl.length, f0 = b.ctl.length;
+    const burst = Array.from({ length: 5 }, (_, i) => new Client(sw.port, `P${i}`, '', null, { deltas: i % 2 === 0 }));
+    await Promise.all(burst.map(x => x.welcome()));
+    const all = 'Alice,Bob,Carol,P0,P1,P2,P3,P4';
+    await same(all);
+    for (const x of burst) await x.until(() => names(x) === all);
+    assert.ok(a.ctl.length - d0 <= 2, `the page: ${a.ctl.length - d0} messages for 5 joins`);
+    assert.ok(b.ctl.length - f0 <= 2, `the page of before: ${b.ctl.length - f0} whole lists for 5 joins`);
+    // a player who leaves and is back (with its token) before the change goes out: gone, then back
+    await sleep(1100);
+    const cv = c.vip, wc = c.ctl.find(m => m.t === 'welcome');
+    c.ws.terminate();
+    const c2 = new Client(sw.port, 'Carol', '', { vip: cv, token: wc.token }, { deltas: true });
+    assert.equal((await c2.welcome()).vip >>> 0, cv);
+    const back = await a.until(() => a.ctl.find(m => m.t === 'delta' && m.gone.includes(cv)));
+    assert.ok(back.peers.some(p => p.vip === cv && p.name === 'Carol'), 'gone and back in one change');
+    await same(all);
+    // leaves: off every list
+    await c2.close(); for (const x of burst) await x.close();
+    await same('Alice,Bob');
+    assert.ok(names(a).length && wa.vip);
+    await a.close(); await b.close();
+  } finally { await sw.close(); }
+});
+
+test('the cost of the peer list: a rename costs nothing, a join one small change to each player (the security review)', async () => {
+  const sw = await startSwitch({ maxPeers: 250 });
+  const N = 100, PRE = 10;                      // 100 players, 10 of them with a page of before
+  const players = [];
+  try {
+    for (let i = 0; i < N; i++) players.push(new Client(sw.port, `Driver ${String(i).padStart(3, '0')}`, `?g=${i}`, null, { deltas: i >= PRE }));
+    await Promise.all(players.map(p => p.welcome()));
+    await Promise.all(players.map(p => p.until(() => p.view?.size === N, 5000)));
+    await sleep(1200);
+    const bytes = () => players.reduce((n, p) => n + p.ctlBytes, 0);
+    // a client sends 40 hellos with new names: before, each sent the whole list (4 KB) to all 100
+    let b0 = bytes();
+    const m = new Client(sw.port, 'M', '?g=m', null, { deltas: true });
+    await m.welcome();
+    await m.until(() => m.view?.size === N + 1);
+    for (let i = 0; i < 40; i++) m.ws.send(JSON.stringify({ t: 'hello', name: i % 2 ? 'A'.repeat(32) : 'B'.repeat(32) }));
+    await sleep(1300);
+    const rename = bytes() - b0;
+    // its join (one change to each page, the whole list to the 10 of before) and nothing for the renames
+    const list = Buffer.byteLength(JSON.stringify({ t: 'peers', peers: players[0].lastPeers() }));
+    console.log(`peer list at ${N + 1} players: a join and 40 renames sent the others ${rename} bytes (the whole list ${list} bytes; ` +
+      `before, ${41} whole lists to each: ${41 * list * N} bytes)`);
+    assert.ok(rename < (N - PRE) * 120 + PRE * (list + 200), `${rename} bytes`);
+    // churn: one client opens and closes connections 10 times; each costs the pages one small change, the pages
+    // of before one whole list a second
+    b0 = bytes();
+    const t0 = performance.now();
+    for (let i = 0; i < 10; i++) { const x = new Client(sw.port, 'churn', '?g=m', null, { deltas: true }); await x.welcome(); await x.close(); }
+    await sleep(1300);
+    const churn = bytes() - b0, secs = (performance.now() - t0) / 1000;
+    console.log(`10 joins and leaves in ${secs.toFixed(1)} s: ${churn} bytes to the others`);
+    assert.ok(churn < 20 * (N - PRE) * 120 + Math.ceil(secs + 1) * PRE * (list + 200), `${churn} bytes`);
+    await m.close();
+  } finally { for (const p of players) p.ws.terminate(); await sw.close(); }
 });
 
 test('limits: players, frame size, frame rate, control messages', async () => {
@@ -398,9 +496,10 @@ test('control frames: pings answered a few a second, a ping flood cut, unasked p
 
 test('a receiver that never reads: cut by the keepalive tick once its queue is over the limit', async () => {
   // B sends to A, which never reads, until A's queue on the switch is just over the limit, then stops: no
-  // further send finds it, the next keepalive tick does (before the missing pong would)
+  // further send finds it, the next keepalive tick does (before the missing pong would); the peer list goes out at
+  // once here, before the flood (it would otherwise be the send that finds it)
   const sw = await startSwitch({ keepaliveMs: 400, sendBuffer: 16 << 10, shedQueue: 1 << 20, byteRate: 64 << 20, frameRate: 100000,
-    groupByteRate: 64 << 20, groupFrameRate: 100000 });
+    groupByteRate: 64 << 20, groupFrameRate: 100000, peersMs: 1, fullPeersMs: 1 });
   try {
     const a = await rawWs(sw.port);
     a.pause();
@@ -480,9 +579,8 @@ test('a departed player\'s address goes only to its token: an attacker who asks 
     assert.equal(f.buf.subarray(16).toString(), 'race-data-for-Bob');
     await sleep(100);
     assert.equal([mallory, ...grabs].reduce((n, c) => n + c.frames.length, 0), 0, 'nothing for Bob reached the attacker');
-    // one Bob on the switch at Bob's address
-    const peers = alice.lastPeers();
-    assert.equal(peers.filter(p => (p.vip >>> 0) === bvip).length, 1);
+    // one Bob on the switch at Bob's address (the peer list comes up to a second later)
+    await alice.until(() => alice.lastPeers()?.filter(p => (p.vip >>> 0) === bvip).length === 1);
     // a reservation ends: after reserveMs the address is an ordinary free one again (no token needed)
     await bob2.close();
     await sleep(50);
@@ -514,7 +612,7 @@ test('a resume replaces the same client\'s older connection (one that died witho
     assert.ok(sw.lan.peers.get(b.vip)?.ws, 'the new connection holds the address after the old one closed');
     a.udp(b.vip, 1, 2, 'to the new one');
     assert.equal((await b2.until(() => b2.frames[0])).buf.subarray(16).toString(), 'to the new one');
-    assert.equal(a.lastPeers().filter(p => p.name === 'Bob').length, 2, 'Bob, and the wrong-token client');
+    await a.until(() => a.lastPeers()?.filter(p => p.name === 'Bob').length === 2);   // Bob, and the wrong-token client
     // a ?resume that never sends its hello gets a fresh address after resumeWaitMs; a binary first message the same
     await x.close(); await a.close(); await b2.close();
   } finally { await sw.close(); }

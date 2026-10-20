@@ -63,7 +63,7 @@ class Browser {
     this.ws.binaryType = 'nodebuffer';
     await new Promise((res, rej) => {
       this.ws.on('message', (d, bin) => {
-        if (!bin) { const m = JSON.parse(String(d)); if (m.t === 'welcome') { this.vip = m.vip >>> 0; this.ws.send(JSON.stringify({ t: 'hello', name: `load${this.i}` })); res(); } return; }
+        if (!bin) { const m = JSON.parse(String(d)); if (m.t === 'welcome') { this.vip = m.vip >>> 0; this.ws.send(JSON.stringify({ t: 'hello', name: `load${this.i}`, deltas: 1 })); res(); } return; }
         this.frame(Buffer.from(d));
       });
       this.ws.on('error', rej); this.ws.on('close', () => { this.closed = true; rej(new Error('closed')); });

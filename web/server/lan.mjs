@@ -13,9 +13,20 @@
 //   3, 4, 5  LAN play (the Winsock HLE, runtime/web/net_lan.c): UDP, TCP
 //      segments and ICMP with ports at [12..15] and an 8-byte LAN header
 //      (op, ttl, connection id) before the data; broadcasts as kind 1
-// Text frames are JSON control messages: {"t":"hello","name":...} and
+// Text frames are JSON control messages: {"t":"hello","name":...,"deltas":1} and
 // {"t":"ping","id":n} from a client; {"t":"welcome","vip":...,"token":...},
-// {"t":"peers",...} and {"t":"pong","id":n} from the switch.
+// {"t":"peers",...}, {"t":"delta",...} and {"t":"pong","id":n} from the switch.
+//
+// The peer list.  A connection's first hello names its player (later ones
+// change nothing: the page sends one a connection) and gets it the whole list,
+// {"t":"peers","peers":[{vip,name},...]}.  After that a client whose hello
+// said "deltas":1 (the page) hears only what changed, at most every peersMs:
+// {"t":"delta","peers":[{vip,name} that joined or got their name],"gone":[vip
+// that left (and may be back: the client takes gone first)]}.  One that did
+// not (a page of before), or sent no hello, gets the whole list again, at most
+// every fullPeersMs.
+// (The security review: each rename, 20 a second per connection, sent the
+// whole list to everyone: 11,700 times what came in, at 100 players.)
 //
 // Addresses belong to the connection that holds them.  The welcome carries a
 // random token (128 bits) that only that client sees.  A client that lost its
@@ -65,6 +76,9 @@
 //                the switch never sends more for a client than these allow
 //                (the audit's F2: one 4 MB/s sender made it send 15 x that).
 //   textRate     control messages per second; maxText bytes each
+//   peersMs      what changed on the peer list goes out at most this often, as one
+//                message to each player (a join and its name in one)
+//   fullPeersMs  the whole list to a client that does not take changes, at most this often
 //   ctlRate      WebSocket control frames per second (token bucket, burst = 2 s
 //                worth): pings, which the switch answers itself, and pongs it
 //                did not ask for.  No browser sends either (the WebSocket API
@@ -161,7 +175,7 @@ export const LAN_DEFAULTS = Object.freeze({
   siteFrameRate: 4000, siteByteRate: 1 << 20,
   textRate: 20, maxText: 1024, ctlRate: 10, shedQueue: 256 << 10, roamQueue: 16 << 10, streamQueue: 2 << 20, streamShare: 1 << 20, stallMs: 1000,
   sendBuffer: 8 << 20, keepaliveMs: 25_000, idleMs: 10 * 60_000, reserveMs: 60_000, groupReserve: 8, siteReserve: 16,
-  resumeWaitMs: 5_000, onlineQueue: 1 << 20,
+  resumeWaitMs: 5_000, onlineQueue: 1 << 20, peersMs: 250, fullPeersMs: 1000,
 });
 
 class Bucket {
@@ -208,6 +222,9 @@ export class LanSwitch {
     // segments, a receiver that stopped reading the stream segments it was sent
     this.cuts = { flood: 0, slow: 0, queue: 0, dead: 0, idle: 0, hog: 0, stall: 0 };
     this.evicted = 0;                    // reservations a client gave up for its newer ones (groupReserve, siteReserve)
+    // the peer list: addresses that joined, got their name or left since the last change went out (and the ones
+    // that left), and when the whole list last went to the clients that take no changes
+    this.changed = new Set(); this.left = new Set(); this.deltaTimer = null; this.fullTimer = null; this.fullAt = -Infinity;
     // --lan-impair (test aid, only with the server's --dev)
     this.impair = parseImpair(opts.impair); this.lost = 0; this.tcpLast = new Map();
     let x = (this.impair?.seed ?? 1) >>> 0 || 1;
@@ -423,12 +440,13 @@ export class LanSwitch {
     if (resumed) { this.reserved.delete(vip); this.resumed++; }
     else if (!(vip = this.allocate())) { this.refused++; return ws.close(1013, 'LAN full'); }
     const token = newToken();
-    const peer = { ws, vip, name: 'player', tokenHash: tokenHash(token), group, site, framesIn: 0, framesOut: 0, alive: true, lastIn: Date.now(), pingData: null,
+    // hello: its first hello came (the name, and deltas: it takes the changes to the peer list)
+    const peer = { ws, vip, name: 'player', hello: false, deltas: false, tokenHash: tokenHash(token), group, site, framesIn: 0, framesOut: 0, alive: true, lastIn: Date.now(), pingData: null,
       // stream segments waiting for this receiver (sq: { data, mine, g }), their bytes by sending group ({ n }) and
       // in all, since when the queue is not empty, and when one last went out
       sq: [], pumpTimer: null, streamQueued: new Map(), streamTotal: 0, streamSince: 0, streamOut: 0,
       frames: new Bucket(o.frameRate), bytes: new Bucket(o.byteRate), texts: new Bucket(o.textRate), ctl: new Bucket(o.ctlRate) };
-    if (hello && typeof hello.name === 'string') { peer.texts.take(1); peer.name = cleanName(hello.name); }
+    if (hello) { peer.texts.take(1); greet(peer, hello); }
     this.peers.set(vip, peer);
     // the same client's older connection (it died without a close): it goes, and its late close changes nothing
     if (old) old.ws.terminate();
@@ -446,7 +464,8 @@ export class LanSwitch {
       flood();
     });
     ws.send(JSON.stringify({ t: 'welcome', vip, vipStr: vipStr(vip), mask: '255.255.255.0', token }));
-    this.broadcastPeers();
+    if (peer.hello) this.send(peer, this.peerList());
+    this.peersChanged(vip);
     this.persist();
     opts.onJoin?.(vip, resumed);
     ws.on('message', (data, isBinary) => {
@@ -457,9 +476,12 @@ export class LanSwitch {
         if (n > o.maxText || !peer.texts.take(1)) { this.limited++; return; }
         let m; try { m = JSON.parse(String(data)); } catch { return; }
         if (!m || typeof m !== 'object') return;
-        if (m.t === 'hello' && typeof m.name === 'string') {
-          const name = cleanName(m.name);
-          if (name !== peer.name) { peer.name = name; this.broadcastPeers(); }
+        if (m.t === 'hello') {
+          if (peer.hello) return;
+          const was = peer.name;
+          greet(peer, m);
+          this.send(peer, this.peerList());
+          if (peer.name !== was) this.peersChanged(vip);
         } else if (m.t === 'ping' && Number.isSafeInteger(m.id)) this.send(peer, JSON.stringify({ t: 'pong', id: m.id }));
         return;
       }
@@ -497,7 +519,7 @@ export class LanSwitch {
       for (const k of this.tcpLast.keys()) if (k.startsWith(`${vip}>`) || k.endsWith(`>${vip}`)) this.tcpLast.delete(k);
       this.online?.peerGone(vip);
       this.roam?.peerGone(vip);
-      this.broadcastPeers();
+      this.peersChanged(vip, true);
       opts.onLeave?.(vip, peer.name);
     });
   }
@@ -513,11 +535,34 @@ export class LanSwitch {
     p.ws.send(data);
     return true;
   }
-  broadcastPeers() {
+  /** the whole peer list, as a message */
+  peerList() {
     const list = [...this.peers.values()].map(p => ({ vip: p.vip, name: p.name }));
     if (this.online) list.push({ vip: this.online.vip, name: this.online.name, server: true });
-    const msg = JSON.stringify({ t: 'peers', peers: list });
-    for (const p of this.peers.values()) if (p.ws.readyState === 1) this.send(p, msg);
+    return JSON.stringify({ t: 'peers', peers: list });
+  }
+  /** vip joined, got its name or left: everyone hears of it peersMs later, with whatever else changed by then */
+  peersChanged(vip, left = false) {
+    this.changed.add(vip); if (left) this.left.add(vip);
+    if (!this.deltaTimer) { this.deltaTimer = setTimeout(() => this.sendDelta(), this.o.peersMs); this.deltaTimer.unref?.(); }
+    if (!this.fullTimer) {
+      this.fullTimer = setTimeout(() => this.sendFull(), Math.max(this.o.peersMs, this.fullAt + this.o.fullPeersMs - performance.now()));
+      this.fullTimer.unref?.();
+    }
+  }
+  sendDelta() {
+    this.deltaTimer = null;
+    const peers = [...this.changed].filter(v => this.peers.has(v)).map(v => ({ vip: v, name: this.peers.get(v).name }));
+    const msg = JSON.stringify({ t: 'delta', peers, gone: [...this.left] });
+    this.changed.clear(); this.left.clear();
+    for (const p of this.peers.values()) if (p.deltas && p.ws.readyState === 1) this.send(p, msg);
+  }
+  sendFull() {
+    this.fullTimer = null; this.fullAt = performance.now();
+    const to = [...this.peers.values()].filter(p => !p.deltas && p.ws.readyState === 1);
+    if (!to.length) return;
+    const msg = this.peerList();
+    for (const p of to) this.send(p, msg);
   }
   // WebSocket pings keep proxies from cutting a quiet connection and find dead ones
   keepalive() {
@@ -531,7 +576,12 @@ export class LanSwitch {
       try { p.ws.ping(p.pingData); } catch { /* closing */ }
     }
   }
-  stop() { clearInterval(this.timer); this.flush(); this.online?.stop?.(); this.roam?.stop?.(); }
+  stop() { clearInterval(this.timer); clearTimeout(this.deltaTimer); clearTimeout(this.fullTimer); this.flush(); this.online?.stop?.(); this.roam?.stop?.(); }
+}
+/** a connection's first hello: its player's name, and whether it takes the changes to the peer list */
+function greet(peer, m) {
+  peer.hello = true; peer.deltas = m.deltas === 1;
+  if (typeof m.name === 'string') peer.name = cleanName(m.name);
 }
 function parseImpair(spec) {
   if (!spec) return null;

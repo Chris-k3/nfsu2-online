@@ -88,7 +88,7 @@ class Bot {
       if (!bin) {
         const m = JSON.parse(String(d));
         if (m.t === 'welcome' && !this.vip) {
-          this.vip = m.vip >>> 0; ws.send(JSON.stringify({ t: 'hello', name: this.name }));
+          this.vip = m.vip >>> 0; ws.send(JSON.stringify({ t: 'hello', name: this.name, deltas: 1 }));
           const io = this.x.crowd_io(), m8 = this.mem();
           const b = Buffer.from(`${this.name}\0${CAR}\0`, 'latin1'); m8.set(b, io);
           this.x.crowd_init(this.id, fnv1a(ROOM), HUB, PORT, bhash(CAR), STATES, nowUs());

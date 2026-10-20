@@ -135,6 +135,8 @@ class Link implements NetLink {
   private lastDownLog = -Infinity;
   /** the switch refused us as full (close 1013 "LAN full"): told once, and again when a place frees up */
   private full = false;
+  /** the switch's peer list (the online host on it too), as its last whole list and the changes since made it */
+  private peerMap = new Map<number, { name: string; server: boolean }>();
   private peerVips = new Set<number>();
   private st = { connections: 0, reconnects: 0, framesOut: 0, bytesOut: 0, framesIn: 0, bytesIn: 0, rxFiltered: 0,
     rttSum: 0, rttN: 0, rttMax: 0, mainMs: 0, mainCalls: 0, rxFull: 0, rxOversize: 0,
@@ -199,7 +201,8 @@ class Link implements NetLink {
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
     ws.onopen = () => {
-      ws.send(JSON.stringify({ t: 'hello', name: this.o.name ?? 'player', ...(resume ? { vip: P.ipStr(this.vipNum), token: this.token } : {}) }));
+      // deltas: the switch sends what changed on the peer list, not the whole list each time (lan.mjs)
+      ws.send(JSON.stringify({ t: 'hello', name: this.o.name ?? 'player', deltas: 1, ...(resume ? { vip: P.ipStr(this.vipNum), token: this.token } : {}) }));
       this.pingTimer = setInterval(() => this.ping(), this.o.pingMs ?? 2000);
     };
     ws.onmessage = (e) => {
@@ -244,14 +247,15 @@ class Link implements NetLink {
       if (this.full) { this.full = false; this.o.onNotice?.('A place on the server freed up: you can play with others now'); }
       this.resolveOnline(this.vip);
     } else if (m.t === 'peers' && Array.isArray(m.peers)) {
-      this.peers = m.peers.filter((p: any) => !p.server)
-        .map((p: any) => ({ vip: P.ipStr(p.vip >>> 0), name: String(p.name ?? ''), self: (p.vip >>> 0) === this.vipNum }));
-      const cur = new Set<number>(m.peers.map((p: any) => p.vip >>> 0));
-      // a browser that left: its TCP connections to this one are reset (LAN play)
-      for (const v of this.peerVips) if (!cur.has(v) && v !== this.vipNum) this.peerGone(v);
-      this.peerVips = cur;
-      for (const ep of this.eps()) this.publishPeers(ep);
-      this.o.onPeers?.(this.peers);
+      const old = this.peerMap;
+      this.peerMap = new Map();
+      for (const p of m.peers) this.peerMap.set(p.vip >>> 0, { name: String(p.name ?? ''), server: !!p.server });
+      for (const v of old.keys()) if (!this.peerMap.has(v)) this.peerLeft(v);
+      this.peersUpdated();
+    } else if (m.t === 'delta' && Array.isArray(m.peers) && Array.isArray(m.gone)) {
+      for (const g of m.gone) if (this.peerMap.delete(g >>> 0)) this.peerLeft(g >>> 0);
+      for (const p of m.peers) this.peerMap.set(p.vip >>> 0, { name: String(p.name ?? ''), server: !!p.server });
+      this.peersUpdated();
     } else if (m.t === 'pong' && typeof m.id === 'number') {
       const t0 = this.pings.get(m.id);
       if (t0 === undefined) return;
@@ -260,6 +264,14 @@ class Link implements NetLink {
       for (const ep of this.eps()) ep.f64[P.D_SWITCH_RTT_MS] = rtt;
       this.st.rttSum += rtt; this.st.rttN++; if (rtt > this.st.rttMax) this.st.rttMax = rtt;
     }
+  }
+  /** a browser that left: its TCP connections to this one are reset (LAN play) */
+  private peerLeft(vip: number) { if (vip !== this.vipNum) this.peerGone(vip); }
+  private peersUpdated() {
+    this.peers = [...this.peerMap].filter(([, p]) => !p.server).map(([v, p]) => ({ vip: P.ipStr(v), name: p.name, self: v === this.vipNum }));
+    this.peerVips = new Set(this.peerMap.keys());
+    for (const ep of this.eps()) this.publishPeers(ep);
+    this.o.onPeers?.(this.peers);
   }
   private peerGone(vip: number) {
     const ep = this.lan;
