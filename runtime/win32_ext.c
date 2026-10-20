@@ -586,8 +586,24 @@ static uint32_t cur_tid(CPU *c){
            ? MR32(c->fs_base+0x24u) : 0u;
 }
 
+/* A guest function that must not lose the GIL to another guest thread
+ * halfway (overrides.c sub_0073b900): no fair yield, and a mutex that is
+ * free (or already ours) is taken without handing the GIL over, as Windows
+ * does not switch threads there either.  A wait that blocks still releases
+ * it. */
+static _Thread_local int tl_noyield = 0;
+void guest_noyield(int d){ tl_noyield += d; }
+static int mutex_take_now(Obj *o, uint32_t me){
+    int got = 0;
+    pthread_mutex_lock(&o->mtx);
+    if (o->owner_tid == me && o->rec > 0){ o->rec++; got = 1; }
+    else if (o->signaled){ o->signaled = 0; o->owner_tid = me; o->rec = 1; got = 1; }
+    pthread_mutex_unlock(&o->mtx);
+    return got;
+}
+
 void guest_fair_yield(void){
-    if (tl_cs_depth) return;          /* never yield inside a critical section */
+    if (tl_cs_depth || tl_noyield) return;    /* never yield inside a critical section */
     static _Thread_local uint32_t n = 0;
     if ((++n & 0x3FFu) != 0) return;          /* once every 1024 calls */
 #ifdef __wasm__
@@ -1395,6 +1411,7 @@ int win32_ext_call(CPU *c, const char *n, uint32_t *out){
                         g_wstat[i].waiter_tid);
           } }
         if(!o){ r=0; }
+        else if (o->kind == OB_MUTEX && tl_noyield && mutex_take_now(o, cur_tid(c))) r=0;   /* WAIT_OBJECT_0 */
         else if (o->kind == OB_MUTEX){
             /* MUTEX: ownership + RECURSION.  The same thread must be able to
              * take the same mutex again; otherwise the game's CRT wrapper,

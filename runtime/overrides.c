@@ -705,3 +705,27 @@ void sub_00559c90(CPU *c){
         MR32(self + 0xc0u) = 0xEEEEEEEEu;
     sub_00559c90_orig(c);
 }
+
+/* --- sub_0073b900: the tick of the music's event system -------------------
+ * The event system (the EA Trax player: tracks, pause, fades) guards its
+ * state with a plain word, [0x8b7bc0]: the tick sets it while it runs, and
+ * an API call that finds it set returns at once and does nothing (pause and
+ * unpause 0x739030, and a dozen more in 0x738dd0..0x73b620).  The sound
+ * thread runs the tick every 10 ms (0x721e13 -> 0x73b9c0), the game thread
+ * too (0x483b40 -> 0x73b9b0).  On Windows a tick takes microseconds.  Here
+ * the sound thread handed the GIL over inside it, at the sound library's
+ * mutex (0x734e40, WaitForSingleObject) and at fair yields, and the game
+ * thread then ran for a whole stretch with the word set.  Entering a shop
+ * starts a new song held paused (a shop entry cut scene runs first) and later
+ * unpauses it; in most runs that unpause came during such a stretch and was
+ * dropped, so the song stayed paused: no more MusicSFX.mus reads, no music
+ * in the shop or after it until the game was restarted.  The tick now keeps
+ * the GIL (guest_noyield, win32_ext.c); a wait that blocks still releases
+ * it. */
+void sub_0073b900_orig(CPU *c);
+void sub_0073b900(CPU *c){
+    void guest_noyield(int);
+    guest_noyield(+1);
+    sub_0073b900_orig(c);
+    guest_noyield(-1);
+}
