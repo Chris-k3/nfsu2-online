@@ -502,9 +502,12 @@ function openHelp() {
 }
 
 /** free roam: a friend joined, left, went into a race (who: the friend's name the text starts with); the server
- *  full; four at most, each for 5 s (also in the log) */
+ *  full; four at most, each for 5 s (also in the log).  Friends' lines are only logged for now: with the crowds
+ *  on the server they came too often */
+const FRIEND_NOTICES = false;
 function notice(text: string, who?: string) {
   log.add(`[notice] ${text}`);
+  if (who && !FRIEND_NOTICES) return;
   const box = $('#notices'), line = document.createElement('div');
   if (who && text.startsWith(who)) { const b = document.createElement('b'); b.textContent = who; line.append(b, text.slice(who.length)); }
   else line.textContent = text;
