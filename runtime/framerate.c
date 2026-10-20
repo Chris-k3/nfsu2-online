@@ -12,9 +12,9 @@
  *   NFSU2_FPS = auto | 60 | 120 | 240 | uncapped | off
  *       auto (default): the window's screen maximumFramesPerSecond mapped to
  *       the best supported content rate (>= 239 Hz -> 240, >= 119 Hz -> 120,
- *       otherwise 60).  The game's own 30 fps requests are kept (NIS
- *       cutscenes: SetFrameRate 0x576CB0; the online/LAN cap 0x5FF67C, which
- *       the race intro's NIS end replaces with the default 1/120 again).
+ *       otherwise 60).  The game's own 30 fps requests in NIS cutscenes are
+ *       kept (SetFrameRate 0x576CB0); its online/LAN cap 0x5FF67C is not
+ *       (sub_005ff490 below).
  *       uncapped: no pacer, mailbox presenter, display sync off.  Benchmark
  *       only: dt follows the machine, so the physics substep varies.
  *       off: the game's own QPC limiter at 1/120 s (plus SPINSLEEP), no fix,
@@ -238,7 +238,7 @@ int hfr_uncapped(void){ resolve(); return g_mode == M_UNCAPPED; }
 
 /* ---- current content rate --------------------------------------------- */
 /* The game's own request in [0x865558]: 1/120 by default (= "the mode's
- * rate"), 1/30 in NIS and online/LAN races.  Requests are honoured only
+ * rate"), 1/30 in NIS.  Requests are honoured only
  * downwards: the default 1/120 must not cap 240.
  * A network race on the game's own clocks (NFSU2_LAN_TIMING=pc) runs at
  * most 120: no unmodified PC gets past its limiter's 1/120, and 1/240 is
@@ -261,7 +261,7 @@ static int content_rate(void){
 }
 /* frame-rate counter (fpscounter.m): the mode's name, its own rate (0 =
  * uncapped) and the content rate of the last frame (the game's 30 fps
- * requests in cutscenes and online races included; 0 = uncapped) */
+ * requests in cutscenes included; 0 = uncapped) */
 const char *hfr_mode_label(void){ resolve(); return mode_name(); }
 int hfr_mode_rate(void){ resolve(); return mode_rate(); }
 int hfr_rate_now(void){ return atomic_load(&g_rate_now); }
@@ -601,6 +601,20 @@ static double   g_tick_acc = 0;
  * (0x5FF652) and World::IsOnline (0x5F00F0). */
 static int net_race(void){
     return MR8(A_ONLINE) || (int32_t)MR32(A_NET_CLIENT) > 0 || (int32_t)MR32(A_NET_HOST) > 0;
+}
+/* The World constructor (thiscall, returns this) asks a network race for 30
+ * fps (0x5FF67C: SetFrameRate [0x7A572C]), and only the race intro's NIS end
+ * (0x437A00) sets the default 1/120 again.  A race without an intro ran at
+ * 30 to the finish, and six cars (runtime/netrace.c) get none: measured
+ * online at auto 120, two cars ran 30 for the intro and then 120, six cars
+ * 30 throughout.  The request is undone in every mode, off included: the
+ * intro still runs at 30 (its own request, 0x435FA3), the race at the
+ * mode's rate. */
+void sub_005ff490_orig(CPU *c);
+void sub_005ff490(CPU *c){
+    float cap = MRF32(A_CAP);
+    sub_005ff490_orig(c);
+    MRF32(A_CAP) = cap;
 }
 /* The fix set follows the mode's rate class at a frame boundary: auto
  * changes the content rate when the window moves to a screen with another
