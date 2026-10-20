@@ -462,9 +462,9 @@ async function sendFile(q, s, root, file, { type, cache = 'store', extra = {}, f
 // the total bounds memory: 128 compressors take about 200 MB at most (zstd 1.5 MB each, br 0.9, gzip 0.4).
 // A shared cache (Cloudflare's, with a Cache Rule for /data-blocks/*) may keep a run for good (EDGE_KEEP), as the
 // game data is the same for every player: only when its address names this version of the file (m, the manifest's
-// mtime, so a changed file is a new address), it is as small as it gets (compressed, or a run that does not
-// compress; not one sent as it is because the compressors were taken), and it is not a movie (video, which
-// Cloudflare's terms want their paid products for).  At about 110 players the 1 Gbit uplink was full without it.
+// mtime, so a changed file is a new address) and it is as small as it gets (compressed, or a run that does not
+// compress; not one sent as it is because the compressors were taken).  The movies too.  At about 110 players the
+// 1 Gbit uplink was full without it.
 const BLOCK = 1 << 20, BLOCKS_MAX = 8, PROBE = 64 << 10;
 const EDGE_KEEP = 'public, max-age=31536000, immutable';
 const COMPRESSORS = { perClient: 8, perSite: 16, total: 128 };
@@ -501,8 +501,7 @@ async function sendBlocks(q, s, file, u) {
   const asIs = held && !await compresses(real, start, end).catch(() => false);
   if (asIs) free();
   const z = held;
-  const keep = (z || asIs) && u.searchParams.get('m') === String(Math.floor(st.mtimeMs / 1000)) &&
-    path.relative(DATA, file).split(path.sep)[0].toLowerCase() !== 'movies';
+  const keep = (z || asIs) && u.searchParams.get('m') === String(Math.floor(st.mtimeMs / 1000));
   s.writeHead(200, headers(q, { 'content-type': 'application/octet-stream', vary: 'accept-encoding',
     ...(keep ? { 'cdn-cache-control': EDGE_KEEP, 'cloudflare-cdn-cache-control': EDGE_KEEP } : {}),
     ...(z ? { 'content-encoding': enc } : { 'content-length': end - start }) }));

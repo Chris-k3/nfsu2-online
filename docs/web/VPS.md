@@ -347,7 +347,7 @@ Through a real Cloudflare: **UNVERIFIED**. The client's address was checked with
    `*` matters: without it only `/data-blocks/` itself matches), Eligible for cache, Edge TTL "Use cache-control
    header if present, bypass cache if not", Browser TTL "Respect origin TTL", the cache key as it is (it must keep
    the query string). Turn on Smart Tiered Caching too. The server then says which runs Cloudflare may keep, for
-   good: those whose address names the file's version, compressed or not compressible, never the movies. A run
+   good: those whose address names the file's version, compressed or not compressible (the movies too). A run
    asked twice answers `cf-cache-status: MISS`, then `HIT`. At about 110 players the 1 Gbit uplink was full
    without it.
 
