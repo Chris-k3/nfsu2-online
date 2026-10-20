@@ -1,6 +1,7 @@
 /* roam_core.c -- free-roam multiplayer: the portable core (see roam_core.h).
  * No OS headers, no libm. */
 #include "roam_core.h"
+#include "names.h"
 /* No <string.h>: the compiler's builtins (inline, or the freestanding
  * memcpy/memset/memmove/memcmp every C platform provides) */
 #define memcpy  __builtin_memcpy
@@ -85,7 +86,7 @@ void rc_name_clean(char *dst, const char *src, uint32_t srclen){
     }
     while (o && dst[o - 1] == ' ') o--;
     dst[o] = 0;
-    if (!o){ memcpy(dst, "Player", 7); }
+    if (!o || name_blocked(dst)) memcpy(dst, "Player", 7);
 }
 const char *rc_status_name(int st){
     static const char *n[RC_ST__N] = { "menus", "loading", "free roam", "event", "shop", "paused" };
@@ -299,6 +300,8 @@ int rc_decode(const uint8_t *buf, int len, rc_msg *m){
         rc_getb(&r, m->u.hello.name, nl); m->u.hello.name[nl] = 0;
         if (r.err) return RC_E_SHORT;
         if (!printable(m->u.hello.name, nl)) return RC_E_FIELD;
+        /* every name heard comes through here: one that reads as a slur is shown as none */
+        if (name_blocked(m->u.hello.name)) memcpy(m->u.hello.name, "Player", 7);
         m->u.hello.n_seen = (uint8_t)rc_get8(&r);
         if (m->u.hello.n_seen > RC_MAX_PEERS) return RC_E_FIELD;
         for (int i = 0; i < m->u.hello.n_seen; i++) m->u.hello.seen[i] = rc_get32(&r);

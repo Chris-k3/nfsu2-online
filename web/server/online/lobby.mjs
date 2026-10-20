@@ -10,7 +10,7 @@
 // One session per lobby connection:
 //   connect  -> the game sends addr, skey, news NAME=7 (asks for the config)
 //   sele     -> what the session wants pushed
-//   auth     -> any name logs in (no accounts, nothing stored); PERSONAS
+//   auth     -> any name logs in but one that reads as a slur (names.mjs; no accounts, nothing stored); PERSONAS
 //   acct     -> "create account": logs in the same way
 //   cper/dper-> a persona for this session, or one less (at most LIMITS.personas)
 //   pers     -> the persona to play as; LKEY.  One holder per name while online
@@ -55,6 +55,7 @@
 import crypto from 'node:crypto';
 import { FrameReader, encodeFrame, encodeFields, fieldMap, MAX_FRAME } from './aries.mjs';
 import { Stats, RACE_TYPES, decodeResult } from './stats.mjs';
+import { blockedName } from '../names.mjs';
 
 export const LOBBY_LIMITS = Object.freeze({
   sessions: 300,            // lobby sessions at once
@@ -304,7 +305,8 @@ export class Lobby {
   auth(s, kind, f) {
     const name = f.get('NAME') ?? '';
     if (s.account) return this.send(s, kind, [], 'logn');
-    if (!validName(name)) return this.send(s, kind, [], kind === 'acct' ? 'inam' : 'imst');
+    // a name that reads as a slur (names.mjs) as one the game would not let one type
+    if (!validName(name) || blockedName(name)) return this.send(s, kind, [], kind === 'acct' ? 'inam' : 'imst');
     s.account = name;
     // the account's personas: the name itself (cper adds more for this session)
     s.personas = [name];
@@ -319,7 +321,7 @@ export class Lobby {
   createPersona(s, f) {
     if (!s.account) return this.send(s, 'cper', [], 'auth');
     const p = f.get('PERS') ?? '';
-    if (!validName(p)) return this.send(s, 'cper', [], 'invp');
+    if (!validName(p) || blockedName(p)) return this.send(s, 'cper', [], 'invp');
     if (s.personas.some(x => x.toLowerCase() === p.toLowerCase()) || this.byPersona.has(p.toLowerCase())) return this.send(s, 'cper', [], 'dupl');
     if (s.personas.length >= this.L.personas) return this.send(s, 'cper', [], 'nspc');
     s.personas.push(p);

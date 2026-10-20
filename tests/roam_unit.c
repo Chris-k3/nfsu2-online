@@ -146,6 +146,13 @@ static void t_roundtrip(void){
     }
     memset(&m, 0, sizeof m); m.h.type = RC_MSG_HELLO; m.h.sender = 7; memset(m.u.hello.name, 'x', RC_NAME_MAX + 1); m.u.hello.name[RC_NAME_MAX] = 'y';
     CHECK(rc_encode(&m, b, sizeof b) < 0, "HELLO name longer than 24 refused");
+    /* a name heard that reads as a slur (names.h) comes as "Player", another as it is */
+    memset(&m, 0, sizeof m); m.h.type = RC_MSG_HELLO; m.h.sender = 7; strcpy(m.u.hello.name, "N1-gg 4");
+    { int n = rc_encode(&m, b, sizeof b);
+      CHECK(n > 0 && rc_decode(b, n, &d) == RC_OK && !strcmp(d.u.hello.name, "Player"), "HELLO: a slur heard is Player ('%s')", d.u.hello.name); }
+    strcpy(m.u.hello.name, "Mustafa GS");
+    { int n = rc_encode(&m, b, sizeof b);
+      CHECK(n > 0 && rc_decode(b, n, &d) == RC_OK && !strcmp(d.u.hello.name, "Mustafa GS"), "HELLO: another name as it is ('%s')", d.u.hello.name); }
     /* car record */
     rc_carcfg cc, c2; memset(&cc, 0, sizeof cc);
     cc.type_hash = 0x12345678u; strcpy(cc.type_name, "350Z"); cc.ride_b[3] = 1;
@@ -810,6 +817,7 @@ static void t_guard(void){
     rc_name_clean(nm, "  Th\xe9o\x01 ", 10); CHECK(!strcmp(nm, "Th?o?"), "name cleaned: '%s'", nm);
     rc_name_clean(nm, "", 0); CHECK(!strcmp(nm, "Player"), "empty name -> Player");
     rc_name_clean(nm, "abcdefghijklmnopqrstuvwxyz0123", 30); CHECK(strlen(nm) == RC_NAME_MAX, "name cut at 24");
+    rc_name_clean(nm, "f4g_42", 6); CHECK(!strcmp(nm, "Player"), "a name that reads as a slur -> Player ('%s')", nm);
 }
 
 /* ---- 4d. states per SNAP (rc_config.snap_states): 3 on a LAN, 1 over the browser's WebSocket -- */

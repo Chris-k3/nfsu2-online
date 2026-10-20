@@ -27,6 +27,7 @@
 #include <time.h>
 #include <ctype.h>
 #include "enhance.h"
+#include "names.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -146,10 +147,10 @@ void app_local_network_notice(void){
  * boolean spellings.  K_NUM: a number.  K_ID: decimal digits only (at most
  * 31).  K_TOKEN: printable ASCII without spaces, under 300 bytes (an asset
  * key or a URL).  K_INT: a whole decimal number in the range "lo..hi".
- * K_NAME: printable ASCII, 1 to 24 characters.  K_PEERS: IPv4 literals
- * a.b.c.d or a.b.c.d:port, separated by commas, ';' or blanks (no host
- * names).  Anything else is logged and ignored, so a typo never silently
- * selects a default.  K_IC (added to a kind): after the value, ';' or '#'
+ * K_NAME: printable ASCII, 1 to 24 characters, not one that reads as a
+ * slur (names.h).  K_PEERS: IPv4 literals a.b.c.d or a.b.c.d:port,
+ * separated by commas, ';' or blanks (no host names).  Anything else is
+ * logged and ignored, so a typo never silently selects a default.  K_IC (added to a kind): after the value, ';' or '#'
  * after a blank starts a comment ("roam_name = Thom ; me" is Thom,
  * "Team#1" stays Team#1), the rule the free-roam options follow in the
  * runtime and in the Windows plugin's .ini.
@@ -682,6 +683,8 @@ static void apply_setting(const char *key, const char *val, int line){
         for (const char *p = val; *p && ok; p++) ok = *p >= ' ' && *p <= '~';
         if (!ok){ set_note("settings.ini:%d: %s = \"%s\" is not a name (printable ASCII, at most 24 characters), ignored\n",
                            line, key, val); return; }
+        if (name_blocked(val)){ set_note("settings.ini:%d: %s = \"%s\" is not a name (it reads as a slur), ignored\n", line, key, val);
+                                return; }
     } else if (kind == K_PEERS){
         char bad[64] = "";
         if (!peers_ok(val, bad, sizeof bad)){

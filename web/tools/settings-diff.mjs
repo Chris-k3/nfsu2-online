@@ -25,6 +25,7 @@ const harness = `#include <stdio.h>
 #include <strings.h>
 #include <stdarg.h>
 #include <ctype.h>
+#include "names.h"
 static char g_settings[1100];
 ${src.slice(a, b).join('\n')}
 /* stdin: "L <key>\\t<value>" applies one setting (bundle.m's caller trims
@@ -57,7 +58,7 @@ int main(void){
 }
 `;
 fs.writeFileSync(path.join(OUT, 'harness.c'), harness);
-execFileSync('clang', ['-O1', '-w', '-o', path.join(OUT, 'harness'), path.join(OUT, 'harness.c')]);
+execFileSync('clang', ['-O1', '-w', '-I', path.join(ROOT, 'runtime'), '-o', path.join(OUT, 'harness'), path.join(OUT, 'harness.c')]);
 
 // ---- the TypeScript side
 await esbuild.build({ entryPoints: [path.join(ROOT, 'web/src/app/settings.ts')], bundle: true, format: 'esm', platform: 'node',
@@ -79,7 +80,9 @@ const values = ['on', 'off', 'yes', 'No', 'TRUE', 'false', '1', '0', 'enabled', 
   'en0', 'EN0', 'en-0', 'abcdefghijklmnop', '10.0.0.2', '010.000.000.002', '4294967296.1.1.1', '4294967551.1.1.1',
   '99999999999999999999999.1.1.1', '1.2.3.4.', '1..2.3', '02:4e:56:4c:00:02', '2:4E:56:4c:0:2', '00:00:00:00:00:00',
   '02:4e:56:4c:00:02:00', '024:e5:64:c0:00:2', '0x2:4e:56:4c:00:02', 'my-pc', 'MY_PC', 'z'.repeat(63), 'z'.repeat(64),
-  'tab\there', 'del\x7f', 'ü'.repeat(31) + 'x', 'ü'.repeat(32), '/tmp/dump', 'Yes', 'enabled '];
+  'tab\there', 'del\x7f', 'ü'.repeat(31) + 'x', 'ü'.repeat(32), '/tmp/dump', 'Yes', 'enabled ',
+  // names that read as a slur (names.h, names.mjs) and others with their letters
+  'N1gg 4', 'f4g_42', 'XxCoonXx', 'Mustafa GS', 'Raccoon'];
 const keys = [...src.slice(a, b).join('\n').matchAll(/\{ "([a-z_]+)",\s+"([A-Z_0-9]+)"/g)].map(m => m[1]);
 const generic = ['NFSU2_STATUS_EVERY', 'fov', 'MiXed_Case', 'SOME_VAR', 'networ\u212A'];
 const cases = [];

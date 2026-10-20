@@ -6,7 +6,7 @@
 //   switch:  frames to 10.77.0.1 -> OnlineHost.frame() -> vhost.mjs (TCP, ICMP)
 //            -> the services below, by port
 //     20920  redirector: @dir -> our lobby's address (no @tic: no RC4, no SSL)
-//     20922  lobby: login (any name), personas, rooms, chat, games (lobby.mjs)
+//     20922  lobby: login (any name but a slur), personas, rooms, chat, games (lobby.mjs)
 //     13505  EA Messenger (buddy server): friends, presence, messages, invites (buddy.mjs)
 //     80     the news and terms pages the config names (http.mjs)
 // Race traffic never comes here: the players' browsers send it to each other

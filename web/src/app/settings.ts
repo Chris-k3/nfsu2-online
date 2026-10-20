@@ -14,6 +14,7 @@
 // noted and ignored, so a typo never silently selects something else.
 //
 // This module is pure (no DOM, no OPFS) so it can be checked under node.
+import { blockedName } from '../../server/names.mjs';
 
 /** bundle.m's K_* kinds.  ic: K_IC, "value ; comment" (the free-roam keys). */
 export type Kind = 'raw' | 'bool' | 'boolInv' | 'enum' | 'num' | 'id' | 'token' | 'int' | 'name' | 'peers'
@@ -547,6 +548,7 @@ export function checkSetting(key: string, val: string): Checked | Refused | null
     case 'name': {
       const ok = val.length >= 1 && val.length <= 24 && /^[ -~]+$/.test(val);
       if (!ok) return { ok: false, reason: `"${val}" is not a name (printable ASCII, at most 24 characters)` };
+      if (blockedName(val)) return { ok: false, reason: `"${val}" is not a name (it reads as a slur)` };
       break;
     }
     case 'peers': {

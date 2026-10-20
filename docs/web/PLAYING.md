@@ -193,6 +193,9 @@ Good to know:
 
 - **Your name online** keeps letters, digits, `-` and `_` (at most 15): `Thom K.` plays as `Thom_K`. A changed name
   applies the next time you press Play.
+- **A name that reads as a slur** is not taken: Settings does not save it as **Your name**, the Online mode
+  refuses it, and in free roam the other players see `Player` over your car. Digits or signs for letters (`1` for
+  `i`), gaps and repeated letters read as the word they spell.
 - **Your name is yours while you are online**, and while you race. Someone else can use it when you are not; the
   rankings and your EA Messenger friends list follow the name, so whoever plays under it while you are away sees your
   friends list and can change it. If another player is online under it, you play under it with four digits in place

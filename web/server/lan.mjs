@@ -171,6 +171,7 @@
 // (2 x delay + 5 ms more); TCP (kind 4) is only delayed, in order.  Free
 // roam's frames are never touched (roam has its own knob in the runtime).
 import crypto from 'node:crypto';
+import { blockedName } from './names.mjs';
 
 const BASE = (10 << 24) | (77 << 16);
 const ADDRS = 1000;             // 10.77.0.0/22: host bytes 2-251 in each of its four /24s
@@ -207,10 +208,12 @@ class Bucket {
   spend(n) { this.has(0); this.v = Math.max(-this.cap, this.v - n); return this.v >= 0; }
 }
 
-/** a display name: printable, no bidi or zero-width tricks, at most 32 characters */
+/** a display name: printable, no bidi or zero-width tricks, at most 32 characters, none that reads as a slur
+ *  (names.mjs) */
 export function cleanName(s) {
   const t = String(s).normalize('NFC').replace(/\s+/g, ' ').replace(/[\p{Cc}\p{Cf}]/gu, '').replace(/ +/g, ' ').trim();
-  return [...t].slice(0, 32).join('').trim() || 'player';
+  const n = [...t].slice(0, 32).join('').trim();
+  return n && !blockedName(n) ? n : 'player';
 }
 
 const newToken = () => crypto.randomBytes(16).toString('base64url');

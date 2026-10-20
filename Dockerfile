@@ -25,6 +25,7 @@ RUN npm ci --no-audit --no-fund
 COPY app/registry-defaults.txt /src/app/
 COPY web/build.mjs web/index.html ./
 COPY web/src src
+COPY web/server/names.mjs server/
 RUN node build.mjs && mkdir /state
 
 FROM --platform=$BUILDPLATFORM node:24-alpine AS deps

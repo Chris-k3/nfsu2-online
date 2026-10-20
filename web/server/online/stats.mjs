@@ -24,6 +24,7 @@
 // (stats.json.bad-<time>) and the server starts with no results.
 import fs from 'node:fs';
 import path from 'node:path';
+import { blockedName } from '../names.mjs';
 
 /** the race types by the game's own numbers: the type in its race report (SPEED2.EXE 0x5fe8d0, from the game's
  *  CUSTFLAGS race bit, 0x58b0f7) and the order it reads the server config's tier points in (0x58a370); its stat
@@ -51,7 +52,8 @@ export class Stats {
     try { text = fs.readFileSync(this.file(), 'utf8'); } catch { return; }
     try {
       const j = JSON.parse(text);
-      const rows = (Array.isArray(j?.personas) ? j.personas : []).filter(r => typeof r?.name === 'string' && /^[A-Za-z0-9_-]{3,15}$/.test(r.name))
+      const rows = (Array.isArray(j?.personas) ? j.personas : []).filter(r => typeof r?.name === 'string' && /^[A-Za-z0-9_-]{3,15}$/.test(r.name)
+        && !blockedName(r.name))        // kept before names.mjs: the server takes no such name now
         .map(clean).sort((a, b) => (a.seen < b.seen ? -1 : a.seen > b.seen ? 1 : 0));
       for (const r of rows.slice(-this.max)) this.p.set(r.name.toLowerCase(), r);
       this.log(`[online] results of ${this.p.size} personas read from ${this.file()}`);

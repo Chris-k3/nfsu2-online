@@ -86,7 +86,8 @@ uint32_t rc_fnv1a_bytes(const uint8_t *p, uint32_t n);
 uint32_t rc_fbits(float f);
 float    rc_bitsf(uint32_t u);
 float    rc_sqrtf(float x);
-/* printable ASCII, at most RC_NAME_MAX bytes, never empty ("Player") */
+/* printable ASCII, at most RC_NAME_MAX bytes, never empty and never one that
+ * reads as a slur (names.h): "Player" then */
 void     rc_name_clean(char *dst, const char *src, uint32_t srclen);
 
 /* ---- messages -------------------------------------------------------------- */
@@ -129,7 +130,8 @@ int rc_encode(const rc_msg *m, uint8_t *out, int cap);
 /* Decode and validate one datagram.  Returns RC_OK or an RC_E_* code; on
  * RC_OK every field is in range (finite floats, positions within ±20 km
  * horizontally and ±2 km vertically, |v| < 200 m/s, a renormalised quaternion,
- * bounded counts, printable names).  m->u.cfg.data points into buf. */
+ * bounded counts, printable names; "Player" for one that reads as a slur,
+ * names.h).  m->u.cfg.data points into buf. */
 int rc_decode(const uint8_t *buf, int len, rc_msg *m);
 
 /* ---- car-look record (CFG payload, reassembled) ------------------------------ */

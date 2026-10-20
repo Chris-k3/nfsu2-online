@@ -104,11 +104,15 @@ test('login: config, any name, personas, LKEY, nothing secret kept', () => {
   assert.match(c2.last('pers').f.get('PERS'), /^Speedy\d{4}$/);
   const c3 = g2.login('x y');
   assert.equal(c3.last('auth').code, 'imst');
+  // ... and so is one that reads as a slur (names.mjs), as an account or a persona
+  assert.equal(g2.login('F4g_42').last('auth').code, 'imst');
   // a second persona for this session (create, select, delete)
   c.send('cper', [['PERS', 'Second']]);
   assert.equal(c.last('cper').code, ''); assert.equal(c.last('cper').f.get('PERS'), 'Second');
   c.send('cper', [['PERS', 'Speedy']]);
   assert.equal(c.last('cper').code, 'dupl');
+  c.send('cper', [['PERS', 'Sp1cs']]);
+  assert.equal(c.last('cper').code, 'invp');
   c.send('dper', [['PERS', 'Second']]);
   assert.equal(c.last('dper').f.get('RESULT'), '0');
 });
