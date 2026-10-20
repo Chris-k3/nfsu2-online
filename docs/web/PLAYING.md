@@ -230,6 +230,7 @@ Good to know:
 |---|---|
 | "Secure, isolated page" on another PC | Open the server's `https://` address, not `http`. Only `localhost` works without HTTPS. |
 | "WebGPU" | Update the browser; look at `chrome://gpu` in Chrome, about:support (Graphics) in Firefox. The game needs WebGPU. Firefox has it on Windows and macOS; where it is off, Chrome plays. |
+| "WebGPU" in Chrome on Linux, while `chrome://gpu` says WebGPU is hardware accelerated | Chrome runs WebGPU on Vulkan there (the rest of Chrome on OpenGL), so it needs the Vulkan driver: `sudo apt install mesa-vulkan-drivers` on Debian and Ubuntu, `sudo dnf install mesa-vulkan-drivers` on Fedora, `vulkan-intel` or `vulkan-radeon` on Arch. Then quit Chrome completely and start it again. |
 | "WebGPU" with a note about compressed textures | Nothing to do: the game plays. This GPU (in many phones, Pixels among them) cannot read the game's compressed textures, so the page unpacks them as the game loads: about 200 MB more memory, and loading screens may pause for a moment. |
 | "Game download" | The download failed, or the server is not reachable. The page tries again by itself, or press **Retry**. If the module is missing, start the server with `web/start.sh`, which builds it. |
 | "Open elsewhere" | The game runs in another tab of this browser. Switch to it, or close it. |

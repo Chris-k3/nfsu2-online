@@ -75,9 +75,14 @@ export async function checkGpu(): Promise<Check & { adapter?: string }> {
     : 'WebGPU is off in this browser. Update Chrome; on Linux enable it in chrome://flags (#enable-unsafe-webgpu).' };
   let ad: GPUAdapter | null = null;
   try { ad = await gpu.requestAdapter({ powerPreference: 'high-performance' }); } catch { /* reported below */ }
+  // Chrome on Linux runs WebGPU on Vulkan while the rest of it stays on OpenGL, so
+  // chrome://gpu says WebGPU is on even when no Vulkan driver is installed
+  const linux = /Linux/.test(navigator.userAgent) && !/Android/.test(navigator.userAgent);
   if (!ad) return { id: 'gpu', label, state: 'fail', detail: ff
     ? 'Firefox found no usable graphics adapter (its blocklist may turn WebGPU off for this graphics driver). Check about:support, Graphics, or play in Chrome.'
-    : 'Chrome found no usable graphics adapter (blocklisted driver or GPU process crash). Check chrome://gpu.' };
+    : linux
+      ? 'Chrome found no usable graphics adapter. On Linux Chrome runs WebGPU on Vulkan: install the Vulkan driver for your graphics (mesa-vulkan-drivers on Debian, Ubuntu and Fedora), then restart Chrome. Where chrome://gpu says WebGPU is disabled, also enable it in chrome://flags (#enable-unsafe-webgpu).'
+      : 'Chrome found no usable graphics adapter (blocklisted driver or GPU process crash). Check chrome://gpu.' };
   const info = ad.info ? [ad.info.vendor, ad.info.architecture, ad.info.description].filter(Boolean).join(' ') : '';
   // no BC (PowerVR, Mali): the renderer unpacks the textures (web/src/gpu/dxt.ts), so it plays
   if (!ad.features.has('texture-compression-bc')) {
