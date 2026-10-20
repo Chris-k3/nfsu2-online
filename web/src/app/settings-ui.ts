@@ -347,7 +347,7 @@ export class SettingsPanel {
       r.setAttribute('aria-label', `Reset ${it.label}`);
       r.title = `Back to the default (${shown(it, DEFAULTS.get(it.key) ?? '')})`;
       r.onclick = () => void this.put(it.key, null);
-      ctl.append(r);
+      ctl.prepend(r);                                // first: the control keeps its place at the right edge
     }
     row.append(label, help, ctl);
     if (f?.refused) this.state(row, `settings.ini line ${f.phys}: ${it.key} = ${f.refused}, so the default is used.`, 'bad');

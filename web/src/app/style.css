@@ -300,6 +300,7 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.64); }
   .set { grid-template-columns: minmax(0, 1fr); grid-template-areas: "label" "help" "ctl"; }
   .set-control { justify-content: flex-start; margin-top: 8px; flex-wrap: wrap; }
   .set-control > .seg { display: flex; flex: 1; }
+  .set-control > .text-btn { order: 1; }            /* Reset after the control here, where the control is aligned left */
   .opt { flex: 1; justify-content: center; padding: 0 8px; }
 }
 @media (prefers-reduced-motion: reduce) {
