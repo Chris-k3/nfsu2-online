@@ -71,6 +71,10 @@ __attribute__((export_name("crowd_tick"))) void crowd_tick(double now_us, float 
     rc_push_state(&S, &st, (int64_t)now_us);
     rc_tick(&S, (int64_t)now_us);
 }
+/* in a race (RC_ST_EVENT) or back in free roam: a game in a race sends no
+ * car, only its timers run (crowd_wait) */
+__attribute__((export_name("crowd_status"))) void crowd_status(int st){ rc_set_status(&S, (uint8_t)st); }
+__attribute__((export_name("crowd_wait"))) void crowd_wait(double now_us){ rc_tick(&S, (int64_t)now_us); }
 /* players established now */
 __attribute__((export_name("crowd_peers"))) int crowd_peers(void){ return rc_established(&S); }
 __attribute__((export_name("crowd_stop"))) void crowd_stop(void){ rc_shutdown(&S, 0); }

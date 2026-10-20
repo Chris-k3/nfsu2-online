@@ -20,7 +20,8 @@
  *    players first.  World::IndexCars' array holds 22 cars and the world has
  *    20, so the first 2 of ours are indexed as AI racers and the others stay
  *    out of it, on the World's list only, which is what the renderer walks
- *    (finish_create); those get their minimap arrows here (arrows_update).  The game has 6 paint slots
+ *    (finish_create); those get their minimap arrows and world map markers here
+ *    (arrows_update, map_update).  The game has 6 paint slots
  *    (DUMMY_SKIN1-6: the player, the 3 opponent cars, the first 2 of ours);
  *    the others composite into textures of our own (skin_textures,
  *    roam_game_texture).  A slot's car gets the player's ride (streamed
@@ -596,7 +597,15 @@ static void body_update(CPU *c, int k){
     body_set(c, s->car, O.collide && !s->ghost);
 }
 static void ghost_all(void){ for (int k = 0; k < NSLOT; k++) g_sl[k].ghost = 1; }
+/* A hidden car is out of the world: Car +0x550 clear, as Car::Deactivate
+ * leaves it (its other state stays as it is; shown again, it is set).  The
+ * minimap draws an AI racer's arrow (0x4CA6D0) and the world map makes its
+ * marker (0x4E0440) only for a car with it set: a hidden one had its arrow at
+ * the parking spot's (0, 0), or on the minimap's edge pointing there, for a
+ * friend in a race, a shop or the menus, gone, or still loading. */
+#define CAR_ACTIVE      0x550u
 static void soft_park(CPU *c, uint32_t car){
+    MR8(car + CAR_ACTIVE) = 0;
     MRF32(car + 0x60u) = 0; MRF32(car + 0x64u) = 0; MRF32(car + 0x68u) = PARK_Z;
     MRF32(car + 0x50u) = 0; MRF32(car + 0x54u) = 0; MRF32(car + 0x58u) = PARK_Z;
     for (uint32_t o = 0x70u; o < 0x7cu; o += 4) MRF32(car + o) = 0;
@@ -1139,6 +1148,14 @@ static uint32_t fe_clone(CPU *c, uint32_t pkg, uint32_t o, const char *name){
     uint32_t one = 1, cl = rh_call(c, rd32(rd32(o) + 4u), o, 0, 1, &one);
     if (!ok(cl, 0x5c)) return 0;
     MR32(cl + 0x58u) = 0;
+    /* an image's drawing data (+0x2C, +0x30 its size: colour, place, size,
+     * texture corners; numbers only) the way the original has it: Clone
+     * leaves the corners, the depth and (on the world map) the colour 0, and
+     * such a copy was drawn as nothing -- the minimap's arrows past the
+     * HUD's eight too */
+    uint32_t dn = rd32(o + 0x30u), d0 = rd32(o + 0x2cu), d1 = rd32(cl + 0x2cu);
+    if (MR32(o + 0x18u) == 1u && rd32(cl + 0x30u) == dn && dn && dn <= 0x100u && ok(d0, dn) && ok(d1, dn) && d0 != d1)
+        memcpy(GPTR(d1), GPTR(d0), dn);
     uint32_t sa = g_gmem + TAG_SCR + 0x48u;
     gstr(sa, name, 24);
     MR32(cl + 0x10u) = gcall1(c, FN_FE_HASH, 0, sa);
@@ -1187,6 +1204,15 @@ static void tag_text(CPU *c, int k, uint32_t obj, const char *name){
     }
     uint32_t ap[3] = { obj, fmt, txt }; rh_call(c, FN_FE_PRINTF, 0, 0, 3, ap);
 }
+/* the HUD's package is the top one: no screen over it (the world map, the
+ * pause menu, a message), which hides the HUD's own parts but not ours */
+#define G_FENG         0x008384c4u   /* +8 the package manager: +0xE4 the top package (GetTopPackage 0x50C8E0), +0xC its name */
+static int hud_on_top(uint32_t pkg){
+    uint32_t fe = rd32(G_FENG), mg = fe ? rd32(fe + 8u) : 0, top = mg ? rd32(mg + 0xe4u) : 0;
+    char a[40], b[40];
+    cstr(top ? rd32(top + 0xcu) : 0, a, sizeof a); cstr(pkg, b, sizeof b);
+    return a[0] && !strcasecmp(a, b);
+}
 static void tags_update(CPU *c){
     uint32_t pl = rd32(G_PLAYER1), hud = pl && ok(pl, PL_HUD + 4u) ? rd32(pl + PL_HUD) : 0;
     uint32_t pkg = hud && ok(hud, 0x14) ? rd32(hud + 0x10u) : 0;
@@ -1196,7 +1222,7 @@ static void tags_update(CPU *c){
     }
     if (!hud || !ok(pkg, 0x20) || !g_gmem) return;
     uint32_t cam = rd32(G_VIEW1 + 0x40u);
-    int on = O.labels && g_in_roam && MR8(G_SHOW_NAMES) && ok(cam, 0x60);
+    int on = O.labels && g_in_roam && MR8(G_SHOW_NAMES) && ok(cam, 0x60) && hud_on_top(pkg);
     /* the cars a name shows on: in front of the camera, within 100 m and on
      * the screen; the nearest TAG_N of them get one */
     struct { int k; float d2, hx, hy, z; } t[NSLOT];
@@ -1249,19 +1275,26 @@ static void tags_update(CPU *c){
  * World's AI range.  An icon keeps the car's racer number and finds the car
  * by it every frame on the World's list (0x4CA6D0 -> 0x5F0E30), and draws
  * one of the free "visuals" of its type, which 0x4DB900 makes from the HUD's
- * AIRACERINDICATOR_0..7 at each rebuild (and frees, 0x4EC6F0).  Our cars
- * outside the car index get theirs here: an icon by racer number (0x4EC790),
- * made again whenever the minimap's icons are; when no visual is free, a
- * visual of our own from the game's pools (it frees them with its own) on a
- * copy of AIRACERINDICATOR_0 (fe_clone) that no visual holds now. */
-#define G_MM_ICONS      0x008364d4u   /* the minimap's icons: +0/+4 their list (icon +0x1C its visual), +0x18 the package's name */
+ * AIRACERINDICATOR_0..7 at each rebuild (and frees, 0x4EC6F0); it draws it
+ * only while the car is in the world (CAR_ACTIVE).  A shown friend's car
+ * without an arrow gets one here: an icon by racer number (0x4EC790); when no
+ * visual is free, a visual of our own from the game's pools (it frees them
+ * with its own) on a copy of AIRACERINDICATOR_0 (fe_clone) that no visual
+ * holds now.  Which cars have one is looked up in the icons every frame: the
+ * game makes them again (0x4F92A0, from several places of the career's), and
+ * the new icons object is a block of the size just freed, at the old one's
+ * address as often as not, so the cars outside the car index lost their
+ * arrows for good when their icons were remembered by that address. */
+#define G_MM_ICONS      0x008364d4u   /* the minimap's icons: +0/+4 their list (icon +8 racer number, +0x1C its visual), +0x18 the package's name */
 #define G_MM_VISUALS    0x00836560u   /* the free visuals: nodes {+0 next, +4 previous, +8 visual {+0 FE object, +4 type}} */
 #define G_MM_VISPOOL    0x008364b4u   /* the visuals' pool */
 #define FN_MM_ADDICON   0x004ec790u   /* thiscall icons (type, racer number), callee pops: an icon with a free visual of that type */
 #define FN_POOL_ALLOC   0x0043f8f0u   /* cdecl (pool) */
 #define FN_NODE_ALLOC   0x00440ec0u   /* cdecl (): a list node, +8 its data */
 #define MM_AIRACER      3u
-static struct { uint32_t hud, icons, copy[NSLOT], hash[NSLOT]; int ncopy; uint32_t icon_car[NSLOT]; int said; } g_mm;
+#define MM_POOL         256u          /* the minimap's visual and icon pools with free roam on (g_pools) */
+static struct { uint32_t hud, copy[NSLOT], hash[NSLOT]; int ncopy; int said, stop;
+                uint32_t orig; int vis; } g_mm;                         /* AIRACERINDICATOR_0; its copies are 0 unknown, 1 hidden, 2 shown */
 /* a visual (a free one, or one for a copy of AIRACERINDICATOR_0) in the free list */
 static int mm_visual_held(uint32_t icons, uint32_t fo){
     for (uint32_t n = rd32(G_MM_VISUALS), m = 0; n && n != G_MM_VISUALS && m < 256; n = rd32(n), m++) if (rd32(rd32(n + 8u)) == fo) return 1;
@@ -1287,7 +1320,7 @@ static int mm_visual(CPU *c, uint32_t icons){
     uint32_t fo = i < g_mm.ncopy ? g_mm.copy[i] : 0;
     if (fo && !mm_copy_live(c, icons, i)){
         rlog("[roam] f=%ld minimap: a new HUD at the old one's address: its %d copies of AIRACERINDICATOR_0 forgotten\n", rh_frame(), g_mm.ncopy);
-        g_mm.ncopy = 0; fo = 0;
+        g_mm.ncopy = 0; g_mm.orig = 0; fo = 0;
     }
     if (!fo){
         if (g_mm.ncopy >= NSLOT) return 0;
@@ -1298,6 +1331,7 @@ static int mm_visual(CPU *c, uint32_t icons){
         fo = ok(o0, 0x5c) ? fe_clone(c, pkg, o0, nm) : 0;
         if (!fo) return 0;
         g_mm.hash[g_mm.ncopy] = MR32(fo + 0x10u); g_mm.copy[g_mm.ncopy++] = fo;
+        g_mm.orig = o0; g_mm.vis = 0;                                     /* shown or hidden as the original, next frame */
     }
     uint32_t pool = rd32(G_MM_VISPOOL), v = pool ? rh_call(c, FN_POOL_ALLOC, 0, 0, 1, &pool) : 0, n = v ? rh_call(c, FN_NODE_ALLOC, 0, 0, 0, 0) : 0;
     if (!ok(v, 8) || !ok(n, 12)) return 0;
@@ -1309,19 +1343,128 @@ static int mm_visual(CPU *c, uint32_t icons){
 static void arrows_update(CPU *c, uint32_t w){
     uint32_t pl = rd32(G_PLAYER1), hud = pl && ok(pl, PL_HUD + 4u) ? rd32(pl + PL_HUD) : 0, icons = rd32(G_MM_ICONS);
     if (hud != g_mm.hud){ memset(&g_mm, 0, sizeof g_mm); g_mm.hud = hud; }      /* our copies went with the old HUD */
-    if (icons != g_mm.icons){ memset(g_mm.icon_car, 0, sizeof g_mm.icon_car); g_mm.icons = icons; }
     if (!hud || !ok(icons, 0x1c) || !g_gmem) return;
-    for (int k = NOPP; k < NSLOT; k++){
+    /* the copies are shown and hidden with the original: the HUD hides its
+     * own arrows (the prologue's start, under the world map or the pause
+     * menu) and shows them again, but not ours; a copy made while the
+     * original was hidden stayed hidden for good.  Only copies the HUD's
+     * package still holds are touched (mm_copy_live) */
+    if (g_mm.ncopy && ok(g_mm.orig, 0x20)){
+        int vis = (MR32(g_mm.orig + 0x1cu) & 1u) ? 1 : 2;
+        if (vis != g_mm.vis){
+            if (!mm_copy_live(c, icons, 0)){
+                rlog("[roam] f=%ld minimap: a new HUD at the old one's address: its %d copies of AIRACERINDICATOR_0 forgotten\n", rh_frame(), g_mm.ncopy);
+                g_mm.ncopy = 0; g_mm.orig = 0; g_mm.vis = 0;
+            } else {
+                for (int i = 0; i < g_mm.ncopy; i++) gcall1(c, vis == 2 ? FN_FE_SHOW : FN_FE_HIDE, 0, g_mm.copy[i]);
+                g_mm.vis = vis;
+            }
+        }
+    }
+    if (g_mm.stop) return;
+    uint8_t has[256] = {0};                                     /* by racer number (a signed byte): an AI racer's arrow */
+    uint32_t m = 0;
+    for (uint32_t n = rd32(icons); n && n != icons && m < 256 && ok(n, 0x20); n = rd32(n), m++){
+        uint32_t v = rd32(n + 0x1cu);
+        if (ok(v, 8) && MR32(v + 4u) == MM_AIRACER) has[(uint8_t)MR32(n + 8u)] = 1;
+    }
+    for (int k = 0; k < NSLOT; k++){
         Slot *s = &g_sl[k];
-        if (!s->created || !s->unindexed || s->world != w || !ok(s->car, 0x9e0) || g_mm.icon_car[k] == s->car) continue;
-        if (!mm_visual(c, icons)){
+        if (s->st != SL_ACTIVE || s->hidden || s->world != w || !ok(s->car, 0x9e0)) continue;
+        int16_t rn = (int16_t)MR16(s->car + 0xau);
+        if (has[(uint8_t)rn]) continue;
+        /* far below the icons' pool (MM_POOL; an icon it cannot give is
+         * linked in as a null pointer) */
+        if (m >= MM_POOL - 16u || !mm_visual(c, icons)){
             if (!g_mm.said++) rlog("[roam] f=%ld no minimap arrow for a friend's car (no AIRACERINDICATOR to copy, or the minimap's pools are full)\n", rh_frame());
             return;
         }
-        uint32_t a[2] = { MM_AIRACER, (uint32_t)(int32_t)(int16_t)MR16(s->car + 0xau) };
+        uint32_t a[2] = { MM_AIRACER, (uint32_t)(int32_t)rn };
         rh_call(c, FN_MM_ADDICON, icons, 0, 2, a);
-        g_mm.icon_car[k] = s->car;
+        m++; has[(uint8_t)rn] = 1;
+        /* the icon is the list's last: with no visual of its type it would
+         * be added again every frame */
+        uint32_t last = rd32(icons + 4u), v = ok(last, 0x20) ? rd32(last + 0x1cu) : 0;
+        if (!ok(v, 8) || MR32(v + 4u) != MM_AIRACER || (int16_t)MR32(last + 8u) != rn){
+            g_mm.stop = 1;
+            rlog("[roam] f=%ld minimap: an arrow made for a friend's car has no visual: no more until the next HUD\n", rh_frame());
+            return;
+        }
     }
+}
+
+/* ---- the world map ---------------------------------------------------------------------------------- */
+/* The world map (M, or the pause menu's Map: InGameWorldMapScreen, 0x4EE320,
+ * for UI_InGame_WorldMap.fng) is made when it opens.  Its WorldMap (screen
+ * +0x4C, 0x4E0440) makes a marker for each car of the World's AI range that
+ * is in the world (0x4B0740: type 0xE, the package's AIRACERINDICATOR_<n> by
+ * a running count, and the car's position and heading then) and places every
+ * marker on the map (0x4B09E0, again at each zoom).  Friends' cars in the AI
+ * range get theirs that way; the ones outside it get theirs here, the first
+ * frame the map is open: the same marker, in the same list.  The package has
+ * AIRACERINDICATOR_0..2 only (the outrun challengers' three cars), so every
+ * car marker past them, the game's own for a friend's car in the AI range or
+ * one of ours, has no object; each gets a copy of the first (fe_clone), and
+ * the map is placed again.  As the game's own, a marker stays where the car
+ * was when the map opened. */
+#define WM_PACKAGE      "UI_InGame_WorldMap.fng"
+#define VT_WM_SCREEN    0x00797f20u   /* InGameWorldMapScreen's vtable; +4 its package's name */
+#define WM_MAP          0x4cu         /* the screen's WorldMap: +4/+8 its markers' list (+0 next, +4 previous) */
+#define WM_MARK_SZ      0x2cu         /* a marker: +8 type, +0xC its FE object, +0x10/+0x14 where, +0x18 heading */
+#define WM_CAR          0xeu          /* a car's marker (the player's is 0x10) */
+#define FN_WM_CARMARK   0x004b0740u   /* thiscall marker (package name, car), callee pops */
+#define FN_WM_PLACE     0x004b09e0u   /* thiscall WorldMap () */
+#define G_WM_COUNT      0x00835f70u   /* the car markers' running count: AIRACERINDICATOR_<n> */
+#define PKG_SCREEN      0x40u         /* FEPackage: +0x40 an object whose +0x14 is the package's screen */
+static struct { int done, said; } g_wm;
+/* the open map's screen, 0 while it is not made (or not this screen) */
+static uint32_t wm_screen(uint32_t pk){
+    uint32_t h = rd32(pk + PKG_SCREEN), s = ok(h, 0x18) ? rd32(h + 0x14u) : 0;
+    return ok(s, WM_MAP + 4u) && MR32(s) == VT_WM_SCREEN ? s : 0;
+}
+static uint32_t wm_find(CPU *c, uint32_t pkg, const char *name){
+    uint32_t sa = g_gmem + TAG_SCR + 0x48u;
+    gstr(sa, name, 24);
+    uint32_t a[2] = { pkg, gcall1(c, FN_FE_HASH, 0, sa) }, o = rh_call(c, FN_FE_FINDOBJ, 0, 0, 2, a);
+    return ok(o, 0x5c) ? o : 0;
+}
+static void map_update(CPU *c, uint32_t w){
+    if (!g_sync_paused || !g_gmem){ g_wm.done = 0; return; }        /* the world stands while the map is open */
+    uint32_t sa = g_gmem + TAG_SCR + 0x48u;
+    gstr(sa, WM_PACKAGE, 24);
+    uint32_t pk = gcall1(c, FN_FE_PACKAGE, 0, sa);
+    if (!ok(pk, 0x54)){ g_wm.done = 0; return; }
+    if (g_wm.done) return;
+    uint32_t scr = wm_screen(pk), map = scr ? rd32(scr + WM_MAP) : 0, pkg = scr ? rd32(scr + 4u) : 0;
+    if (!ok(map, 0x2c) || !ok(pkg, 24)) return;
+    g_wm.done = 1;
+    int n = 0, copies = 0;
+    for (int k = NOPP; k < NSLOT; k++){
+        Slot *s = &g_sl[k];
+        if (s->st != SL_ACTIVE || s->hidden || !s->unindexed || s->world != w || !ok(s->car, 0x9e0) || !MR8(s->car + CAR_ACTIVE)) continue;
+        uint32_t sz = WM_MARK_SZ, m = rh_call(c, FN_MALLOC, 0, 0, 1, &sz);
+        if (!ok(m, WM_MARK_SZ)) break;
+        uint32_t a[2] = { pkg, s->car };
+        rh_call(c, FN_WM_CARMARK, m, 0, 2, a);
+        uint32_t head = map + 4u, tail = rd32(head + 4u);                    /* at the end, as 0x4E0440 adds them */
+        MR32(tail) = m; MR32(head + 4u) = m; MR32(m + 4u) = tail; MR32(m) = head;
+        n++;
+    }
+    uint32_t o0 = 0;
+    for (uint32_t e = rd32(map + 4u), i = 0; e && e != map + 4u && i < 1024 && ok(e, WM_MARK_SZ); e = rd32(e), i++){
+        if (MR32(e + 8u) != WM_CAR || MR32(e + 0xcu)) continue;
+        char nm[24]; snprintf(nm, sizeof nm, "ROAM_MAPCAR_%d", copies);
+        if (!o0) o0 = wm_find(c, pkg, "AIRACERINDICATOR_0");
+        uint32_t cl = o0 ? fe_clone(c, pkg, o0, nm) : 0;
+        if (!cl){
+            if (!g_wm.said++) rlog("[roam] f=%ld world map: no copy of AIRACERINDICATOR_0: some friends' cars not marked\n", rh_frame());
+            break;
+        }
+        MR32(e + 0xcu) = cl; copies++;
+    }
+    if (n || copies) gcall0(c, FN_WM_PLACE, map);
+    rlog("[roam] f=%ld world map open: %u car markers, %d of them friends' cars outside the car index; %d copies of AIRACERINDICATOR_0\n",
+            rh_frame(), MR32(G_WM_COUNT), n, copies);
 }
 
 /* ---- per-frame --------------------------------------------------------------------------------- */
@@ -1770,7 +1913,7 @@ static void du_hud(CPU *c, int64_t host){
     uint32_t pkg = hud && ok(hud, 0x14) ? rd32(hud + 0x10u) : 0;
     if (!hud || hud != g_tag.hud || !ok(pkg, 0x20) || !g_gmem) return;
     char tx[TAG_DUEL_MAX] = {0};
-    if (g_in_roam){
+    if (g_in_roam && hud_on_top(pkg)){
         if (g_du.st == DU_IDLE && g_du.icon){
             for (int k = 0; k < NSLOT; k++) if (g_sl[k].car == g_du.icon && g_sl[k].st == SL_ACTIVE)
                 snprintf(tx, sizeof tx, "Press Enter to challenge %s to an outrun", g_sl[k].name);
@@ -2248,7 +2391,7 @@ void roam_game_frame(CPU *c){
                 apply_pose(c, s, &v->pose, (float)frame_dt / 1e6f);
                 body_update(c, k);
                 for (int i = 0; i < 3; i++) s->drawn[i] = v->pose.p[i];
-                s->hidden = 0;
+                s->hidden = 0; MR8(s->car + CAR_ACTIVE) = 1;
                 if (g_poselog)
                     rh_fprintf(g_poselog, "R,%lld,%.0f,%08x,%.4f,%.4f,%.4f,%.3f,%d,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f\n", (long long)host, g_sync, s->peer_id,
                             (double)v->pose.p[0], (double)v->pose.p[1], (double)v->pose.p[2], (double)v->pose.speed, v->pose.mode, (double)v->err,
@@ -2258,6 +2401,12 @@ void roam_game_frame(CPU *c){
             /* (an outrun's opponent stays where it was: parked, the game would count it 120 km behind) */
         }
         arrows_update(c, w);
+        map_update(c, w);
+        /* a screen over the HUD: the HUD's update, which places the names
+         * (roam_game_hud), does not run under the world map, and they stayed
+         * on it where the cars had been on the screen */
+        uint32_t pl = rd32(G_PLAYER1), hud = pl && ok(pl, PL_HUD + 4u) ? rd32(pl + PL_HUD) : 0;
+        if (hud && hud == g_tag.hud && ok(hud, 0x14) && !hud_on_top(rd32(hud + 0x10u))) for (int i = 0; i <= TAG_N; i++) tag_hide(c, i);
         int busy = 0;
         for (int k = 0; k < NSLOT; k++) if (g_sl[k].st != SL_FREE && g_sl[k].st != SL_PARKED) busy = 1;
         if (busy) g_em_release_at = 0;
@@ -2343,12 +2492,23 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
                     p->id, p->state, p->name, rc_status_name(p->status), p->cfg_rev, p->cfg_len ? "" : " (none yet)", p->mo.n);
         }
         roam_plat_unlock();
-        uint32_t icons = rd32(G_MM_ICONS); int arrows = 0, freev = 0;
+        uint32_t icons = rd32(G_MM_ICONS); int arrows = 0, freev = 0; uint8_t has[256] = {0};
         for (uint32_t n = ok(icons, 0x1c) ? rd32(icons) : 0, m = 0; n && n != icons && m < 256; n = rd32(n), m++)
-            if (ok(rd32(n + 0x1cu), 8) && MR32(rd32(n + 0x1cu) + 4u) == MM_AIRACER) arrows++;
+            if (ok(rd32(n + 0x1cu), 8) && MR32(rd32(n + 0x1cu) + 4u) == MM_AIRACER){ arrows++; has[(uint8_t)MR32(n + 8u)] = 1; }
         for (uint32_t n = rd32(G_MM_VISUALS), m = 0; n && n != G_MM_VISUALS && m < 256; n = rd32(n), m++)
             if (ok(rd32(n + 8u), 8) && MR32(rd32(n + 8u) + 4u) == MM_AIRACER) freev++;
-        rlog("[roam]   minimap: %d cars' arrows, %d free, %d copies of AIRACERINDICATOR_0\n", arrows, freev, g_mm.ncopy);
+        /* friends' cars shown, and of those with an arrow; hidden ones still in the world (an arrow at the parking spot) */
+        int shown = 0, with = 0, stray = 0;
+        for (int k = 0; k < NSLOT; k++){
+            uint32_t car = g_sl[k].car;
+            if (g_sl[k].st == SL_FREE || !ok(car, 0x9e0)) continue;
+            if (g_sl[k].st == SL_ACTIVE && !g_sl[k].hidden){ shown++; with += has[(uint8_t)MR16(car + 0xau)]; }
+            else if (MR8(car + CAR_ACTIVE)) stray++;
+        }
+        int cdrawn = 0;                             /* copies the renderer has drawn (their render object made) */
+        for (int i = 0; i < g_mm.ncopy; i++) cdrawn += ok(g_mm.copy[i], 0x5c) && MR32(g_mm.copy[i] + 0x58u);
+        rlog("[roam]   minimap: %d cars' arrows, %d free, %d copies of AIRACERINDICATOR_0 (%d drawn); %d of %d friends' cars shown have one, "
+                        "%d hidden one(s) in the world\n", arrows, freev, g_mm.ncopy, cdrawn, with, shown, stray);
         uint32_t me = player_car();
         if (me) rlog("[roam]   me: car 0x%08x at %.1f %.1f %.1f heading 0x%04x speed %.1f\n", me, (double)MRF32(me + 0x60u),
                         (double)MRF32(me + 0x64u), (double)MRF32(me + 0x68u), MR16(me + 0x40cu), (double)MRF32(me + 0x42cu));
@@ -2365,12 +2525,31 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
         }
         return 1;
     }
-    if (!strcasecmp(sub, "waitpeers") || !strcasecmp(sub, "waitcars") || !strcasecmp(sub, "waitsolid")){
-        /* friends established / friends' cars shown / of those, solid (no longer ghosts) */
+    if (!strcasecmp(sub, "map")){
+        /* the open world map's car markers */
+        uint32_t sa = g_gmem + TAG_SCR + 0x48u, pk = 0;
+        if (g_gmem){ gstr(sa, WM_PACKAGE, 24); pk = gcall1(c, FN_FE_PACKAGE, 0, sa); }
+        uint32_t scr = ok(pk, 0x54) ? wm_screen(pk) : 0, map = scr ? rd32(scr + WM_MAP) : 0;
+        if (!ok(map, 0x2c)){ rlog("[roam] f=%ld mp map: the world map is not open\n", f); return 1; }
+        int n = 0, cars = 0, drawn = 0;
+        for (uint32_t e = rd32(map + 4u); e && e != map + 4u && n < 1024 && ok(e, WM_MARK_SZ); e = rd32(e), n++){
+            if (MR32(e + 8u) != WM_CAR) continue;
+            cars++;
+            uint32_t o = MR32(e + 0xcu);
+            drawn += ok(o, 0x5c) && MR32(o + 0x58u);
+            rlog("[roam]   car marker at %.1f %.1f, object 0x%08x%s%s\n", (double)MRF32(e + 0x10u), (double)MRF32(e + 0x14u), o,
+                    ok(o, 0x5c) && (MR32(o + 0x1cu) & 1u) ? ", hidden" : "", ok(o, 0x5c) && MR32(o + 0x58u) ? ", drawn" : "");
+        }
+        rlog("[roam] f=%ld mp map: %d markers, %d of them cars', %d of those drawn\n", f, n, cars, drawn);
+        return 1;
+    }
+    if (!strcasecmp(sub, "waitpeers") || !strcasecmp(sub, "waitcars") || !strcasecmp(sub, "waitsolid") || !strcasecmp(sub, "waithidden")){
+        /* friends established / friends' cars shown / of those, solid (no longer ghosts) / friends' cars hidden or parked */
         int want = atoi(a1); long tmo = a2[0] ? atol(a2) : 0;
         if (*wait_start < 0) *wait_start = f;
         int have = 0;
         if (!strcasecmp(sub, "waitpeers")){ roam_plat_lock(); have = rc_established(&g_s); roam_plat_unlock(); }
+        else if (!strcasecmp(sub, "waithidden")){ for (int k = 0; k < NSLOT; k++) have += g_sl[k].st == SL_PARKED || (g_sl[k].st == SL_ACTIVE && g_sl[k].hidden); }
         else for (int k = 0; k < NSLOT; k++)
             if (g_sl[k].st == SL_ACTIVE && !g_sl[k].hidden && (strcasecmp(sub, "waitsolid") || (O.collide && !g_sl[k].ghost))) have++;
         if (have >= want){ rlog("[roam] f=%ld mp %s %d satisfied after %ld frames\n", f, sub, want, f - *wait_start); *wait_start = -1; return 1; }

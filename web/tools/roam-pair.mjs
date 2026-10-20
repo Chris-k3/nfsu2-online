@@ -21,6 +21,7 @@
 //                    after the first page opened, for 8 s
 //        [--crowd <n>]  web/tools/roam-crowd.mjs's n simulated players on the same server for the whole run
 //                    (<out>/crowd.log): with 5 or more friends the first cars of our own come into use, in the AI range
+//        [--crowd-race 1-3:200:320]  roam-crowd's --race: those players are in a race meanwhile
 //
 // Without --base it starts its own server (web/server/server.mjs --dev on the given
 // ports, the game folder from --data or NFSU2_DATA) and stops it at the end.
@@ -122,7 +123,8 @@ const CROWD = +opt('crowd', 0);
 let crowd = null;
 if (CROWD) {
   const log = fs.openSync(path.join(OUT, 'crowd.log'), 'w');
-  crowd = spawn(process.execPath, [path.join(REPO, 'web/tools/roam-crowd.mjs'), '--base', BASE, '--n', String(CROWD), '--seconds', String(TMO / 1000)],
+  crowd = spawn(process.execPath, [path.join(REPO, 'web/tools/roam-crowd.mjs'), '--base', BASE, '--n', String(CROWD), '--seconds', String(TMO / 1000),
+    ...(opt('crowd-race', '') ? ['--race', opt('crowd-race', '')] : [])],
     { cwd: REPO, stdio: ['ignore', log, log] });
 }
 

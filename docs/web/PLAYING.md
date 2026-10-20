@@ -153,7 +153,9 @@ Good to know:
   change that). Only free roam and the LAN and Online screens take a place; single-player takes none. When it is full,
   the game says so and lets you in by itself when a place frees up. The server pairs each player with the 32 players
   nearest to them, and your game shows all 32 of their cars at once. Their names show over the cars within 100 m, and
-  each gets an arrow on the minimap when it is near, as the game's own opponents do. A player farther than 300 m sends
+  each gets an arrow on the minimap when it is near and a marker on the world map (M), as the game's own opponents
+  do; the world map shows where they were when you opened it. A player in a race, a shop or the menus is not in your
+  free roam: no car, no arrow, no marker until they are back. A player farther than 300 m sends
   you their car 5 times a second instead of 20 (past 1 km, twice), which saves traffic and doesn't show at that
   distance. When many players arrive at once, their cars load one after another, about two a second.
 - **Solid cars:** you collide with the other players' cars (Online, More online settings,

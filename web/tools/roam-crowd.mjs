@@ -4,10 +4,13 @@
 //
 //   node web/tools/roam-crowd.mjs [--base http://localhost:8655] [--n 62] [--seconds 120] [--room <name>]
 //        [--track <pose.csv>] [--speed 15] [--spread 20] [--car 350Z] [--cars A,B,..|all] [--stagger 50] [--states 1] [--out <summary.json>]
+//        [--race 1-3:60:120]
 //
 // --cars   the players' cars in turn (car type names, CarTypeInfo +0), or all: the game's 31 player cars, PEUGOT to
 //          IMPREZAWRX; without it every player drives --car.
 // --states the car states in each SNAP: 1 as the browsers send them (roam_web.c), 3 as a LAN does.
+// --race   players first to last (Bot01 is 1) are in a race from one second to the other after the start: they
+//          announce it (RC_ST_EVENT) and send no car meanwhile, as a game in a race does.
 // --track  a pose log (NFSU2_ROAM_POSELOG): the first player's L rows, a real drive; every simulated player
 //          follows it from its own point along it, so they spread over the route.  Without one: circles of 20 to
 //          120 m around the new career's start (1695, -884, 24), or --spread m apart (6 circles, the first at --spread).
@@ -27,6 +30,7 @@ const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && i + 1
 const BASE = opt('base', 'http://localhost:8655'), N = +opt('n', 62), SECONDS = +opt('seconds', 120), ROOM = opt('room', '');
 const SPEED = +opt('speed', 15), CAR = opt('car', '350Z'), STAGGER = +opt('stagger', 50), TRACK = opt('track', ''), OUTF = opt('out', '');
 const STATES = +opt('states', 1), SPREAD = +opt('spread', 20);
+const RACE = (opt('race', '').match(/^(\d+)-(\d+):(\d+):(\d+)$/) ?? []).slice(1).map(Number);
 const ALL_CARS = ['PEUGOT', 'FOCUS', 'COROLLA', '240SX', 'MIATA', 'CIVIC', 'PEUGOT106', 'CORSA', 'HUMMER', 'NAVIGATOR', 'ESCALADE', 'TIBURON',
   'SENTRA', 'CELICA', 'IS300', 'SUPRA', 'GOLF', 'A3', 'RSX', 'ECLIPSE', 'TT', 'RX8', '350Z', 'G35', '3000GT', 'GTO', 'MUSTANGGT', 'SKYLINE',
   'LANCEREVO8', 'RX7', 'IMPREZAWRX'];
@@ -118,6 +122,12 @@ class Bot {
   }
   tick(t) {
     if (!this.ready) return;
+    const racing = RACE.length === 4 && this.i + 1 >= RACE[0] && this.i + 1 <= RACE[1] && t >= RACE[2] && t < RACE[3];
+    if (racing !== !!this.racing) {
+      this.racing = racing; this.x.crowd_status(racing ? 3 : 2);
+      console.log(`roam-crowd: t=${t.toFixed(0)}s ${this.name} ${racing ? 'in a race' : 'back in free roam'}`);
+    }
+    if (racing) { this.x.crowd_wait(nowUs()); return; }
     const { p, v } = track(t, this.i);
     this.x.crowd_tick(nowUs(), p[0], p[1], p[2], v[0], v[1], v[2], Math.atan2(v[1], v[0]));
   }
