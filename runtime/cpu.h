@@ -57,7 +57,14 @@ typedef double   __attribute__((may_alias)) gm_f64;
  * stay in wasm locals across guest loads and stores until the next call.
  * True because the CPU structs (and all of the runtime's data) live above
  * GUEST_END, where no guest access goes.  The runtime keeps g_mem: its own
- * accesses may well mix guest and host pointers. */
+ * accesses may well mix guest and host pointers.
+ * One hazard: wasm-ld resolves g_guest + K in data to 0, not K (an undefined
+ * weak symbol loses its addend there).  Code keeps g_guest and K apart, data
+ * does not: clang can turn a switch whose arms load from constant guest
+ * addresses into a lookup table of g_guest + K.  sub_0050e2e0 (the first
+ * screen of a career shop) was one: every entry read guest address 0, the
+ * screen name was NULL and entering any upgrade shop trapped.  web/build.sh
+ * compiles a shard that has such a table without jump tables. */
 extern __attribute__((weak)) uint8_t g_guest[];
 #define GMEM_ g_guest
 #else

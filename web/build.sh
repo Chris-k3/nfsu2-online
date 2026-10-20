@@ -22,7 +22,7 @@ WASI="$WASI" web/tools/aliasguard.sh > /dev/null || { WASI="$WASI" web/tools/ali
 web/tools/gencheck.sh
 LIFT="$(cat gen/all/web-lift.txt 2>/dev/null || echo unknown)"
 [ "$LIFT" != unknown ] || echo "note: gen/all was not made by web/gen.sh (lift options unknown; web/gen.sh turns on FLAGABI and X87OPT)"
-CC="$WASI/bin/clang"
+CC="$WASI/bin/clang"; OBJDUMP="$WASI/bin/llvm-objdump"
 J="${J:-$(sysctl -n hw.ncpu 2>/dev/null || nproc)}"
 OPT="${OPT:--O3}"
 OUT="$ROOT/out/web"; mkdir -p "$OUT/obj" "$OUT/obj/srv" "$OUT/rt"
@@ -40,7 +40,7 @@ DEFS="-D_WASI_EMULATED_MMAN -D_WASI_EMULATED_SIGNAL -D_WASI_EMULATED_PROCESS_CLO
 CFLAGS="$TARGET $OPT $FEAT $DEFS -fno-delete-null-pointer-checks -include runtime/web/compat/wasm_plat.h -Iruntime/web/compat -Iruntime -Igen/all"
 # the lifted shards only: guest memory as an object of its own (cpu.h, NFSU2_GUEST_OBJ)
 SHARDFLAGS="-DNFSU2_GUEST_OBJ"
-export CC CFLAGS SHARDFLAGS OUT FULL MEMCHECK OBJCACHE
+export CC OBJDUMP CFLAGS SHARDFLAGS OUT FULL MEMCHECK OBJCACHE
 HDRSUM="$( (cat runtime/cpu.h runtime/web/compat/wasm_plat.h; echo "$CFLAGS $SHARDFLAGS") | shasum | cut -c1-16)"; export HDRSUM
 
 # ---- lifted shards (content-hash incremental, as build.sh) ----
@@ -65,6 +65,15 @@ HDRSUM="$( (cat runtime/cpu.h runtime/web/compat/wasm_plat.h; echo "$CFLAGS $SHA
   o=$($CC $CFLAGS $SHARDFLAGS $mc -I"gen/$1" -Wno-unused-label -Wno-parentheses-equality -c -o "$obj" "$src" 2>&1); r=$?
   [ -z "$o" ] || printf "%s\n" "$o" | head -5
   [ $r -eq 0 ] || { echo "FAILED: $src" >&2; exit $r; }
+  # a lookup table of guest addresses (g_guest + K in data) links as zeros
+  # (cpu.h): compile the shard again without jump tables, which has none
+  guestdata() { "$OBJDUMP" -r "$obj" | awk "/^RELOCATION RECORDS FOR \\[DATA\\]/ { d = 1; next } /^RELOCATION RECORDS/ { d = 0 }
+    d && \$3 ~ /^g_guest[+-]/ && \$3 != \"g_guest+0\" { f = 1 } END { exit !f }"; }
+  if guestdata; then
+    $CC $CFLAGS $SHARDFLAGS $mc -fno-jump-tables -I"gen/$1" -Wno-unused-label -Wno-parentheses-equality -c -o "$obj" "$src" || { echo "FAILED: $src" >&2; exit 1; }
+    if guestdata; then echo "FAILED: $src has guest addresses in data, without jump tables too (cpu.h, g_guest)" >&2; exit 1; fi
+    echo "  $src: without jump tables (it had a lookup table of guest addresses)"
+  fi
   echo "$sum" > "$obj.sum"; ln -f "$obj" "$OBJCACHE/$sum.o" 2>/dev/null || cp "$obj" "$OBJCACHE/$sum.o"
   echo "  compiled $src"' sh
 
