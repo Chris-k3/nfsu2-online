@@ -87,6 +87,8 @@ body[data-phase="error"] .status { color: var(--bad); }
 /* Play across the panel; Retry, Reload and Download log under it */
 .hero .row { justify-content: center; }
 .hero .play { flex: 1 0 100%; justify-content: center; padding: 0 16px; }
+/* after a crash: the channel's name in one piece, not broken at its hyphen */
+#report a { white-space: nowrap; }
 
 /* ------------------------------------------------------------- controls */
 button, .file-btn { cursor: pointer; }

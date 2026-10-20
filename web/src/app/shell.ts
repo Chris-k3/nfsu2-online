@@ -308,7 +308,7 @@ async function startGame() {
     void audio?.close().catch(() => {});
     endStage();
     setPhase('exited', 'Did not start', `The game could not start: ${e}`);
-    $('#log-btn').hidden = false;
+    $('#log-btn').hidden = $('#report').hidden = false;
     download.resume();
     return;
   }
@@ -401,12 +401,14 @@ function onExit(s: GameSession, code: number) {
   players?.now();
   download.resume();
   $('#log-btn').hidden = false;
+  // a crash, or a game stopped for want of a subsystem: where to send the log (not a normal close or a Stop)
+  $('#report').hidden = !fatal && (code === 0 || code === -1);
   const mins = seconds >= 120 ? `${Math.floor(seconds / 60)} min` : `${seconds.toFixed(0)} s`;
   if (fatal) setPhase('exited', 'Did not start', `The game was stopped: ${fatal}. Download the log to see why; ` +
     (firefoxVersion() !== null ? 'about:support, Graphics, shows what Firefox thinks of the graphics.' : 'chrome://gpu shows what Chrome thinks of the graphics.'));
   else {
     const base = code === 0 ? `The game closed normally after ${mins}.` : code === -1 ? `The game was stopped after ${mins}.`
-      : `The game stopped with error code ${code} after ${mins}. Download the log to see why.`;
+      : `The game stopped with error code ${code} after ${mins}.`;
     // what is kept: the game's last profile save, never a claim it did not make
     const sv = saved;
     setPhase('exited', code === 0 ? 'See you' : 'Stopped', !sv ? base : code === 0 ? `${base} Progress saved in this browser at ${when(sv.at)} (${sv.name}).`

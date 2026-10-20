@@ -28,8 +28,11 @@
 //             "Close the game now" forces the exit (exit 0); "Stop the game" comes only after the
 //             forced close's longest run (a game that does not answer: stopped, code -1)
 //   slowgpu   a renderer that comes after the game stopped waiting for it (NFSU2_RENDERER_WAIT_MS)
-//             is refused and the game stopped with the reason, not left on a black screen
-//   leak      three Play -> Stop rounds with sound on in one tab (the second with free roam on, so
+//             is refused and the game stopped with the reason, not left on a black screen; the page
+//             points to #bug-reports on Discord
+//   crash     a trap (exit 134): "Stopped" with the error code, the trap in the log, the pointer to
+//             #bug-reports on Discord; a normal close after it takes the pointer away
+//   leak     three Play -> Stop rounds with sound on in one tab (the second with free roam on, so
 //             the network too): every ended game's memory is collected (WeakRefs + forced gc,
 //             Chrome with --js-flags=--expose-gc), so is every AudioContext and GPU device, and
 //             measureUserAgentSpecificMemory comes back to where it was before the first Play
@@ -324,9 +327,10 @@ try {
     const fsAfter = await st.evaluate(() => !!document.fullscreenElement);
     const tail = (await st.evaluate(() => window.__nfsu2.log.tail(400))).join('\n');
     const viaGame = /quit requested \(page quit request\)/.test(tail) && /the game exited \(code 0\)/.test(tail);
+    const bugReport = await st.locator('#report').isVisible();
     await shot(st, 'quit-exited.png');
-    report('quit', label === 'Quit game' && p === 'exited' && exit?.code === 0 && viaGame && !fsAfter && !(await st.locator('#play').isDisabled()),
-      { menuLabel: label, exit, quitThroughGame: viaGame, headline: head, sub, fullscreenAfter: fsAfter });
+    report('quit', label === 'Quit game' && p === 'exited' && exit?.code === 0 && viaGame && !fsAfter && !bugReport && !(await st.locator('#play').isDisabled()),
+      { menuLabel: label, exit, quitThroughGame: viaGame, headline: head, sub, fullscreenAfter: fsAfter, bugReport });
     await c2.close();
   }
 
@@ -589,9 +593,44 @@ try {
     const r = { phase: ph, exit: await p.evaluate(() => window.__nfsu2.lastExit), headline: await p.locator('#status').textContent(),
       sub: await p.locator('#status-sub').textContent(),
       gameGaveUp: /no renderer attached after \d+ ms/.test(tail), refused: /renderer could not attach: Error: (the game stopped waiting for a renderer|this game process takes no renderer any more)/.test(tail),
-      attachedLines: (tail.match(/\[gpu\] renderer attached:/g) ?? []).length };
+      attachedLines: (tail.match(/\[gpu\] renderer attached:/g) ?? []).length, bugReport: await p.locator('#report').isVisible() };
     report('slowgpu', r.phase === 'exited' && r.gameGaveUp && r.refused && r.attachedLines === 0 && r.headline === 'Did not start' &&
-      /graphics \(WebGPU renderer\) could not start/.test(r.sub), r);
+      /graphics \(WebGPU renderer\) could not start/.test(r.sub) && r.bugReport, r);
+    await c2.close();
+  }
+
+  // ------------------------------------------------------------ crash --
+  // a trap ends the game with exit 134 (game-worker.ts): the start page says so and
+  // points to #bug-reports on Discord; a normal end afterwards takes that line away.
+  // The trap and the exits are the game worker's own messages, given to the page
+  // from its side (the real game keeps running until the page stops it).
+  if (want('crash')) {
+    const c2 = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    await c2.addInitScript(() => {
+      const W = window.Worker, ws = window.__workers = [];
+      window.Worker = class extends W { constructor(u, o) { super(u, o); ws.push({ w: this, name: o?.name }); } };
+    });
+    const x = watch(await c2.newPage(), 'X');
+    await open(x, `save=${RUN}-x&fresh&env=NOMOVIES%3D1`);
+    const end = async (msgs) => {
+      await x.click('#play');
+      await waitPhase(x, ['playing'], 60000);
+      await x.evaluate(ms => {
+        const { w } = window.__workers.findLast(e => e.name === 'game-0');
+        for (const data of ms) w.dispatchEvent(new MessageEvent('message', { data }));
+      }, msgs);
+      await waitPhase(x, ['exited'], 30000);
+      return x.evaluate(() => ({ exit: window.__nfsu2.lastExit, headline: document.querySelector('#status').textContent,
+        sub: document.querySelector('#status-sub').textContent, bugReport: !document.querySelector('#report').hidden,
+        link: document.querySelector('#report a').href }));
+    };
+    const crashed = await end([{ t: 'trap', tid: 1, msg: 'RuntimeError: memory access out of bounds (app-test)', stack: '' }, { t: 'exit', code: 134 }]);
+    const trapLogged = (await x.evaluate(() => window.__nfsu2.log.tail(400))).some(l => /TRAP in thread 1: RuntimeError: memory access out of bounds \(app-test\)/.test(l));
+    await shot(x, 'crash-exited.png');
+    const closed = await end([{ t: 'exit', code: 0 }]);
+    report('crash', crashed.exit?.code === 134 && crashed.headline === 'Stopped' && /error code 134/.test(crashed.sub) && crashed.bugReport &&
+      /^https:\/\/discord\.(gg|com)\//.test(crashed.link) && trapLogged && closed.exit?.code === 0 && !closed.bugReport,
+      { crashed, trapLogged, closed: { exit: closed.exit, headline: closed.headline, bugReport: closed.bugReport } });
     await c2.close();
   }
 
