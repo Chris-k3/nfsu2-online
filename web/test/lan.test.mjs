@@ -889,6 +889,25 @@ test('a broadcast costs its size for every player it reaches; one client address
   } finally { await sw.close(); }
 });
 
+test('the most free roam sends goes through one connection: 32 friends at 60 snapshots a second', { timeout: 30_000 }, async () => {
+  const sw = await startSwitch();
+  try {
+    const a = new Client(sw.port, 'Roamer'), b = new Client(sw.port, 'Friend');
+    await a.welcome(); await b.welcome();
+    // 4 s (past the 2 s burst) of 2000 snapshots of 94 bytes a second: 32 x 60, HELLOs and PINGs
+    const t0 = performance.now();
+    let sent = 0;
+    while (performance.now() - t0 < 4000) {
+      for (const due = Math.floor((performance.now() - t0) * 2); sent < due; sent++) a.udp(b.vip, 47210, 47210, Buffer.alloc(94 - 16));
+      await sleep(5);
+    }
+    await sleep(300);
+    console.log(`free roam at the most: ${b.frames.length} of ${sent} snapshots through`);
+    assert.ok(b.frames.length >= sent * 0.99, `none dropped by the connection's limits (${b.frames.length} of ${sent})`);
+    await a.close(); await b.close();
+  } finally { await sw.close(); }
+});
+
 test('with a store, a restart of the server keeps each player\'s address for its token (and only for it)', async () => {
   let saved = [];
   const store = { load: () => saved, save: l => { saved = JSON.parse(JSON.stringify(l)); } };

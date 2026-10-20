@@ -73,13 +73,15 @@
 //
 // Limits (sized to the game: free roam sends 20 snapshots a second of about
 // 95 bytes to each friend, 1.9 KB/s per friend, and with 32 friends near
-// about 700 frames and 70 KB a second in all; the host of a 3-player LAN
+// about 700 frames and 70 KB a second in all, at the 60 a second Settings
+// allow about 2000 frames and 190 KB; the host of a 3-player LAN
 // race sent at most 100 frames and 7.7 KB a second (the audit's measurement on
 // the switch); LAN play's frames are at most an Ethernet MTU,
 // runtime/web/net_proto.h NET_SLOT_BYTES 1536):
 //   maxPeers     players on the switch at once (one more: closed with 1013)
 //   maxFrame     bytes in one binary frame (larger ones are dropped)
-//   frameRate    binary frames per second per connection (token bucket, burst = 2 s worth)
+//   frameRate    binary frames per second per connection (token bucket, burst = 2 s worth): 32 friends at 60
+//                snapshots a second, and the page's answers to stray connects (web/src/net, 32 KB/s at most)
 //   byteRate     binary bytes per second per connection (the same)
 //   groupFrameRate, groupByteRate  the same for all connections of one client
 //                address together (the group id the server passes): room for
@@ -190,7 +192,7 @@ const STREAM_LOW = 64 << 10;    // a receiver with less than this queued gets st
 export const LAN_WSS_OPTIONS = Object.freeze({ autoPong: false });
 
 export const LAN_DEFAULTS = Object.freeze({
-  maxPeers: 128, maxFrame: 8192, frameRate: 1000, byteRate: 256 << 10, groupFrameRate: 5000, groupByteRate: 512 << 10,
+  maxPeers: 128, maxFrame: 8192, frameRate: 2500, byteRate: 256 << 10, groupFrameRate: 5000, groupByteRate: 512 << 10,
   siteFrameRate: 10000, siteByteRate: 1 << 20,
   textRate: 20, maxText: 1024, ctlRate: 10, shedQueue: 256 << 10, roamQueue: 64 << 10, streamQueue: 2 << 20, streamShare: 1 << 20, stallMs: 1000,
   sendBuffer: 8 << 20, keepaliveMs: 25_000, idleMs: 10 * 60_000, reserveMs: 60_000, groupReserve: 8, siteReserve: 16,

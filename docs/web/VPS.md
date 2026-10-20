@@ -434,12 +434,12 @@ paths to the VPS, so pick a VPS location between you.
   - 8 connections at once per client address and 16 per IPv6 /48; opening them is rate limited per client
     address (a burst of 20, then one a second), so a client that opens and closes connections as fast as it can
     gets 429;
-  - frames up to 8 KB; 1000 frames and 256 KB a second per connection, 2000 and 512 KB for all of one client
-    address's connections together, 4000 and 1 MB for all of one IPv6 /48 (a 3-player LAN race's host sent at
-    most 100 frames and 7.7 KB a second; free roam is 1.9 KB a second per friend). A broadcast counts once for
-    every player it reaches;
+  - frames up to 8 KB; 2500 frames and 256 KB a second per connection, 5000 and 512 KB for all of one client
+    address's connections together, 10000 and 1 MB for all of one IPv6 /48 (a 3-player LAN race's host sent at
+    most 100 frames and 7.7 KB a second; free roam is 1.9 KB a second per friend, and 32 friends at 60 snapshots
+    a second are about 2000 frames). A broadcast counts once for every player it reaches;
   - datagrams to a player whose connection is 256 KB behind are dropped, as a full link would; free roam's already
-    at 16 KB (about a second of them), so a player whose link falls behind gets the newest positions as soon as it
+    at 64 KB (about a second of them), so a player whose link falls behind gets the newest positions as soon as it
     catches up, not seconds of old ones first. LAN-race stream data is never dropped. A player with more than 2 MB of it waiting, or more than 1 MB of it from one client, is
     disconnected if it stopped reading (nothing went out for a second while data waited); otherwise the client
     that queued the most for it is, all its connections (so a flood does not get a player who reads cut; only many
