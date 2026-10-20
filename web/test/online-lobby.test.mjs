@@ -342,6 +342,9 @@ test('names: a name another browser holds comes with four digits (the same for o
   const a2 = w.client('10.77.0.2').login('NAME');
   assert.equal(a2.last('pers').f.get('PERS'), 'NAME');
   assert.equal([...w.host.lobby.sessions].filter(s => s.persona === 'NAME').length, 1, 'the old session went');
+  // a shortened name that reads as a slur (names.mjs) is "Player" with the digits
+  w.client('10.77.0.7').login('AbcdefghFagxyz');
+  assert.match(w.client('10.77.0.8').login('AbcdefghFagxyz').last('pers').f.get('PERS'), /^Player\d{4}$/);
 });
 
 test('names: a racer keeps the name until back; another player under it gets digits and ends nothing', () => {

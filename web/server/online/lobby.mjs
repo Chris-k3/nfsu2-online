@@ -387,11 +387,13 @@ export class Lobby {
   }
   /** a free name: name with four digits in place of its end (a persona name has 15 characters at most); the same
    *  digits for one client while they are free (it keeps the name when it logs in again, even before its older
-   *  session is gone), else random ones */
+   *  session is gone), else random ones.  "Player" with the digits where the shortened name reads as a slur
+   *  (names.mjs: "AbcdefghFagxyz" is "AbcdefghFag1234"): the game's next login would be refused under it */
   freeVariant(name, s) {
     const own = crypto.createHash('sha256').update(`${s.group}\n${name.toLowerCase()}`).digest().readUInt32BE(0) % 9000 + 1000;
     for (let i = 0; i < 20; i++) {
-      const d = String(i ? crypto.randomInt(1000, 10000) : own), v = name.slice(0, 15 - d.length) + d;
+      const d = String(i ? crypto.randomInt(1000, 10000) : own), cut = name.slice(0, 15 - d.length) + d;
+      const v = blockedName(cut) ? `Player${d}` : cut;
       this.giveWay(v, s);
       if (!this.nameTaken(v, s)) return v;
     }

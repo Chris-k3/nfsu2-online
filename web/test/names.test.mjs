@@ -19,13 +19,17 @@ const haveClang = spawnSync('clang', ['--version'], { encoding: 'utf8' }).status
 const BLOCKED = ['nigger', 'N1gg3r', 'n i g g e r', 'n.i.g.g.a', 'NiQQa', 'nlgga', 'n!gga', 'niiiigggaaa', 'xXn1gg4Xx',
   'FAG', 'f4g', 'F A G', 'f4g_42', 'XxFagXx', 'fags', 'Faaag', 'faggot', 'f@gg0t', 'fa66ot', 'tr4nny', 'Trannie', 'r3tard',
   'ibne', 'iBnE_34', 'wetback', 'beaner', 'Ch1nk', 'g00k', 'sp1cs', 'paki', 'k1ke', 'dyke', 'c00n', 'XxCoonXx',
-  'towelhead', 'sandnigger', 'junglebunny'];
+  'towelhead', 'sandnigger', 'junglebunny', 'ni99a', 'NI99A', 'nigga99', 'Fag42', 'Big1Fag', 'Mr5Coon', 'trannies',
+  'Dykes', 'Van_Fag'];
 const UNICODE = ['ñigga', 'nіgga', 'ｎｉｇｇａ', 'ΝΙGGΑ', 'n̲i̲g̲g̲a̲', 'ⓕⓐⓖ', 'fаg'];
 // other words with those letters in them, the player names this server sees most (Turkish) among them
 const ALLOWED = ['Mustafa69', 'MustafaGS', 'Mustafa_GS', 'Mustafa Gamer', 'mustafagamer', 'Rafa96', 'Vefa', 'Safa',
   'Pakize', 'Nigar', 'Niger', 'Nigeria', 'Nigerian', 'Nigel', 'Raccoon', 'Tycoon', 'Cocoon', 'spicy', 'Spice',
   'despicable', 'Pakistan', 'Fagundes', 'Bigger', 'Trigger', 'Digger', 'Knight', 'Chinook', 'Scunthorpe', 'Cooper',
-  'Ahmet35', 'Emre_34', 'Gökhan', 'İbrahim', 'Thom', 'Player', 'NAME', 'OLHOST', 'Speedy', ''];
+  'Ahmet35', 'Emre_34', 'Gökhan', 'İbrahim', 'Thom', 'Player', 'NAME', 'OLHOST', 'Speedy', '',
+  // a name and a number: a year, two digits, the digits the Online mode adds to a taken name (lobby.mjs freeVariant)
+  'Hakan1995', 'Furkan1999', 'Ozan_1996', 'Can 1969', 'Kaan1998', 'Dani99', 'Toni69', 'Dani99GS', 'Ozan1996GS',
+  'Hakan1993TR', 'Dani9912', 'Strannik', 'VanDyke', 'Van Dyke'];
 
 test('names.mjs: the lists\' words, the ways round them, and not the other words', () => {
   for (const w of [...SLURS.anywhere, ...SLURS.whole]) assert.ok(blockedName(w), w);
@@ -74,7 +78,8 @@ int main(void){
     let seed = 7;
     const rnd = n => { seed = (seed * 1103515245 + 12345) >>> 0; return (seed >>> 8) % n; };
     const pick = a => a[rnd(a.length)];
-    const pieces = [...SLURS.anywhere, ...SLURS.whole, 'mustafa', 'gs', 'raccoon', 'spice', 'niger', 'pakize', 'xx', 'gamer', 'a', 'g'];
+    const pieces = [...SLURS.anywhere, ...SLURS.whole, 'mustafa', 'gs', 'raccoon', 'spice', 'niger', 'pakize', 'xx', 'gamer', 'a', 'g',
+      'dani', 'hakan', 'van', '99', '1995', '69'];
     const swap = { o: '0', i: '1!|l', e: '3', a: '4@', s: '5$', t: '7+', g: '69q', b: '8' };
     const names = [...BLOCKED, ...ALLOWED.filter(n => /^[ -~]*$/.test(n))];
     for (let k = 0; k < 20000; k++) {
