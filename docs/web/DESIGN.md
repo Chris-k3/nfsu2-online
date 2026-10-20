@@ -126,7 +126,9 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
   - `/data`: the install folder. Manifest from the server, case-insensitive lookup, 1 MiB blocks, memory LRU,
     persistent OPFS block cache (`web/src/host/datacache.ts`). Blocks come from the server's `/data-blocks/` (named by
     the manifest): runs of up to 8 blocks as one answer, compressed with zstd, br or gzip as Content-Encoding, which
-    the browser undoes itself; a run whose first 64 KB does not compress goes as it is. An older server: byte ranges
+    the browser undoes itself; a run whose first 64 KB does not compress goes as it is. The address carries the file's
+    mtime (`m`), and the server lets a shared cache (Cloudflare) keep a run for good when `m` is the file's, the run
+    is compressed or does not compress, and it is not a movie (`EDGE_KEEP`). An older server: byte ranges
     of `/data/`. The data but the movies crosses the network in 69 % of its size (1.37 of 1.98 GB; tracks about 40 %).
     Game data on this PC (at the bottom of the start page) shows how much of it the cache holds. Its "Download the
     game data" button, which filled the cache with all but the movies ahead of play, is off with the reason under it:

@@ -460,7 +460,13 @@ async function sendFile(q, s, root, file, { type, cache = 'store', extra = {}, f
 // byte, so most of them wait on the network: about 100 players draw some 70 MB/s of game data, dozens of answers
 // under way at once.  The CPU follows the bytes, not the answers (br 3 does 200 MB/s on one core of an M4 Pro), so
 // the total bounds memory: 128 compressors take about 200 MB at most (zstd 1.5 MB each, br 0.9, gzip 0.4).
+// A shared cache (Cloudflare's, with a Cache Rule for /data-blocks/*) may keep a run for good (EDGE_KEEP), as the
+// game data is the same for every player: only when its address names this version of the file (m, the manifest's
+// mtime, so a changed file is a new address), it is as small as it gets (compressed, or a run that does not
+// compress; not one sent as it is because the compressors were taken), and it is not a movie (video, which
+// Cloudflare's terms want their paid products for).  At about 110 players the 1 Gbit uplink was full without it.
 const BLOCK = 1 << 20, BLOCKS_MAX = 8, PROBE = 64 << 10;
+const EDGE_KEEP = 'public, max-age=31536000, immutable';
 const COMPRESSORS = { perClient: 8, perSite: 16, total: 128 };
 const compressors = new Budget(COMPRESSORS.perClient, COMPRESSORS.perSite, COMPRESSORS.total);
 // fast settings: within a few percent of the best ratio for this data, at a fraction of the CPU (zstd 3:
@@ -492,9 +498,13 @@ async function sendBlocks(q, s, file, u) {
   const enc = pickEncoding(q.headers['accept-encoding'], Object.keys(ENCODERS));
   let held = q.method !== 'HEAD' && !!enc && compressors.take(key, site);
   const free = () => { if (held) { held = false; compressors.give(key, site); } };
-  if (held && !await compresses(real, start, end).catch(() => false)) free();
+  const asIs = held && !await compresses(real, start, end).catch(() => false);
+  if (asIs) free();
   const z = held;
+  const keep = (z || asIs) && u.searchParams.get('m') === String(Math.floor(st.mtimeMs / 1000)) &&
+    path.relative(DATA, file).split(path.sep)[0].toLowerCase() !== 'movies';
   s.writeHead(200, headers(q, { 'content-type': 'application/octet-stream', vary: 'accept-encoding',
+    ...(keep ? { 'cdn-cache-control': EDGE_KEEP, 'cloudflare-cdn-cache-control': EDGE_KEEP } : {}),
     ...(z ? { 'content-encoding': enc } : { 'content-length': end - start }) }));
   if (q.method === 'HEAD') return s.end();
   const flow = mustFlow(s);

@@ -96,7 +96,7 @@ async function fetchBlock(n: DNode, bi: number, start: number, len: number): Pro
   while (fetching >= FETCHES) await new Promise<void>(r => fetchWait.push(r));
   fetching++;
   try {
-    const url = runs ? runUrl(runs.url, n.path, bi, 1) : dataUrl(cfg.dataBase, n.path);
+    const url = runs ? runUrl(runs.url, n.path, bi, 1, n.mtime) : dataUrl(cfg.dataBase, n.path);
     for (let attempt = 0, wait = 250; ; attempt++, wait = Math.min(wait * 2, 4000)) {
       const r = await fetch(url, { headers: runs ? {} : { Range: `bytes=${start}-${start + len - 1}` }, cache: 'no-store' });
       if ((r.status === 429 || r.status === 503) && attempt < 12) { await r.body?.cancel(); await new Promise(res => setTimeout(res, wait)); continue; }

@@ -343,6 +343,13 @@ Through a real Cloudflare: **UNVERIFIED**. The client's address was checked with
 
 3. Run `docker compose up -d`. Skip the setup's firewall step for 80 and 443 (`ufw allow 22/tcp && ufw --force
    enable`).
+4. Let Cloudflare keep the game data (Caching, Cache Rules, one rule): URI Path wildcard `/data-blocks/*` (the
+   `*` matters: without it only `/data-blocks/` itself matches), Eligible for cache, Edge TTL "Use cache-control
+   header if present, bypass cache if not", Browser TTL "Respect origin TTL", the cache key as it is (it must keep
+   the query string). Turn on Smart Tiered Caching too. The server then says which runs Cloudflare may keep, for
+   good: those whose address names the file's version, compressed or not compressible, never the movies. A run
+   asked twice answers `cf-cache-status: MISS`, then `HIT`. At about 110 players the 1 Gbit uplink was full
+   without it.
 
 What follows from this setup:
 

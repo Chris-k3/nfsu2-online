@@ -4,7 +4,9 @@
 // The manifest names it; every encoding gives back the file's exact bytes; a run that does not compress goes
 // as it is (judged per run); requests out of bounds, outside the game's files or past the end are refused; a client holding all
 // its compressors gets the rest as they are (never refused, never queued), and gets them back when it lets go; past
-// the 128 compressors of all clients, the next client gets its runs as they are until one is given back.
+// the 128 compressors of all clients, the next client gets its runs as they are until one is given back.  A
+// shared cache (Cloudflare's) may keep a run only when its address names this version of the file, it is as
+// small as it gets, and it is not a movie.
 // Port: NFSU2_TEST_BLOCKS_PORT (8532).
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -66,6 +68,12 @@ function get(p, { ae = 'gzip, deflate, br, zstd', method = 'GET' } = {}) {
   });
 }
 const slice = (file, b, n) => FILES[file].subarray(b * M, Math.min(FILES[file].length, (b + n) * M));
+/** each file's mtime as the manifest names it (the m of a run's address) */
+const mtimes = async () => Object.fromEntries(JSON.parse((await get('/data-manifest', { ae: 'identity' })).body).files.filter(f => !f.d).map(f => [f.p, f.m]));
+const KEEP = 'public, max-age=31536000, immutable';
+/** what a shared cache is told: 'keep' (for good, both CDN headers) or 'no' (no-store) */
+const edge = r => r.headers['cdn-cache-control'] === KEEP && r.headers['cloudflare-cdn-cache-control'] === KEEP ? 'keep'
+  : r.headers['cdn-cache-control'] === 'no-store' && r.headers['cloudflare-cdn-cache-control'] === 'no-store' ? 'no' : JSON.stringify(r.headers);
 
 test('Accept-Encoding: the first of the server\'s encodings the client takes', () => {
   const have = ['zstd', 'br', 'gzip'];
@@ -124,6 +132,27 @@ test('/data-blocks/: named by the manifest, exact in every encoding, as they are
   } finally { await s.stop(); }
 });
 
+test('/data-blocks/: a shared cache may keep a run for good: this version of the file, as small as it gets, not a movie', { timeout: 60_000 }, async () => {
+  const s = await server();
+  try {
+    const m = await mtimes();
+    const run = (f, b, n, mt = m[f], ae) => get(`/data-blocks/${f}?b=${b}&n=${n}${mt === null ? '' : `&m=${mt}`}`, ae ? { ae } : undefined);
+    // compressed, or a run that does not compress: kept, and still exact
+    for (const [f, b, n, ae] of [['TRACKS/L4RA.BUN', 1, 8], ['TRACKS/L4RA.BUN', 0, 1, 'gzip, br'], ['SPEED2.EXE', 0, 4], ['PFDATA/MIX.MUS', 0, 1]]) {
+      const r = await run(f, b, n, m[f], ae);
+      assert.equal(r.status, 200, f);
+      assert.equal(edge(r), 'keep', `${f} from block ${b}`);
+      assert.match(r.headers['cache-control'], /private, no-store/, 'the browser keeps none (the page has its own cache)');
+      assert.ok(r.body.equals(slice(f, b, n)), f);
+    }
+    // not kept: no version, another version, a movie, a client that takes no compression
+    assert.equal(edge(await run('TRACKS/L4RA.BUN', 1, 1, null)), 'no');
+    assert.equal(edge(await run('TRACKS/L4RA.BUN', 1, 1, m['TRACKS/L4RA.BUN'] - 1)), 'no');
+    assert.equal(edge(await run('MOVIES/INTRO.VP6', 0, 1)), 'no');
+    assert.equal(edge(await run('TRACKS/L4RA.BUN', 1, 1, m['TRACKS/L4RA.BUN'], 'identity')), 'no');
+  } finally { await s.stop(); }
+});
+
 test('/data-blocks/: a client holding all its compressors gets the rest as they are, and gets them back when it lets go', { timeout: 60_000 }, async () => {
   const s = await server();
   const held = [];
@@ -140,10 +169,11 @@ test('/data-blocks/: a client holding all its compressors gets the rest as they 
     for (let i = 0; i < 10; i++) encs.push(await open());
     assert.deepEqual(encs.slice(0, 8).map(e => e !== 'none'), Array(8).fill(true), encs.join(' '));
     assert.deepEqual(encs.slice(8), ['none', 'none'], encs.join(' '));
-    // the uncompressed answers are still exact
-    const plain = await get('/data-blocks/TRACKS/L4RA.BUN?b=2&n=1');
+    // the uncompressed answers are still exact, and no shared cache keeps one (compressed, it is a quarter)
+    const plain = await get(`/data-blocks/TRACKS/L4RA.BUN?b=2&n=1&m=${(await mtimes())['TRACKS/L4RA.BUN']}`);
     assert.equal(plain.headers['content-encoding'], undefined);
     assert.ok(plain.body.equals(slice('TRACKS/L4RA.BUN', 2, 1)));
+    assert.equal(edge(plain), 'no');
     // letting go (the client goes away mid-answer) gives the compressors back
     for (const r of held.splice(0)) r.destroy();
     let enc;
