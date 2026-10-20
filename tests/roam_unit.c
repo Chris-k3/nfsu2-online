@@ -153,6 +153,21 @@ static void t_roundtrip(void){
     strcpy(m.u.hello.name, "Mustafa GS");
     { int n = rc_encode(&m, b, sizeof b);
       CHECK(n > 0 && rc_decode(b, n, &d) == RC_OK && !strcmp(d.u.hello.name, "Mustafa GS"), "HELLO: another name as it is ('%s')", d.u.hello.name); }
+    /* DUEL: 10 bytes of payload; no op, an unknown op, no player or no id refused */
+    memset(&m, 0, sizeof m); m.h.type = RC_MSG_DUEL; m.h.sender = 7;
+    m.u.duel.op = RC_DUEL_RESULT; m.u.duel.arg = 2; m.u.duel.to = 0xCAFEF00Du; m.u.duel.duel = 0x12345678u;
+    { int n = rc_encode(&m, b, sizeof b);
+      CHECK(n == RC_HDR + 10 + RC_CRC && rc_decode(b, n, &d) == RC_OK && d.u.duel.op == RC_DUEL_RESULT && d.u.duel.arg == 2 &&
+            d.u.duel.to == 0xCAFEF00Du && d.u.duel.duel == 0x12345678u, "DUEL round trip (%d bytes)", n);
+      static const struct { int at; uint8_t v; } bad[] = { { RC_HDR, 0 }, { RC_HDR, RC_DUEL__N }, { RC_HDR + 2, 0 }, { RC_HDR + 6, 0 } };
+      for (int k = 0; k < 4; k++){
+          uint8_t c[RC_MAX_DGRAM]; memcpy(c, b, (size_t)n);
+          c[bad[k].at] = bad[k].v;
+          if (bad[k].at >= RC_HDR + 2) for (int j = 1; j < 4; j++) c[bad[k].at + j] = 0;
+          uint32_t crc = rc_crc32(c, (uint32_t)n - RC_CRC); for (int j = 0; j < 4; j++) c[n - 4 + j] = (uint8_t)(crc >> (8 * j));
+          CHECK(rc_decode(c, n, &d) == RC_E_FIELD, "DUEL with a bad field refused (%d)", k);
+      }
+      m.u.duel.op = 0; CHECK(rc_encode(&m, b, sizeof b) < 0, "DUEL without an op not encoded"); }
     /* car record */
     rc_carcfg cc, c2; memset(&cc, 0, sizeof cc);
     cc.type_hash = 0x12345678u; strcpy(cc.type_name, "350Z"); cc.ride_b[3] = 1;
@@ -184,15 +199,16 @@ static void t_roundtrip(void){
 
 /* ---- 3. hostile datagrams ----------------------------------------------------------------- */
 static void t_fuzz(long iters){
-    uint8_t b[1600], base[8][RC_MAX_DGRAM]; int bn[8];
+    uint8_t b[1600], base[9][RC_MAX_DGRAM]; int bn[9];
     rc_msg m;
     /* one valid datagram of each type, to mutate */
-    for (int t = 1; t <= 8; t++){
+    for (int t = 1; t <= 9; t++){
         memset(&m, 0, sizeof m); m.h.type = (uint8_t)t; m.h.sender = 9;
         if (t == RC_MSG_HELLO){ strcpy(m.u.hello.name, "abc"); m.u.hello.n_seen = 2; }
         if (t == RC_MSG_PEERS){ m.u.peers.n = 2; m.u.peers.e[0].ip = 0x7f000001u; m.u.peers.e[0].port = 1; m.u.peers.e[0].id = 1; m.u.peers.e[1] = m.u.peers.e[0]; }
         if (t == RC_MSG_SNAP){ m.u.snap.n = 3; for (int k = 0; k < 3; k++) m.u.snap.s[k].q[3] = 1; }
         static uint8_t d[1000]; if (t == RC_MSG_CFG){ m.u.cfg.nfrag = 1; m.u.cfg.total = 100; m.u.cfg.dlen = 100; m.u.cfg.data = d; }
+        if (t == RC_MSG_DUEL){ m.u.duel.op = RC_DUEL_OFFER; m.u.duel.to = 1; m.u.duel.duel = 5; }
         bn[t - 1] = rc_encode(&m, base[t - 1], RC_MAX_DGRAM);
     }
     rc_session s; rc_config cf; memset(&cf, 0, sizeof cf); cf.self_id = 1; cf.port = 1; cf.max_players = 8; cf.rate_hz = 20; cf.test_mode = 1;
@@ -204,7 +220,7 @@ static void t_fuzz(long iters){
         int kind = (int)(rnd() % 4);
         if (kind == 0){ len = (int)(rnd() % 1300); for (int i = 0; i < len; i++) b[i] = (uint8_t)rnd(); }
         else {
-            int t = (int)(rnd() % 8); len = bn[t]; memcpy(b, base[t], (size_t)len);
+            int t = (int)(rnd() % 9); len = bn[t]; memcpy(b, base[t], (size_t)len);
             int nm = 1 + (int)(rnd() % 6);
             for (int k = 0; k < nm; k++) b[rnd() % (uint32_t)len] = (uint8_t)rnd();
             if (kind == 2) len = (int)(rnd() % (uint32_t)(len + 1));
@@ -224,6 +240,7 @@ static void t_fuzz(long iters){
                 for (int k = 0; k < m.u.snap.n && okk; k++) for (int i = 0; i < 3; i++)
                     okk = okk && isfinite(m.u.snap.s[k].p[i]) && fabsf(m.u.snap.s[k].p[i]) <= 20000.f; }
             if (m.h.type == RC_MSG_CFG) okk = okk && m.u.cfg.data >= b && m.u.cfg.data + m.u.cfg.dlen <= b + len - 4;
+            if (m.h.type == RC_MSG_DUEL) okk = okk && m.u.duel.op >= 1 && m.u.duel.op < RC_DUEL__N && m.u.duel.to && m.u.duel.duel;
             if (!okk){ bad++; if (bad < 5) printf("  fuzz: accepted datagram breaks an invariant (type %d)\n", m.h.type); }
         } else refused++;
         /* and through a session (state machine, reassembly) */
@@ -231,6 +248,7 @@ static void t_fuzz(long iters){
         if (it % 1000 == 0) rc_tick(&s, it * 1000);
     }
     CHECK(bad == 0, "fuzz: %ld accepted datagrams break invariants", bad);
+    CHECK(s.n_duel_in == 0, "fuzz: no DUEL from a stranger reaches the game (%d)", s.n_duel_in);
     printf("  fuzz: %ld datagrams, %ld accepted, %ld refused, session rx %u bad %u policy %u\n", iters, accepted, refused, s.rx, s.rx_bad, s.rx_policy);
 }
 
@@ -924,6 +942,38 @@ static void t_bigmesh(void){
           g_big[0].snaps, g_big[4].snaps, g_big[19].snaps, g_big[0].every, g_big[4].every, g_big[19].every);
 }
 
+/* ---- 4d. outruns between players: DUEL only to a peer that takes them, only for us -- */
+static void t_duel(void){
+    mesh(3, 8);
+    g_n[0].conf.duels = 1; g_n[1].conf.duels = 1;             /* node 2: an older game */
+    for (int i = 1; i < 3; i++){ rc_add_peer(&g_n[0], node_ip(i), node_port(i), 1, g_now); rc_add_peer(&g_n[i], node_ip(0), node_port(0), 1, g_now); }
+    drive(3, g_now + 3000000);
+    int p1 = peer_of(0, 0x501), p2 = peer_of(0, 0x502);
+    CHECK(est(0) == 2 && p1 >= 0 && p2 >= 0 && g_n[0].peer[p1].duels && !g_n[0].peer[p2].duels,
+          "the HELLO's flag says who takes outrun challenges (%d %d)", p1 >= 0 && g_n[0].peer[p1].duels, p2 >= 0 && g_n[0].peer[p2].duels);
+    uint32_t bad2 = g_n[2].rx_bad;
+    CHECK(rc_send_duel(&g_n[0], 0x501, RC_DUEL_OFFER, 0, 0xD1) == 1 && rc_send_duel(&g_n[0], 0x502, RC_DUEL_OFFER, 0, 0xD2) == 0 &&
+          rc_send_duel(&g_n[0], 0x777, RC_DUEL_OFFER, 0, 0xD3) == 0, "DUEL goes to a peer that takes it, not to an older one or a stranger");
+    net_run(g_now + 20000, 3);
+    uint32_t from = 0, duel = 0; uint8_t op = 0, arg = 0;
+    CHECK(rc_take_duel(&g_n[1], &from, &op, &arg, &duel) == 1 && from == 0x500 && op == RC_DUEL_OFFER && duel == 0xD1 &&
+          !rc_take_duel(&g_n[1], &from, &op, &arg, &duel), "the challenge arrives once (from %x, op %d, id %x)", from, op, duel);
+    CHECK(g_n[2].rx_bad == bad2 && !g_n[2].n_duel_in, "the older game hears nothing it cannot read");
+    /* one for somebody else, from an established peer: not ours */
+    rc_msg m; memset(&m, 0, sizeof m); m.h.type = RC_MSG_DUEL; m.h.sender = 0x500;
+    m.u.duel.op = RC_DUEL_ACCEPT; m.u.duel.to = 0x999; m.u.duel.duel = 0xD1;
+    uint8_t b[RC_MAX_DGRAM]; int n = rc_encode(&m, b, sizeof b);
+    rc_receive(&g_n[1], node_ip(0), node_port(0), b, n, g_now);
+    CHECK(!g_n[1].n_duel_in, "a DUEL for another player is dropped");
+    /* the inbox holds RC_DUEL_INBOX, oldest first */
+    for (int k = 0; k < RC_DUEL_INBOX + 4; k++) rc_send_duel(&g_n[0], 0x501, RC_DUEL_RESULT, 1, 0x100u + (uint32_t)k);
+    net_run(g_now + 20000, 3);
+    int kept = g_n[1].n_duel_in, taken = 0; uint32_t seen = 0;
+    while (rc_take_duel(&g_n[1], &from, &op, &arg, &duel)) if (duel >= 0x100 && duel < 0x100 + RC_DUEL_INBOX + 4){ taken++; seen |= 1u << (duel - 0x100); }
+    CHECK(kept == RC_DUEL_INBOX && g_n[1].duel_dropped == 4 && taken == RC_DUEL_INBOX && __builtin_popcount(seen) == RC_DUEL_INBOX && !g_n[1].n_duel_in,
+          "inbox: %d kept, %u dropped, %d taken", kept, g_n[1].duel_dropped, taken);
+}
+
 int main(int argc, char **argv){
     long fuzz = argc > 1 ? atol(argv[1]) : 200000;
     printf("roam_unit: core %d, protocol %d\n", RC_CORE_VER, RC_PROTO_VER);
@@ -933,6 +983,7 @@ int main(int argc, char **argv){
     t_session();
     t_review();
     t_hub();
+    t_duel();
     t_snapstates();
     t_bigmesh();
     t_interp();

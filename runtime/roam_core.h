@@ -21,7 +21,7 @@
 #include <stddef.h>
 
 #define RC_PROTO_VER     1          /* header byte 4; a different value is ignored */
-#define RC_CORE_VER      2          /* HELLO: implementation revision (2: lists of up to RC_MAX_PEERS) */
+#define RC_CORE_VER      3          /* HELLO: implementation revision (2: lists of up to RC_MAX_PEERS; 3: RC_MSG_DUEL) */
 #define RC_MAGIC0        0x4E       /* "N2FR" */
 #define RC_MAGIC1        0x32
 #define RC_MAGIC2        0x46
@@ -46,10 +46,20 @@
 #define RC_CFG_TYPE_NAME 16
 #define RC_PERF_BYTES    52         /* car-look record extension 1 */
 #define RC_EXT_PERF      1
+#define RC_DUEL_INBOX    16         /* DUEL messages held for the game side */
 
 /* message types (header byte 5) */
 enum { RC_MSG_HELLO = 1, RC_MSG_PEERS = 2, RC_MSG_SNAP = 3, RC_MSG_CFG = 4, RC_MSG_CFG_REQ = 5,
-       RC_MSG_PING = 6, RC_MSG_PONG = 7, RC_MSG_BYE = 8 };
+       RC_MSG_PING = 6, RC_MSG_PONG = 7, RC_MSG_BYE = 8, RC_MSG_DUEL = 9 };
+/* DUEL ops: an outrun between two players (roam_game.c).  Only to a peer
+ * whose HELLO carries RC_HF_DUELS: an older core counts the type as bad */
+enum { RC_DUEL_OFFER = 1,           /* I challenge you (duel: a new id) */
+       RC_DUEL_ACCEPT = 2,          /* I take your challenge */
+       RC_DUEL_START = 3,           /* the challenger's outrun runs: yours starts now */
+       RC_DUEL_RESULT = 4,          /* arg 1: I won, 2: I lost */
+       RC_DUEL_CANCEL = 5,          /* arg: RC_DC_* */
+       RC_DUEL__N };
+enum { RC_DC_WITHDRAWN = 1, RC_DC_BUSY = 2, RC_DC_LEFT = 3, RC_DC__N };
 /* player status (HELLO and SNAP) */
 enum { RC_ST_MENUS = 0, RC_ST_LOADING = 1, RC_ST_ROAM = 2, RC_ST_EVENT = 3, RC_ST_SHOP = 4,
        RC_ST_PAUSED = 5, RC_ST__N };
@@ -67,6 +77,9 @@ enum { RC_PLAT_MAC = 1, RC_PLAT_WIN = 2, RC_PLAT_TOOL = 3 };
 #define RC_HF_EVERY      0x000F
 #define RC_FAR_M         300.f      /* past this a peer gets every 4th snapshot (5 a second) */
 #define RC_VERYFAR_M     1000.f     /* and past this every 10th (2 a second) */
+/* header flags (HELLO): this player takes outrun challenges (RC_MSG_DUEL);
+ * an older core sends none and ignores them */
+#define RC_HF_DUELS      0x0010
 /* decoder results */
 enum { RC_OK = 0, RC_E_SHORT = -1, RC_E_MAGIC = -2, RC_E_VERSION = -3, RC_E_LENGTH = -4,
        RC_E_CRC = -5, RC_E_TYPE = -6, RC_E_FIELD = -7, RC_E_TRAIL = -8, RC_E_RANGE = -9 };
@@ -127,6 +140,7 @@ typedef struct {
         struct { uint16_t cfg_rev; uint8_t have_mask; } cfgreq;
         struct { uint32_t t0, t1, t2; } ping;          /* PING: t0 only */
         struct { uint8_t reason; } bye;
+        struct { uint8_t op, arg; uint32_t to, duel; } duel;      /* to: the player it is for */
     } u;
 } rc_msg;
 
@@ -249,6 +263,7 @@ typedef struct {
      * gossip as without one. */
     uint32_t hub_ip;
     uint16_t hub_port;
+    int      duels;                /* we take outrun challenges (HELLO says so: RC_HF_DUELS) */
 } rc_config;
 
 enum { RC_PS_FREE = 0, RC_PS_CANDIDATE = 1, RC_PS_HEARD = 2, RC_PS_EST = 3 };
@@ -264,6 +279,7 @@ typedef struct {
     char     name[RC_NAME_MAX + 1];
     uint8_t  platform, status;
     uint16_t core_ver;             /* its HELLO's (0 until one came): below 2 it reads lists of RC_PEERS_V1 at most */
+    uint8_t  duels;                /* its HELLO says it takes outrun challenges (RC_HF_DUELS) */
     uint16_t cfg_rev_seen;         /* what the peer announces */
     int      hears_us, lost;
     int      hears_miss;           /* with the hub: one HELLO without our id forgiven (hub mode only) */
@@ -311,6 +327,11 @@ typedef struct {
     int64_t   hub_since, hub_heard_us, hub_hello_tx, hub_snap_tx;  int hub_was;
     uint32_t  hub_lists;           /* PEERS lists from the hub */
     uint32_t  rx_unlisted;         /* HELLOs of players the hub does not list for us: ignored */
+    /* DUEL messages for us from established peers, oldest first, until the
+     * game side takes them (rc_take_duel) */
+    struct { uint32_t from; uint8_t op, arg; uint32_t duel; } duel_in[RC_DUEL_INBOX];
+    int       n_duel_in;
+    uint32_t  duel_dropped;        /* the inbox was full */
 } rc_session;
 
 void rc_session_init(rc_session *s, const rc_config *cfg, const rc_io *io);
@@ -329,6 +350,11 @@ void rc_bump_epoch(rc_session *s);       /* teleport: receivers snap */
 void rc_bump_clock(rc_session *s);       /* stamps re-anchored: receivers re-sync, blended */
 void rc_shutdown(rc_session *s, uint8_t reason);   /* BYE x3 to every peer, then the session is silent */
 int  rc_established(const rc_session *s);
+/* a DUEL message to the established peer with id `to`, if its HELLO said it
+ * takes them; 1 when sent */
+int  rc_send_duel(rc_session *s, uint32_t to, uint8_t op, uint8_t arg, uint32_t duel);
+/* the oldest DUEL message for us not taken yet; 1 when there was one */
+int  rc_take_duel(rc_session *s, uint32_t *from, uint8_t *op, uint8_t *arg, uint32_t *duel);
 const char *rc_status_name(int st);
 
 #endif

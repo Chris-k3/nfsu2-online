@@ -266,6 +266,10 @@ int rc_encode(const rc_msg *m, uint8_t *out, int cap){
     case RC_MSG_PING: rc_put32(&w, m->u.ping.t0); break;
     case RC_MSG_PONG: rc_put32(&w, m->u.ping.t0); rc_put32(&w, m->u.ping.t1); rc_put32(&w, m->u.ping.t2); break;
     case RC_MSG_BYE: rc_put8(&w, m->u.bye.reason); break;
+    case RC_MSG_DUEL:
+        if (m->u.duel.op < 1 || m->u.duel.op >= RC_DUEL__N || !m->u.duel.to || !m->u.duel.duel) return -1;
+        rc_put8(&w, m->u.duel.op); rc_put8(&w, m->u.duel.arg); rc_put32(&w, m->u.duel.to); rc_put32(&w, m->u.duel.duel);
+        break;
     default: return -1;
     }
     if (w.err || w.n + RC_CRC > w.cap) return -1;
@@ -345,6 +349,12 @@ int rc_decode(const uint8_t *buf, int len, rc_msg *m){
     case RC_MSG_PING: m->u.ping.t0 = rc_get32(&r); break;
     case RC_MSG_PONG: m->u.ping.t0 = rc_get32(&r); m->u.ping.t1 = rc_get32(&r); m->u.ping.t2 = rc_get32(&r); break;
     case RC_MSG_BYE: m->u.bye.reason = (uint8_t)rc_get8(&r); break;
+    case RC_MSG_DUEL:
+        m->u.duel.op = (uint8_t)rc_get8(&r); m->u.duel.arg = (uint8_t)rc_get8(&r);
+        m->u.duel.to = rc_get32(&r); m->u.duel.duel = rc_get32(&r);
+        if (r.err) return RC_E_SHORT;
+        if (m->u.duel.op < 1 || m->u.duel.op >= RC_DUEL__N || !m->u.duel.to || !m->u.duel.duel) return RC_E_FIELD;
+        break;
     default: return RC_E_TYPE;
     }
     if (r.err) return RC_E_SHORT;
@@ -635,6 +645,25 @@ static int hub_mode(const rc_session *s, int64_t now){
     if (!s->hub_since) return 1;
     return now - (s->hub_heard_us ? s->hub_heard_us : s->hub_since) < T_HUB_SILENT;
 }
+int rc_send_duel(rc_session *s, uint32_t to, uint8_t op, uint8_t arg, uint32_t duel){
+    for (int i = 0; i < RC_TABLE; i++){
+        rc_peer *p = &s->peer[i];
+        if (p->state != RC_PS_EST || p->id != to || !p->duels) continue;
+        rc_msg m; hdr(s, &m, RC_MSG_DUEL);
+        m.u.duel.op = op; m.u.duel.arg = arg; m.u.duel.to = to; m.u.duel.duel = duel;
+        uint32_t before = s->tx;
+        tx(s, p, &m);
+        return s->tx != before;
+    }
+    return 0;
+}
+int rc_take_duel(rc_session *s, uint32_t *from, uint8_t *op, uint8_t *arg, uint32_t *duel){
+    if (!s->n_duel_in) return 0;
+    *from = s->duel_in[0].from; *op = s->duel_in[0].op; *arg = s->duel_in[0].arg; *duel = s->duel_in[0].duel;
+    for (int k = 1; k < s->n_duel_in; k++) s->duel_in[k - 1] = s->duel_in[k];
+    s->n_duel_in--;
+    return 1;
+}
 int rc_established(const rc_session *s){ int n = 0; for (int i = 0; i < RC_TABLE; i++) if (s->peer[i].state == RC_PS_EST) n++; return n; }
 /* an established peer counts for the group (max_players) unless the hub
  * decides and its last list left it out: it goes within T_HUB_GRACE, and a
@@ -700,6 +729,7 @@ int rc_add_peer(rc_session *s, uint32_t ip, uint16_t port, int configured, int64
 /* `to`: the peer it goes to (none for the beacon and the hub) */
 static void fill_hello(rc_session *s, rc_msg *m, const rc_peer *to){
     hdr(s, m, RC_MSG_HELLO);
+    if (s->conf.duels) m->h.flags = RC_HF_DUELS;
     m->u.hello.core_ver = RC_CORE_VER; m->u.hello.platform = s->conf.platform; m->u.hello.status = s->status;
     m->u.hello.listen_port = s->conf.port; m->u.hello.cfg_rev = s->cfg_rev; m->u.hello.room = s->conf.room;
     memcpy(m->u.hello.name, s->conf.name, sizeof m->u.hello.name);
@@ -864,7 +894,7 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
         int first = !p->name[0];
         memcpy(p->name, m.u.hello.name, sizeof p->name);
         p->platform = m.u.hello.platform; p->status = m.u.hello.status; p->cfg_rev_seen = m.u.hello.cfg_rev;
-        p->core_ver = m.u.hello.core_ver;
+        p->core_ver = m.u.hello.core_ver; p->duels = (m.h.flags & RC_HF_DUELS) != 0;
         p->hears_us = 0;
         for (int k = 0; k < m.u.hello.n_seen; k++) if (m.u.hello.seen[k] == s->conf.self_id) p->hears_us = 1;
         if (p->hears_us) p->hears_miss = 0;
@@ -953,6 +983,13 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
         break; }
     case RC_MSG_PONG:
         p->rtt_us = (int32_t)((uint32_t)now - m.u.ping.t0 - (m.u.ping.t2 - m.u.ping.t1));
+        break;
+    case RC_MSG_DUEL:
+        if (p->state != RC_PS_EST || m.u.duel.to != s->conf.self_id) return;
+        if (s->n_duel_in == RC_DUEL_INBOX){ s->duel_dropped++; return; }
+        s->duel_in[s->n_duel_in].from = m.h.sender; s->duel_in[s->n_duel_in].op = m.u.duel.op;
+        s->duel_in[s->n_duel_in].arg = m.u.duel.arg; s->duel_in[s->n_duel_in].duel = m.u.duel.duel;
+        s->n_duel_in++;
         break;
     case RC_MSG_BYE: {
         int k = 0;

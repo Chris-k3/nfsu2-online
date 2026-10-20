@@ -60,7 +60,7 @@ need the server; your saves are in the browser either way.
 | H | Horn (free roam and races with other players) |
 | M, Tab | Map, messages |
 | Esc or P | Pause; Esc also goes back in menus |
-| Enter | Choose (menus) |
+| Enter | Choose (menus); in free roam, start an event at its marker or take an outrun |
 | F12 | The game's screenshot, kept with your saves |
 | **F8** | Frame-rate counter: off, on, detailed |
 | **F9** | The page menu: when the game last saved, full screen, counter, controls, log, **Quit game** |
@@ -166,6 +166,14 @@ Good to know:
   they are, from the side your car is on, and lower in pitch as you drive away from them. Each player's horn has its
   own pitch, so you can tell who honks. It sounds while the game runs, not in the pause menu or on the map. It works
   in Online and LAN races too.
+- **Outruns:** stay within about 30 m of another player for 3 seconds and the game offers an outrun, as it does with
+  its own tuners: the outrun icon lights up and the top of the screen says "Press Enter to challenge ... to an
+  outrun" (on a controller, D-pad up, the game's Engage). The other player sees "... challenges you to an outrun" and
+  takes it with Enter as well, or lets it go: a challenge lapses after 15 seconds, or when you are more than 60 m
+  apart. Then both games run the game's own outrun against each other's car: its "Feet" meter, and whoever gets
+  1,000 feet (300 m) ahead of the other wins, and the bank pays or charges as in an outrun against a tuner. Leaving it
+  (back to the menus, quitting, losing the connection) loses it. The other players' cars stay, and they see the two
+  drive. Players on the Windows plugin are not offered outruns.
 - **Rooms:** set the same "Room" to see only some of the players' cars. A room is a filter between players, not
   privacy: every browser on the server still sees your name ("Your name", or the profile name), whether you are in
   the menus or driving, and the room, and someone with their own tools could join it. Play on a server only with

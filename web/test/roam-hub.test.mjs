@@ -89,8 +89,8 @@ test('the wire: what roam_core sends the hub reads, and its PEERS lists decode i
   const run = (...a) => execFileSync(process.execPath, [path.join(REPO, 'web/test/wasi-run.mjs'), w, ...a], { encoding: 'utf8' }).trim();
   const h = Buffer.from(run('hello'), 'hex'), s = Buffer.from(run('snap'), 'hex'), b = Buffer.from(run('bye'), 'hex');
   const mh = decodeRoam(h), ms = decodeRoam(s), mb = decodeRoam(b);
-  assert.deepEqual(mh, { type: 1, sender: 0x1234ABCD, core: 2, status: 2, room: fnv1a('blue'), name: 'Ann K.' });
-  assert.ok(hello(0x1234ABCD, { room: fnv1a('blue'), name: 'Ann K.', seen: [0x11, 0x22], core: 2 }).equals(h), 'this test\'s HELLO = the C core\'s, byte for byte');
+  assert.deepEqual(mh, { type: 1, sender: 0x1234ABCD, core: 3, status: 2, room: fnv1a('blue'), name: 'Ann K.' });
+  assert.ok(hello(0x1234ABCD, { room: fnv1a('blue'), name: 'Ann K.', seen: [0x11, 0x22], core: 3 }).equals(h), 'this test\'s HELLO = the C core\'s, byte for byte');
   assert.equal(ms.type, 3); assert.equal(ms.sender, 0x1234ABCD); assert.equal(ms.status, 2);
   assert.deepEqual(ms.p, [1695.25, -883.5, 24.125], 'the newest state\'s position');
   assert.deepEqual(mb, { type: 8, sender: 0x1234ABCD });

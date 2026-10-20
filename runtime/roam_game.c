@@ -38,6 +38,8 @@
  *    (roam_game_hud).
  *  - horns: the player's goes out with the snapshots, friends' sound from
  *    their cars (horns_update, horn.c).
+ *  - outruns: two players who stay near each other can challenge each other
+ *    to the game's own outrun, raced against each other's car (du_frame).
  *  - leaving free roam (shop, crib, race, menus) parks the cars; their
  *    rides are unloaded once the world is gone.  A peer that leaves, times
  *    out or goes into a shop or race disappears (soft-parked), and its slot
@@ -132,9 +134,12 @@ static uint32_t gcall0(CPU *c, uint32_t fn, uint32_t ecx){ return rh_call(c, fn,
 static uint32_t gcall1(CPU *c, uint32_t fn, uint32_t ecx, uint32_t a){ return rh_call(c, fn, ecx, 0, 1, &a); }
 static uint32_t player_car(void){ uint32_t p = rd32(G_PLAYER1); return p ? rd32(p + 4u) : 0; }
 static uint32_t world(void){ uint32_t w = rd32(G_WORLD); return ok(w, 0x80) ? w : 0; }
+static int du_racing(uint32_t race);
+/* free roam: the career's world with no race but free roam's own one-racer
+ * one, or an outrun with a friend (du_racing): that is still free roam */
 static int roaming(void){
     uint32_t race = rd32(G_RACE);
-    return rd32(G_FLOW) == 6u && ok(race, 0xc44) && MR32(race) == 4u && MR32(race + 0x24u) == 1u &&
+    return rd32(G_FLOW) == 6u && ok(race, 0xc44) && MR32(race) == 4u && (MR32(race + 0x24u) == 1u || du_racing(race)) &&
            !rd32(G_CAREER_RACE) && !(rd32(G_GAMEMODE) & 0x200u) && world() && player_car();
 }
 static uint32_t encounter_mgr(void){ uint32_t r = rd32(G_RACE); return ok(r, 0xc44) ? r + RC_ENCOUNTERS : 0; }
@@ -258,6 +263,7 @@ typedef struct {
     int      hidden;
     int      paused;                          /* the friend is paused (for a second now): so says the name over the car */
     int64_t  paused_since;
+    int64_t  near_since;                      /* within DU_NEAR_M of the player's car since (0: not), for an outrun */
     int      ghost;                           /* solid cars: no collision body until clear of the player's car */
     float    drawn[3];                        /* where the car was drawn last frame (+0x60) */
     float    com[3];                          /* centre-of-mass offset in the car's frame (forward, left, up) */
@@ -1082,6 +1088,7 @@ static void apply_pose(CPU *c, Slot *s, const rc_pose *P, float dt){
 #define FN_FE_HASH      0x00505450u   /* cdecl (name) -> hash (upper case) */
 #define FN_FE_FIND      0x00537a10u   /* cdecl (package name, hash) -> FE object */
 #define FN_FE_PRINTF    0x00537be0u   /* cdecl (object, format, ...) */
+#define FN_FE_SETSTR    0x00535fe0u   /* thiscall object (char*): its text, the string grown to fit */
 #define FN_FE_COLOR     0x00517e20u   /* thiscall object (int rgba[4]*, 0) */
 #define FN_FE_POS       0x00517c10u   /* thiscall object (float xyz*, 0): HUD units from the centre */
 #define FN_FE_SCALE     0x00517db0u   /* thiscall object (float xyz*, 0) */
@@ -1092,7 +1099,9 @@ static void apply_pose(CPU *c, Slot *s, const rc_pose *P, float dt){
 #define TAG_TEXT_MAX    (RC_NAME_MAX + 10)  /* "<name> (paused)" */
 #define TAG_GAME        6             /* the HUD's ONLINE_PLAYER_1..6 */
 #define TAG_N           NSLOT
-static struct { uint32_t hud, obj[TAG_N]; uint8_t looked[TAG_N], shown[TAG_N]; char text[TAG_N][TAG_TEXT_MAX]; } g_tag;
+#define TAG_DUEL        TAG_N         /* one more: the outrun's line of text (du_hud) */
+#define TAG_DUEL_MAX    80
+static struct { uint32_t hud, obj[TAG_N + 1]; uint8_t looked[TAG_N + 1], shown[TAG_N + 1]; char text[TAG_N + 1][TAG_DUEL_MAX]; } g_tag;
 static void gstr(uint32_t a, const char *s, uint32_t cap){
     uint32_t i = 0;
     for (; s[i] && i + 1 < cap; i++) MR8(a + i) = (uint8_t)s[i];
@@ -1145,9 +1154,10 @@ static uint32_t tag_obj(CPU *c, int k, uint32_t pkg){
     g_tag.looked[k] = 1;
     if (k >= TAG_GAME){
         uint32_t o1 = tag_obj(c, 0, pkg);
-        char nm[24]; snprintf(nm, sizeof nm, "ROAM_PLAYER_%d", k + 1);      /* past the HUD's six: copies of the first */
+        char nm[24]; snprintf(nm, sizeof nm, k == TAG_DUEL ? "ROAM_OUTRUN" : "ROAM_PLAYER_%d", k + 1);   /* past the HUD's six: copies of the first */
         g_tag.obj[k] = o1 ? fe_clone(c, pkg, o1, nm) : 0;
-        if (!g_tag.obj[k]) rlog("[roam] f=%ld no copy of ONLINE_PLAYER_1 for name %d: one name fewer over friends' cars\n", rh_frame(), k + 1);
+        if (!g_tag.obj[k] && k == TAG_DUEL) rlog("[roam] f=%ld no copy of ONLINE_PLAYER_1 for the outrun's line of text\n", rh_frame());
+        else if (!g_tag.obj[k]) rlog("[roam] f=%ld no copy of ONLINE_PLAYER_1 for name %d: one name fewer over friends' cars\n", rh_frame(), k + 1);
         return g_tag.obj[k];
     }
     char nm[24]; snprintf(nm, sizeof nm, "ONLINE_PLAYER_%d", k + 1);
@@ -1167,7 +1177,14 @@ static void tag_text(CPU *c, int k, uint32_t obj, const char *name){
     uint32_t ac[2] = { col, 0 }; rh_call(c, FN_FE_COLOR, obj, 0, 2, ac);
     MR32(obj + 0x6cu) = (MR32(obj + 0x6cu) & ~0xfu) | 5u;                     /* centred */
     MR32(obj + 0x1cu) |= 0x100u;
-    gstr(fmt, "%s", 4); gstr(txt, name, TAG_TEXT_MAX);
+    gstr(fmt, "%s", 4); gstr(txt, name, TAG_DUEL_MAX);
+    if (k == TAG_DUEL){
+        /* FEPrintf keeps a text within the object's string as it is (20 for
+         * ONLINE_PLAYER_1's); the string's own setter, which it calls, grows it */
+        gcall1(c, FN_FE_SETSTR, obj, txt);
+        MR32(obj + 0x1cu) |= 2u;
+        return;
+    }
     uint32_t ap[3] = { obj, fmt, txt }; rh_call(c, FN_FE_PRINTF, 0, 0, 3, ap);
 }
 static void tags_update(CPU *c){
@@ -1295,6 +1312,7 @@ static void arrows_update(CPU *c, uint32_t w){
 
 /* ---- per-frame --------------------------------------------------------------------------------- */
 typedef struct { int idx; uint32_t id; char name[RC_NAME_MAX + 1]; int visible, paused; float dist; uint32_t cfg_gen;
+                 int duels;            /* takes outrun challenges (its HELLO) */
                  int has_cfg;          /* a complete car record is held */
                  int cfg_len;          /* > 0: the record is copied here (a slot needs it) */
                  uint8_t cfg[RC_CFG_MAX]; int have_pose; rc_pose pose; float err; uint32_t look; } PeerView;
@@ -1355,6 +1373,413 @@ static int64_t render_delay(int i, const rc_peer *p, int64_t frame_dt){
     return g_rd[i].d;
 }
 
+/* ---- outruns between players --------------------------------------------------------------------- */
+/* Two players who stay near each other in free roam (within DU_NEAR_M for
+ * DU_NEAR_US) get the game's own outrun challenge: the HUD's outrun icon
+ * (0x4DB890: the "!" and two cars, the D-pad's Up lit) and a line of text
+ * naming the friend (du_hud).  Engage (Enter, or the pad's D-pad Up: the
+ * game's action 0xF, however the player set it) challenges; the friend gets
+ * the icon and "<name> challenges you" and takes it with Engage, or lets it
+ * go.  Then both games run the game's own outrun -- the "1,000 Feet" meter,
+ * the result message, the bank reward or loss -- each against the other's
+ * car as shown there:
+ *  - started as Engage starts one (0x602E09), from the main-loop hook, with
+ *    the World's AI range narrowed to the friend's car for the call, so the
+ *    race (0x607180) has the two cars as its racers whichever slot the car
+ *    has (one past World::IndexCars' 22 too);
+ *  - the game decides it as its own: the racer ranked first wins once the
+ *    other is 300 m behind it (1,000 feet with imperial units; 0x607C9C,
+ *    the distances from 0x5FC510).  It ranks the opponent first at the
+ *    start ("Catch Them!"), and only the leader's AI road path puts the
+ *    player past it; a friend's car has none.  So each frame the one
+ *    getting away is ranked first (du_rank): the one moving away from the
+ *    other the faster, from where both cars are drawn frame to frame (the
+ *    friend's velocity as sent is too rough), over DU_AWAY_US.  Only
+ *    someone driving away takes the two 300 m apart, so a car standing
+ *    still never wins, however the road bends (where the cars head would
+ *    not do: on a loop the one getting away heads back).  Each game works
+ *    it out from its own screen, and the two agree;
+ *  - each game tells the other its result; one that has none yet takes it
+ *    (race +0xBEC/+0xBF0, as the game's result message 0x4A7B30 does), so
+ *    a few metres of network delay never make two winners;
+ *  - a player who leaves (back to the menus, quits, loses the connection)
+ *    loses: the other wins.
+ * While it runs both still count as in free roam: friends' cars stay, and
+ * friends still see the two.  Messages: RC_MSG_DUEL (roam_core.h), each
+ * repeated until answered (a datagram lost on a LAN).  Not in the Windows
+ * plugin (DUELS): its players are not offered one. */
+#ifdef ROAM_HOST_WIN
+#define DUELS           0
+#else
+#define DUELS           1
+#endif
+#define G_ACTIONS       0x0086eaf0u   /* the joystick actions held this frame, a bit per action, 0 = held (0x5CFD60) */
+#define ACT_ENGAGE      15u           /* Engage */
+#define G_RACETYPE      0x0089e7b0u   /* 0 free roam, 7 an outrun */
+#define G_OUTRUN_STATE  (G_ENCOUNTERS + 0x1ae8u)  /* 2: an outrun can be taken (0x500D20) */
+#define G_ENGAGE        0x00838590u
+#define PL_OPPONENT     0x250u        /* Player: the car an outrun is against */
+#define PL_MARKER       0x9acu        /* Player: the event or shop marker Engage would enter */
+#define RACE_RESULT     0xbecu        /* race: the result message's position (+0xBF0 its player number) */
+#define FN_HUD_OUTRUN   0x004db890u   /* thiscall HUD (car or 0): the outrun icon on or off */
+#define FN_OUTRUN_START 0x00607180u   /* thiscall race: an outrun against player +0x250, the AI range its racers */
+#define FN_ENGAGE_DONE  0x005010e0u   /* thiscall G_ENGAGE: what Engage does after starting one */
+#define DU_NEAR_M       30.f          /* the game's own reach for a challenge (0x40C030) */
+#define DU_NEAR_US      3000000
+#define DU_PROMPT_M     40.f          /* the offer stays while the two are this near */
+#define DU_KEEP_M       60.f          /* a challenge stands while the two are this near */
+#define DU_RANK_MPS     2.f           /* the order changes when the other gets away this much faster (m/s) */
+#define DU_AWAY_US      1000000
+#define DU_OFFER_US     15000000      /* a challenge nobody takes goes */
+#define DU_GONE_US      2000000       /* a friend whose car is not shown for this long has left the outrun */
+#define DU_NOTE_US      4000000
+enum { DU_IDLE, DU_SENT, DU_GOT, DU_ACCEPTED, DU_RACE, DU_OVER };
+static const char *const du_st[] = { "idle", "challenge sent", "challenged", "accepted", "racing", "over" };
+static struct {
+    int      st;
+    uint32_t id, duel;                        /* the friend; the outrun's id (the challenger's) */
+    char     name[RC_NAME_MAX + 1];
+    int      mine;                            /* we challenged */
+    int64_t  since, tx_at, heard;             /* this state's start, our last message, the friend's last */
+    uint8_t  op, arg;                         /* what we say until answered */
+    uint32_t car;                             /* the friend's car: the outrun's opponent */
+    int      won;                             /* our game's result: 1 won, 2 lost, 0 none (yet) */
+    int      their;                           /* the friend's game's, for us: 1 we won, 2 we lost */
+    int      posted, nres;                    /* we gave the game a result; results still to send */
+    int64_t  gone_at;
+    float    gap, away;                       /* metres between the cars; how much faster we get away (m/s, smoothed) */
+    float    was[4]; int64_t away_at;         /* where the two cars were (ours x y, the friend's x y), and when */
+    uint32_t ranks;                           /* order changes */
+    uint32_t icon, hud;                       /* the car the HUD's outrun icon is on (0 off), in this HUD */
+    int      engage;                          /* Engage held last frame */
+    char     note[TAG_DUEL_MAX]; int64_t note_until;
+    uint32_t offers, races, wins, losses;     /* statistics */
+} g_du;
+static int du_racing(uint32_t race){
+    return (g_du.st == DU_RACE || g_du.st == DU_OVER) && g_du.car && MR32(G_RACETYPE) == 7u && MR32(race + 0x24u) >= 2u;
+}
+/* the outrun's friend keeps the slot (assign) */
+static int du_keeps(int k){ return g_du.st != DU_IDLE && g_sl[k].peer_id == g_du.id; }
+static void du_note(int64_t host, const char *fmt, const char *name){
+    snprintf(g_du.note, sizeof g_du.note, fmt, name);
+    g_du.note_until = host + DU_NOTE_US;
+    rlog("[roam] f=%ld outrun: %s\n", rh_frame(), g_du.note);
+}
+static void du_send(int64_t host, uint8_t op, uint8_t arg){
+    roam_plat_lock(); rc_send_duel(&g_s, g_du.id, op, arg, g_du.duel); roam_plat_unlock();
+    g_du.op = op; g_du.arg = arg; g_du.tx_at = host;
+}
+static void du_to(int st, int64_t host){
+    if (st != g_du.st) rlog("[roam] f=%ld outrun with %s: %s -> %s\n", rh_frame(), g_du.name[0] ? g_du.name : "?", du_st[g_du.st], du_st[st]);
+    g_du.st = st; g_du.since = host;
+    if (st == DU_IDLE){ g_du.id = 0; g_du.duel = 0; g_du.car = 0; g_du.won = g_du.their = 0; g_du.posted = 0; g_du.nres = 0; g_du.op = 0; }
+}
+/* the friend's slot with a car shown, or -1 */
+static int du_slot(uint32_t id){
+    for (int k = 0; k < NSLOT; k++)
+        if (g_sl[k].st == SL_ACTIVE && g_sl[k].peer_id == id && !g_sl[k].hidden && ok(g_sl[k].car, 0x9e0)) return k;
+    return -1;
+}
+static const PeerView *du_pv(uint32_t id){ for (int i = 0; i < g_npv; i++) if (g_pv[i].id == id) return &g_pv[i]; return 0; }
+/* the friend can race now: shown, in free roam and not paused, takes challenges */
+static int du_able(int k){
+    const PeerView *v = k >= 0 ? du_pv(g_sl[k].peer_id) : 0;
+    return v && v->visible && !v->paused && v->duels && !g_sl[k].paused;
+}
+static float du_dist(uint32_t car){
+    uint32_t me = player_car();
+    float dx = MRF32(car + 0x60u) - MRF32(me + 0x60u), dy = MRF32(car + 0x64u) - MRF32(me + 0x64u);
+    return rc_sqrtf(dx * dx + dy * dy);
+}
+static void du_icon(CPU *c, uint32_t car){
+    uint32_t pl = world() ? rd32(G_PLAYER1) : 0, hud = pl ? rd32(pl + PL_HUD) : 0;
+    if (hud != g_du.hud){ g_du.hud = hud; g_du.icon = 0; }                 /* a new HUD: nothing on it yet */
+    if (!hud || g_du.icon == car) return;
+    gcall1(c, FN_HUD_OUTRUN, hud, car);
+    g_du.icon = car;
+}
+/* our game can race now: free roam, the world running, no race, no marker
+ * Engage would enter */
+static int du_free(int in_roam, int world_runs){
+    uint32_t race = rd32(G_RACE), pl = rd32(G_PLAYER1);
+    return in_roam && world_runs && pl && ok(race, 0xc44) && MR32(race + 0x24u) == 1u && !MR32(G_RACETYPE) && !rd32(pl + PL_MARKER);
+}
+/* the game's outrun against the friend's car, as Engage starts one */
+static int du_start(CPU *c, int64_t host){
+    int k = du_slot(g_du.id);
+    uint32_t w = world(), race = rd32(G_RACE), pl = rd32(G_PLAYER1);
+    if (k < 0 || !w || !pl || !ok(race, 0xc44) || MR32(race + 0x24u) != 1u || MR32(G_RACETYPE)) return 0;
+    uint32_t first = MR32(w + 0x14u), end = MR32(w + 0x18u);
+    if (first >= WORLD_INDEX) return 0;
+    uint32_t car = g_sl[k].car, keep = MR32(w + 0x1cu + 4u * first);
+    du_icon(c, 0);
+    MR32(w + 0x1cu + 4u * first) = car; MR32(w + 0x18u) = first + 1u;     /* the AI range: the friend's car alone */
+    MR32(pl + PL_OPPONENT) = car; MR32(G_OUTRUN_STATE) = 2u;
+    gcall0(c, FN_OUTRUN_START, race);
+    gcall0(c, FN_ENGAGE_DONE, G_ENGAGE);
+    MR32(w + 0x1cu + 4u * first) = keep; MR32(w + 0x18u) = end;
+    g_du.car = car; g_du.won = g_du.their = 0; g_du.posted = 0; g_du.nres = 0; g_du.gone_at = 0; g_du.ranks = 0; g_du.away = 0; g_du.away_at = 0;
+    if (MR32(G_RACETYPE) != 7u || MR32(race + 0x24u) != 2u){
+        rlog("[roam] f=%ld outrun with %s: the game did not start it (race type %u, %u racers)\n", rh_frame(), g_du.name,
+                MR32(G_RACETYPE), MR32(race + 0x24u));
+        MR32(pl + PL_OPPONENT) = 0; g_du.car = 0;
+        return 0;
+    }
+    g_du.races++;
+    rlog("[roam] f=%ld outrun with %s: on, against car 0x%08x, %.0f m apart\n", rh_frame(), g_du.name, car, (double)du_dist(car));
+    return 1;
+}
+/* a result into the game, as its result message does (0x4A7B30): the
+ * player's position, 1 won or 2 lost; the race finishes on its next update */
+static void du_post(int won, const char *why){
+    uint32_t race = rd32(G_RACE), me = player_car(), owner = me ? rd32(me + 0x18u) : 0;
+    if (g_du.posted || !ok(race, 0xc44) || !du_racing(race)) return;
+    MR32(race + RACE_RESULT + 4u) = owner ? rd32(owner + 0x10u) : 0;
+    MR32(race + RACE_RESULT) = won ? 1u : 2u;
+    g_du.posted = 1;
+    rlog("[roam] f=%ld outrun with %s: %s for us (%s), %.0f m apart\n", rh_frame(), g_du.name, won ? "a win" : "a loss", why, (double)g_du.gap);
+}
+/* our game's outrun is over: the player's racer says how (FinishRacer's
+ * completion, 6 won, 7 lost; it stays a few seconds after the race), or it
+ * ended without one */
+static int du_outcome(uint32_t race){
+    uint32_t me = player_car();
+    for (uint32_t i = 0; me && i < 6; i++){
+        uint32_t r = race + 0x30u + 0x1f0u * i;
+        if (rd32(r) != me) continue;
+        uint32_t ct = MR16(r + 0x10u);
+        return ct == 6u ? 1 : ct == 7u ? 2 : 0;
+    }
+    return 0;
+}
+/* the race's order: the one ahead first (position 1), as the game's own
+ * outrun has it once the player gets past the AI */
+static void du_rank(uint32_t race, int me_first){
+    uint32_t a = rd32(race + 0xbd0u), b = rd32(race + 0xbd4u);
+    if (MR32(race + 0x24u) != 2u || !ok(a, 0x1f0) || !ok(b, 0x1f0) || (rd32(a) == player_car()) == me_first) return;
+    MR32(race + 0xbd0u) = b; MR32(race + 0xbd4u) = a;
+    MR8(b + 0xau) = 1; MR8(a + 0xau) = 2;
+    g_du.ranks++;
+}
+/* the outrun is over in the game (its result shown) or never was: what it
+ * leaves behind goes, and the career's outrun bookkeeping starts again */
+static void du_clear(CPU *c){
+    uint32_t race = rd32(G_RACE), pl = rd32(G_PLAYER1);
+    if (ok(race, 0xc44) && !MR32(G_RACETYPE)){ MR32(race + RACE_RESULT) = 0; MR32(race + RACE_RESULT + 4u) = 0; }
+    if (pl && rd32(pl + PL_OPPONENT) == g_du.car) MR32(pl + PL_OPPONENT) = 0;
+    gcall0(c, FN_EM_OVER, G_ENCOUNTERS);
+}
+/* one DUEL message from the friend `from` */
+static void du_recv(CPU *c, int64_t host, uint32_t from, uint8_t op, uint8_t arg, uint32_t duel, int in_roam, int world_runs){
+    uint32_t self = g_s.conf.self_id;
+    int ours = g_du.st != DU_IDLE && from == g_du.id && duel == g_du.duel;
+    if (ours) g_du.heard = host;
+    switch (op){
+    case RC_DUEL_OFFER: {
+        if (ours) return;                                              /* repeated */
+        int k = du_slot(from);
+        if (g_du.st == DU_SENT && from == g_du.id){
+            /* we challenged each other: the lower id's challenge it is */
+            g_du.heard = host;
+            if (self < from){ rlog("[roam] f=%ld outrun with %s: challenged each other, ours stands\n", rh_frame(), g_du.name);
+                              goto accepted; }
+            rlog("[roam] f=%ld outrun with %s: challenged each other, theirs stands\n", rh_frame(), g_du.name);
+            g_du.duel = duel; g_du.mine = 0;
+            du_send(host, RC_DUEL_ACCEPT, 0); du_to(DU_ACCEPTED, host);
+            return;
+        }
+        if (g_du.st != DU_IDLE || k < 0 || !du_able(k) || !du_free(in_roam, world_runs) || du_dist(g_sl[k].car) > DU_KEEP_M){
+            roam_plat_lock(); rc_send_duel(&g_s, from, RC_DUEL_CANCEL, RC_DC_BUSY, duel); roam_plat_unlock();
+            return;
+        }
+        g_du.id = from; g_du.duel = duel; g_du.mine = 0; g_du.heard = host; g_du.op = 0;
+        snprintf(g_du.name, sizeof g_du.name, "%s", g_sl[k].name);
+        du_to(DU_GOT, host);
+        return; }
+    case RC_DUEL_ACCEPT:
+        if (!ours) return;
+        if (g_du.st == DU_RACE && g_du.mine){ du_send(host, RC_DUEL_START, 0); return; }   /* our START was lost */
+        if (g_du.st != DU_SENT) return;
+    accepted:
+        if (!du_start(c, host)){
+            du_send(host, RC_DUEL_CANCEL, RC_DC_BUSY); du_note(host, "The outrun with %s could not start", g_du.name); du_to(DU_IDLE, host);
+            return;
+        }
+        du_send(host, RC_DUEL_START, 0); du_to(DU_RACE, host);
+        return;
+    case RC_DUEL_START:
+        if (!ours || g_du.st != DU_ACCEPTED) return;
+        if (!du_start(c, host)){
+            du_send(host, RC_DUEL_CANCEL, RC_DC_LEFT); du_note(host, "The outrun with %s could not start", g_du.name); du_to(DU_IDLE, host);
+            return;
+        }
+        g_du.op = 0;
+        du_to(DU_RACE, host);
+        return;
+    case RC_DUEL_RESULT:                                               /* the friend won (1) or lost (2) */
+        if (ours && (g_du.st == DU_RACE || g_du.st == DU_OVER) && (arg == 1 || arg == 2)) g_du.their = arg == 1 ? 2 : 1;
+        return;
+    case RC_DUEL_CANCEL:
+        if (!ours) return;
+        if (g_du.st == DU_RACE){ g_du.their = 1; du_note(host, "%s left the outrun", g_du.name); du_post(1, "the friend left"); return; }
+        if (g_du.st == DU_OVER) return;
+        if (g_du.st == DU_SENT) du_note(host, arg == RC_DC_BUSY ? "%s cannot race now" : "%s did not take the outrun", g_du.name);
+        else if (g_du.st == DU_GOT) du_note(host, "%s called off the outrun", g_du.name);
+        else du_note(host, "The outrun with %s is off", g_du.name);
+        du_to(DU_IDLE, host);
+        return;
+    }
+}
+/* per frame, after the slots (the friends' cars are where they are drawn) */
+static void du_frame(CPU *c, int64_t host, int in_roam, int world_runs, const uint32_t *in, int nin){
+    if (!DUELS) return;
+    for (int i = 0; i < nin; i++) du_recv(c, host, in[4 * i], (uint8_t)in[4 * i + 1], (uint8_t)in[4 * i + 2], in[4 * i + 3], in_roam, world_runs);
+    uint32_t race = rd32(G_RACE), me = player_car();
+    int eng = in_roam && world_runs && !(rd32(G_ACTIONS) & (1u << ACT_ENGAGE));
+    int press = eng && !g_du.engage;
+    g_du.engage = eng;
+    int free = du_free(in_roam, world_runs);
+    /* who has been near for the time it takes */
+    for (int k = 0; k < NSLOT; k++){
+        Slot *s = &g_sl[k];
+        int near = free && me && s->st == SL_ACTIVE && !s->hidden && ok(s->car, 0x9e0) && du_able(k) &&
+                   du_dist(s->car) < (g_du.st == DU_IDLE && g_du.icon == s->car ? DU_PROMPT_M : DU_NEAR_M);
+        if (!near) s->near_since = 0;
+        else if (!s->near_since) s->near_since = host;
+    }
+    int k = g_du.st != DU_IDLE ? du_slot(g_du.id) : -1;
+    switch (g_du.st){
+    case DU_IDLE: {
+        int best = -1; float bd = 0;
+        for (int j = 0; j < NSLOT; j++){
+            if (!g_sl[j].near_since || host - g_sl[j].near_since < DU_NEAR_US) continue;
+            float d = du_dist(g_sl[j].car);
+            if (best < 0 || d < bd){ best = j; bd = d; }
+        }
+        du_icon(c, best >= 0 ? g_sl[best].car : 0);
+        if (best < 0 || !press) break;
+        roam_plat_lock(); do g_du.duel = roam_plat_random(); while (!g_du.duel); roam_plat_unlock();
+        g_du.id = g_sl[best].peer_id; g_du.mine = 1; g_du.heard = host; g_du.offers++;
+        snprintf(g_du.name, sizeof g_du.name, "%s", g_sl[best].name);
+        du_send(host, RC_DUEL_OFFER, 0);
+        du_to(DU_SENT, host);
+        break; }
+    case DU_SENT:
+    case DU_GOT:
+    case DU_ACCEPTED:
+        du_icon(c, k >= 0 && g_du.st == DU_GOT ? g_sl[k].car : 0);
+        if (k < 0 || !du_able(k) || !free || du_dist(g_sl[k].car) > DU_KEEP_M){
+            if (g_du.st != DU_GOT) du_send(host, RC_DUEL_CANCEL, RC_DC_WITHDRAWN);
+            du_note(host, k < 0 || !du_able(k) ? "The outrun with %s is off" : "The outrun with %s is off: too far apart", g_du.name);
+            du_to(DU_IDLE, host);
+            break;
+        }
+        if (g_du.st == DU_SENT){
+            if (host - g_du.since > DU_OFFER_US){
+                du_send(host, RC_DUEL_CANCEL, RC_DC_WITHDRAWN); du_note(host, "%s did not take the outrun", g_du.name); du_to(DU_IDLE, host);
+            } else if (host - g_du.tx_at >= 500000) du_send(host, RC_DUEL_OFFER, 0);
+        } else if (g_du.st == DU_GOT){
+            if (host - g_du.heard > 2000000 || host - g_du.since > DU_OFFER_US){ du_to(DU_IDLE, host); break; }   /* the challenge stopped */
+            if (press){ du_send(host, RC_DUEL_ACCEPT, 0); du_to(DU_ACCEPTED, host); }
+        } else {
+            if (host - g_du.since > 4000000){ du_note(host, "The outrun with %s did not start", g_du.name); du_to(DU_IDLE, host); }
+            else if (host - g_du.tx_at >= 300000) du_send(host, RC_DUEL_ACCEPT, 0);
+        }
+        break;
+    case DU_RACE: {
+        if (!ok(race, 0xc44) || !me || !du_racing(race)){
+            /* our game's outrun is over: its result to the friend, or we left it */
+            g_du.won = ok(race, 0xc44) ? du_outcome(race) : 0;
+            if (g_du.won == 1) g_du.wins++;
+            if (g_du.won == 2) g_du.losses++;
+            rlog("[roam] f=%ld outrun with %s: over, %s, %.0f m apart, the order changed %u time(s)%s\n", rh_frame(), g_du.name,
+                    g_du.won == 1 ? "WON" : g_du.won == 2 ? "LOST" : "we left it", (double)g_du.gap, g_du.ranks,
+                    g_du.their && g_du.won && g_du.their != g_du.won ? "; the friend's game said otherwise" : "");
+            if (!g_du.won){
+                for (int n = 0; n < 3; n++) du_send(host, RC_DUEL_CANCEL, RC_DC_LEFT);
+                if (ok(race, 0xc44)) du_clear(c);
+                du_to(DU_IDLE, host);
+                break;
+            }
+            g_du.nres = 5; g_du.tx_at = 0;
+            du_to(DU_OVER, host);
+            break;
+        }
+        if (g_du.mine && g_du.op == RC_DUEL_START && host - g_du.since < 1000000 && host - g_du.tx_at >= 300000) du_send(host, RC_DUEL_START, 0);
+        /* the friend is gone (not shown, not in free roam, no packets): its
+         * car stays where it was (the slots leave it), and we win */
+        const PeerView *v = du_pv(g_du.id);
+        if (!car_out(g_du.car) || (k >= 0 && g_sl[k].car != g_du.car)){
+            /* its car was parked (the friend left the session): at once, before the game's next update counts it */
+            if (!g_du.posted){ du_note(host, "%s left the outrun", g_du.name); du_post(1, "the friend's car is gone"); }
+            break;
+        }
+        if (k < 0 || !v || !v->visible){
+            if (!g_du.gone_at) g_du.gone_at = host;
+            if (host - g_du.gone_at > DU_GONE_US && !g_du.posted){ du_note(host, "%s left the outrun", g_du.name); du_post(1, "the friend is gone"); }
+            break;
+        }
+        g_du.gone_at = 0;
+        if (g_du.their){ du_post(g_du.their == 1, "the friend's game has its result"); break; }
+        uint32_t car = g_du.car;
+        float p[4] = { MRF32(me + 0x60u), MRF32(me + 0x64u), MRF32(car + 0x60u), MRF32(car + 0x64u) };
+        float dx = p[0] - p[2], dy = p[1] - p[3];
+        g_du.gap = rc_sqrtf(dx * dx + dy * dy);
+        float dt = (float)(host - g_du.away_at) / 1e6f;
+        if (g_du.away_at && dt > 0.f && g_du.gap > 1.f){
+            /* our speed away from the friend less the friend's away from us,
+             * from how each car moved since the last frame: the friend's game
+             * gets minus this.  A jump (a respawn) counts for nothing */
+            float ux = dx / g_du.gap, uy = dy / g_du.gap;
+            float a = ((p[0] - g_du.was[0]) * ux + (p[1] - g_du.was[1]) * uy) / dt, b = -((p[2] - g_du.was[2]) * ux + (p[3] - g_du.was[3]) * uy) / dt;
+            if (!__builtin_isfinite(a - b) || __builtin_fabsf(a) > 150.f || __builtin_fabsf(b) > 150.f) a = b = 0;
+            float t = dt * 1e6f / (float)DU_AWAY_US;
+            g_du.away += (a - b - g_du.away) * (t < 1.f ? t : 1.f);
+        }
+        for (int i = 0; i < 4; i++) g_du.was[i] = p[i];
+        g_du.away_at = host;
+        if (g_du.away > DU_RANK_MPS) du_rank(race, 1);
+        else if (g_du.away < -DU_RANK_MPS) du_rank(race, 0);
+        break; }
+    case DU_OVER:
+        if (g_du.nres > 0 && host - g_du.tx_at >= 300000){ du_send(host, RC_DUEL_RESULT, (uint8_t)g_du.won); g_du.nres--; }
+        if (!g_du.nres){
+            if (ok(race, 0xc44)) du_clear(c);
+            du_to(DU_IDLE, host);
+        }
+        break;
+    }
+}
+/* the line of text, top centre, after the HUD's update (roam_game_hud) */
+static void du_hud(CPU *c, int64_t host){
+    uint32_t pl = rd32(G_PLAYER1), hud = pl && ok(pl, PL_HUD + 4u) ? rd32(pl + PL_HUD) : 0;
+    uint32_t pkg = hud && ok(hud, 0x14) ? rd32(hud + 0x10u) : 0;
+    if (!hud || hud != g_tag.hud || !ok(pkg, 0x20) || !g_gmem) return;
+    char tx[TAG_DUEL_MAX] = {0};
+    if (g_in_roam){
+        if (g_du.st == DU_IDLE && g_du.icon){
+            for (int k = 0; k < NSLOT; k++) if (g_sl[k].car == g_du.icon && g_sl[k].st == SL_ACTIVE)
+                snprintf(tx, sizeof tx, "Press Enter to challenge %s to an outrun", g_sl[k].name);
+        }
+        else if (g_du.st == DU_SENT) snprintf(tx, sizeof tx, "Waiting for %s to take the outrun", g_du.name);
+        else if (g_du.st == DU_GOT) snprintf(tx, sizeof tx, "%s challenges you to an outrun: press Enter to take it", g_du.name);
+        else if (g_du.st == DU_ACCEPTED) snprintf(tx, sizeof tx, "Outrun with %s", g_du.name);
+        if (!tx[0] && g_du.note[0] && host < g_du.note_until && g_du.st != DU_RACE && g_du.st != DU_OVER) snprintf(tx, sizeof tx, "%s", g_du.note);
+    }
+    if (!tx[0]){ tag_hide(c, TAG_DUEL); return; }
+    uint32_t obj = tag_obj(c, TAG_DUEL, pkg);
+    if (!obj) return;
+    tag_text(c, TAG_DUEL, obj, tx);
+    /* above the top of the HUD's middle (the prologue's arrow), in front
+     * (the names over cars come with their depth, about 0.99; 1 is not drawn) */
+    uint32_t ap[2] = { gvec(g_gmem + TAG_SCR + 0x20u, 0.f, -165.f, 0.5f), 0 };
+    rh_call(c, FN_FE_POS, obj, 0, 2, ap);
+    uint32_t as[2] = { gvec(g_gmem + TAG_SCR + 0x30u, 1.f, 1.f, 1.f), 0 };
+    rh_call(c, FN_FE_SCALE, obj, 0, 2, as);
+    gcall1(c, FN_FE_SHOW, 0, obj);
+    g_tag.shown[TAG_DUEL] = 1;
+}
+
 /* the app has parked the game in the background (macOS: lifecycle.c; the
  * game thread then waits in GetMessageA and this file runs no frame) */
 static int g_parked;
@@ -1406,7 +1831,7 @@ static void init_once(CPU *c){
 #else
     cf.platform = RC_PLAT_MAC;
 #endif
-    cf.test_mode = O.test; cf.max_players = maxp; cf.rate_hz = O.rate;
+    cf.test_mode = O.test; cf.max_players = maxp; cf.rate_hz = O.rate; cf.duels = DUELS;
     cf.discovery = disc && !O.test;
     rc_io io = { 0, 0, 0, 0 };
     rc_session_init(&g_s, &cf, &io);
@@ -1538,7 +1963,7 @@ static void assign(CPU *c, int64_t host){
             /* 4. a friend out of sight: the one unseen the longest gives way */
             int far = -1;
             for (int j = 0; j < nslots; j++)
-                if (g_sl[j].st == SL_ACTIVE && g_sl[j].unseen_since && (far < 0 || g_sl[j].unseen_since < g_sl[far].unseen_since)) far = j;
+                if (g_sl[j].st == SL_ACTIVE && g_sl[j].unseen_since && !du_keeps(j) && (far < 0 || g_sl[j].unseen_since < g_sl[far].unseen_since)) far = j;
             /* 5. else the farthest shown one, for a friend much nearer (well
              *    within 60 % of its distance and 50 m nearer: no swapping
              *    back and forth at the edge) -- with more players than
@@ -1546,7 +1971,7 @@ static void assign(CPU *c, int64_t host){
             if (far < 0){
                 float fd = 0.f; int fj = -1;
                 for (int j = 0; j < nslots; j++){
-                    if (g_sl[j].st != SL_ACTIVE) continue;
+                    if (g_sl[j].st != SL_ACTIVE || du_keeps(j)) continue;
                     for (int i = 0; i < g_npv; i++)
                         if (g_pv[i].idx == g_sl[j].peer && g_pv[i].id == g_sl[j].peer_id && g_pv[i].dist > fd){ fd = g_pv[i].dist; fj = j; }
                 }
@@ -1558,7 +1983,7 @@ static void assign(CPU *c, int64_t host){
         }
         Slot *s = &g_sl[k];
         int was = s->st;
-        s->peer = v->idx; s->peer_id = v->id; s->unseen_since = 0;
+        s->peer = v->idx; s->peer_id = v->id; s->unseen_since = 0; s->near_since = 0;
         snprintf(s->name, sizeof s->name, "%s", v->name);
         if (reuse){
             s->st = SL_ACTIVE; s->cfg_gen = v->cfg_gen; s->hidden = 1; g_acquires++; g_reuses++;
@@ -1699,6 +2124,13 @@ void roam_game_frame(CPU *c){
         if (g_s.cfg_rev != before) rlog("[roam] f=%ld my car: %s, %d-byte record, revision %u\n", rh_frame(), tname, cfgn, g_s.cfg_rev);
     }
     if (have_ls) rc_push_state(&g_s, &ls, host);
+    /* outrun messages for us (du_frame) */
+    uint32_t duin[4 * RC_DUEL_INBOX]; int nduin = 0;
+    while (nduin < RC_DUEL_INBOX){
+        uint8_t op, arg;
+        if (!rc_take_duel(&g_s, &duin[4 * nduin], &op, &arg, &duin[4 * nduin + 3])) break;
+        duin[4 * nduin + 1] = op; duin[4 * nduin + 2] = arg; nduin++;
+    }
     /* what the slots need from the session */
     g_npv = 0;
     if (in_roam){
@@ -1717,7 +2149,7 @@ void roam_game_frame(CPU *c){
             v->visible = !p->lost && p->mo.n > 0 &&
                          (p->status == RC_ST_PAUSED ||
                           (p->status == RC_ST_ROAM && host - p->last_snap_rx < 2000000));
-            v->paused = p->status == RC_ST_PAUSED;
+            v->paused = p->status == RC_ST_PAUSED; v->duels = p->duels;
             v->cfg_gen = p->cfg_gen; v->cfg_len = 0; v->has_cfg = p->cfg_len > 0; v->err = 0;
             int slotted = -1;
             for (int k = 0; k < NSLOT; k++) if (g_sl[k].st != SL_FREE && g_sl[k].st != SL_PARKED && g_sl[k].peer == i && g_sl[k].peer_id == p->id) slotted = k;
@@ -1807,7 +2239,8 @@ void roam_game_frame(CPU *c){
                             (double)v->pose.p[0], (double)v->pose.p[1], (double)v->pose.p[2], (double)v->pose.speed, v->pose.mode, (double)v->err,
                             (double)MRF32(s->car + 0x90u), (double)MRF32(s->car + 0x94u), (double)MRF32(s->car + 0x98u), (double)MRF32(s->car + 0xb8u),
                             (double)MRF32(s->car + 0x50u), (double)MRF32(s->car + 0x54u), (double)MRF32(s->car + 0x58u));
-            } else if (!s->hidden){ soft_park(c, s->car); s->hidden = 1; }
+            } else if (!s->hidden && !(g_du.st == DU_RACE && s->car == g_du.car)){ soft_park(c, s->car); s->hidden = 1; }
+            /* (an outrun's opponent stays where it was: parked, the game would count it 120 km behind) */
         }
         arrows_update(c, w);
         int busy = 0;
@@ -1824,6 +2257,7 @@ void roam_game_frame(CPU *c){
             }
         }
     }
+    du_frame(c, host, in_roam, world_runs, duin, nduin);
     horns_update(have_ls ? &ls : 0, world_runs);
     if (g_poselog && have_ls){
         uint32_t me = player_car();
@@ -1848,6 +2282,7 @@ void roam_game_hud(CPU *c){
     if (!O.on || !g_net_ok) return;
     uint64_t t0 = rh_ns();
     tags_update(c);
+    if (DUELS) du_hud(c, roam_plat_now_us());
     g_cost_hud += rh_ns() - t0;
 }
 
@@ -1862,6 +2297,8 @@ void roam_game_report(void){
                     "impairment dropped %llu duplicated %llu\n", (unsigned long long)ps.sent, (unsigned long long)ps.sent_bytes,
             (unsigned long long)ps.recv, (unsigned long long)ps.recv_bytes, (unsigned long long)ps.blocked,
             (unsigned long long)ps.send_err, (unsigned long long)ps.impair_drop, (unsigned long long)ps.impair_dup);
+    if (g_du.offers || g_du.races) rlog("  [roam] outruns with friends: %u challenge(s) made, %u raced, %u won, %u lost\n",
+                                        g_du.offers, g_du.races, g_du.wins, g_du.losses);
     rlog("  [roam] game-thread cost per frame: mean %.1f us, max %.1f us over %llu frames\n",
             g_cost_n ? g_cost_sum / 1000.0 / (double)g_cost_n : 0.0, g_cost_max / 1000.0, (unsigned long long)g_cost_n);
     if (g_poselog){ rh_fflush(g_poselog); }
@@ -1968,6 +2405,24 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
             }
         }
         return 1;
+    }
+    if (!strcasecmp(sub, "outrun") || !strcasecmp(sub, "waitoutrun")){
+        /* "mp outrun": the outrun with a friend; "mp waitoutrun STATE [tmo]":
+         * wait for prompt (the challenge is offered), idle, sent, got,
+         * accepted, race or over */
+        static const char *const st[] = { "idle", "sent", "got", "accepted", "race", "over" };
+        if (!strcasecmp(sub, "outrun")){
+            rlog("[roam] f=%ld mp outrun: %s%s%s%s, %.0f m apart, getting away %.1f m/s faster; %u challenge(s), %u raced, %u won, %u lost\n", f, st[g_du.st],
+                    g_du.id ? " with " : "", g_du.id ? g_du.name : "", g_du.icon ? ", challenge offered" : "", (double)g_du.gap, (double)g_du.away,
+                    g_du.offers, g_du.races, g_du.wins, g_du.losses);
+            return 1;
+        }
+        long tmo = a2[0] ? atol(a2) : 0;
+        if (*wait_start < 0) *wait_start = f;
+        int have = !strcasecmp(a1, "prompt") ? g_du.st == DU_IDLE && g_du.icon : !strcasecmp(a1, st[g_du.st]);
+        if (have){ rlog("[roam] f=%ld mp waitoutrun %s satisfied after %ld frames\n", f, a1, f - *wait_start); *wait_start = -1; return 1; }
+        if (tmo && f - *wait_start >= tmo){ rlog("[roam] f=%ld mp waitoutrun %s TIMEOUT (%s)\n", f, a1, st[g_du.st]); *wait_start = -1; return 1; }
+        return 0;
     }
     if (!strcasecmp(sub, "cfgdump") || !strcasecmp(sub, "cfgtest")){
         if (g_njob == NJOB){ rlog("[roam] f=%ld mp %s: busy\n", f, sub); return 1; }
