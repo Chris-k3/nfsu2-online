@@ -3,14 +3,14 @@
 // driving along a track.  Real game pages (web/tools/roam-pair.mjs) can join the same server meanwhile.
 //
 //   node web/tools/roam-crowd.mjs [--base http://localhost:8655] [--n 62] [--seconds 120] [--room <name>]
-//        [--track <pose.csv>] [--speed 15] [--car 350Z] [--cars A,B,..|all] [--stagger 50] [--states 1] [--out <summary.json>]
+//        [--track <pose.csv>] [--speed 15] [--spread 20] [--car 350Z] [--cars A,B,..|all] [--stagger 50] [--states 1] [--out <summary.json>]
 //
 // --cars   the players' cars in turn (car type names, CarTypeInfo +0), or all: the game's 31 player cars, PEUGOT to
 //          IMPREZAWRX; without it every player drives --car.
 // --states the car states in each SNAP: 1 as the browsers send them (roam_web.c), 3 as a LAN does.
 // --track  a pose log (NFSU2_ROAM_POSELOG): the first player's L rows, a real drive; every simulated player
 //          follows it from its own point along it, so they spread over the route.  Without one: circles of 20 to
-//          120 m around the new career's start (1695, -884, 24).
+//          120 m around the new career's start (1695, -884, 24), or --spread m apart (6 circles, the first at --spread).
 // Each player is its own client address for the server's per-address limits (X-Forwarded-For, which the
 // server takes from this machine, its trusted proxy).  Every 10 s one line: players on the switch, their peers
 // (min, mean, max: the hub gives each at most 32), datagrams a second in and out, joins and "out of range"
@@ -26,7 +26,7 @@ const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && i + 1 < argv.length ? argv[i + 1] : d; };
 const BASE = opt('base', 'http://localhost:8655'), N = +opt('n', 62), SECONDS = +opt('seconds', 120), ROOM = opt('room', '');
 const SPEED = +opt('speed', 15), CAR = opt('car', '350Z'), STAGGER = +opt('stagger', 50), TRACK = opt('track', ''), OUTF = opt('out', '');
-const STATES = +opt('states', 1);
+const STATES = +opt('states', 1), SPREAD = +opt('spread', 20);
 const ALL_CARS = ['PEUGOT', 'FOCUS', 'COROLLA', '240SX', 'MIATA', 'CIVIC', 'PEUGOT106', 'CORSA', 'HUMMER', 'NAVIGATOR', 'ESCALADE', 'TIBURON',
   'SENTRA', 'CELICA', 'IS300', 'SUPRA', 'GOLF', 'A3', 'RSX', 'ECLIPSE', 'TT', 'RX8', '350Z', 'G35', '3000GT', 'GTO', 'MUSTANGGT', 'SKYLINE',
   'LANCEREVO8', 'RX7', 'IMPREZAWRX'];
@@ -63,7 +63,7 @@ if (TRACK) {
   console.log(`roam-crowd: track ${TRACK}: ${pts.length} points over ${T.toFixed(0)} s`);
 } else {
   track = (t, i) => {
-    const r = 20 + (i % 6) * 20, w = SPEED / r, a = w * t + i;
+    const r = SPREAD + (i % 6) * SPREAD, w = SPEED / r, a = w * t + i;
     return { p: [1695 + r * Math.cos(a), -884 + r * Math.sin(a), 24.1], v: [-r * w * Math.sin(a), r * w * Math.cos(a), 0] };
   };
 }
