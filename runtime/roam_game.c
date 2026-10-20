@@ -840,7 +840,11 @@ static void release(CPU *c, int k, const char *why){
     rlog("[roam] f=%ld slot %d: %s's car removed (%s)\n", rh_frame(), k, s->name, why);
     g_releases++;
     if (s->h_new){ unload_later(s->h_new); s->h_new = 0; s->pending_cfg = 0; }
-    if (s->st == SL_CREATING){                      /* not made yet: forget it */
+    /* not made yet: forget it.  A car made whose first look cannot load now
+     * (begin_load right after finish_create: a friend's shop rims waiting
+     * for rim_packs) goes on below: it stays ours, parked on its first ride
+     * with h_orig kept, and the next try loads onto it */
+    if (s->st == SL_CREATING && !s->car){
         if (s->h_orig) unload_later(s->h_orig);
         s->h_orig = 0; s->st = SL_FREE; s->peer = -1; s->peer_id = 0;
         return;
