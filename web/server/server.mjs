@@ -933,7 +933,7 @@ const lines = [
   `  proxies   : this machine${trust.entries.length ? ', ' + trust.entries.join(', ') : ''} (client address from ${REAL_IP})`,
   `  names     : ${[...new Set(['localhost', ...hostCheck.names()])].join(', ')} (other Host names get 421)`,
   `  switch    : at most ${MAX_PEERS} players`,
-  `  free roam : ${roamHub ? 'the hub at 10.77.0.253 on the switch links each player to the 7 nearest (--roam-hub off: groups of 8 by broadcast)' : 'no hub (--roam-hub off): players find each other by broadcast, groups of 8'}`,
+  `  free roam : ${roamHub ? 'the hub at 10.77.0.253 on the switch links each player to the 32 nearest (--roam-hub off: groups of 33 by broadcast)' : 'no hub (--roam-hub off): players find each other by broadcast, groups of 33'}`,
   `  online    : ${online ? `the game's Online mode at 10.77.0.1 on the switch (any name logs in; race results per persona in ${path.join(STATE, 'online')})` : 'off (--online off)'}`,
   ONLINE_TRACE ? `  trace     : lobby messages (secrets redacted) into ${ONLINE_TRACE}` : null,
   DEV ? `  dev       : test pages (/test/), test scripts (/tests/), source maps${ARTIFACTS ? `, PUT /artifacts/<name>.png into ${ARTIFACTS}` : ''}` : null,

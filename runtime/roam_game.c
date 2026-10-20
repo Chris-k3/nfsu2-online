@@ -16,8 +16,14 @@
  *    out when it changes;
  *  - remote players get "slots": the 3 parked free-roam opponent cars (the
  *    outrun challengers' cars; the RandomEncounterManager is held off while
- *    we use them) and up to 2 cars of our own (CreateCar + IndexCars), the
- *    nearest players first.  A slot's car gets the player's ride (streamed
+ *    we use them) and up to 29 cars of our own (CreateCar), the nearest
+ *    players first.  World::IndexCars' array holds 22 cars and the world has
+ *    20, so the first 2 of ours are indexed as AI racers (a minimap arrow)
+ *    and the others stay out of it, on the World's list only, which is what
+ *    the renderer walks (finish_create).  The game has 6 paint slots
+ *    (DUMMY_SKIN1-6: the player, the 3 opponent cars, the first 2 of ours);
+ *    the others composite into textures of our own (skin_textures,
+ *    roam_game_texture).  A slot's car gets the player's ride (streamed
  *    in through the CarLoader, then Car::SetRideInfo), no brain and no
  *    physics, and its pose is written every frame from the core's
  *    interpolation.  Solid cars (the default) keep their collision body,
@@ -106,7 +112,16 @@
 #define PARK_Z          (-123456.f)   /* Car::Deactivate's parking spot (0, 0, -123456) */
 #define RIDE_SZ         0x900u
 #define REC_SZ          0x940u
-#define NSLOT           5             /* 3 opponent cars + 2 of our own */
+#define NSLOT           32            /* 3 opponent cars + 29 of our own */
+#define NOPP            3             /* slots 0-2: the parked free-roam opponent cars */
+#define WORLD_INDEX     22            /* World::IndexCars' cars[] (World +0x1C; other fields follow) */
+#define KIND_OUT        4             /* a racer record kind IndexCars skips (1 human, 2 AI racer, 3 traffic) */
+#define SKIN_GAME       6             /* the game's paint slots, DUMMY_SKIN1-6 */
+#ifdef ROAM_HOST_WIN
+#define MAX_CARS        5             /* the Windows plugin: the game's own paint slots and car index only */
+#else
+#define MAX_CARS        NSLOT
+#endif
 #define CLEAR_M         6.f           /* a ghost becomes solid once its centre is this far from the player's car's */
 #define JUMP_M          5.f           /* a friend's car drawn this far from where it was last frame is a ghost again */
 
@@ -138,11 +153,18 @@ static uint32_t ai_car(uint32_t w, int i){
     return ok(car, 0x9e0) ? car : 0;
 }
 static int car_out(uint32_t car){ return __builtin_fabsf(MRF32(car + 0x68u) - PARK_Z) >= 0.001f; }   /* 0x5ED430 */
+#define RIDE_ENTRIES    128           /* the car loader's ride entries with free-roam multiplayer on (roam_game_pool) */
 static uint32_t loader_entry(uint32_t h){
     uint32_t head = G_CARLOADER + 0x58u, e = rd32(head);
-    for (int k = 0; e && e != head && k < 64; k++, e = rd32(e)) if (rd32(e + 0x123cu) == h) return e;
+    for (int k = 0; e && e != head && k < 4 * RIDE_ENTRIES; k++, e = rd32(e)) if (rd32(e + 0x123cu) == h) return e;
     return 0;
 }
+/* The car loader serves its loads one after another, about half a second
+ * each: a load may take 15 s, and a second more for each load ahead of it
+ * (32 friends arriving at once queue 61 loads, a car of our own's and the
+ * friend's ride each) */
+static int loads_waiting(void);
+static int64_t load_wait_us(void){ return 15000000 + 1000000 * (int64_t)loads_waiting(); }
 static void cstr(uint32_t a, char *o, int n){
     int i = 0;
     if (ok(a, (uint32_t)n)) for (; i < n - 1 && MR8(a + (uint32_t)i) >= 0x20 && MR8(a + (uint32_t)i) < 0x7f; i++) o[i] = (char)MR8(a + (uint32_t)i);
@@ -223,14 +245,15 @@ typedef struct {
     int      peer; uint32_t peer_id;          /* session table index and id */
     char     name[RC_NAME_MAX + 1];
     uint32_t car, world;                      /* the slot's car in this world */
-    int      created;                         /* one of our own cars (k >= 3) */
+    int      created;                         /* one of our own cars (k >= NOPP) */
+    int      unindexed;                       /* ...past World::IndexCars' 22: record kind KIND_OUT */
     uint32_t ride_new, ride_orig, rec;        /* guest buffers */
     uint32_t h_cur, h_new;                    /* CarLoader handles (on the car / loading) */
     uint32_t h_orig;                          /* a car of our own: its first ride (an opponent's copy) */
     int      have_orig, activated;
     uint32_t cfg_gen;  int pending_cfg;       /* the record the car shows / one waiting */
     uint32_t look;                            /* hash of the record the car shows (0: none) */
-    int64_t  load_t0; long load_f0;
+    int64_t  load_t0, load_wait; long load_f0;    /* load_wait: how long the load may take (loads_waiting) */
     int      hidden;
     int      paused;                          /* the friend is paused (for a second now): so says the name over the car */
     int64_t  paused_since;
@@ -246,7 +269,7 @@ typedef struct {
 } Slot;
 static Slot g_sl[NSLOT];
 static uint32_t g_world_seen;
-static uint32_t g_handles_pending[16]; static int g_npending;   /* unload once the world is gone */
+static uint32_t g_handles_pending[3 * NSLOT]; static int g_npending;   /* unload once the world is gone */
 static int g_created_n;                       /* cars of our own in this world */
 /* the outrun challengers' manager: the game's (EM_GAME), held off by us
  * (EM_HELD: state 6, its cars parked), or being stood down (EM_STANDDOWN:
@@ -421,8 +444,96 @@ static int build_ride(CPU *c, const rc_carcfg *cc, uint32_t ride, uint32_t skin,
     return missing;
 }
 
+/* ---- paint slots past the game's six ---------------------------------------------------------- */
+/* A car's paint (the composited skin: base colour, vinyls) goes into the
+ * texture its ride names DUMMY_SKIN<n>, its rims into DUMMY_WHEEL<n> and its
+ * spinners into DUMMY_SPINNER<n> (0x61C280).  The game's are n = 1..6
+ * (GlobalMemoryFile.bin); its compositor (0x61D790) keeps a cache for those
+ * six and composites into any other texture GetTextureInfo (0x4901D0)
+ * finds.  The game's six are texture packs of their own in CARS/TEXTURES.BIN
+ * (pixels, then the TextureInfo, then its platform record), which the car
+ * loader reads in while a car uses that slot; slot 1, the player's car, is
+ * always there.  Slots 7 and up get copies of a slot that is there: its
+ * TextureInfo (0x7C bytes) and platform record (0x20 bytes: +0/+4 the links
+ * of the game's list of D3D textures, +0x18 the texture) copied, pixels of
+ * their own (zero), the D3D texture made by the game (0x5CE170), handed out
+ * by the port's override of GetTextureInfo (roam.c).  Made once, when a car
+ * first needs them, and kept. */
+#define FN_TEXINFO      0x004901d0u   /* cdecl (hash, default, 0) -> TextureInfo* (one that is loaded) */
+#define FN_TEX_CREATE   0x005ce170u   /* thiscall TextureInfo: its D3D texture from +0x70's pixels */
+#define TI_SZ           0x7cu         /* TextureInfo: +0 platform record, +0x24 name hash, +0x40 bytes of mip 0, +0x4E mips,
+                                       * +0x6C itself (or the texture named by +0x2C), +0x70 pixels */
+#define PLAT_SZ         0x20u         /* platform record: +0x18 the D3D texture */
+static struct { uint32_t hash, ti; } g_tex[3 * NSLOT]; static int g_ntex;
+static uint8_t g_texbits[0x2000u / 8u];       /* hash & 0x1fff of every g_tex: the override's quick no */
+#ifndef ROAM_HOST_WIN
+static uint32_t bhash(const char *s){ uint32_t h = 0xffffffffu; for (; *s; s++) h = h * 33u + (uint8_t)*s; return h; }  /* bStringHash 0x43DB50 */
+static int8_t g_skin_ok[NSLOT + SKIN_GAME];   /* paint slot n: 1 its textures are there, -1 they could not be made */
+#endif
+uint32_t roam_game_texture(uint32_t h){
+    if (!(g_texbits[(h & 0x1fffu) >> 3] & (1u << (h & 7u)))) return 0;
+    for (int i = 0; i < g_ntex; i++) if (g_tex[i].hash == h) return g_tex[i].ti;
+    return 0;
+}
+static int skin_textures(CPU *c, uint32_t n){
+    if (n <= SKIN_GAME) return 1;
+#ifdef ROAM_HOST_WIN
+    (void)c; return 0;
+#else
+    if (n >= sizeof g_skin_ok) return 0;
+    if (g_skin_ok[n]) return g_skin_ok[n] > 0;
+    static const char *const fmt[3] = { "DUMMY_SKIN%u", "DUMMY_WHEEL%u", "DUMMY_SPINNER%u" };
+    int had = 0, made = 0;
+    for (int i = 0; i < 3 && g_ntex < 3 * NSLOT; i++){
+        char nm[24];
+        uint32_t src = 0;
+        for (uint32_t t = 1; t <= SKIN_GAME && !src; t++){                                /* a slot that is there now */
+            snprintf(nm, sizeof nm, fmt[i], (unsigned)t);
+            uint32_t a[3] = { bhash(nm), 0, 0 };
+            src = rh_call(c, FN_TEXINFO, 0, 0, 3, a);
+            if (!ok(src, TI_SZ) || !ok(rd32(src), PLAT_SZ)) src = 0;
+        }
+        if (!src) continue;                                                               /* no spinners, say */
+        had++;
+        /* the pixels: mip 0's bytes, each further mip a quarter of the one before */
+        uint32_t px = MR32(src + 0x40u), mips = MR8(src + 0x4eu), total = 0;
+        for (uint32_t m = 0, b = px; m < (mips ? mips : 1u) && b; m++, b >>= 2) total += b > 16u ? b : 16u;
+        if (!px || px > (16u << 20)){ rlog("[roam] f=%ld %s: %u bytes of pixels?\n", rh_frame(), nm, px); break; }
+        uint32_t sz = TI_SZ + PLAT_SZ + total + 64u, ti = rh_call(c, FN_MALLOC, 0, 0, 1, &sz), pl = ti + TI_SZ;
+        if (!ti) break;
+        uint32_t pix = (pl + PLAT_SZ + 63u) & ~63u;
+        memcpy(GPTR(ti), GPTR(src), TI_SZ); memcpy(GPTR(pl), GPTR(rd32(src)), PLAT_SZ);
+        memset(GPTR(pix), 0, total);
+        MR32(pl) = 0; MR32(pl + 4u) = 0; MR32(pl + 0x18u) = 0;
+        snprintf(nm, sizeof nm, fmt[i], (unsigned)n);
+        MR32(ti) = pl; MR32(ti + 0x24u) = bhash(nm); MR32(ti + 0x70u) = pix;
+        for (uint32_t q = 0; q < 0x18u; q++) MR8(ti + 8u + q) = q < 0x17u && q < strlen(nm) ? (uint8_t)nm[q] : 0;   /* its name */
+        if (MR32(ti + 0x6cu) == src) MR32(ti + 0x6cu) = ti;
+        gcall0(c, FN_TEX_CREATE, ti);
+        if (!rd32(pl + 0x18u)){ rlog("[roam] f=%ld %s: the game made no texture\n", rh_frame(), nm); break; }
+        uint32_t h = MR32(ti + 0x24u);
+        g_tex[g_ntex].hash = h; g_tex[g_ntex].ti = ti; g_ntex++;
+        g_texbits[(h & 0x1fffu) >> 3] |= (uint8_t)(1u << (h & 7u));
+        made++;
+    }
+    g_skin_ok[n] = had && made == had ? 1 : -1;
+    if (g_skin_ok[n] > 0) rlog("[roam] f=%ld paint slot %u: %d textures of our own (the paint %ux%u, format 0x%02x, %u mips)\n", rh_frame(), n,
+                               made, (unsigned)MR16(g_tex[g_ntex - made].ti + 0x44u), (unsigned)MR16(g_tex[g_ntex - made].ti + 0x46u),
+                               (unsigned)MR8(g_tex[g_ntex - made].ti + 0x4au), (unsigned)MR8(g_tex[g_ntex - made].ti + 0x4eu));
+    else rlog("[roam] f=%ld paint slot %u: its textures could not be made (%d of %d): no car in that slot\n", rh_frame(), n, made, had);
+    return g_skin_ok[n] > 0;
+#endif
+}
+
 /* ---- slots ------------------------------------------------------------------------------------ */
 static uint32_t skin_of(uint32_t rec){ return rec >= G_RECORDS && rec < G_RECORDS + 22u * REC_SZ ? (rec - G_RECORDS) / REC_SZ + 1u : 0; }
+/* slot k's paint slot: an opponent car's own (its record's place: 2-4), ours
+ * 5 and up */
+static uint32_t slot_skin(int k){
+    if (k >= NOPP) return 5u + (uint32_t)(k - NOPP);
+    uint32_t n = skin_of(g_sl[k].car ? rd32(g_sl[k].car + 0x14u) : 0);
+    return n ? n : 2u + (uint32_t)k;
+}
 /* g_gmem: scratch for guest-call arguments (+0x40 a performance block, +0x80
  * a grid entry, +0x100 the name labels' vectors and strings), then the
  * slots' rides and records */
@@ -441,7 +552,7 @@ static void gmem_init(CPU *c){
 }
 static void unload_later(uint32_t h){
     if (!h) return;
-    if (g_npending < 16) g_handles_pending[g_npending++] = h;
+    if (g_npending < 3 * NSLOT) g_handles_pending[g_npending++] = h;
     else rlog("[roam] too many rides waiting to be unloaded, one kept\n");
 }
 static void set_name(Slot *s){
@@ -576,7 +687,7 @@ static uint32_t free_opponent_car(uint32_t w){
     }
     return 0;
 }
-static int opp_slots_used(void){ int n = 0; for (int k = 0; k < 3; k++) if (g_sl[k].st != SL_FREE) n++; return n; }
+static int opp_slots_used(void){ int n = 0; for (int k = 0; k < NOPP; k++) if (g_sl[k].st != SL_FREE) n++; return n; }
 
 /* the manager's state 0 takes World cars[first .. first+2] as its three
  * cars; IndexCars puts the AI racers in the order of the World's list, and
@@ -587,9 +698,9 @@ static int opp_slots_used(void){ int n = 0; for (int k = 0; k < 3; k++) if (g_sl
  * calls it only when it builds a world. */
 static void keep_out_of_window(CPU *c, uint32_t w){
     if (!ours_in_window(w)) return;
-    for (int k = 3; k < NSLOT; k++){
+    for (int k = NOPP; k < NSLOT; k++){
         uint32_t car = g_sl[k].car;
-        if (!g_sl[k].created || g_sl[k].world != w || !ok(car, 0x10)) continue;
+        if (!g_sl[k].created || g_sl[k].unindexed || g_sl[k].world != w || !ok(car, 0x10)) continue;
         uint32_t nx = rd32(car), pv = rd32(car + 4u);
         if (!ok(nx, 8) || !ok(pv, 8) || rd32(pv) != car || rd32(nx + 4u) != car) continue;   /* not linked as expected */
         MR32(pv) = nx; MR32(nx + 4u) = pv;                           /* unlink */
@@ -646,7 +757,7 @@ static void release(CPU *c, int k, const char *why){
         s->st = SL_PARKED;
     } else s->st = SL_FREE;                          /* nothing of the friend's on it */
     s->peer = -1; s->peer_id = 0; s->unseen_since = 0; s->name[0] = 0;
-    if (s->st == SL_FREE && k < 3){ s->car = 0; s->world = 0; }
+    if (s->st == SL_FREE && k < NOPP){ s->car = 0; s->world = 0; }
 }
 /* the car gets its own ride back (still resident: the world, or for a car
  * of our own its first load, holds it), is deactivated, and the friend's
@@ -665,7 +776,8 @@ static void restore(CPU *c, int k){
     memset(s, 0, sizeof *s);
     s->ride_new = keep.ride_new; s->ride_orig = keep.ride_orig; s->rec = keep.rec; s->peer = -1;
     if (keep.created){                              /* the car stays ours, parked, for the next friend */
-        s->car = keep.car; s->created = 1; s->world = keep.world; s->h_orig = keep.h_orig; s->have_orig = keep.have_orig;
+        s->car = keep.car; s->created = 1; s->unindexed = keep.unindexed; s->world = keep.world; s->h_orig = keep.h_orig;
+        s->have_orig = keep.have_orig;
         memcpy(s->com, keep.com, sizeof s->com);
     }
     rlog("[roam] f=%ld slot %d: car back to its own ride\n", rh_frame(), k);
@@ -698,21 +810,25 @@ static int pool_room(CPU *c, const Slot *s, const char *car /* 0: a car of our o
     }
     return 0;
 }
-/* a car of our own (slots 3, 4): a copy of the first opponent's racer record
- * (racer number 103/104, skin slot 5/6), its ride loaded through the
- * CarLoader, then CreateCar + World::IndexCars (finish_create); the friend's
- * ride follows as for an opponent car */
+/* a car of our own (slots 3 and up): a copy of the first opponent's racer
+ * record (racer number 103 and up, paint slot 5 and up), its ride loaded
+ * through the CarLoader, then CreateCar (finish_create); the friend's ride
+ * follows as for an opponent car */
 static int begin_create(CPU *c, int k){
     Slot *s = &g_sl[k];
     uint32_t w = world(), opp = 0;
     for (int i = 0; w && i < 22 && !opp; i++){ uint32_t car = ai_car(w, i); if (car && game_opponent(car)) opp = car; }
     uint32_t orec = opp ? rd32(opp + 0x14u) : 0;
     if (!ok(orec, REC_SZ) || !g_gmem) return 0;
+    if (!skin_textures(c, slot_skin(k))) return 0;
     if (!pool_room(c, s, 0)) return 0;
     memcpy(GPTR(s->rec), GPTR(orec), REC_SZ);
-    MR8(s->rec + 1u) = (uint8_t)(103 + (k - 3)); MR8(s->rec + 0x900u) = 0;
-    gcall1(c, FN_RIDE_SKINS, s->rec + 0x10u, 5u + (uint32_t)(k - 3));
+    /* a signed byte: past 127 the cars outside the index share 127 (only
+     * the indexed ones are looked up by number: minimap arrows) */
+    MR8(s->rec + 1u) = (uint8_t)(103 + (k - NOPP) < 127 ? 103 + (k - NOPP) : 127); MR8(s->rec + 0x900u) = 0;
+    gcall1(c, FN_RIDE_SKINS, s->rec + 0x10u, slot_skin(k));
     uint32_t a3[3] = { s->rec + 0x10u, 0, 0 };
+    s->load_wait = load_wait_us();
     s->h_orig = rh_call(c, FN_LOADER_LOAD, G_CARLOADER, 0, 3, a3);
     uint32_t a2[2] = { 0, 0 }; rh_call(c, FN_LOADER_SERVICE, G_CARLOADER, 0, 2, a2);
     s->load_t0 = roam_plat_now_us(); s->load_f0 = rh_frame();
@@ -723,7 +839,7 @@ static int finish_create(CPU *c, int k){
     uint32_t e = loader_entry(s->h_orig);
     uint32_t done = e ? gcall1(c, FN_LOADER_LOADED, G_CARLOADER, e) : 0;
     if (!done){
-        if (roam_plat_now_us() - s->load_t0 > 15000000){ unload_later(s->h_orig); s->h_orig = 0; g_load_fail++; return -1; }
+        if (roam_plat_now_us() - s->load_t0 > s->load_wait){ unload_later(s->h_orig); s->h_orig = 0; g_load_fail++; return -1; }
         return 0;
     }
     gcall1(c, FN_LOADER_WAIT, G_CARLOADER, s->h_orig);
@@ -732,26 +848,35 @@ static int finish_create(CPU *c, int k){
     uint32_t grid = g_gmem + 0x80u;                          /* scratch: the grid entry {vec3, +0x10 heading} */
     for (uint32_t i = 0; i < 0x20u; i += 4) MR32(grid + i) = 0;
     MRF32(grid) = MRF32(me + 0x60u) + 6.f; MRF32(grid + 4) = MRF32(me + 0x64u); MRF32(grid + 8) = MRF32(me + 0x68u) + 0.5f;
+    /* World::IndexCars writes cars[] without a bound, and the World's
+     * fields follow its 22 entries: a car past them is of a kind IndexCars
+     * skips, on the World's list only (the renderer walks the list; nothing
+     * reads the debug arrays its index 0 writes, 0x89CCF8) */
     uint32_t n0 = MR32(w + 0x10u), a2[2] = { 0, 0 };
+    int out = n0 >= WORLD_INDEX;
+    if (out) MR32(s->rec + 4u) = KIND_OUT;
     rh_call(c, FN_CREATECAR, grid, s->rec, 2, a2);
-    gcall0(c, FN_INDEXCARS, w);
+    if (!out) gcall0(c, FN_INDEXCARS, w);
     /* the new car is the one on the World's list with our racer record
      * (CreateCar's eax is not the car) */
     uint32_t car = 0, it = rd32(w);
-    for (int n = 0; it && it != w && n < 64 && ok(it, 0x9e0); n++, it = rd32(it)) if (rd32(it + 0x14u) == s->rec) car = it;
+    for (int n = 0; it && it != w && n < 128 && ok(it, 0x9e0); n++, it = rd32(it)) if (rd32(it + 0x14u) == s->rec) car = it;
     if (!car){ rlog("[roam] f=%ld slot %d: CreateCar made no car\n", rh_frame(), k); return -1; }
-    s->car = car; s->created = 1; s->world = w; s->activated = 1; g_created_n++; g_creates++;
-    keep_out_of_window(c, w);
-    /* the minimap makes its icons when the HUD is built: an AI racer's arrow
-     * for each car of the World's AI range then (by racer number, 0x4EC950),
-     * so a car made later has none.  They are made again, now with this one */
-    gcall0(c, FN_MM_REBUILD, 0);
+    s->car = car; s->created = 1; s->unindexed = out; s->world = w; s->activated = 1; g_created_n++; g_creates++;
+    if (!out){
+        keep_out_of_window(c, w);
+        /* the minimap makes its icons when the HUD is built: an AI racer's
+         * arrow for each car of the World's AI range then (by racer number,
+         * 0x4EC950), so a car made later has none.  They are made again, now
+         * with this one */
+        gcall0(c, FN_MM_REBUILD, 0);
+    }
     memcpy(GPTR(s->ride_orig), GPTR(s->rec + 0x10u), 0x8f0); s->have_orig = 1;
     make_inert(c, car);
     body_set(c, car, 0); s->ghost = 1;
     soft_park(c, car);
-    rlog("[roam] f=%ld slot %d: car of our own created: car 0x%08x, index %d, cars %u -> %u, AI range [%u, %u)\n", rh_frame(), k,
-            car, (int16_t)MR16(car + 8u), n0, MR32(w + 0x10u), MR32(w + 0x14u), MR32(w + 0x18u));
+    rlog("[roam] f=%ld slot %d: car of our own created: car 0x%08x, %s, cars %u -> %u, AI range [%u, %u)\n", rh_frame(), k,
+            car, out ? "outside the car index" : "indexed", n0, MR32(w + 0x10u), MR32(w + 0x14u), MR32(w + 0x18u));
     return 1;
 }
 /* start loading peer's ride for slot k */
@@ -759,9 +884,9 @@ static int begin_load(CPU *c, int k, const uint8_t *cfg, int len, uint32_t gen){
     Slot *s = &g_sl[k];
     rc_carcfg cc;
     if (rc_carcfg_decode(cfg, len, &cc) != RC_OK) return 0;
+    uint32_t skin = slot_skin(k);
+    if (!skin_textures(c, skin)) return 0;
     if (!pool_room(c, s, cc.type_name)) return 0;
-    uint32_t skin = k < 3 ? skin_of(s->car ? rd32(s->car + 0x14u) : 0) : 5u + (uint32_t)(k - 3);
-    if (!skin) skin = 2u + (uint32_t)k;
     uint32_t ride = s->ride_new;
     char why[96] = {0};
     int miss = build_ride(c, &cc, ride, skin, why, sizeof why);
@@ -776,6 +901,7 @@ static int begin_load(CPU *c, int k, const uint8_t *cfg, int len, uint32_t gen){
     }
     if (why[0]) rlog("[roam] f=%ld slot %d: %s's car: %s\n", rh_frame(), k, s->name, why);
     uint32_t a3[3] = { ride, 0, 0 };
+    s->load_wait = load_wait_us();
     s->h_new = rh_call(c, FN_LOADER_LOAD, G_CARLOADER, 0, 3, a3);
     uint32_t a2[2] = { 0, 0 }; rh_call(c, FN_LOADER_SERVICE, G_CARLOADER, 0, 2, a2);
     s->load_t0 = roam_plat_now_us(); s->load_f0 = rh_frame(); s->pending_cfg = 1; s->cfg_gen = gen;
@@ -792,8 +918,8 @@ static int finish_load(CPU *c, int k){
     uint32_t e = loader_entry(s->h_new);
     uint32_t done = e ? gcall1(c, FN_LOADER_LOADED, G_CARLOADER, e) : 0;
     if (!done){
-        if (roam_plat_now_us() - s->load_t0 > 15000000){
-            rlog("[roam] f=%ld slot %d: %s's car did not load in 15 s\n", rh_frame(), k, s->name);
+        if (roam_plat_now_us() - s->load_t0 > s->load_wait){
+            rlog("[roam] f=%ld slot %d: %s's car did not load in %.0f s\n", rh_frame(), k, s->name, s->load_wait / 1e6);
             unload_later(s->h_new); s->h_new = 0; s->pending_cfg = 0; g_load_fail++;
             return -1;
         }
@@ -930,8 +1056,9 @@ static void apply_pose(CPU *c, Slot *s, const rc_pose *P, float dt){
  * camera, off the screen and from 100 m on, scaled 25 m / distance within
  * 0.5 .. 1, and all of them while the game's player-names option is off.
  * In free roam that part does not exist and nothing uses the objects, so
- * slot k's car gets ONLINE_PLAYER_<k+1> the same way, from the same point
- * of the frame (roam_game_hud, after the HUD update: this frame's camera). */
+ * friends' cars get them the same way, from the same point of the frame
+ * (roam_game_hud, after the HUD update: this frame's camera), the nearest
+ * cars first.  Past the six, copies of ONLINE_PLAYER_1 (tag_clone). */
 #define G_VIEW1         0x00832e50u   /* eView 1: [+0] +0x80 view*projection, +0x40 camera (+0x40 position, +0x50 forward) */
 #define G_VIEW_W        0x00870980u   /* view size in pixels (0x5BC1F0, 0x5BC200) */
 #define G_VIEW_H        0x00870984u
@@ -948,7 +1075,9 @@ static void apply_pose(CPU *c, Slot *s, const rc_pose *P, float dt){
 #define FN_VIEW_SCREEN  0x005bc4a0u   /* thiscall view (out*, in*): world -> view pixels, z > 0 in front */
 #define TAG_SCR         0x100u        /* g_gmem scratch: +0 in, +0x10 out, +0x20 vectors, +0x40 "%s", +0x48 text */
 #define TAG_TEXT_MAX    (RC_NAME_MAX + 10)  /* "<name> (paused)" */
-static struct { uint32_t hud, obj[NSLOT]; uint8_t looked[NSLOT], shown[NSLOT]; char text[NSLOT][TAG_TEXT_MAX]; } g_tag;
+#define TAG_GAME        6             /* the HUD's ONLINE_PLAYER_1..6 */
+#define TAG_N           NSLOT
+static struct { uint32_t hud, obj[TAG_N]; uint8_t looked[TAG_N], shown[TAG_N]; char text[TAG_N][TAG_TEXT_MAX]; } g_tag;
 static void gstr(uint32_t a, const char *s, uint32_t cap){
     uint32_t i = 0;
     for (; s[i] && i + 1 < cap; i++) MR8(a + i) = (uint8_t)s[i];
@@ -959,17 +1088,51 @@ static void tag_hide(CPU *c, int k){
     if (g_tag.shown[k] && g_tag.obj[k]) gcall1(c, FN_FE_HIDE, 0, g_tag.obj[k]);
     g_tag.shown[k] = 0;
 }
-/* the label's FE object, looked up once per HUD */
+/* A label past the HUD's six: ONLINE_PLAYER_1 copied by its class's Clone
+ * (vtable slot 1, thiscall (1): its scripts copied too; its render object,
+ * +0x58, which that leaves unset, made by the renderer as for a new object), named
+ * ROAM_PLAYER_<k+1> (+0x10, the hash the package's lookups compare), and
+ * linked after it in the package's list of objects (FEPackage +0x48 count,
+ * +0x4C first, +0x50 last; an object's +4 next, +8 previous), which the FE
+ * renderer draws and the package frees with the HUD.  Only when
+ * ONLINE_PLAYER_1 is in that list itself, not in a group's. */
+#define FN_FE_PACKAGE   0x0052cef0u   /* cdecl (package name) -> FEPackage* */
+static uint32_t tag_clone(CPU *c, int k, uint32_t pkg, uint32_t o1){
+    uint32_t pk = gcall1(c, FN_FE_PACKAGE, 0, pkg);
+    if (!ok(pk, 0x54) || !ok(rd32(o1), 8)) return 0;
+    uint32_t it = rd32(pk + 0x4cu);
+    for (int n = 0; it && it != o1 && n < 4096; n++) it = rd32(it + 4u);
+    if (it != o1) return 0;
+    uint32_t one = 1, cl = rh_call(c, rd32(rd32(o1) + 4u), o1, 0, 1, &one);
+    if (!ok(cl, 0x78)) return 0;
+    MR32(cl + 0x58u) = 0;          /* its render object: the copy constructor leaves it unset, the FE renderer makes one */
+    char nm[24]; snprintf(nm, sizeof nm, "ROAM_PLAYER_%d", k + 1);
+    uint32_t sa = g_gmem + TAG_SCR + 0x48u;
+    gstr(sa, nm, 24);
+    MR32(cl + 0x10u) = gcall1(c, FN_FE_HASH, 0, sa);
+    uint32_t nx = rd32(o1 + 4u);
+    MR32(cl + 4u) = nx; MR32(cl + 8u) = o1; MR32(o1 + 4u) = cl;
+    if (nx) MR32(nx + 8u) = cl; else MR32(pk + 0x50u) = cl;
+    MR32(pk + 0x48u) += 1;
+    return cl;
+}
+/* the label's FE object, looked up (or made) once per HUD */
 static uint32_t tag_obj(CPU *c, int k, uint32_t pkg){
     if (g_tag.looked[k]) return g_tag.obj[k];
     g_tag.looked[k] = 1;
+    if (k >= TAG_GAME){
+        uint32_t o1 = tag_obj(c, 0, pkg);
+        g_tag.obj[k] = o1 ? tag_clone(c, k, pkg, o1) : 0;
+        if (!g_tag.obj[k]) rlog("[roam] f=%ld no copy of ONLINE_PLAYER_1 for name %d: one name fewer over friends' cars\n", rh_frame(), k + 1);
+        return g_tag.obj[k];
+    }
     char nm[24]; snprintf(nm, sizeof nm, "ONLINE_PLAYER_%d", k + 1);
     uint32_t sa = g_gmem + TAG_SCR + 0x48u;
     gstr(sa, nm, 24);
     uint32_t h = gcall1(c, FN_FE_HASH, 0, sa), a[2] = { pkg, h };
     g_tag.obj[k] = rh_call(c, FN_FE_FIND, 0, 0, 2, a);
     if (!ok(g_tag.obj[k], 0x70)) g_tag.obj[k] = 0;
-    if (!g_tag.obj[k]) rlog("[roam] f=%ld no %s in the HUD: no name over friend %d's car\n", rh_frame(), nm, k);
+    if (!g_tag.obj[k]) rlog("[roam] f=%ld no %s in the HUD: one name fewer over friends' cars\n", rh_frame(), nm);
     return g_tag.obj[k];
 }
 static void tag_text(CPU *c, int k, uint32_t obj, const char *name){
@@ -993,38 +1156,49 @@ static void tags_update(CPU *c){
     if (!hud || !ok(pkg, 0x20) || !g_gmem) return;
     uint32_t cam = rd32(G_VIEW1 + 0x40u);
     int on = O.labels && g_in_roam && MR8(G_SHOW_NAMES) && ok(cam, 0x60);
-    for (int k = 0; k < NSLOT; k++){
+    /* the cars a name shows on: in front of the camera, within 100 m and on
+     * the screen; the nearest TAG_N of them get one */
+    struct { int k; float d2, hx, hy, z; } t[NSLOT];
+    int n = 0;
+    for (int k = 0; on && k < NSLOT; k++){
         Slot *s = &g_sl[k];
-        if (!on || s->st != SL_ACTIVE || s->hidden || !s->name[0] || !ok(s->car, 0x9e0)){ tag_hide(c, k); continue; }
-        uint32_t obj = tag_obj(c, k, pkg);
-        if (!obj) continue;
+        if (s->st != SL_ACTIVE || s->hidden || !s->name[0] || !ok(s->car, 0x9e0)) continue;
         uint32_t car = s->car;
         float p[3], u[3], d[3];
         rd3(car + 0x60u, p); rd3(car + 0xb0u, u);
         for (int i = 0; i < 3; i++) d[i] = p[i] - MRF32(cam + 0x40u + 4u * (uint32_t)i);
         float ahead = d[0] * MRF32(cam + 0x50u) + d[1] * MRF32(cam + 0x54u) + d[2] * MRF32(cam + 0x58u);
         float d2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-        if (ahead < 0.f || !(d2 > 0.f) || !(d2 < 100.f * 100.f)){ tag_hide(c, k); continue; }
+        if (ahead < 0.f || !(d2 > 0.f) || !(d2 < 100.f * 100.f)) continue;
         uint32_t in = gvec(g_gmem + TAG_SCR, u[0] * 1.7f + p[0], u[1] * 1.7f + p[1], u[2] * 1.7f + p[2]);
         uint32_t out = g_gmem + TAG_SCR + 0x10u, av[2] = { out, in };
         rh_call(c, FN_VIEW_SCREEN, G_VIEW1, 0, 2, av);
         float x = MRF32(out), y = MRF32(out + 4u), z = MRF32(out + 8u);
         float w = (float)(int32_t)MR32(G_VIEW_W), h = (float)(int32_t)MR32(G_VIEW_H);
-        if (!(z > 0.f) || !(x >= 0.f) || !(x <= w) || !(y >= 0.f) || !(y <= h)){ tag_hide(c, k); continue; }
-        float hx = x / w * 640.f, hy = y / h * 480.f;
+        if (!(z > 0.f) || !(x >= 0.f) || !(x <= w) || !(y >= 0.f) || !(y <= h)) continue;
+        int j = n++;
+        for (; j > 0 && t[j - 1].d2 > d2; j--) t[j] = t[j - 1];      /* nearest first */
+        t[j].k = k; t[j].d2 = d2; t[j].hx = x / w * 640.f; t[j].hy = y / h * 480.f; t[j].z = z;
+    }
+    for (int i = 0; i < TAG_N; i++){
+        if (i >= n){ tag_hide(c, i); continue; }
+        uint32_t obj = tag_obj(c, i, pkg);
+        if (!obj) continue;
+        const Slot *s = &g_sl[t[i].k];
+        float hx = t[i].hx, hy = t[i].hy;
         rh_hud_marker(&hx, &hy);
-        char t[TAG_TEXT_MAX];
-        snprintf(t, sizeof t, s->paused ? "%s (paused)" : "%s", s->name);
-        tag_text(c, k, obj, t);
-        uint32_t ap[2] = { gvec(g_gmem + TAG_SCR + 0x20u, hx - 320.f, hy - 240.f, z), 0 };
+        char tx[TAG_TEXT_MAX];
+        snprintf(tx, sizeof tx, s->paused ? "%s (paused)" : "%s", s->name);
+        tag_text(c, i, obj, tx);
+        uint32_t ap[2] = { gvec(g_gmem + TAG_SCR + 0x20u, hx - 320.f, hy - 240.f, t[i].z), 0 };
         rh_call(c, FN_FE_POS, obj, 0, 2, ap);
-        float sc = 25.f / rc_sqrtf(d2);
+        float sc = 25.f / rc_sqrtf(t[i].d2);
         if (sc < 0.5f) sc = 0.5f;
         if (sc > 1.f) sc = 1.f;
         uint32_t as[2] = { gvec(g_gmem + TAG_SCR + 0x30u, sc, sc, 1.f), 0 };
         rh_call(c, FN_FE_SCALE, obj, 0, 2, as);
         gcall1(c, FN_FE_SHOW, 0, obj);
-        g_tag.shown[k] = 1;
+        g_tag.shown[i] = 1;
     }
 }
 
@@ -1119,11 +1293,11 @@ static void init_once(CPU *c){
 #endif
     O.labels = env_int("NFSU2_ROAM_LABELS", 1, 0, 1);
     O.test_owncars = env_int("NFSU2_ROAM_TEST_OWNCARS", 0, 0, 1);
-    O.max_cars = env_int("NFSU2_ROAM_MAX_CARS", NSLOT, 0, NSLOT);
+    O.max_cars = env_int("NFSU2_ROAM_MAX_CARS", MAX_CARS, 0, MAX_CARS);
     O.rate = env_int("NFSU2_ROAM_RATE", 20, 10, 60);
     O.delay_ms = env_int("NFSU2_ROAM_DELAY", 100, 0, 1000);
     O.extrap_ms = env_int("NFSU2_ROAM_EXTRAP", 250, 0, 1000);
-    O.carpool_kb = env_int("NFSU2_ROAM_CARPOOL_KB", 20000, 0, 64000);
+    O.carpool_kb = env_int("NFSU2_ROAM_CARPOOL_KB", 48000, 0, 128000);
     int port = env_int("NFSU2_ROAM_PORT", RC_DEFAULT_PORT, 1024, 65535);
     int maxp = env_int("NFSU2_ROAM_MAX_PLAYERS", RC_MAX_PLAYERS, 2, RC_MAX_PLAYERS);
     int disc = env_int("NFSU2_ROAM_DISCOVERY", 1, 0, 1);
@@ -1204,6 +1378,16 @@ static void periodic_log(int64_t host){
     g_cost_win_t0 = host; g_cost_win_sum = g_cost_win_n = g_cost_win_max = 0;
 }
 
+static int loads_waiting(void){
+    int n = 0;
+    for (int k = 0; k < NSLOT; k++) n += (g_sl[k].st == SL_CREATING) + (g_sl[k].h_new != 0);
+    return n;
+}
+/* What costs a frame time: a car of our own made (its paint textures, its
+ * first ride asked for, or CreateCar), a ride asked for.  At most two a
+ * frame: 32 friends arriving at once made 29 cars in one frame (112 ms) */
+#define HEAVY_PER_FRAME 2
+static int g_heavy;
 /* choose which friends get the slots: visible ones, nearest first; a slot
  * keeps its friend while the friend stays visible, unless a much nearer
  * friend has none (step 5: with the server's hub there can be more
@@ -1248,7 +1432,7 @@ static void assign(CPU *c, int64_t host){
          *    else one of our own */
         for (int j = 0; j < nslots && k < 0; j++){
             if (g_sl[j].st != SL_FREE) continue;
-            if (j < 3){
+            if (j < NOPP){
                 if (O.test_owncars) continue;
                 uint32_t w = world(), car = w && g_em == EM_HELD ? free_opponent_car(w) : 0;
                 if (!car) continue;
@@ -1291,7 +1475,13 @@ static void assign(CPU *c, int64_t host){
                     s->name, (double)v->dist, s->carname);
             continue;
         }
-        if (k >= 3 && !s->car){
+        if (g_heavy >= HEAVY_PER_FRAME){                                        /* the next frame */
+            s->peer = -1; s->peer_id = 0; s->name[0] = 0;
+            if (was == SL_FREE && k < NOPP){ s->car = 0; s->world = 0; }
+            return;
+        }
+        g_heavy++;
+        if (k >= NOPP && !s->car){
             if (!begin_create(c, k)){ s->peer = -1; s->peer_id = 0; s->name[0] = 0; tried[best] = 1; continue; }
             s->st = SL_CREATING; g_acquires++;
             rlog("[roam] f=%ld slot %d (car of our own, being created) for %s, %.0f m away\n", rh_frame(), k, s->name,
@@ -1301,13 +1491,13 @@ static void assign(CPU *c, int64_t host){
         if (!begin_load(c, k, v->cfg, v->cfg_len, v->cfg_gen)){
             /* not now (memory, record): try again later */
             s->peer = -1; s->peer_id = 0; s->name[0] = 0;
-            if (was == SL_FREE && k < 3){ s->car = 0; s->world = 0; }
+            if (was == SL_FREE && k < NOPP){ s->car = 0; s->world = 0; }
             tried[best] = 1;
             continue;
         }
         s->st = SL_LOADING; g_acquires++;
         rlog("[roam] f=%ld slot %d (%s) for %s, %.0f m away\n", rh_frame(), k,
-                k < 3 ? "free-roam opponent car" : "car of our own", s->name, (double)v->dist);
+                k < NOPP ? "free-roam opponent car" : "car of our own", s->name, (double)v->dist);
     }
 }
 
@@ -1473,6 +1663,7 @@ void roam_game_frame(CPU *c){
         for (int k = 0; k < NSLOT; k++) if (g_sl[k].st != SL_FREE && g_sl[k].st != SL_PARKED) want = 1;
         for (int i = 0; i < g_npv; i++) if (g_pv[i].visible && g_pv[i].has_cfg && g_pv[i].have_pose) want = 1;
         em_update(c, want, host);
+        g_heavy = 0;
         assign(c, host);
         for (int k = 0; k < NSLOT; k++){
             Slot *s = &g_sl[k];
@@ -1485,7 +1676,9 @@ void roam_game_frame(CPU *c){
             else if (!s->paused_since) s->paused_since = host;
             s->paused = s->paused_since && host - s->paused_since >= 1000000;
             if (s->st == SL_CREATING){
+                if (g_heavy >= HEAVY_PER_FRAME) continue;                          /* CreateCar: the next frame */
                 int r = finish_create(c, k);
+                if (r > 0) g_heavy++;
                 if (r < 0){ release(c, k, "could not create a car"); continue; }
                 if (r > 0){
                     if (v->cfg_len > 0 && begin_load(c, k, v->cfg, v->cfg_len, v->cfg_gen)) s->st = SL_LOADING;
@@ -1501,7 +1694,8 @@ void roam_game_frame(CPU *c){
             }
             if (!ok(s->car, 0x9e0)) continue;
             /* a new look: load it while the old one stays on */
-            if (!s->h_new && v->cfg_len > 0 && v->cfg_gen != s->cfg_gen) begin_load(c, k, v->cfg, v->cfg_len, v->cfg_gen);
+            if (!s->h_new && v->cfg_len > 0 && v->cfg_gen != s->cfg_gen && g_heavy < HEAVY_PER_FRAME && begin_load(c, k, v->cfg, v->cfg_len, v->cfg_gen))
+                g_heavy++;
             if (s->h_new){
                 int r = finish_load(c, k);
                 if (r < 0) s->cfg_gen = v->cfg_gen;                 /* do not retry this one */
@@ -1531,7 +1725,7 @@ void roam_game_frame(CPU *c){
              * get their own rides back and the outrun challengers return */
             if (!g_em_release_at) g_em_release_at = host + 60000000;
             if (host >= g_em_release_at){
-                for (int k = 0; k < 3; k++) if (g_sl[k].st == SL_PARKED){ restore(c, k); g_restores++; }
+                for (int k = 0; k < NOPP; k++) if (g_sl[k].st == SL_PARKED){ restore(c, k); g_restores++; }
                 if (!opp_slots_used()) em_let_go();
                 g_em_release_at = 0;
             }
@@ -1749,6 +1943,18 @@ int roam_game_inert(uint32_t car, uint32_t mode, uint32_t from){
         return 1;
     }
     return 0;
+}
+/* roam.c, bSlotPool's constructor (0x440DF0), at the game's start: the car
+ * loader's ride entries (CarLoadedRideInfoSlotPool, 0x1240 bytes each) are 22,
+ * and its Load (0x63AE70) waits until one is free, purging, for good when
+ * every entry is in use: the player's, the opponent cars', traffic's (up to
+ * 7), a car of our own's first ride, each friend's.  With free-roam
+ * multiplayer on there are 128 (600 KB). */
+#define G_RIDEPOOL_NAME 0x007a8694u   /* "CarLoadedRideInfoSlotPool" */
+uint32_t roam_game_pool(uint32_t name, uint32_t count){
+    if (name != G_RIDEPOOL_NAME || count >= RIDE_ENTRIES || !env_int("NFSU2_ROAM", 0, 0, 1)) return count;
+    rlog("[roam] the car loader holds %d rides, not %u (friends' cars)\n", RIDE_ENTRIES, count);
+    return RIDE_ENTRIES;
 }
 /* lifecycle.c, on the guest thread, when the app parks the game in the
  * background (Cmd-Tab, hidden: WM_ACTIVATEAPP(FALSE), then the game waits in

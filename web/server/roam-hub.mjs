@@ -9,14 +9,15 @@
 //                   ("N2FR", version 1, type, length, sender id, sequence, flags; little-endian), the payload,
 //                   then the CRC-32 of everything before it.
 //   hub -> player   every second a PEERS message: the players linked to it, { virtual address, port, id }, at most
-//                   `degree` (7: roam_core's group of 8 with itself); an empty one says the hub is there.
+//                   `degree` (32: roam_core's group of 33 with itself), or 7 for a player whose HELLO says core
+//                   version 1 (its group was 8, and it drops a longer list); an empty one says the hub is there.
 //
 // The links, in each room: the pairs of players with a position younger than staleMs (60 s: one in a shop or a
-// race keeps its links for a while), nearest first, each player at most `degree` of them.  Both ends of a link
+// race keeps its links for a while), nearest first, each player at most its degree of them.  Both ends of a link
 // list each other (roam_core takes a player only when both hear each other).  A link stays at least holdMs (5 s),
 // and after that counts as `keep` (half) its distance: a new link costs a handshake, the car's record and maybe a
 // car swapped on the screen, so it has to be much nearer to take the place of one (62 simulated players circling
-// within 240 m changed links 28 times a second with 20 % instead).  The game shows the nearest 5 of a player's
+// within 240 m changed links 28 times a second with 20 % instead).  The game shows a car for each of a player's
 // links (runtime/roam_game.c).
 //
 // What the hub keeps, in memory only: per player endpoint its virtual address, port, id, room hash, status, name
@@ -30,8 +31,9 @@ const KIND_UDP = 1;                             // the switch's frame kinds (lan
 const F_DATA = 16;                              // [0] kind, [4..7] source vip, [8..11] destination vip, [12..15] ports
 const MSG = { HELLO: 1, PEERS: 2, SNAP: 3, BYE: 8 };
 const HDR = 16, CRC = 4;
+const DEGREE_V1 = 7;                            // roam_core.h RC_PEERS_V1: what a core of version 1 reads
 
-export const ROAM_HUB_DEFAULTS = Object.freeze({ degree: 7, tickMs: 1000, staleMs: 60_000, goneMs: 6_000, keep: 0.5, holdMs: 5_000,
+export const ROAM_HUB_DEFAULTS = Object.freeze({ degree: 32, tickMs: 1000, staleMs: 60_000, goneMs: 6_000, keep: 0.5, holdMs: 5_000,
   maxPerVip: 2, maxPlayers: 1024 });
 
 /** one free-roam datagram, or null: the fields the hub needs (HELLO, SNAP, BYE), checked as roam_core.c's decoder does */
@@ -42,11 +44,11 @@ export function decodeRoam(d) {
   if (!sender) return null;
   if (type === MSG.HELLO) {
     if (end < 29) return null;
-    const status = d[19], room = d.readUInt32LE(24), nl = d[28];
+    const core = d.readUInt16LE(16), status = d[19], room = d.readUInt32LE(24), nl = d[28];
     if (nl > 24 || end < 29 + nl + 1 || status > 5) return null;
     const name = d.subarray(29, 29 + nl).toString('latin1');
     if (!/^[\x20-\x7e]*$/.test(name)) return null;
-    return { type, sender, status, room, name };
+    return { type, sender, core, status, room, name };
   }
   if (type === MSG.SNAP) {
     if (end < 22 + 52) return null;
@@ -60,7 +62,7 @@ export function decodeRoam(d) {
   return { type, sender };
 }
 
-/** a PEERS datagram: list = [{ vip, port, id }] (at most 7: roam_core's RC_MAX_PEERS) */
+/** a PEERS datagram: list = [{ vip, port, id }] (at most 32: roam_core's RC_MAX_PEERS; 7 for a core of version 1) */
 export function encodePeers(sender, seq, list) {
   const len = HDR + 1 + 10 * list.length + CRC, b = Buffer.alloc(len);
   b.write('N2FR', 0, 'latin1'); b[4] = 1; b[5] = MSG.PEERS; b.writeUInt16LE(len, 6);
@@ -107,13 +109,14 @@ export class RoamHub {
       for (const q of this.players.values()) if (q.vip === from) mine++;
       if (mine >= this.o.maxPerVip || this.players.size >= this.o.maxPlayers) { this.st.refused++; return; }
       p = { key, vip: from, port: sport, hubPort: dport, id: m.sender, room: m.room, status: m.status, name: m.name,
-        p: null, posAt: 0, seen: 0, links: new Map() };   // links: key -> since when
+        degree: 0, p: null, posAt: 0, seen: 0, links: new Map() };   // links: key -> since when
       this.players.set(key, p);
     }
     p.seen = this.now(); p.hubPort = dport;
     if (m.type === MSG.HELLO) {
       if (p.id !== m.sender) p.links = new Map();         // another start of the game on the same endpoint
       p.id = m.sender; p.room = m.room; p.status = m.status; p.name = m.name;
+      p.degree = m.core >= 2 ? this.o.degree : Math.min(this.o.degree, DEGREE_V1);
     } else if (m.type === MSG.SNAP && m.sender === p.id) { p.p = m.p; p.posAt = p.seen; p.status = m.status; }
   }
   drop(key) {
@@ -141,12 +144,12 @@ export class RoamHub {
         const a = list[i], b = list[j], since = a.links.get(b.key);
         const d = since === undefined ? Math.hypot(a.p[0] - b.p[0], a.p[1] - b.p[1], a.p[2] - b.p[2])
           : now - since < o.holdMs ? -1 : Math.hypot(a.p[0] - b.p[0], a.p[1] - b.p[1], a.p[2] - b.p[2]) * o.keep;
-        pairs.push({ d, a: a.key, b: b.key, since: since ?? now });
+        pairs.push({ d, a: a.key, b: b.key, da: a.degree, db: b.degree, since: since ?? now });
       }
       pairs.sort((x, y) => x.d - y.d);
-      for (const { a, b, since } of pairs) {
+      for (const { a, b, da, db, since } of pairs) {
         const la = links.get(a), lb = links.get(b);
-        if (la.size < o.degree && lb.size < o.degree) { la.set(b, since); lb.set(a, since); }
+        if (la.size < da && lb.size < db) { la.set(b, since); lb.set(a, since); }
       }
     }
     for (const p of this.players.values()) {

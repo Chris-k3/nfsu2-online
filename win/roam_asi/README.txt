@@ -43,7 +43,8 @@ If friends do not appear
 
 What to expect
 --------------
-- Up to 8 players in a group, the nearest 5 friends' cars shown at once.
+- Up to 33 players in a group, the nearest 5 friends' cars shown at once (the
+  game's own paint slots; the Mac and browser versions show 32).
 - Friends' cars are ghosts (you drive through them). Collide = 1 makes them
   solid: experimental.
 - While friends are in your free roam, the "outrun" challengers are off

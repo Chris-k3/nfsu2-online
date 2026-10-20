@@ -72,7 +72,8 @@
 // texts.
 //
 // Limits (sized to the game: free roam sends 20 snapshots a second of about
-// 95 bytes to each friend, 1.9 KB/s per friend; the host of a 3-player LAN
+// 95 bytes to each friend, 1.9 KB/s per friend, and with 32 friends near
+// about 700 frames and 70 KB a second in all; the host of a 3-player LAN
 // race sent at most 100 frames and 7.7 KB a second (the audit's measurement on
 // the switch); LAN play's frames are at most an Ethernet MTU,
 // runtime/web/net_proto.h NET_SLOT_BYTES 1536):
@@ -81,7 +82,8 @@
 //   frameRate    binary frames per second per connection (token bucket, burst = 2 s worth)
 //   byteRate     binary bytes per second per connection (the same)
 //   groupFrameRate, groupByteRate  the same for all connections of one client
-//                address together (the group id the server passes)
+//                address together (the group id the server passes): room for
+//                about 7 players behind one address with 32 friends each
 //   siteFrameRate, siteByteRate    and for all of one site (the site id)
 //                A broadcast costs its size times the players it reaches, so
 //                the switch never sends more for a client than these allow
@@ -99,7 +101,7 @@
 //                UDP: a flood never gets a slower player disconnected
 //   roamQueue    the same for kind 1 (free roam's snapshots, and LAN play's
 //                broadcasts), at a much shorter queue: about a second of free
-//                roam (a SNAP of 94 bytes, 20 a second from each of up to 7
+//                roam (a SNAP of 94 bytes, 20 a second from each of up to 32
 //                friends).  A car's position is of no use once it is that old
 //                (the game draws friends' cars 100 ms in the past and throws
 //                late ones away), so a receiver whose link falls behind gets
@@ -188,9 +190,9 @@ const STREAM_LOW = 64 << 10;    // a receiver with less than this queued gets st
 export const LAN_WSS_OPTIONS = Object.freeze({ autoPong: false });
 
 export const LAN_DEFAULTS = Object.freeze({
-  maxPeers: 128, maxFrame: 8192, frameRate: 1000, byteRate: 256 << 10, groupFrameRate: 2000, groupByteRate: 512 << 10,
-  siteFrameRate: 4000, siteByteRate: 1 << 20,
-  textRate: 20, maxText: 1024, ctlRate: 10, shedQueue: 256 << 10, roamQueue: 16 << 10, streamQueue: 2 << 20, streamShare: 1 << 20, stallMs: 1000,
+  maxPeers: 128, maxFrame: 8192, frameRate: 1000, byteRate: 256 << 10, groupFrameRate: 5000, groupByteRate: 512 << 10,
+  siteFrameRate: 10000, siteByteRate: 1 << 20,
+  textRate: 20, maxText: 1024, ctlRate: 10, shedQueue: 256 << 10, roamQueue: 64 << 10, streamQueue: 2 << 20, streamShare: 1 << 20, stallMs: 1000,
   sendBuffer: 8 << 20, keepaliveMs: 25_000, idleMs: 10 * 60_000, reserveMs: 60_000, groupReserve: 8, siteReserve: 16,
   resumeWaitMs: 5_000, onlineQueue: 1 << 20, peersMs: 250, fullPeersMs: 1000,
 });

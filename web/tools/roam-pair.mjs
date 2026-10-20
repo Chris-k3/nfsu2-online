@@ -4,7 +4,7 @@
 //
 //   node web/tools/roam-pair.mjs --out <dir> [--mode vlan|loop] [--port 8516 --http-port 8616]
 //        [--timeout 1200] [--drive 3600] [--watch 2400] [--stagger 2] [--bounce <s>]
-//        [--a Alice:roam_mp_drive.txt] [--b Bob:roam_mp_watch.txt] [--c Carol:<script>] [--d Dave:<script>]
+//        [--a Alice:roam_mp_drive.txt] [--b Bob:roam_mp_watch.txt] [--c Carol:<script>] [--d Dave:<script>] [--solo]
 //        [--env K=V ...] [--headed]
 //        [--base http://localhost:8616]   (use a server that is already running instead)
 //        [--https]   the pages load from https://localhost:<port> (the switch over wss://): our own server
@@ -30,7 +30,8 @@
 // mode loop: the test harness (as tools/roam_multi.sh on the Mac): each its own
 //            roam_port (47300 + i), peers 127.0.0.1:<the other's port>, the
 //            switch as the emulated loopback.
-// 2 to 4 instances (--c, --d add a third and a fourth).  Writes <out>/<name>.log
+// 2 to 4 instances (--c, --d add a third and a fourth; --solo: --a only, with
+// web/tools/roam-crowd.mjs's players on the same server).  Writes <out>/<name>.log
 // (the page console), <name>.pose.csv (the pose log from the page's OPFS) and
 // <out>/summary.json; then runs tools/roam_compare.py for the first (the driver)
 // against every other instance.
@@ -56,7 +57,8 @@ const OUT = path.resolve(opt('out', path.join(REPO, 'out/web/roam-pair')));
 const MODE = opt('mode', 'vlan');
 const TMO = +opt('timeout', 1200) * 1000;
 const STAGGER = +opt('stagger', 2) * 1000;
-const SPECS = [opt('a', 'Alice:roam_mp_drive.txt'), opt('b', 'Bob:roam_mp_watch.txt'), opt('c', null), opt('d', null)]
+const SPECS = (argv.includes('--solo') ? [opt('a', 'Alice:roam_mp_drive.txt')]
+  : [opt('a', 'Alice:roam_mp_drive.txt'), opt('b', 'Bob:roam_mp_watch.txt'), opt('c', null), opt('d', null)])
   .filter(Boolean).map(x => x.split(':'));
 const N = SPECS.length;
 const APP = opt('page', 'test') === 'app';

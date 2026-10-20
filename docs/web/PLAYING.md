@@ -151,9 +151,11 @@ Good to know:
 
 - **How many:** up to 1000 players on a server set up as VPS.md describes, 128 on one started by hand (its owner can
   change that). Only free roam and the LAN and Online screens take a place; single-player takes none. When it is
-  full, the game says so and lets you in by itself when a place frees up. The server pairs
-  each player with the 7 players nearest to them, and your game shows the 5 nearest cars at once; as you drive,
-  nearer cars take the place of farther ones.
+  full, the game says so and lets you in by itself when a place frees up. The server pairs each player with the 32
+  players nearest to them, and your game shows all 32 of their cars at once. Their names show over the cars within
+  100 m; five of them also get an arrow on the minimap. A player farther than 300 m sends you their car 5 times a
+  second instead of 20 (past 1 km, twice), which saves traffic and doesn't show at that distance. When many players
+  arrive at once, their cars load one after another, about two a second.
 - **Solid cars:** you collide with the other players' cars (Online, More online settings,
   Solid cars; off: you drive through them). A car that appears on top of yours, at a garage or after a jump, lets you
   through until you are apart. Each player's own game moves their car: a car you hit is pushed in its owner's game,

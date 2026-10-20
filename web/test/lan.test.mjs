@@ -705,7 +705,8 @@ async function rawPeer(port, name, query = '') {
   return s;
 }
 test('a flood of datagrams never gets a slower receiver cut: they are dropped for it, as a full link drops UDP', async () => {
-  const sw = await startSwitch({ sendBuffer: 256 << 10, shedQueue: 32 << 10, byteRate: 64 << 20, frameRate: 100000, groupByteRate: 64 << 20, groupFrameRate: 100000 });
+  const sw = await startSwitch({ sendBuffer: 256 << 10, shedQueue: 32 << 10, roamQueue: 16 << 10, byteRate: 64 << 20, frameRate: 100000,
+    groupByteRate: 64 << 20, groupFrameRate: 100000 });
   try {
     const victim = await rawPeer(sw.port, 'Victim');
     victim.pause();                                       // reads nothing: the slowest possible link

@@ -704,6 +704,9 @@ static void fill_hello(rc_session *s, rc_msg *m, const rc_peer *to){
     m->u.hello.listen_port = s->conf.port; m->u.hello.cfg_rev = s->cfg_rev; m->u.hello.room = s->conf.room;
     memcpy(m->u.hello.name, s->conf.name, sizeof m->u.hello.name);
     int n = 0;
+    /* a core of version 1 (the beacon and the hub may reach one too) reads 7
+     * ids at most, and drops a longer HELLO */
+    int cap = to && to->core_ver >= 2 ? RC_MAX_PEERS : RC_PEERS_V1;
     /* the ids we hear: our group first, then the established ones the hub's
      * last list left out (they are going), then the others that spoke lately;
      * with the group full not those (a peer that sees its id here takes us as
@@ -711,7 +714,7 @@ static void fill_hello(rc_session *s, rc_msg *m, const rc_peer *to){
      * one-sidedly, and never get a snapshot) */
     int full = group_count(s) + 1 >= s->conf.max_players;
     for (int pass = 0; pass < 3; pass++)
-        for (int i = 0; i < RC_TABLE && n < RC_MAX_PEERS; i++){
+        for (int i = 0; i < RC_TABLE && n < cap; i++){
             const rc_peer *p = &s->peer[i];
             if (!p->id || !p->last_rx_us) continue;
             if (pass < 2 && (p->state != RC_PS_EST || (pass == 0) != in_group(s, p))) continue;
@@ -724,7 +727,7 @@ static void fill_hello(rc_session *s, rc_msg *m, const rc_peer *to){
     if (to && to->id && to->last_rx_us && (to->state == RC_PS_EST || (!full && to->state == RC_PS_HEARD))){
         int have = 0;
         for (int k = 0; k < n; k++) if (m->u.hello.seen[k] == to->id) have = 1;
-        if (!have){ if (n < RC_MAX_PEERS) n++; m->u.hello.seen[n - 1] = to->id; }
+        if (!have){ if (n < cap) n++; m->u.hello.seen[n - 1] = to->id; }
     }
     m->u.hello.n_seen = (uint8_t)n;
 }
@@ -861,6 +864,7 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
         int first = !p->name[0];
         memcpy(p->name, m.u.hello.name, sizeof p->name);
         p->platform = m.u.hello.platform; p->status = m.u.hello.status; p->cfg_rev_seen = m.u.hello.cfg_rev;
+        p->core_ver = m.u.hello.core_ver;
         p->hears_us = 0;
         for (int k = 0; k < m.u.hello.n_seen; k++) if (m.u.hello.seen[k] == s->conf.self_id) p->hears_us = 1;
         if (p->hears_us) p->hears_miss = 0;
@@ -900,7 +904,12 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
         if (p->state != RC_PS_EST) return;
         p->rx_snap++; p->last_snap_rx = now; p->status = m.u.snap.status; p->cfg_rev_seen = m.u.snap.cfg_rev;
         /* the sender's snapshot sequence: a gap is snapshots lost on the way */
-        if (p->seq_init){ uint16_t d = (uint16_t)(m.h.seq - p->last_seq); if (d > 1 && d < 0x8000u) p->seq_lost += d - 1u; if (d && d < 0x8000u) p->last_seq = m.h.seq; }
+        if (p->seq_init){
+            uint16_t d = (uint16_t)(m.h.seq - p->last_seq), every = (uint16_t)(m.h.flags & RC_HF_EVERY);
+            if (every < 1) every = 1;                                      /* far away: every n-th (rc_push_state) */
+            if (d > every && d < 0x8000u) p->seq_lost += d - every;
+            if (d && d < 0x8000u) p->last_seq = m.h.seq;
+        }
         else { p->seq_init = 1; p->last_seq = m.h.seq; }
         for (int k = m.u.snap.n - 1; k >= 0; k--)
             rc_interp_insert(&p->mo, &m.u.snap.s[k], m.u.snap.epoch, m.u.snap.clock, m.u.snap.status, now, k == 0);
@@ -997,8 +1006,11 @@ void rc_tick(rc_session *s, int64_t now){
             if (p->state != RC_PS_EST) continue;
             m.u.peers.e[n].ip = p->ip; m.u.peers.e[n].port = p->port; m.u.peers.e[n].id = p->id; n++;
         }
-        m.u.peers.n = (uint8_t)n;
-        for (int i = 0; i < RC_TABLE && n; i++) if (s->peer[i].state == RC_PS_EST) tx(s, &s->peer[i], &m);
+        /* a core of version 1 gets the first 7 (it drops a longer list) */
+        for (int i = 0; i < RC_TABLE && n; i++) if (s->peer[i].state == RC_PS_EST){
+            m.u.peers.n = (uint8_t)(s->peer[i].core_ver >= 2 || n < RC_PEERS_V1 ? n : RC_PEERS_V1);
+            tx(s, &s->peer[i], &m);
+        }
         s->peers_dirty = 0; s->last_peers_tx = now;
     }
 }
@@ -1018,6 +1030,15 @@ void rc_set_cfg(rc_session *s, const uint8_t *rec, int len, int64_t now){
     memcpy(s->cfg, rec, (size_t)len); s->cfg_len = len;
     s->cfg_rev++; if (!s->cfg_rev) s->cfg_rev = 1;
     for (int i = 0; i < RC_TABLE; i++) if (s->peer[i].state == RC_PS_EST) send_cfg(s, &s->peer[i], 0);
+}
+/* Every how many snapshots peer p gets one: a car hundreds of metres away is
+ * out of sight, and with the hub's 32 nearest players most of a crowd's
+ * links cross the map.  Our position against its newest state's. */
+static int snap_every(const rc_peer *p, const rc_state *st){
+    if (!p->mo.n) return 1;
+    const float *q = p->mo.s[p->mo.n - 1].p;
+    float dx = q[0] - st->p[0], dy = q[1] - st->p[1], d2 = dx * dx + dy * dy;
+    return d2 > RC_VERYFAR_M * RC_VERYFAR_M ? 10 : d2 > RC_FAR_M * RC_FAR_M ? 4 : 1;
 }
 int rc_push_state(rc_session *s, const rc_state *st, int64_t now){
     int64_t iv = (int32_t)1000000 / (int32_t)s->conf.rate_hz;
@@ -1039,10 +1060,20 @@ int rc_push_state(rc_session *s, const rc_state *st, int64_t now){
     for (int k = 0; k < m.u.snap.n; k++) m.u.snap.s[k] = s->last[k];
     uint8_t b[RC_MAX_DGRAM]; int n = rc_encode(&m, b, sizeof b);
     if (n <= 0) return 0;
+    /* the same SNAP with header flags 4 and 10 for the peers far away, made
+     * when one needs it; each peer at its own phase, so that the far ones'
+     * snapshots spread over the ticks */
+    uint8_t bf[2][RC_MAX_DGRAM]; int nf[2] = { 0, 0 };
     for (int i = 0; i < RC_TABLE; i++){
         rc_peer *p = &s->peer[i];
         if (p->state != RC_PS_EST || !s->io.send) continue;
-        s->io.send(s->io.user, p->ip, p->port, b, n); s->tx++; s->tx_bytes += (uint32_t)n;
+        int e = snap_every(p, &s->last[0]);
+        if (e == 1){ s->io.send(s->io.user, p->ip, p->port, b, n); s->tx++; s->tx_bytes += (uint32_t)n; continue; }
+        if ((uint16_t)(s->seq + i) % (uint16_t)e) continue;
+        int j = e == 4 ? 0 : 1;
+        if (!nf[j]){ m.h.flags = (uint16_t)e; nf[j] = rc_encode(&m, bf[j], sizeof bf[j]); m.h.flags = 0; }
+        if (nf[j] <= 0) continue;
+        s->io.send(s->io.user, p->ip, p->port, bf[j], nf[j]); s->tx++; s->tx_bytes += (uint32_t)nf[j];
     }
     if (to_hub && s->io.send){
         s->io.send(s->io.user, s->conf.hub_ip, s->conf.hub_port, b, n); s->tx++; s->tx_bytes += (uint32_t)n;

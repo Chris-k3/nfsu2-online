@@ -64,10 +64,10 @@ typedef FILE rh_file;
  * 0.3 ms a frame on average (max 36 ms) against 20 us without the log.  The
  * buffer holds what the periodic rh_fflush (every 240 frames, roam_game.c)
  * writes, so that stays the only flush: per frame one L row (our car) and
- * one R row per friend's car shown (at most 5, roam_max_cars), each about
- * 145 bytes (147 at most in the measured runs), with room to 256.  64 KB
- * was 229 frames with one friend. */
-#define RH_POSELOG_BUF (240u * (1u + 5u) * 256u)
+ * one R row per friend's car shown (at most 32, roam_game.c NSLOT), each
+ * about 145 bytes (147 at most in the measured runs), with room to 256.
+ * 64 KB was 229 frames with one friend. */
+#define RH_POSELOG_BUF (240u * (1u + 32u) * 256u)
 static inline FILE *rh_fopen(const char *p){
     FILE *f = fopen(p, "w");
     /* musl ignores the size when setvbuf gets no buffer: give it one (one

@@ -2,8 +2,9 @@
 //   node --test web/test/roam-hub.test.mjs        (the wire test needs wasi-sdk in deps/)
 // 1. the wire: what runtime/roam_core.c sends the hub (HELLO, SNAP, BYE, encoded by the C core built for wasm,
 //    web/test/roam_hubwire.c) is what the hub reads, and the hub's PEERS lists decode in the C core;
-// 2. the links: nearest first, both ends of a link list each other, at most 7 per player, rooms apart, stale
-//    positions out, links kept at the edge, BYE and departures forgotten, the limits per address;
+// 2. the links: nearest first, both ends of a link list each other, at most 32 per player (7 for a core of
+//    version 1), rooms apart, stale positions out, links kept at the edge, BYE and departures forgotten, the
+//    limits per address;
 // 3. on the switch (lan.mjs): frames to 10.77.0.253 reach the hub and its lists come back to the browsers.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -33,9 +34,9 @@ function dgram(type, sender, payload) {
   b.writeUInt32LE(crc32(b.subarray(0, len - 4)), len - 4);
   return b;
 }
-function hello(sender, { room = 0, status = 2, name = 'p', seen = [], cfgRev = 3 } = {}) {
+function hello(sender, { room = 0, status = 2, name = 'p', seen = [], cfgRev = 3, core = 1 } = {}) {
   const nm = Buffer.from(name, 'latin1'), p = Buffer.alloc(13 + nm.length + 1 + 4 * seen.length);
-  p.writeUInt16LE(1, 0); p[2] = 1; p[3] = status; p.writeUInt16LE(47210, 4); p.writeUInt16LE(cfgRev, 6); p.writeUInt32LE(room >>> 0, 8);
+  p.writeUInt16LE(core, 0); p[2] = 1; p[3] = status; p.writeUInt16LE(47210, 4); p.writeUInt16LE(cfgRev, 6); p.writeUInt32LE(room >>> 0, 8);
   p[12] = nm.length; nm.copy(p, 13); p[13 + nm.length] = seen.length;
   seen.forEach((s, i) => p.writeUInt32LE(s, 14 + nm.length + 4 * i));
   return dgram(1, sender, p);
@@ -88,8 +89,8 @@ test('the wire: what roam_core sends the hub reads, and its PEERS lists decode i
   const run = (...a) => execFileSync(process.execPath, [path.join(REPO, 'web/test/wasi-run.mjs'), w, ...a], { encoding: 'utf8' }).trim();
   const h = Buffer.from(run('hello'), 'hex'), s = Buffer.from(run('snap'), 'hex'), b = Buffer.from(run('bye'), 'hex');
   const mh = decodeRoam(h), ms = decodeRoam(s), mb = decodeRoam(b);
-  assert.deepEqual(mh, { type: 1, sender: 0x1234ABCD, status: 2, room: fnv1a('blue'), name: 'Ann K.' });
-  assert.ok(hello(0x1234ABCD, { room: fnv1a('blue'), name: 'Ann K.', seen: [0x11, 0x22] }).equals(h), 'this test\'s HELLO = the C core\'s, byte for byte');
+  assert.deepEqual(mh, { type: 1, sender: 0x1234ABCD, core: 2, status: 2, room: fnv1a('blue'), name: 'Ann K.' });
+  assert.ok(hello(0x1234ABCD, { room: fnv1a('blue'), name: 'Ann K.', seen: [0x11, 0x22], core: 2 }).equals(h), 'this test\'s HELLO = the C core\'s, byte for byte');
   assert.equal(ms.type, 3); assert.equal(ms.sender, 0x1234ABCD); assert.equal(ms.status, 2);
   assert.deepEqual(ms.p, [1695.25, -883.5, 24.125], 'the newest state\'s position');
   assert.deepEqual(mb, { type: 8, sender: 0x1234ABCD });
@@ -100,7 +101,7 @@ test('the wire: what roam_core sends the hub reads, and its PEERS lists decode i
   assert.equal(run('peers', encodePeers(0xB0B, 10, []).toString('hex')), 'ok 0', 'an empty list (the hub is there)');
 });
 
-test('links: the nearest, both ends, at most 7 a player, only in free roam lately, rooms apart', () => {
+test('links of players of core version 1: the nearest, both ends, at most 7 a player, only in free roam lately, rooms apart', () => {
   const { hub, sent, step } = hubFor();
   // 20 players on a line 10 m apart, one far away, two in another room, one with no position yet
   for (let i = 0; i < 20; i++) { hub.frame(V(i), frame(V(i), hello(100 + i))); hub.frame(V(i), frame(V(i), snap(100 + i, [i * 10, 0, 0]))); }
@@ -133,6 +134,26 @@ test('links: the nearest, both ends, at most 7 a player, only in free roam latel
   for (let i = 1; i < 23; i++) hub.frame(V(i), frame(V(i), snap(100 + i, [i * 10, 0, 0])));
   hub.tick();
   assert.equal(lists(sent).get(`${V(0)}:47210`).length, 0, '61 s without a SNAP: no links');
+});
+
+test('links of players of core version 2: at most 32 a player, 7 for one of version 1 among them', () => {
+  const { hub, sent } = hubFor();
+  // 50 players on a line 10 m apart, player 15 of core version 1
+  for (let i = 0; i < 50; i++) {
+    hub.frame(V(i), frame(V(i), hello(100 + i, { core: i === 15 ? 1 : 2 })));
+    hub.frame(V(i), frame(V(i), snap(100 + i, [i * 10, 0, 0])));
+  }
+  hub.tick();
+  const L = lists(sent), of = i => L.get(`${V(i)}:47210`);
+  for (let i = 0; i < 50; i++) {
+    assert.ok(of(i).length <= (i === 15 ? 7 : 32), `player ${i}: at most ${i === 15 ? 7 : 32} (${of(i).length})`);
+    for (const e of of(i)) assert.ok(L.get(`${e.vip}:47210`).some(x => x.vip === V(i)), `player ${i}: its links list it too`);
+  }
+  assert.equal(of(15).length, 7, 'the version 1 player: 7, as its group of 8 holds');
+  const deg = i => (i === 15 ? 7 : 32), has = (i, j) => of(i).some(e => e.vip === V(j));
+  for (let i = 0; i < 50; i++) for (let j = 0; j < 50; j++)
+    if (i !== j && of(i).length < deg(i) && of(j).length < deg(j)) assert.ok(has(i, j), `${i} and ${j} both have room, so they are linked`);
+  assert.ok(of(25).length > 16, `more than 16 for a player of version 2 (${of(25).length})`);
 });
 
 test('links stay put at the edge, players come and go', () => {
@@ -174,16 +195,16 @@ test('limits: two endpoints a browser, a player starts with its HELLO, bad datag
   assert.equal(hub.info().bad, 3, 'a position out of the map: refused');
 });
 
-test('64 players in one place: each list at most 7, the tick stays cheap', () => {
-  const { hub, sent } = hubFor();
+for (const core of [1, 2]) test(`64 players of core version ${core} in one place: each list at most ${core === 1 ? 7 : 32}, the tick stays cheap`, () => {
+  const { hub, sent } = hubFor(), most = core === 1 ? 7 : 32;
   for (let i = 0; i < 64; i++) {
     const v = ip(`10.77.0.${2 + i}`);
-    hub.frame(v, frame(v, hello(400 + i))); hub.frame(v, frame(v, snap(400 + i, [Math.cos(i) * 30, Math.sin(i) * 30, 0])));
+    hub.frame(v, frame(v, hello(400 + i, { core }))); hub.frame(v, frame(v, snap(400 + i, [Math.cos(i) * 30, Math.sin(i) * 30, 0])));
   }
   for (let k = 0; k < 20; k++) hub.tick();
   const L = lists(sent.slice(-64)), n = [...L.values()].map(l => l.length);
-  assert.ok(n.every(x => x <= 7) && n.filter(x => x === 7).length >= 60, `lists of 7 (${n.join(' ')})`);
-  console.log(`64 players: ${hub.info().links} links, tick at most ${hub.info().tickMsMax.toFixed(2)} ms`);
+  assert.ok(n.every(x => x <= most) && n.filter(x => x === most).length >= 60, `lists of ${most} (${n.join(' ')})`);
+  console.log(`64 players of core version ${core}: ${hub.info().links} links, tick at most ${hub.info().tickMsMax.toFixed(2)} ms`);
   assert.ok(hub.info().tickMsMax < 50);
 });
 

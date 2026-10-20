@@ -3,15 +3,17 @@
 // driving along a track.  Real game pages (web/tools/roam-pair.mjs) can join the same server meanwhile.
 //
 //   node web/tools/roam-crowd.mjs [--base http://localhost:8655] [--n 62] [--seconds 120] [--room <name>]
-//        [--track <pose.csv>] [--speed 15] [--car 350Z] [--stagger 50] [--states 1] [--out <summary.json>]
+//        [--track <pose.csv>] [--speed 15] [--car 350Z] [--cars A,B,..|all] [--stagger 50] [--states 1] [--out <summary.json>]
 //
+// --cars   the players' cars in turn (car type names, CarTypeInfo +0), or all: the game's 31 player cars, PEUGOT to
+//          IMPREZAWRX; without it every player drives --car.
 // --states the car states in each SNAP: 1 as the browsers send them (roam_web.c), 3 as a LAN does.
 // --track  a pose log (NFSU2_ROAM_POSELOG): the first player's L rows, a real drive; every simulated player
 //          follows it from its own point along it, so they spread over the route.  Without one: circles of 20 to
 //          120 m around the new career's start (1695, -884, 24).
 // Each player is its own client address for the server's per-address limits (X-Forwarded-For, which the
 // server takes from this machine, its trusted proxy).  Every 10 s one line: players on the switch, their peers
-// (min, mean, max: the hub gives each at most 7), datagrams a second in and out, joins and "out of range"
+// (min, mean, max: the hub gives each at most 32), datagrams a second in and out, joins and "out of range"
 // leaves, and their bytes.  Needs wasi-sdk in deps/ (its clang) and the ws package (web/node_modules).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -25,6 +27,10 @@ const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && i + 1
 const BASE = opt('base', 'http://localhost:8655'), N = +opt('n', 62), SECONDS = +opt('seconds', 120), ROOM = opt('room', '');
 const SPEED = +opt('speed', 15), CAR = opt('car', '350Z'), STAGGER = +opt('stagger', 50), TRACK = opt('track', ''), OUTF = opt('out', '');
 const STATES = +opt('states', 1);
+const ALL_CARS = ['PEUGOT', 'FOCUS', 'COROLLA', '240SX', 'MIATA', 'CIVIC', 'PEUGOT106', 'CORSA', 'HUMMER', 'NAVIGATOR', 'ESCALADE', 'TIBURON',
+  'SENTRA', 'CELICA', 'IS300', 'SUPRA', 'GOLF', 'A3', 'RSX', 'ECLIPSE', 'TT', 'RX8', '350Z', 'G35', '3000GT', 'GTO', 'MUSTANGGT', 'SKYLINE',
+  'LANCEREVO8', 'RX7', 'IMPREZAWRX'];
+const CARS = opt('cars', '') === 'all' ? ALL_CARS : opt('cars', '') ? opt('cars', '').split(',') : [CAR];
 const HUB = 0x0A4D00FD, PORT = 47210;
 
 // the core for wasm: no C library, bulk memory for the copies
@@ -66,7 +72,7 @@ const st = { inDg: 0, outDg: 0, inB: 0, outB: 0, joins: 0, outOfRange: 0, otherL
 const tally = t => { const k = t.replace(/^Bot\d+/, '<bot>').replace(/\d+(\.\d+)*(:\d+)?/g, '#'); why[k] = (why[k] ?? 0) + 1; };
 class Bot {
   constructor(i) {
-    this.i = i; this.name = `Bot${String(i + 1).padStart(2, '0')}`; this.vip = 0; this.ready = false;
+    this.i = i; this.name = `Bot${String(i + 1).padStart(2, '0')}`; this.vip = 0; this.ready = false; this.car = CARS[i % CARS.length];
     this.id = (Math.random() * 0xfffffffe + 1) >>> 0;
   }
   async start() {
@@ -90,8 +96,8 @@ class Bot {
         if (m.t === 'welcome' && !this.vip) {
           this.vip = m.vip >>> 0; ws.send(JSON.stringify({ t: 'hello', name: this.name, deltas: 1 }));
           const io = this.x.crowd_io(), m8 = this.mem();
-          const b = Buffer.from(`${this.name}\0${CAR}\0`, 'latin1'); m8.set(b, io);
-          this.x.crowd_init(this.id, fnv1a(ROOM), HUB, PORT, bhash(CAR), STATES, nowUs());
+          const b = Buffer.from(`${this.name}\0${this.car}\0`, 'latin1'); m8.set(b, io);
+          this.x.crowd_init(this.id, fnv1a(ROOM), HUB, PORT, bhash(this.car), STATES, nowUs());
           this.ready = true;
         }
         return;

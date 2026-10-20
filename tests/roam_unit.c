@@ -537,7 +537,8 @@ static void t_review(void){
     g_loss_pct = 0;
     uint32_t got = k10 >= 0 ? g_n[1].peer[k10].rx_snap - rx0 : 0, gone = k10 >= 0 ? g_n[1].peer[k10].seq_lost - lost0 : 0;
     double rate = got + gone ? 100.0 * gone / (got + gone) : 0;
-    CHECK(rate > 7.0 && rate < 13.0, "10%% loss on the wire: %.1f%% of snapshots counted lost (%u of %u)", rate, gone, got + gone);
+    /* about 400 snapshots: one standard deviation is 1.5 points */
+    CHECK(rate > 6.0 && rate < 14.0, "10%% loss on the wire: %.1f%% of snapshots counted lost (%u of %u)", rate, gone, got + gone);
     /* different max_players: the full one does not list a waiting peer, so
      * nobody joins one-sidedly */
     mesh(3, 8); g_now = 0;
@@ -853,6 +854,76 @@ static void t_snapstates(void){
           "one state per SNAP: %u snapshots, %d buffered, no duplicates", k >= 0 ? g_n[1].peer[k].rx_snap : 0, k >= 0 ? g_n[1].peer[k].mo.n : 0);
 }
 
+/* ---- 4e. groups past 8: lists of up to RC_MAX_PEERS, 7 for a core of version 1 -- */
+static struct { int hello_n, hello_self, peers_n, hellos, peers, snaps, every; } g_big[40];
+static void big_send(void *u, uint32_t ip, uint16_t port, const uint8_t *b, int n){
+    (void)u; (void)ip;
+    rc_msg m; int k = port - 51000;
+    if (k < 0 || k >= 40 || rc_decode(b, n, &m) != RC_OK) return;
+    if (m.h.type == RC_MSG_HELLO){
+        g_big[k].hellos++; g_big[k].hello_n = m.u.hello.n_seen; g_big[k].hello_self = 0;
+        for (int i = 0; i < m.u.hello.n_seen; i++) if (m.u.hello.seen[i] == 0x1000u + (uint32_t)k) g_big[k].hello_self = 1;
+    }
+    if (m.h.type == RC_MSG_PEERS){ g_big[k].peers++; g_big[k].peers_n = m.u.peers.n; }
+    if (m.h.type == RC_MSG_SNAP){ g_big[k].snaps++; g_big[k].every = m.h.flags & RC_HF_EVERY; }
+}
+enum { BIG_NP = 20, BIG_OLD = 3 };
+/* the BIG_NP players' HELLOs, each hearing us; player BIG_OLD speaks core version 1 */
+static void big_hellos(rc_session *s, int64_t now){
+    for (int i = 0; i < BIG_NP; i++){
+        rc_msg m; memset(&m, 0, sizeof m); m.h.type = RC_MSG_HELLO; m.h.sender = 0x1000u + (uint32_t)i;
+        m.u.hello.core_ver = i == BIG_OLD ? 1 : RC_CORE_VER; m.u.hello.status = RC_ST_ROAM; m.u.hello.listen_port = (uint16_t)(51000 + i);
+        snprintf(m.u.hello.name, sizeof m.u.hello.name, "p%d", i); m.u.hello.n_seen = 1; m.u.hello.seen[0] = 0x77;
+        uint8_t b[RC_MAX_DGRAM]; int n = rc_encode(&m, b, sizeof b);
+        rc_receive(s, 0x7f000001u, (uint16_t)(51000 + i), b, n, now);
+    }
+}
+static void t_bigmesh(void){
+    enum { NP = BIG_NP, OLD = BIG_OLD };
+    static rc_session s; rc_config cf; memset(&cf, 0, sizeof cf);
+    cf.self_id = 0x77; cf.port = 50999; cf.platform = RC_PLAT_TOOL; cf.test_mode = 1; cf.max_players = RC_MAX_PLAYERS; cf.rate_hz = 20;
+    rc_io io = { 0, big_send, 0, 0 }; rc_session_init(&s, &cf, &io);
+    memset(g_big, 0, sizeof g_big);
+    int64_t now = 1000000;
+    big_hellos(&s, now); now += 200000; big_hellos(&s, now); now += 200000;
+    CHECK(rc_established(&s) == NP, "a group of %d: every player established (%d)", NP + 1, rc_established(&s));
+    memset(g_big, 0, sizeof g_big);
+    for (int64_t t = now; t < now + 11000000; t += 100000){                    /* HELLOs every 2 s, PEERS every 10 s */
+        if ((t - now) % 1000000 == 0) big_hellos(&s, t);
+        rc_tick(&s, t);
+    }
+    int ok_new = 1, ok_old = g_big[OLD].hellos > 0 && g_big[OLD].hello_n <= RC_PEERS_V1 && g_big[OLD].hello_self &&
+                             g_big[OLD].peers > 0 && g_big[OLD].peers_n == RC_PEERS_V1;
+    for (int i = 0; i < NP; i++) if (i != OLD && (!g_big[i].hellos || g_big[i].hello_n != NP || !g_big[i].hello_self || g_big[i].peers_n != NP)) ok_new = 0;
+    CHECK(ok_new, "a group of %d: HELLOs and PEERS lists of all %d to cores of version %d (to player 0: %d ids, %d peers)", NP + 1, NP, RC_CORE_VER,
+          g_big[0].hello_n, g_big[0].peers_n);
+    CHECK(ok_old, "the player of core version 1: HELLOs of at most 7 ids with its own (%d, %s), PEERS of 7 (%d)",
+          g_big[OLD].hello_n, g_big[OLD].hello_self ? "with it" : "WITHOUT it", g_big[OLD].peers_n);
+    /* snapshots by distance: player i is i * 100 + 50 m away; 20 a second
+     * within 300 m, 5 to 1000 m, 2 past that */
+    int64_t t = now + 11000000;
+    for (int i = 0; i < NP; i++){
+        rc_msg m; memset(&m, 0, sizeof m); m.h.type = RC_MSG_SNAP; m.h.sender = 0x1000u + (uint32_t)i; m.h.seq = 1;
+        m.u.snap.status = RC_ST_ROAM; m.u.snap.n = 1; m.u.snap.s[0].q[3] = 1; m.u.snap.s[0].p[0] = (float)(i * 100 + 50);
+        uint8_t b[RC_MAX_DGRAM]; int n = rc_encode(&m, b, sizeof b);
+        rc_receive(&s, 0x7f000001u, (uint16_t)(51000 + i), b, n, t);
+    }
+    memset(g_big, 0, sizeof g_big);
+    for (int64_t u = t; u < t + 2000000; u += 10000){
+        if ((u - t) % 1000000 == 0) big_hellos(&s, u);
+        rc_state st; memset(&st, 0, sizeof st); st.q[3] = 1; st.t_us = (uint32_t)u;
+        rc_set_status(&s, RC_ST_ROAM); rc_push_state(&s, &st, u);
+        rc_tick(&s, u);
+    }
+    int ok_rate = 1;
+    for (int i = 0; i < NP; i++){
+        int d = i * 100 + 50, want = d > 1000 ? 4 : d > 300 ? 10 : 40, every = d > 1000 ? 10 : d > 300 ? 4 : 0;
+        if (g_big[i].snaps < want - 1 || g_big[i].snaps > want + 1 || g_big[i].every != every) ok_rate = 0;
+    }
+    CHECK(ok_rate, "snapshots in 2 s by distance: %d at 50 m, %d at 450 m, %d at 1950 m (40, 10, 4), header flags %d %d %d",
+          g_big[0].snaps, g_big[4].snaps, g_big[19].snaps, g_big[0].every, g_big[4].every, g_big[19].every);
+}
+
 int main(int argc, char **argv){
     long fuzz = argc > 1 ? atol(argv[1]) : 200000;
     printf("roam_unit: core %d, protocol %d\n", RC_CORE_VER, RC_PROTO_VER);
@@ -863,6 +934,7 @@ int main(int argc, char **argv){
     t_review();
     t_hub();
     t_snapstates();
+    t_bigmesh();
     t_interp();
     t_guard();
     printf("roam_unit: %d passed, %d failed\n", g_pass, g_fail);

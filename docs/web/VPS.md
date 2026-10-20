@@ -392,10 +392,14 @@ The server's switch relays every packet: player → VPS → player. The delay be
 paths to the VPS, so pick a VPS location between you.
 
 - **Free roam's hub** (`web/server/roam-hub.mjs`, on 10.77.0.253 of the switch): every second it tells each player
-  in free roam which players are nearest (7 at most, in the same Room); the players then send their cars only to
-  those, straight through the switch, and the game shows the 5 nearest. For that the hub reads where each player's
-  car is; it keeps nothing on disk. `--roam-hub off` in the server's `command`: no hub, players find each other by
-  broadcast in groups of 8, the first to meet.
+  in free roam which players are nearest (32 at most, in the same Room; 7 for a game from before this change); the
+  players then send their cars only to those, straight through the switch, and the game shows all of them. For that
+  the hub reads where each player's car is; it keeps nothing on disk. `--roam-hub off` in the server's `command`:
+  no hub, players find each other by broadcast in groups of 33, the first to meet.
+  - **Traffic:** a player sends each linked player 20 snapshots a second (about 1.9 KB/s each way), 5 a second past
+    300 m and 2 past 1 km. 32 players in one spot: about 60 KB/s each way per player, and the switch relays about
+    2 MB/s (measured with 32 `web/tools/roam-crowd.mjs` players: 22,000 datagrams a second each way, 10 % of one core
+    for the server).
 - **Free roam** draws another player's car where it is now (solid cars, the default: the newest snapshot carried on
   by half the round trip), or with Solid cars off `roam_delay` milliseconds (100 by default) behind its newest
   snapshot. That delay hides the 50 ms between snapshots, jitter and the odd lost snapshot. Network delay comes on

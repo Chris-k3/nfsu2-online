@@ -21,7 +21,7 @@
 #include <stddef.h>
 
 #define RC_PROTO_VER     1          /* header byte 4; a different value is ignored */
-#define RC_CORE_VER      1          /* HELLO: implementation revision */
+#define RC_CORE_VER      2          /* HELLO: implementation revision (2: lists of up to RC_MAX_PEERS) */
 #define RC_MAGIC0        0x4E       /* "N2FR" */
 #define RC_MAGIC1        0x32
 #define RC_MAGIC2        0x46
@@ -31,9 +31,10 @@
 #define RC_HDR           16
 #define RC_CRC           4
 #define RC_NAME_MAX      24
-#define RC_MAX_PLAYERS   8          /* the mesh: this machine + 7 peers */
+#define RC_MAX_PLAYERS   33         /* the mesh: this machine + 32 peers */
 #define RC_MAX_PEERS     (RC_MAX_PLAYERS - 1)
-#define RC_TABLE         16         /* known addresses (configured, gossiped, heard) */
+#define RC_PEERS_V1      7          /* the most a core of version 1 reads in a HELLO's ids or a PEERS list */
+#define RC_TABLE         64         /* known addresses (configured, gossiped, heard) */
 #define RC_SNAP_STATES   3          /* states per SNAP (newest first): loss redundancy */
 #define RC_STATE_BYTES   52
 #define RC_BUF_STATES    32         /* jitter buffer per peer */
@@ -61,6 +62,11 @@ enum { RC_PLAT_MAC = 1, RC_PLAT_WIN = 2, RC_PLAT_TOOL = 3 };
 #define RC_BIT_HANDBRAKE 0x08
 #define RC_BIT_LIGHTS    0x10
 #define RC_BIT_HORN      0x20       /* the horn sounds (horn.c); older builds ignore it */
+/* header flags (SNAP): the peer gets every n-th snapshot (0 or 1: all); a
+ * peer far away gets fewer (rc_push_state), and its gap count follows */
+#define RC_HF_EVERY      0x000F
+#define RC_FAR_M         300.f      /* past this a peer gets every 4th snapshot (5 a second) */
+#define RC_VERYFAR_M     1000.f     /* and past this every 10th (2 a second) */
 /* decoder results */
 enum { RC_OK = 0, RC_E_SHORT = -1, RC_E_MAGIC = -2, RC_E_VERSION = -3, RC_E_LENGTH = -4,
        RC_E_CRC = -5, RC_E_TYPE = -6, RC_E_FIELD = -7, RC_E_TRAIL = -8, RC_E_RANGE = -9 };
@@ -257,6 +263,7 @@ typedef struct {
     int64_t  hub_listed_us;        /* the hub's list named it last (0: never) */
     char     name[RC_NAME_MAX + 1];
     uint8_t  platform, status;
+    uint16_t core_ver;             /* its HELLO's (0 until one came): below 2 it reads lists of RC_PEERS_V1 at most */
     uint16_t cfg_rev_seen;         /* what the peer announces */
     int      hears_us, lost;
     int      hears_miss;           /* with the hub: one HELLO without our id forgiven (hub mode only) */

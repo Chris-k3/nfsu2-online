@@ -587,6 +587,26 @@ void sub_005f46a0(CPU *c){
                 MR32(c->esp + 4u), MR32(c->esp), MR32(G.car + 0x28u));
     sub_005f46a0_orig(c);
 }
+/* GetTextureInfo(hash, default, ...) (cdecl): friends' cars past the game's
+ * six paint slots composite into textures of our own, DUMMY_SKIN7 and up
+ * (roam_game.c, roam_game_texture); every other name is the game's */
+void sub_004901d0_orig(CPU *c);
+uint32_t roam_game_texture(uint32_t hash);
+void sub_004901d0(CPU *c){
+    uint32_t ti = roam_game_texture(MR32(c->esp + 4u));
+    if (ti){ MR8(ti + 0x53u) = 1; c->eax = ti; POP32(c->eip); return; }     /* as the game marks a texture it hands out */
+    sub_004901d0_orig(c);
+}
+/* bSlotPool's constructor (cdecl size, count, name, flags): the car loader
+ * has 22 ride entries and waits for a free one (0x63AE70: purging until one
+ * is unreferenced, for good when none is); friends' cars need more
+ * (roam_game.c, roam_game_pool) */
+void sub_00440df0_orig(CPU *c);
+uint32_t roam_game_pool(uint32_t name, uint32_t count);
+void sub_00440df0(CPU *c){
+    MR32(c->esp + 8u) = roam_game_pool(MR32(c->esp + 12u), MR32(c->esp + 8u));
+    sub_00440df0_orig(c);
+}
 void sub_005eba30_orig(CPU *c);   /* Car::SetDriverType(this, type) */
 void sub_005eba30(CPU *c){
     if (G.on && c->ecx == G.car && probe())

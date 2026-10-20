@@ -217,13 +217,13 @@ static const struct { const char *key, *env; int kind; const char *vals; } g_key
     { "roam_peers",               "NFSU2_ROAM_PEERS",           K_PEERS | K_IC },
     { "roam_discovery",           "NFSU2_ROAM_DISCOVERY",       K_BOOL  | K_IC },
     { "roam_room",                "NFSU2_ROAM_ROOM",            K_TEXT  | K_IC },
-    { "roam_max_players",         "NFSU2_ROAM_MAX_PLAYERS",     K_INT   | K_IC, "2..8" },
-    { "roam_max_cars",            "NFSU2_ROAM_MAX_CARS",        K_INT   | K_IC, "0..5" },
+    { "roam_max_players",         "NFSU2_ROAM_MAX_PLAYERS",     K_INT   | K_IC, "2..33" },
+    { "roam_max_cars",            "NFSU2_ROAM_MAX_CARS",        K_INT   | K_IC, "0..32" },
     { "roam_collide",             "NFSU2_ROAM_COLLIDE",         K_BOOL  | K_IC },
     { "roam_rate",                "NFSU2_ROAM_RATE",            K_INT   | K_IC, "10..60" },
     { "roam_delay",               "NFSU2_ROAM_DELAY",           K_INT   | K_IC, "0..1000" },
     { "roam_extrap",              "NFSU2_ROAM_EXTRAP",          K_INT   | K_IC, "0..1000" },
-    { "roam_carpool_kb",          "NFSU2_ROAM_CARPOOL_KB",      K_INT   | K_IC, "0..64000" },
+    { "roam_carpool_kb",          "NFSU2_ROAM_CARPOOL_KB",      K_INT   | K_IC, "0..128000" },
     /* LAN play */
     { "network",                  "NFSU2_NET",                  K_ENUM, "lan|on|off" },
     { "lan_interface",            "NFSU2_NET_IFACE",            K_IFNAME   },
@@ -424,10 +424,10 @@ static const char *const k_template =
 "#roam_port = 47210\n"
 "# Look for friends with a network broadcast every 2 s.  [NFSU2_ROAM_DISCOVERY]\n"
 "#roam_discovery = on\n"
-"# Largest group, you included (2 to 8), and friends' cars shown at once\n"
-"# (0 to 5, the nearest).  [NFSU2_ROAM_MAX_PLAYERS, NFSU2_ROAM_MAX_CARS]\n"
-"#roam_max_players = 8\n"
-"#roam_max_cars = 5\n"
+"# Largest group, you included (2 to 33), and friends' cars shown at once\n"
+"# (0 to 32, the nearest).  [NFSU2_ROAM_MAX_PLAYERS, NFSU2_ROAM_MAX_CARS]\n"
+"#roam_max_players = 33\n"
+"#roam_max_cars = 32\n"
 "# on = friends' cars are solid: drawn where they are now, and one that\n"
 "# appears on your car lets you through until you are apart.  off = ghosts.\n"
 "# [NFSU2_ROAM_COLLIDE]\n"
@@ -440,7 +440,7 @@ static const char *const k_template =
 "#roam_extrap = 250\n"
 "# The free-roam car memory pool in KB, raised for friends' cars (the game's\n"
 "# own is 11000; it is never lowered).  [NFSU2_ROAM_CARPOOL_KB]\n"
-"#roam_carpool_kb = 20000\n"
+"#roam_carpool_kb = 48000\n"
 "\n"
 "# ---- LAN play ----------------------------------------------------------\n"
 "\n"
