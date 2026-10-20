@@ -1,7 +1,7 @@
 /* horn.c -- horns between players: the horn key, where each horn is heard
  * from, and a car horn synthesised over the game's sound.  See horn.h.
  *
- * The PC game has no horn.  Its input names one (JOY_EVENT_HONK_HORN, 0xA3,
+ * The PC game has no horn.  Its input names one (JOY_EVENT_HONK_HORN, 0xA2,
  * which no key or button map uses) and its audio a CARSFX_TrafficHorn class
  * (0x47E610), but none of its sound banks holds a horn: every sound in
  * SOUND/ was decoded (EA-XA, the BNKl banks of the .abk files) and looked
@@ -12,10 +12,11 @@
  * Each player's horn has its own pitch (one of five, from the name), so
  * players can tell who honks.
  *
- * The key: H, and the controller's left stick click.  Both are the game's
- * hydraulics ("Hydraulic Pressurize": H in its keyboard map 0x7FCAC0, the
- * left stick in the pad layout of dinput_pad.c), a feature the PC game does
- * not have.
+ * The key: N, which no control of the game's keyboard map (0x7FCAC0) uses,
+ * and the controller's left stick click while the player's car has no
+ * hydraulics (the callers say).  With the Hydraulics part (Car Specialties)
+ * that click is the game's Hydraulic Pressurize, as H is on the keyboard
+ * (the pad layout of dinput_pad.c; Hydraulic Bounce: the right stick, J).
  *
  * Where a horn is heard from: the player's own in the middle; another
  * player's from their car as the camera hears it, full within NEAR_M, then
@@ -37,7 +38,7 @@
 #include <string.h>
 #include <time.h>
 
-#define DIK_H     0x23
+#define DIK_N     0x31
 #define F_LOW     405.f              /* Hz: the low horn */
 #define F_HIGH    510.f              /* the high horn, a major third up */
 #define LEVEL     0.55f              /* another player's horn within NEAR_M: about -8 dBFS at its peaks */
@@ -49,10 +50,10 @@
 #define REUSE_MS  400u               /* a voice let go fades out (to -80 dB in 280 ms) before another horn takes it */
 #define TBL       2048
 
-int horn_held(void){
-    if (kbd_key_down(DIK_H)) return 1;
+int horn_held(int stick){
+    if (kbd_key_down(DIK_N)) return 1;
     PadState s;
-    return gamepad_read(&s) && (s.buttons & 1u << PAD_LS);
+    return stick && gamepad_read(&s) && (s.buttons & 1u << PAD_LS);
 }
 
 static uint32_t now_ms(void){

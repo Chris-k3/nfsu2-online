@@ -39,6 +39,11 @@
  *    (roam_game_hud).
  *  - horns: the player's goes out with the snapshots, friends' sound from
  *    their cars (horns_update, horn.c).
+ *  - hydraulics and nitrous: the snapshots' extension carries the wheel
+ *    places' heights and the nitrous left; a friend's car gets its wheels
+ *    where the friend's are (wheels_pose: the hydraulics lift the body, the
+ *    pose has that) and a shot of nitrous of its own while theirs is on, so
+ *    the game draws its streaks and flames (nos_pose).
  *  - outruns: two players who stay near each other can challenge each other
  *    to the game's own outrun, raced against each other's car (du_frame).
  *  - leaving free roam (shop, crib, race, menus) parks the cars; their
@@ -89,6 +94,13 @@
 #define FN_CAR_SECTION  0x005f6cd0u   /* thiscall (): track section / collider after a move */
 #define FN_ROADTRACK    0x005da330u   /* thiscall (car +0x8D8, pos*): road tracker, as Car::SetPosition does */
 #define FN_CAR_BODYPOS  0x005f5010u   /* thiscall (): +0x50 = +0x60 - centre-of-mass offset (and a ground snap) */
+#define FN_CAR_FX       0x0061fb00u   /* thiscall (effect, float strength, 0, 0), callee pops: a car's effect this frame */
+#define FX_NOS          0xau          /* ...the nitrous flames (0x5F5730: on the throttle, from 5 mph) */
+#define FX_PURGE        0xdu          /* ...the nitrous let out (standing, off the throttle; and before a race) */
+#define CAR_SUSP        0x380u        /* float[4]: each wheel's suspension offset (m, up), 0 at rest */
+#define CAR_NOS         0x40u         /* Car: its nitrous (+0x414 a full shot, +0x41C left, +0x420 on since; nos_left) */
+#define G_TICKS         0x0086518cu   /* game time, 4000 ticks a second: the nitrous's clock (0x592480) */
+#define G_HYD_LEVEL     0x007e949cu   /* int: every car's hydraulics level, -1: each its own (a debug setting) */
 #define FN_CAR_SETRIDE  0x00601110u   /* thiscall (RideInfo*) */
 #define FN_BODY_DISABLE 0x005930f0u   /* DynamicCollisionBody (car +0x3C): ++[+0x17] */
 #define FN_TYPE_BY_HASH 0x00610130u   /* cdecl (hash) -> CarTypeInfo* or 0 */
@@ -269,6 +281,7 @@ typedef struct {
     float    drawn[3];                        /* where the car was drawn last frame (+0x60) */
     float    com[3];                          /* centre-of-mass offset in the car's frame (forward, left, up) */
     float    spin[4], steer;                  /* the wheels' angles about the axle and the front wheels' steering (rad) */
+    float    susp[4];                         /* the wheels' suspension offsets as wheels_pose left them (CAR_SUSP) */
     int64_t  unseen_since;                    /* the peer is not visible: release after a while */
     int64_t  release_after;
     char     carname[RC_CFG_TYPE_NAME + 1];
@@ -312,6 +325,27 @@ void roam_game_event(int ev, int peer, const char *text){
 
 /* ---- the local car -------------------------------------------------------------------------- */
 static void rd3(uint32_t a, float *o){ o[0] = MRF32(a); o[1] = MRF32(a + 4u); o[2] = MRF32(a + 8u); }
+/* The car has hydraulics: the level its HYDRAULICS part gives it (RideInfo
+ * +0x581, UpdatePartsEnabled 0x61BCD0), or G_HYD_LEVEL's when that is not -1,
+ * as the driver's hydraulics controls (0x4078A0) read it */
+static int has_hydraulics(uint32_t car){
+    uint32_t ride = car ? rd32(car + 0x10u) : 0;
+    int32_t lv = ok(ride, 0x581) ? (int8_t)MR8(ride + 0x581u) : 0, ov = (int32_t)rd32(G_HYD_LEVEL);
+    return (ov > -1 ? ov : lv) != 0;
+}
+/* The car's nitrous while it is on: what is left of a full shot, in 1/100
+ * (0x5925B0: left / full; more than 1 for a car that had some over), 0 when
+ * it is off.  CAR_NOS +0x420 is when it went on, +0x41C what was left then,
+ * +0x414 a full shot (all in G_TICKS); 0x7FFFFFFF is no time. */
+static uint8_t nos_left(uint32_t car){
+    uint32_t n = car + CAR_NOS, since = MR32(n + 0x420u), full = MR32(n + 0x414u), left = MR32(n + 0x41cu);
+    if (!since || since == 0x7fffffffu || !full || full == 0x7fffffffu || left == 0x7fffffffu) return 0;
+    float r = ((float)(int32_t)left - (float)(int32_t)(MR32(G_TICKS) - since)) / (float)(int32_t)full;
+    if (!(r > 0.f)) return 0;
+    if (r >= 2.55f) return 255;
+    int v = (int)(r * 100.f + 0.5f);
+    return (uint8_t)(v < 1 ? 1 : v);
+}
 static int local_state(rc_state *s){
     uint32_t car = player_car();
     if (!ok(car, 0x9e0)) return 0;
@@ -331,6 +365,15 @@ static int local_state(rc_state *s){
     }
     if (s->speed < -0.5f) s->bits |= RC_BIT_REVERSE;
     if (g_horn) s->bits |= RC_BIT_HORN;
+    /* the extension: the wheel places' heights in the car (the suspension,
+     * and the hydraulics, which lift the body off its wheels) and the nitrous */
+    s->ext = 1;
+    for (uint32_t w = 0; w < 4; w++){
+        float z = MRF32(car + 0x130u + 0x40u * w + 0x38u);
+        s->wz[w] = __builtin_isfinite(z) ? z : 0.f;
+    }
+    s->nos = nos_left(car);
+    if (s->nos) s->bits |= RC_BIT_NOS;
     if (g_sync_paused > 1){ for (int i = 0; i < 3; i++){ s->v[i] = 0; s->w[i] = 0; } s->speed = 0; s->rpm = 0; }
     for (int i = 0; i < 3; i++) if (!__builtin_isfinite(s->p[i]) || !__builtin_isfinite(s->v[i])) return 0;
     /* the stamp clock may run a little faster than the world (it is pulled
@@ -612,6 +655,8 @@ static void soft_park(CPU *c, uint32_t car){
     for (uint32_t o = 0x70u; o < 0x7cu; o += 4) MRF32(car + o) = 0;
     for (uint32_t o = 0x110u; o < 0x11cu; o += 4) MRF32(car + o) = 0;
     MRF32(car + 0x42cu) = 0; MRF32(car + 0x430u) = 0;
+    MR32(car + CAR_NOS + 0x420u) = 0;                                    /* no nitrous (nos_pose) */
+    for (uint32_t w = 0; w < 4; w++) MRF32(car + CAR_SUSP + 4u * w) = 0.f;   /* the wheels at rest (wheels_pose) */
     gcall0(c, FN_CAR_SECTION, car);
 }
 /* The RandomEncounterManager (race coordinator +0xC40; Update 0x42EDF0):
@@ -1015,8 +1060,9 @@ static void sincos_pi(float a, float *sn, float *cs){
  * left there, and with a NaN every later frame's wheels were NaN, the tires
  * gone for good (reported in play, mostly after a crash; with the offsets
  * poked to NaN the wheels vanish, at 0.8 they float over the car).  So here
- * the offsets go back to 0 and the places are written every frame, and the
- * first times that was needed are logged.  Spin: the wheel's angle goes down by
+ * the offsets go back to ours (0, or the friend's wheel heights) and the
+ * places are written every frame, and the first times that was needed are
+ * logged.  Spin: the wheel's angle goes down by
  * speed / tyre radius (RidePhysicsInfo +0x20 + 0x30 k) as the car goes
  * forward.  Steering: the friend's own, the controls' +0x1e0 that goes on the
  * wire as steer.  It is the angle the game's physics turns the front wheels
@@ -1026,7 +1072,6 @@ static void sincos_pi(float a, float *sn, float *cs){
  * for the keys' full lock standing still); so whatever the friend steers
  * shows, counter-steer and standing still too.  Smoothed over 80 ms, at most
  * 0.8 rad. */
-#define CAR_SUSP        0x380u        /* float[4]: each wheel's suspension offset (m, up), 0 at rest */
 static void wheels_pose(Slot *s, const rc_pose *P, float dt){
     uint32_t car = s->car, ph = MR32(car + 0x20u);
     int phok = ok(ph, 0xc0);
@@ -1042,8 +1087,8 @@ static void wheels_pose(Slot *s, const rc_pose *P, float dt){
     float susp[4]; int moved = 0;
     for (uint32_t w = 0; w < 4; w++){
         susp[w] = MRF32(car + CAR_SUSP + 4u * w);
-        moved |= susp[w] != 0.f;                                     /* a NaN too */
-        MRF32(car + CAR_SUSP + 4u * w) = 0.f;
+        moved |= susp[w] != s->susp[w] && susp[w] != 0.f;            /* a NaN too; 0 is at rest (soft_park) */
+        MRF32(car + CAR_SUSP + 4u * w) = s->susp[w] = 0.f;
     }
     if (moved && s->wheelfix++ < 3)
         rlog("[roam] f=%ld slot %d: %s's car had its wheels moved (suspension %g %g %g %g, put back into physics mode 0 %u times): put back\n",
@@ -1067,14 +1112,42 @@ static void wheels_pose(Slot *s, const rc_pose *P, float dt){
             MRF32(b + 0x00u) = cy;  MRF32(b + 0x04u) = sy;
             MRF32(b + 0x10u) = -sy; MRF32(b + 0x14u) = cy;
         }
-        /* the wheel's and the brake's place, at rest (0x5921B0's with offset 0) */
+        /* the wheel's and the brake's place: at rest (0x5921B0's with offset
+         * 0), or where the friend's are, when their game sends that (rc_pose
+         * wz: their suspension, and their hydraulics lifting the body off the
+         * wheels); that height's offset goes into CAR_SUSP too, so the game's
+         * own build next frame and the render's second set of wheel places
+         * (0x5EC7F0) have it as well */
         float x = phok ? MRF32(ph + 0x10u + 0x30u * w) : 0.f, y = phok ? MRF32(ph + 0x14u + 0x30u * w) : 0.f,
               z = phok ? MRF32(ph + 0x18u + 0x30u * w) : 0.f;
         if (phok && __builtin_fabsf(x) < 4.f && __builtin_fabsf(y) < 2.f && __builtin_fabsf(z) < 2.f){
-            MRF32(m + 0x30u) = x; MRF32(m + 0x34u) = y; MRF32(m + 0x38u) = z;
-            MRF32(b + 0x30u) = x; MRF32(b + 0x34u) = y; MRF32(b + 0x38u) = z;
+            float o = P->ext && P->wz[w] > -2.f && P->wz[w] < 2.f ? P->wz[w] - z : 0.f;
+            MRF32(m + 0x30u) = x; MRF32(m + 0x34u) = y; MRF32(m + 0x38u) = z + o;
+            MRF32(b + 0x30u) = x; MRF32(b + 0x34u) = y; MRF32(b + 0x38u) = z + o;
+            MRF32(car + CAR_SUSP + 4u * w) = s->susp[w] = o;
         }
     }
+}
+/* A friend's car's nitrous (a sender of core version 4 and up; an older
+ * one's car has none; its wheel heights are wheels_pose's): the car gets a
+ * shot of its own that stays as full as the friend's, and the game draws for
+ * it what it draws for any car on nitrous: the tail-light streaks (0x61AE90)
+ * and, for a car in the car index, the flames (0x5F5730, from the World's
+ * update).  A car outside the index gets the flames here, as 0x5F5730 would
+ * give them: FX_NOS on the throttle from 5 mph, FX_PURGE otherwise and while
+ * no race runs. */
+#define NOS_FULL        40000u        /* the friend's car's full shot: 10 s (a frame on, its share is the same within 0.2 %) */
+static void nos_pose(CPU *c, Slot *s, const rc_pose *P){
+    uint32_t car = s->car, n = car + CAR_NOS;
+    if (!P->ext || !P->nos){ if (MR32(n + 0x420u)) MR32(n + 0x420u) = 0; return; }
+    uint32_t now = MR32(G_TICKS);
+    MR32(n + 0x414u) = NOS_FULL; MR32(n + 0x41cu) = (uint32_t)P->nos * (NOS_FULL / 100u); MR32(n + 0x420u) = now ? now : 1u;
+    if (!s->unindexed) return;
+    uint32_t ctl = rd32(car + 0x30u), race = rd32(G_RACE);
+    float thr = ok(ctl, 0x220) ? __builtin_fabsf(MRF32(ctl + 0x20cu)) : 0.f, mph = MRF32(car + 0x430u) * 2.237f;
+    uint32_t a[4] = { thr > 0.001f && mph >= 5.f ? FX_NOS : FX_PURGE, 0x3f800000u, 0, 0 };   /* strength 1.0 */
+    rh_call(c, FN_CAR_FX, car, 0, 4, a);
+    if (race && rd32(race) <= 3u){ a[0] = FX_PURGE; rh_call(c, FN_CAR_FX, car, 0, 4, a); }
 }
 static void apply_pose(CPU *c, Slot *s, const rc_pose *P, float dt){
     uint32_t car = s->car;
@@ -1102,6 +1175,7 @@ static void apply_pose(CPU *c, Slot *s, const rc_pose *P, float dt){
     gcall1(c, FN_ROADTRACK, car + 0x8d8u, car + 0x60u);
     gcall0(c, FN_CAR_SECTION, car);
     wheels_pose(s, P, dt);
+    nos_pose(c, s, P);
     s->pose_frames++;
 }
 
@@ -2290,9 +2364,10 @@ void roam_game_frame(CPU *c){
         }
     }
     /* local state and look; the horn only while the world runs (not in the
-     * pause menu, the map or the messages) */
+     * pause menu, the map or the messages), the stick click not for a car
+     * with hydraulics (horn.h) */
     int world_runs = in_roam && g_sync_paused <= 1 && !g_parked;
-    g_horn = world_runs && rh_horn_held();
+    g_horn = world_runs && rh_horn_held(!has_hydraulics(player_car()));
     rc_state ls; int have_ls = in_roam && local_state(&ls);
     uint8_t cfgb[RC_CFG_MAX]; int cfgn = 0; char tname[RC_CFG_TYPE_NAME + 1] = {0};
     if (in_roam && host >= g_cfg_next){ cfgn = local_cfg(cfgb, sizeof cfgb, tname); g_cfg_next = host + 5000000; }
@@ -2555,6 +2630,8 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
                     sqrt((double)(dx * dx + dy * dy)), car ? MR16(car + 0x40cu) : 0, car ? MR8(car + 0x5c0u) : 0, car ? MR8(car + 0x550u) : 0,
                     car ? MR32(car + 0x24u) : 0, car ? MR32(car + 0x28u) : 0, car ? MR32(car + 0x554u) : 0, car ? (int16_t)MR16(car + 8u) : -1,
                     car ? (double)MRF32(car + 0x50u) : 0, car ? (double)MRF32(car + 0x54u) : 0, car ? (double)MRF32(car + 0x58u) : 0);
+            if (car) rlog("[roam]     nitrous %u%%, wheels at %.3f %.3f %.3f %.3f m in the car\n", nos_left(car),
+                          (double)MRF32(car + 0x168u), (double)MRF32(car + 0x1a8u), (double)MRF32(car + 0x1e8u), (double)MRF32(car + 0x228u));
         }
         return 1;
     }

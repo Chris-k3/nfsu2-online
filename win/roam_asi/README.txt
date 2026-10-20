@@ -55,8 +55,9 @@ What to expect
 - A friend in a shop, the garage, a race or the menus disappears and comes
   back when they return to free roam.
 - Traffic, races, money and saves are your own; nothing of your career is
-  sent. Only your car's position and its look.
-- No horn: players in the browser and the Mac port honk with H, but this
+  sent. Only your car's position and its look (with its hydraulics and
+  nitrous: friends see the car lift and bounce, and the nitrous trails).
+- No horn: players in the browser and the Mac port honk with N, but this
   plugin neither sounds one nor plays theirs.
 
 Uninstall: delete the two files.

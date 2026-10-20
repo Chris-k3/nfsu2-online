@@ -15,7 +15,7 @@ typedef char rc_assert_float[(sizeof(float) == 4) ? 1 : -1];
 typedef char rc_assert_u32[(sizeof(uint32_t) == 4) ? 1 : -1];
 typedef char rc_assert_i64[(sizeof(int64_t) == 8) ? 1 : -1];
 typedef char rc_assert_state[(RC_STATE_BYTES == 52) ? 1 : -1];
-typedef char rc_assert_snap[(RC_HDR + 6 + RC_SNAP_STATES * RC_STATE_BYTES + RC_CRC <= RC_MAX_DGRAM) ? 1 : -1];
+typedef char rc_assert_snap[(RC_HDR + 6 + RC_SNAP_STATES * (RC_STATE_BYTES + RC_STATEX_BYTES) + RC_CRC <= RC_MAX_DGRAM) ? 1 : -1];
 typedef char rc_assert_cfg[(RC_CFG_MAX <= RC_CFG_FRAG * RC_CFG_MAXFRAG) ? 1 : -1];
 
 /* ---- byte helpers ---------------------------------------------------------- */
@@ -200,7 +200,28 @@ static void put_state(rc_w *w, const rc_state *s){
     rc_put8(w, (uint8_t)s->gear);
     rc_put8(w, s->bits);
 }
+/* the extension (RC_HF_STATEX): a state without one has the length 0 */
+static void put_statex(rc_w *w, const rc_state *s){
+    if (!s->ext){ rc_put8(w, 0); return; }
+    rc_put8(w, RC_STATEX_BYTES - 1);
+    for (int i = 0; i < 4; i++) rc_put16(w, (uint16_t)q16(f_clamp(s->wz[i], -32.f, 32.f), 1000.f));
+    rc_put8(w, s->nos);
+}
+static int get_statex(rc_r *r, rc_state *s){
+    uint32_t n = rc_get8(r);
+    if (r->err) return RC_E_SHORT;
+    if (!n) return RC_OK;
+    if (n < RC_STATEX_BYTES - 1) return RC_E_FIELD;
+    if (!r_have(r, n)) return RC_E_SHORT;
+    for (int i = 0; i < 4; i++) s->wz[i] = (float)(int16_t)rc_get16(r) / 1000.f;
+    s->nos = (uint8_t)rc_get8(r);
+    r->n += n - (RC_STATEX_BYTES - 1);                              /* a newer core's fields */
+    s->ext = 1;
+    return RC_OK;
+}
 static int get_state(rc_r *r, rc_state *s){
+    s->ext = 0; s->nos = 0;
+    for (int i = 0; i < 4; i++) s->wz[i] = 0;
     s->t_us = rc_get32(r);
     for (int i = 0; i < 3; i++) s->p[i] = rc_getf(r);
     for (int i = 0; i < 3; i++) s->v[i] = rc_getf(r);
@@ -254,7 +275,10 @@ int rc_encode(const rc_msg *m, uint8_t *out, int cap){
         if (m->u.snap.n < 1 || m->u.snap.n > RC_SNAP_STATES) return -1;
         rc_put8(&w, m->u.snap.status); rc_put8(&w, m->u.snap.epoch); rc_put16(&w, m->u.snap.cfg_rev);
         rc_put8(&w, m->u.snap.n); rc_put8(&w, m->u.snap.clock);
-        for (int i = 0; i < m->u.snap.n; i++) put_state(&w, &m->u.snap.s[i]);
+        for (int i = 0; i < m->u.snap.n; i++){
+            put_state(&w, &m->u.snap.s[i]);
+            if (m->h.flags & RC_HF_STATEX) put_statex(&w, &m->u.snap.s[i]);
+        }
         break;
     case RC_MSG_CFG:
         if (m->u.cfg.nfrag < 1 || m->u.cfg.nfrag > RC_CFG_MAXFRAG || m->u.cfg.frag >= m->u.cfg.nfrag ||
@@ -326,7 +350,10 @@ int rc_decode(const uint8_t *buf, int len, rc_msg *m){
         m->u.snap.cfg_rev = (uint16_t)rc_get16(&r); m->u.snap.n = (uint8_t)rc_get8(&r); m->u.snap.clock = (uint8_t)rc_get8(&r);
         if (r.err) return RC_E_SHORT;
         if (m->u.snap.n < 1 || m->u.snap.n > RC_SNAP_STATES || m->u.snap.status >= RC_ST__N) return RC_E_FIELD;
-        for (int i = 0; i < m->u.snap.n; i++){ int e = get_state(&r, &m->u.snap.s[i]); if (e) return e; }
+        for (int i = 0; i < m->u.snap.n; i++){
+            int e = get_state(&r, &m->u.snap.s[i]); if (e) return e;
+            if ((m->h.flags & RC_HF_STATEX) && (e = get_statex(&r, &m->u.snap.s[i]))) return e;
+        }
         break; }
     case RC_MSG_CFG:
         m->u.cfg.cfg_rev = (uint16_t)rc_get16(&r); m->u.cfg.frag = (uint8_t)rc_get8(&r);
@@ -486,12 +513,14 @@ static void lerp_rest(const rc_state *a, const rc_state *b, float u, rc_pose *o)
     o->speed = a->speed + u * (b->speed - a->speed);
     const rc_state *n = u < 0.5f ? a : b;
     o->gear = n->gear; o->bits = n->bits;
+    o->ext = n->ext; o->nos = n->nos;
+    for (int i = 0; i < 4; i++) o->wz[i] = a->ext && b->ext ? a->wz[i] + u * (b->wz[i] - a->wz[i]) : n->wz[i];
 }
 static void from_state(const rc_state *s, rc_pose *o){
     for (int i = 0; i < 3; i++){ o->p[i] = s->p[i]; o->v[i] = s->v[i]; o->w[i] = s->w[i]; }
-    for (int i = 0; i < 4; i++) o->q[i] = s->q[i];
+    for (int i = 0; i < 4; i++){ o->q[i] = s->q[i]; o->wz[i] = s->wz[i]; }
     o->steer = s->steer; o->throttle = s->throttle; o->brake = s->brake; o->rpm = s->rpm; o->speed = s->speed;
-    o->gear = s->gear; o->bits = s->bits;
+    o->gear = s->gear; o->bits = s->bits; o->ext = s->ext; o->nos = s->nos;
 }
 int rc_interp_peek(const rc_interp *ip, int64_t rt, int64_t cap_us, rc_pose *o){
     memset(o, 0, sizeof *o); o->q[3] = 1;
@@ -729,7 +758,8 @@ int rc_add_peer(rc_session *s, uint32_t ip, uint16_t port, int configured, int64
 /* `to`: the peer it goes to (none for the beacon and the hub) */
 static void fill_hello(rc_session *s, rc_msg *m, const rc_peer *to){
     hdr(s, m, RC_MSG_HELLO);
-    if (s->conf.duels) m->h.flags = RC_HF_DUELS;
+    m->h.flags = RC_HF_STATEX;
+    if (s->conf.duels) m->h.flags |= RC_HF_DUELS;
     if (!to) m->h.flags |= RC_HF_ALL;
     m->u.hello.core_ver = RC_CORE_VER; m->u.hello.platform = s->conf.platform; m->u.hello.status = s->status;
     m->u.hello.listen_port = s->conf.port; m->u.hello.cfg_rev = s->cfg_rev; m->u.hello.room = s->conf.room;
@@ -896,6 +926,7 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
         memcpy(p->name, m.u.hello.name, sizeof p->name);
         p->platform = m.u.hello.platform; p->status = m.u.hello.status; p->cfg_rev_seen = m.u.hello.cfg_rev;
         p->core_ver = m.u.hello.core_ver; p->duels = (m.h.flags & RC_HF_DUELS) != 0;
+        p->statex = (m.h.flags & RC_HF_STATEX) != 0;
         int heard = 0;
         for (int k = 0; k < m.u.hello.n_seen; k++) if (m.u.hello.seen[k] == s->conf.self_id) heard = 1;
         /* the beacon of a group past 8: a full list without our id (RC_HF_ALL) */
@@ -1081,6 +1112,7 @@ static int snap_every(const rc_peer *p, const rc_state *st){
     float dx = q[0] - st->p[0], dy = q[1] - st->p[1], d2 = dx * dx + dy * dy;
     return d2 > RC_VERYFAR_M * RC_VERYFAR_M ? 10 : d2 > RC_FAR_M * RC_FAR_M ? 4 : 1;
 }
+#define SNAP_MAX (RC_HDR + 6 + RC_SNAP_STATES * (RC_STATE_BYTES + RC_STATEX_BYTES) + RC_CRC)
 int rc_push_state(rc_session *s, const rc_state *st, int64_t now){
     int64_t iv = (int32_t)1000000 / (int32_t)s->conf.rate_hz;
     if (s->closed || now < s->next_snap_us) return 0;
@@ -1101,20 +1133,31 @@ int rc_push_state(rc_session *s, const rc_state *st, int64_t now){
     for (int k = 0; k < m.u.snap.n; k++) m.u.snap.s[k] = s->last[k];
     uint8_t b[RC_MAX_DGRAM]; int n = rc_encode(&m, b, sizeof b);
     if (n <= 0) return 0;
-    /* the same SNAP with header flags 4 and 10 for the peers far away, made
-     * when one needs it; each peer at its own phase, so that the far ones'
-     * snapshots spread over the ticks */
-    uint8_t bf[2][RC_MAX_DGRAM]; int nf[2] = { 0, 0 };
+    /* the same SNAP with the states' extensions for a peer whose HELLO says
+     * it reads them (when the game side filled them in), and with header
+     * flags 4 and 10 for the peers far away: each made when one needs it,
+     * and each far peer at its own phase, so that the far ones' snapshots
+     * spread over the ticks.  bv[0]: near, extended; bv[1 + 2x + j]: far
+     * (x: extended, j: 0 every 4th, 1 every 10th) */
+    int ext = 0;
+    for (int k = 0; k < m.u.snap.n; k++) ext |= m.u.snap.s[k].ext;
+    uint8_t bv[5][SNAP_MAX]; int nv[5] = { 0, 0, 0, 0, 0 };
     for (int i = 0; i < RC_TABLE; i++){
         rc_peer *p = &s->peer[i];
         if (p->state != RC_PS_EST || !s->io.send) continue;
-        int e = snap_every(p, &s->last[0]);
-        if (e == 1){ s->io.send(s->io.user, p->ip, p->port, b, n); s->tx++; s->tx_bytes += (uint32_t)n; continue; }
-        if ((uint16_t)(s->seq + i) % (uint16_t)e) continue;
-        int j = e == 4 ? 0 : 1;
-        if (!nf[j]){ m.h.flags = (uint16_t)e; nf[j] = rc_encode(&m, bf[j], sizeof bf[j]); m.h.flags = 0; }
-        if (nf[j] <= 0) continue;
-        s->io.send(s->io.user, p->ip, p->port, bf[j], nf[j]); s->tx++; s->tx_bytes += (uint32_t)nf[j];
+        int e = snap_every(p, &s->last[0]), x = ext && p->statex;
+        if (e > 1 && (uint16_t)(s->seq + i) % (uint16_t)e) continue;
+        const uint8_t *d = b; int dn = n;
+        if (e > 1 || x){
+            int v = e == 1 ? 0 : 1 + 2 * x + (e == 4 ? 0 : 1);
+            if (!nv[v]){
+                m.h.flags = (uint16_t)((e > 1 ? e : 0) | (x ? RC_HF_STATEX : 0));
+                nv[v] = rc_encode(&m, bv[v], SNAP_MAX); m.h.flags = 0;
+            }
+            if (nv[v] <= 0) continue;
+            d = bv[v]; dn = nv[v];
+        }
+        s->io.send(s->io.user, p->ip, p->port, d, dn); s->tx++; s->tx_bytes += (uint32_t)dn;
     }
     if (to_hub && s->io.send){
         s->io.send(s->io.user, s->conf.hub_ip, s->conf.hub_port, b, n); s->tx++; s->tx_bytes += (uint32_t)n;

@@ -264,6 +264,8 @@ static Pkt g_q[20000]; static int g_qn;
 static int g_lat_us = 1000, g_jit_us = 0, g_dup_pct = 0;
 static int g_ver_from = -1;                 /* this node's datagrams go out as protocol version 2 */
 static int g_twoaddr_from = -1;             /* this node's HELLOs also arrive from 127.0.0.2 */
+static int g_nox_from = -1;                 /* this node's HELLOs go out without RC_HF_STATEX (an older core) */
+static int g_snapx_rx[NN], g_snap_rx[NN];   /* SNAPs each node was sent with and without state extensions */
 static uint32_t node_ip(int i){ return 0x7f000001u; (void)i; }
 static uint16_t node_port(int i){ return (uint16_t)(50000 + i); }
 static int node_of(uint32_t ip, uint16_t port){ if (ip != 0x7f000001u) return -1; for (int i = 0; i < NN; i++) if (node_port(i) == port) return i; return -1; }
@@ -274,18 +276,19 @@ static int g_cfg_tx[NN];                    /* CFG datagrams each node sent */
  * i every second */
 #define HUB_IP   0x7f0000FDu
 #define HUB_PORT 47210
-static int g_hub_on, g_hub_link[NN][NN], g_hub_hello[NN], g_hub_snap[NN], g_hub_bye[NN];
+static int g_hub_on, g_hub_link[NN][NN], g_hub_hello[NN], g_hub_snap[NN], g_hub_snapx[NN], g_hub_bye[NN];
 static int64_t g_hub_next;
 static void hub_in(int from, const uint8_t *b, int len){
     rc_msg m; if (rc_decode(b, len, &m) != RC_OK) return;
     if (m.h.type == RC_MSG_HELLO) g_hub_hello[from]++;
-    else if (m.h.type == RC_MSG_SNAP) g_hub_snap[from]++;
+    else if (m.h.type == RC_MSG_SNAP){ g_hub_snap[from]++; if (m.h.flags & RC_HF_STATEX) g_hub_snapx[from]++; }
     else if (m.h.type == RC_MSG_BYE) g_hub_bye[from]++;
 }
 static void net_send(void *u, uint32_t ip, uint16_t port, const uint8_t *buf, int len){
     if (ip == HUB_IP && port == HUB_PORT){ hub_in((int)(intptr_t)u, buf, len); return; }
     int from = (int)(intptr_t)u, to = node_of(ip, port);
     if (len > 5 && buf[5] == RC_MSG_CFG) g_cfg_tx[from]++;
+    if (to >= 0 && len > 15 && buf[5] == RC_MSG_SNAP){ if (buf[14] & RC_HF_STATEX) g_snapx_rx[to]++; else g_snap_rx[to]++; }
     if (to < 0 || g_drop[from][to]) return;
     if (g_loss_pct && (int)(rnd() % 100u) < g_loss_pct) return;
     for (int copy = 0; copy < 2; copy++){
@@ -296,6 +299,9 @@ static void net_send(void *u, uint32_t ip, uint16_t port, const uint8_t *buf, in
         p->to = to; p->ip = node_ip(from); p->port = node_port(from); p->len = len; memcpy(p->b, buf, (size_t)len);
         if (from == g_ver_from){                /* another protocol version, CRC fixed up */
             p->b[4] = 2; uint32_t c = rc_crc32(p->b, (uint32_t)len - 4);
+            for (int k = 0; k < 4; k++) p->b[len - 4 + k] = (uint8_t)(c >> (8 * k)); }
+        if (from == g_nox_from && len > 15 && buf[5] == RC_MSG_HELLO){
+            p->b[14] &= (uint8_t)~RC_HF_STATEX; uint32_t c = rc_crc32(p->b, (uint32_t)len - 4);
             for (int k = 0; k < 4; k++) p->b[len - 4 + k] = (uint8_t)(c >> (8 * k)); }
         if (from == g_twoaddr_from && len > 5 && buf[5] == RC_MSG_HELLO && g_qn < 20000){
             g_q[g_qn] = *p; g_q[g_qn].ip = 0x7f000002u; g_qn++; }
@@ -989,6 +995,69 @@ static void t_duel(void){
           "inbox: %d kept, %u dropped, %d taken", kept, g_n[1].duel_dropped, taken);
 }
 
+/* ---- 4f. state extensions: wheel heights and nitrous, only to a peer that reads them -- */
+static void t_statex(void){
+    /* layout: a length byte, 4 x int16 mm, the nitrous byte; 0 = none */
+    uint8_t b[RC_MAX_DGRAM];
+    rc_msg m; memset(&m, 0, sizeof m);
+    m.h.type = RC_MSG_SNAP; m.h.sender = 5; m.h.flags = RC_HF_STATEX; m.u.snap.status = RC_ST_ROAM; m.u.snap.n = 2;
+    for (int k = 0; k < 2; k++){ m.u.snap.s[k].q[3] = 1; m.u.snap.s[k].t_us = 1000u - (uint32_t)k; }
+    rc_state *s = &m.u.snap.s[0];
+    s->ext = 1; s->wz[0] = 0.187f; s->wz[1] = -0.0355f; s->wz[2] = 40.f; s->wz[3] = -0.0004f; s->nos = 150;
+    int n = rc_encode(&m, b, sizeof b);
+    CHECK(n == 16 + 6 + 2 * 52 + 10 + 1 + 4, "STATEX SNAP length %d (one state with its extension, one without)", n);
+    const uint8_t *x = b + 22 + 52;
+    CHECK(x[0] == 9 && (int16_t)le16(x + 1) == 187 && (int16_t)le16(x + 3) == -36 && (int16_t)le16(x + 5) == 32000 &&
+          (int16_t)le16(x + 7) == 0 && x[9] == 150 && x[10 + 52] == 0, "STATEX layout (mm, clamped to 32 m, nitrous byte, 0 for none)");
+    rc_msg d; int e = rc_decode(b, n, &d);
+    CHECK(e == RC_OK && d.u.snap.s[0].ext && fabsf(d.u.snap.s[0].wz[0] - 0.187f) < 1e-6f && fabsf(d.u.snap.s[0].wz[1] + 0.036f) < 1e-6f &&
+          d.u.snap.s[0].nos == 150 && !d.u.snap.s[1].ext && d.u.snap.s[1].nos == 0, "STATEX decodes (e %d)", e);
+    /* a newer core's longer extension: its own fields skipped */
+    memset(&m, 0, sizeof m); m.h.type = RC_MSG_SNAP; m.h.sender = 5; m.h.flags = RC_HF_STATEX; m.u.snap.status = RC_ST_ROAM; m.u.snap.n = 1;
+    m.u.snap.s[0].q[3] = 1; m.u.snap.s[0].ext = 1; m.u.snap.s[0].nos = 7; m.u.snap.s[0].wz[2] = 0.25f;
+    n = rc_encode(&m, b, sizeof b);
+    uint8_t lb[RC_MAX_DGRAM]; memcpy(lb, b, (size_t)n - 4);
+    lb[22 + 52] = 12; lb[n - 4] = 0xAA; lb[n - 3] = 0xBB; lb[n - 2] = 0xCC;
+    int ln = n + 3; lb[6] = (uint8_t)ln; lb[7] = (uint8_t)(ln >> 8);
+    uint32_t c = rc_crc32(lb, (uint32_t)ln - 4); for (int k = 0; k < 4; k++) lb[ln - 4 + k] = (uint8_t)(c >> (8 * k));
+    e = rc_decode(lb, ln, &d);
+    CHECK(e == RC_OK && d.u.snap.s[0].ext && d.u.snap.s[0].nos == 7 && d.u.snap.s[0].wz[2] == 0.25f, "a longer extension is read, its rest skipped (e %d)", e);
+    lb[22 + 52] = 4; c = rc_crc32(lb, (uint32_t)ln - 4); for (int k = 0; k < 4; k++) lb[ln - 4 + k] = (uint8_t)(c >> (8 * k));
+    CHECK(rc_decode(lb, ln, &d) == RC_E_FIELD, "an extension shorter than this core's fields is bad");
+    m.h.flags = 0; n = rc_encode(&m, b, sizeof b);
+    CHECK(n == 16 + 6 + 52 + 4 && rc_decode(b, n, &d) == RC_OK && !d.u.snap.s[0].ext && !d.u.snap.s[0].nos && d.u.snap.s[0].wz[2] == 0,
+          "without the flag: the plain state, no extension (%d bytes)", n);
+
+    /* sessions: node 2 is an older core (its HELLO without the flag), node 0 also reports to a hub */
+    mesh(3, 8);
+    memset(g_snapx_rx, 0, sizeof g_snapx_rx); memset(g_snap_rx, 0, sizeof g_snap_rx); memset(g_hub_snapx, 0, sizeof g_hub_snapx);
+    g_nox_from = 2; g_n[0].conf.hub_ip = HUB_IP; g_n[0].conf.hub_port = HUB_PORT;
+    for (int i = 1; i < 3; i++){ rc_add_peer(&g_n[0], node_ip(i), node_port(i), 1, g_now); rc_add_peer(&g_n[i], node_ip(0), node_port(0), 1, g_now); }
+    int64_t until = g_now + 3000000;
+    while (g_now < until){
+        for (int i = 0; i < 3; i++){
+            rc_state st; memset(&st, 0, sizeof st); st.q[3] = 1; st.t_us = (uint32_t)g_now; st.p[0] = (float)i;
+            st.ext = 1; st.nos = 60; for (int w = 0; w < 4; w++) st.wz[w] = 0.1f * (float)(w + 1);
+            rc_set_status(&g_n[i], RC_ST_ROAM); rc_push_state(&g_n[i], &st, g_now);
+        }
+        net_run(g_now + 10000, 3);
+    }
+    g_nox_from = -1; g_n[0].conf.hub_ip = 0;
+    int p1 = peer_of(0, 0x501), p2 = peer_of(0, 0x502), k1 = peer_of(1, 0x500), k2 = peer_of(2, 0x500);
+    CHECK(est(0) == 2 && p1 >= 0 && p2 >= 0 && g_n[0].peer[p1].statex && !g_n[0].peer[p2].statex,
+          "the HELLO's flag says who reads state extensions");
+    CHECK(g_snapx_rx[1] > 20 && g_snap_rx[2] > 20 && !g_snapx_rx[2] && g_n[2].rx_bad == 0,
+          "extended SNAPs to the newer peer (%d), plain ones to the older (%d plain, %d extended, %u bad)",
+          g_snapx_rx[1], g_snap_rx[2], g_snapx_rx[2], g_n[2].rx_bad);
+    CHECK(g_hub_snap[0] > 0 && !g_hub_snapx[0], "the hub gets plain SNAPs (%d, %d extended)", g_hub_snap[0], g_hub_snapx[0]);
+    rc_pose P;
+    int ok1 = k1 >= 0 && rc_interp_peek(&g_n[1].peer[k1].mo, g_n[1].peer[k1].mo.t[g_n[1].peer[k1].mo.n - 1], 250000, &P);
+    CHECK(ok1 && P.ext && P.nos == 60 && fabsf(P.wz[0] - 0.1f) < 1e-6f && fabsf(P.wz[3] - 0.4f) < 1e-6f,
+          "the newer peer's pose has the wheel heights and the nitrous (%d %d %g)", P.ext, P.nos, (double)P.wz[3]);
+    int ok2 = k2 >= 0 && rc_interp_peek(&g_n[2].peer[k2].mo, g_n[2].peer[k2].mo.t[g_n[2].peer[k2].mo.n - 1], 250000, &P);
+    CHECK(ok2 && !P.ext && !P.nos, "the older peer's pose has none");
+}
+
 int main(int argc, char **argv){
     long fuzz = argc > 1 ? atol(argv[1]) : 200000;
     printf("roam_unit: core %d, protocol %d\n", RC_CORE_VER, RC_PROTO_VER);
@@ -999,6 +1068,7 @@ int main(int argc, char **argv){
     t_review();
     t_hub();
     t_duel();
+    t_statex();
     t_snapstates();
     t_bigmesh();
     t_interp();

@@ -4,7 +4,8 @@
 # writes into it what a moment of the game's physics can leave there, the
 # suspension offsets (car +0x380): NaN, which made the tires vanish for good,
 # then 0.8 m, which floats the wheels over the car.  Each time the log says
-# "had its wheels moved ... put back", +0x380 reads 0 again two frames later,
+# "had its wheels moved ... put back", +0x380 reads ours again two frames
+# later (A's wheel heights less the ride's, a few cm; 0 from an older game),
 # the wheel's place (+0x160) is the ride's, and the dumps show the wheels.
 #   node web/tools/roam-pair.mjs --page play --play-only Bo --size 1280x720
 #        --a Al:roam_mp_ram_a.txt --b Bo:roam_mp_tires.txt --watch 4000

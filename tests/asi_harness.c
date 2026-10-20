@@ -137,7 +137,7 @@ static long g_frame;
 long autotest_frame(void){ return g_frame; }
 uint32_t win32_heap_live(void){ return 0; }
 int64_t roam_plat_now_us(void){ return g_now; }
-int horn_held(void){ return 0; }                 /* the companion has no horn */
+int horn_held(int stick){ (void)stick; return 0; }   /* the companion has no horn */
 void horn_begin(const float *pos, const float *fwd, const float *vel){ (void)pos; (void)fwd; (void)vel; }
 int horn_sound(uint32_t who, const char *name, const float *p, const float *v){ (void)who; (void)name; (void)p; (void)v; return 0; }
 void horn_end(void){}

@@ -8,9 +8,10 @@
 
 #define HORN_VOICES 8                /* the player's horn and 7 others' */
 
-/* 1 while the horn key (H) or the controller's left stick click is held.
- * Game thread. */
-int  horn_held(void);
+/* 1 while the horn key (N) is held, or the controller's left stick click
+ * when stick is 1: the callers pass 0 while the player's car has hydraulics,
+ * whose Hydraulic Pressurize is on that click.  Game thread. */
+int  horn_held(int stick);
 /* A frame of horns, on the game thread: horn_begin with the listener (the
  * camera's position and forward, and the player's car's velocity, m and
  * m/s; pos 0: nobody else's horn can sound), horn_sound for every horn that

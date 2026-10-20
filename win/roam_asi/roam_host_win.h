@@ -44,7 +44,7 @@ uint64_t    roam_win_ns(void);
 #define rh_hud_marker(x, y) ((void)(x), (void)(y))   /* the HUD as the game shows it */
 #define rh_ns()          roam_win_ns()
 /* no horn here: the companion neither sounds one nor plays friends' */
-#define rh_horn_held()   0
+#define rh_horn_held(stick) ((void)(stick), 0)
 #define rh_horn_begin(pos, fwd, vel)   ((void)(pos), (void)(fwd), (void)(vel))
 #define rh_horn_sound(who, name, p, v) ((void)(who), (void)(name), (void)(p), (void)(v))
 #define rh_horn_end()    ((void)0)

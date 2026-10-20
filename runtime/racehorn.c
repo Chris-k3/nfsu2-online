@@ -36,6 +36,7 @@
 #define G_WORLDDT    0x00865154u   /* float: this frame's world dt (s) */
 #define G_VIEW1      0x00832e50u   /* eView 1: +0x40 camera (+0x40 position, +0x50 forward) */
 #define G_NETPLAYERS 0x0089cf50u   /* the network race's players: 6 pointers (0x89CF48 + 8), name at +0x12 */
+#define G_HYD_LEVEL  0x007e949cu   /* int: every car's hydraulics level, -1: each its own (a debug setting) */
 #define NP_NAME      0x12u
 #define HORN_PORT    3659u         /* next to the race link's 3658; the game binds neither else */
 #define PEER_MS      5000u
@@ -71,6 +72,13 @@ static void car_name(uint32_t car, char *o){
     if (ok(pl, NP_NAME + NAME_N))
         for (; n < NAME_N - 1; n++){ uint8_t ch = MR8(pl + NP_NAME + (uint32_t)n); if (ch < 0x20 || ch > 0x7e) break; o[n] = (char)ch; }
     o[n] = 0;
+}
+/* the car has hydraulics, so the stick click is not the horn (horn.h; as
+ * roam_game.c's has_hydraulics: RideInfo +0x581, or G_HYD_LEVEL's when not -1) */
+static int has_hydraulics(uint32_t car){
+    uint32_t ride = ok(car, 0x14) ? rd32(car + 0x10u) : 0;
+    int32_t lv = ok(ride, 0x581) ? (int8_t)MR8(ride + 0x581u) : 0, ov = (int32_t)rd32(G_HYD_LEVEL);
+    return (ov > -1 ? ov : lv) != 0;
 }
 
 static struct { char name[NAME_N]; uint32_t at; int on; } g_h[NHORNS];   /* others' horns as last heard */
@@ -115,7 +123,7 @@ void racehorn_frame(CPU *c){
     char mine[NAME_N];
     car_name(me, mine);
     /* our horn to the others */
-    int horn = runs && mine[0] && horn_held();
+    int horn = runs && mine[0] && horn_held(!has_hydraulics(me));
     if (horn != g_mine){ g_mine = horn; g_offs = horn ? 0 : 2; g_sent_at = now - SEND_MS; }
     if (mine[0] && (g_mine || g_offs) && now - g_sent_at >= SEND_MS){
         memset(m, 0, MSG_N);

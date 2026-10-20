@@ -57,7 +57,8 @@ need the server; your saves are in the browser either way.
 | Shift, Ctrl | Gear up, gear down (manual gearbox) |
 | C, B | Camera, look back |
 | R | Respawn |
-| H | Horn (free roam and races with other players) |
+| H, J | Hydraulics, with the Hydraulics part (Car Specialties): hold H to pressurize or J to bounce, then the arrows pick the corners; under 10 mph |
+| N | Horn (free roam and races with other players) |
 | M, Tab | Map, messages |
 | Esc or P | Pause; Esc also goes back in menus |
 | Enter | Choose (menus); in free roam, start an event at its marker or take an outrun |
@@ -68,10 +69,11 @@ need the server; your saves are in the browser either way.
 
 The start page shows these keys under **Controls**, and F9, Controls shows them while you play.
 
-- **Change the keys:** in the game, Options, Controls. The horn stays on H (the game has no horn of its own).
+- **Change the keys:** in the game, Options, Controls. The horn stays on N (the game has no horn of its own).
 - **Mouse:** works in the menus.
 - **Controller:** an Xbox or PlayStation pad works through the browser. The browser shows a pad to the page only
-  after a button is pressed on it. A click of the left stick is the horn.
+  after a button is pressed on it. A click of the left stick is the horn, unless your car has hydraulics: then the
+  stick clicks are the game's hydraulics (left: pressurize, right: bounce).
 - **Rumble:** a controller that can rumble in Chrome (Xbox, DualSense and others) shakes when you crash, scrape a
   wall or land hard. Settings, Controller, Rumble turns it off. Firefox has no rumble.
 - **Sound** starts with the Play click. If the browser still keeps it off, a note says so, and a click on the game or
@@ -164,10 +166,13 @@ Good to know:
   and moves on your screen as it does there.
 - **Names over the cars** follow the game's own player-names option, as in its LAN races. A player who paused shows
   as "paused" there.
-- **Horn:** hold H (or click the controller's left stick) to honk. The others hear it from your car: louder the nearer
+- **Horn:** hold N (or click the controller's left stick) to honk. The others hear it from your car: louder the nearer
   they are, from the side your car is on, and lower in pitch as you drive away from them. Each player's horn has its
   own pitch, so you can tell who honks. It sounds while the game runs, not in the pause menu or on the map. It works
   in Online and LAN races too.
+- **Hydraulics and nitrous:** the others see your car lift, tilt and bounce on its hydraulics, with its wheels on the
+  road, and your nitrous as the game draws it on any car: the light trails behind it. A player on an older version
+  sees the body move but not the wheels, and no nitrous.
 - **Outruns:** stay within about 30 m of another player for 3 seconds and the game offers an outrun, as it does with
   its own tuners: the outrun icon lights up and the top of the screen says "Press Enter to challenge ... to an
   outrun" (on a controller, D-pad up, the game's Engage). The other player sees "... challenges you to an outrun" and
@@ -229,7 +234,7 @@ Good to know:
   LAN races. The career and Quick Race keep their unlocks.
 - **Up to 6 players** race in one game (Options, Max Players; the game's own most was 4, and 6 only in Street X).
   Drag keeps one car per lane: 4, or 3 on the track with three lanes.
-- **Horn:** H (or the controller's left stick click) honks in a race too, as in free roam: the others hear it from your
+- **Horn:** N (or the controller's left stick click) honks in a race too, as in free roam: the others hear it from your
   car. The same in the game's LAN races.
 - **The Lobby lists every open game**, whatever its race type and options (Collision Detection, Race Breaker, Car
   Performance Restrictions, Ranked). The lobby's **Filter** only puts the games it asks for first; in the original

@@ -191,5 +191,30 @@ int roam_selftest(uint8_t *out, int cap){
       int n = rc_encode(&m, b, sizeof b);
       o_u32(&o, 0xEDCE0000u | (uint32_t)n);
       if (n > 0) o_bytes(&o, b, n); }
+    /* 8. state extensions (RC_HF_STATEX): wheel heights and nitrous, one
+     * state without, edge values; decoded again, and the wheel heights
+     * interpolated halfway between two states */
+    { rc_msg m; memset(&m, 0, sizeof m); m.h.type = RC_MSG_SNAP; m.h.sender = 1; m.h.flags = RC_HF_STATEX;
+      m.u.snap.n = 3; m.u.snap.status = RC_ST_ROAM;
+      volatile uint32_t nb = 0x7FC00000u, ib = 0x7F800000u; float nanv = rc_bitsf(nb), inf = rc_bitsf(ib);
+      for (int k = 0; k < 3; k++){
+          rc_state *s = &m.u.snap.s[k]; s->q[3] = 1; s->t_us = 1000000u - 50000u * (uint32_t)k;
+          s->ext = k != 1; s->nos = (uint8_t)(k * 120);
+          for (int i = 0; i < 4; i++) s->wz[i] = st_frnd(-0.4f, 0.4f);
+      }
+      m.u.snap.s[2].wz[0] = nanv; m.u.snap.s[2].wz[1] = inf; m.u.snap.s[2].wz[2] = -inf; m.u.snap.s[2].wz[3] = 0.0005f;
+      int n = rc_encode(&m, b, sizeof b);
+      o_u32(&o, 0xE8000000u | (uint32_t)n);
+      if (n > 0) o_bytes(&o, b, n);
+      rc_msg d; int e = rc_decode(b, n, &d); o_u32(&o, (uint32_t)e);
+      if (!e){
+          for (int k = 0; k < d.u.snap.n; k++){ const rc_state *s = &d.u.snap.s[k];
+              o_u32(&o, (uint32_t)s->ext << 8 | s->nos); for (int i = 0; i < 4; i++) o_f(&o, s->wz[i]); }
+          static rc_interp ip; rc_interp_reset(&ip);
+          rc_interp_insert(&ip, &d.u.snap.s[2], 0, 0, RC_ST_ROAM, 2000000, 0);
+          rc_interp_insert(&ip, &d.u.snap.s[0], 0, 0, RC_ST_ROAM, 2000000, 1);
+          rc_pose P; rc_interp_peek(&ip, 950000, 250000, &P);
+          o_u32(&o, (uint32_t)P.ext << 8 | P.nos); for (int i = 0; i < 4; i++) o_f(&o, P.wz[i]);
+      } }
     return o.n;
 }

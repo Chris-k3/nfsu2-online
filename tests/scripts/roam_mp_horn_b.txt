@@ -23,5 +23,5 @@
 +0    roam mp waitpeers 1 6000
 +0    roam mp waitcars 1 3000
 +0    roam mp status
-+1800 roam mp status
++2400 roam mp status
 +10   quit

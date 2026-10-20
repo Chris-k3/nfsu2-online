@@ -21,7 +21,8 @@
 #include <stddef.h>
 
 #define RC_PROTO_VER     1          /* header byte 4; a different value is ignored */
-#define RC_CORE_VER      3          /* HELLO: implementation revision (2: lists of up to RC_MAX_PEERS; 3: RC_MSG_DUEL) */
+#define RC_CORE_VER      4          /* HELLO: implementation revision (2: lists of up to RC_MAX_PEERS; 3: RC_MSG_DUEL;
+                                       4: state extensions, RC_HF_STATEX) */
 #define RC_MAGIC0        0x4E       /* "N2FR" */
 #define RC_MAGIC1        0x32
 #define RC_MAGIC2        0x46
@@ -37,6 +38,7 @@
 #define RC_TABLE         64         /* known addresses (configured, gossiped, heard) */
 #define RC_SNAP_STATES   3          /* states per SNAP (newest first): loss redundancy */
 #define RC_STATE_BYTES   52
+#define RC_STATEX_BYTES  10         /* a state's extension (RC_HF_STATEX), its length byte included */
 #define RC_BUF_STATES    32         /* jitter buffer per peer */
 #define RC_OFFWIN        64         /* clock-offset samples per peer */
 #define RC_CFG_MAX       2048       /* car-look record, bytes */
@@ -68,7 +70,7 @@ enum { RC_PLAT_MAC = 1, RC_PLAT_WIN = 2, RC_PLAT_TOOL = 3 };
 /* state bits (SNAP) */
 #define RC_BIT_BRAKE     0x01       /* brake lights */
 #define RC_BIT_REVERSE   0x02
-#define RC_BIT_NOS       0x04
+#define RC_BIT_NOS       0x04       /* nitrous is on (the extension's nos says how much is left) */
 #define RC_BIT_HANDBRAKE 0x08
 #define RC_BIT_LIGHTS    0x10
 #define RC_BIT_HORN      0x20       /* the horn sounds (horn.c); older builds ignore it */
@@ -85,6 +87,13 @@ enum { RC_PLAT_MAC = 1, RC_PLAT_WIN = 2, RC_PLAT_TOOL = 3 };
  * without ours does not say the sender no longer hears us (its HELLOs to us
  * do); an older core sends none and ignores it */
 #define RC_HF_ALL        0x0020
+/* header flags (HELLO): this player reads state extensions; (SNAP): every
+ * state is followed by its extension: a length byte (what follows, at least
+ * RC_STATEX_BYTES - 1), the wheel places' heights in the car (4 x int16, mm)
+ * and the nitrous left (u8, see rc_state), then whatever a newer core adds,
+ * skipped.  Only to a peer whose HELLO carries the flag: an older core counts
+ * the longer SNAP as bad */
+#define RC_HF_STATEX     0x0040
 /* decoder results */
 enum { RC_OK = 0, RC_E_SHORT = -1, RC_E_MAGIC = -2, RC_E_VERSION = -3, RC_E_LENGTH = -4,
        RC_E_CRC = -5, RC_E_TYPE = -6, RC_E_FIELD = -7, RC_E_TRAIL = -8, RC_E_RANGE = -9 };
@@ -125,6 +134,11 @@ typedef struct {
     float    rpm, speed;           /* rpm, m/s (forward) */
     int8_t   gear;
     uint8_t  bits;                 /* RC_BIT_* */
+    /* the extension (RC_HF_STATEX): what a peer of core version 4 and up
+     * sends, and only when its game side fills it in (ext = 1) */
+    uint8_t  ext;
+    float    wz[4];                /* the wheel places' heights in the car (m): suspension and hydraulics */
+    uint8_t  nos;                  /* nitrous: 0 off, else what is left of it in 1/100 (the game's left / full, up to 2.55) */
 } rc_state;
 
 typedef struct {
@@ -183,6 +197,8 @@ typedef struct {
     float   steer, throttle, brake, rpm, speed;
     int8_t  gear;
     uint8_t bits;
+    uint8_t ext, nos;              /* as rc_state: ext 0 when the sender sent no extension */
+    float   wz[4];
     int     mode;                  /* RC_MODE_* */
 } rc_pose;
 enum { RC_MODE_NONE = 0, RC_MODE_INTERP = 1, RC_MODE_EXTRAP = 2, RC_MODE_HOLD = 3 };
@@ -285,6 +301,7 @@ typedef struct {
     uint8_t  platform, status;
     uint16_t core_ver;             /* its HELLO's (0 until one came): below 2 it reads lists of RC_PEERS_V1 at most */
     uint8_t  duels;                /* its HELLO says it takes outrun challenges (RC_HF_DUELS) */
+    uint8_t  statex;               /* its HELLO says it reads state extensions (RC_HF_STATEX) */
     uint16_t cfg_rev_seen;         /* what the peer announces */
     int      hears_us, lost;
     int      hears_miss;           /* with the hub: one HELLO without our id forgiven (hub mode only) */
