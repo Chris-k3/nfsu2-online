@@ -288,6 +288,7 @@ typedef struct {
     /* statistics */
     uint32_t loads, remode, pose_frames, wakes;   /* wakes: the game's wake-ups refused (roam_game_inert) */
     uint32_t moded, wheelfix;                 /* other physics modes the game set (roam_game_inert); frames the wheels were put back (wheels_pose) */
+    uint32_t blinks;                          /* times the game blinked the car out (unblink) */
 } Slot;
 static Slot g_sl[NSLOT];
 static uint32_t g_world_seen;
@@ -659,6 +660,26 @@ static void soft_park(CPU *c, uint32_t car){
     for (uint32_t w = 0; w < 4; w++) MRF32(car + CAR_SUSP + 4u * w) = 0.f;   /* the wheels at rest (wheels_pose) */
     gcall0(c, FN_CAR_SECTION, car);
 }
+/* A race's end blinks its AI racers out: FinishRacer (0x606CB0) with its
+ * blink, which the race's update (0x6076D0) asks for when no Player owns the
+ * racer's car, sets car +0x998, the blink's start (game ticks) at +0x974 and
+ * its length at +0x978.  The renderer (0x6316D0 -> 0x60D4F0) and the
+ * minimap's arrow (0x4CA6D0) skip a car with +0x998 set, every other frame
+ * while the blink lasts and for good after it; only Car::Activate clears it.
+ * In an outrun a friend's car is the AI racer: at its end, in the winner's
+ * game and the loser's alike, the friend's car went for good and only their
+ * name stayed where it was (reported in play; roam_mp_outrun_view_a/b).  A
+ * friend's car is shown or hidden by us alone, so the blink goes at once, as
+ * the game ends one (+0x974 = 0, 0x5FBDE2). */
+#define CAR_BLINKOUT    0x998u
+#define CAR_BLINK_T0    0x974u
+static void unblink(Slot *s){
+    uint32_t car = s->car;
+    if (!MR8(car + CAR_BLINKOUT)) return;
+    if (s->blinks++ < 3) rlog("[roam] f=%ld slot %d: %s's car was blinked out by the game (a race's end): shown again\n",
+                              rh_frame(), (int)(s - g_sl), s->name);
+    MR8(car + CAR_BLINKOUT) = 0; MR32(car + CAR_BLINK_T0) = 0;
+}
 /* The RandomEncounterManager (race coordinator +0xC40; Update 0x42EDF0):
  * state 0 resets it (0x412F90: its three rides unloaded, World cars[first ..
  * first+2] taken as its cars), 1 asks the career whether an outrun is due,
@@ -671,11 +692,11 @@ static void soft_park(CPU *c, uint32_t car){
  *  - while any friend has (or is about to get) a car in this world it is
  *    held in 6;
  *  - from 3 or 5 it is stood down the way its own state 5 does it, but for
- *    its three cars only: each is parked once it is engaged in an outrun or
- *    250 m from the player, or after 20 s anyway; then the career is told
- *    and it goes to 0, which re-reads its cars (the game's three opponent
- *    cars: ours are kept out of that window, keep_out_of_window) and then
- *    to 1, where it is held;
+ *    its three cars only: each is parked once an outrun's end blinked it
+ *    out (unblink) or 250 m from the player, or after 20 s anyway; then the
+ *    career is told and it goes to 0, which re-reads its cars (the game's
+ *    three opponent cars: ours are kept out of that window,
+ *    keep_out_of_window) and then to 1, where it is held;
  *  - during an outrun (4) it is left alone (the race has two racers, so
  *    this is not free roam for roaming(): friends' cars are hidden, as in
  *    any race); its 5 afterwards is taken over as above;
@@ -693,7 +714,7 @@ static void em_update(CPU *c, int want, int64_t host){
             uint32_t car = rd32(em + EM_TABLE + 0xcu + 0x10u * k);
             if (!ok(car, 0x9e0) || !car_out(car)) continue;
             float dx = me ? MRF32(car + 0x60u) - MRF32(me + 0x60u) : 1e4f, dy = me ? MRF32(car + 0x64u) - MRF32(me + 0x64u) : 0;
-            if (MR8(car + 0x998u) || dx * dx + dy * dy > 250.f * 250.f || host - g_em_sd_t0 > EM_STANDDOWN_US){
+            if (MR8(car + CAR_BLINKOUT) || dx * dx + dy * dy > 250.f * 250.f || host - g_em_sd_t0 > EM_STANDDOWN_US){
                 gcall0(c, FN_CAR_DEACTIVATE, car); MR8(em + EM_TABLE + 8u + 0x10u * k) = 0; parked++;
             } else out++;
         }
@@ -2500,6 +2521,7 @@ void roam_game_frame(CPU *c){
                 body_update(c, k);
                 for (int i = 0; i < 3; i++) s->drawn[i] = v->pose.p[i];
                 s->hidden = 0; MR8(s->car + CAR_ACTIVE) = 1;
+                unblink(s);
                 if (g_poselog)
                     rh_fprintf(g_poselog, "R,%lld,%.0f,%08x,%.4f,%.4f,%.4f,%.3f,%d,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f\n", (long long)host, g_sync, s->peer_id,
                             (double)v->pose.p[0], (double)v->pose.p[1], (double)v->pose.p[2], (double)v->pose.speed, v->pose.mode, (double)v->err,
@@ -2630,8 +2652,9 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
                     sqrt((double)(dx * dx + dy * dy)), car ? MR16(car + 0x40cu) : 0, car ? MR8(car + 0x5c0u) : 0, car ? MR8(car + 0x550u) : 0,
                     car ? MR32(car + 0x24u) : 0, car ? MR32(car + 0x28u) : 0, car ? MR32(car + 0x554u) : 0, car ? (int16_t)MR16(car + 8u) : -1,
                     car ? (double)MRF32(car + 0x50u) : 0, car ? (double)MRF32(car + 0x54u) : 0, car ? (double)MRF32(car + 0x58u) : 0);
-            if (car) rlog("[roam]     nitrous %u%%, wheels at %.3f %.3f %.3f %.3f m in the car\n", nos_left(car),
-                          (double)MRF32(car + 0x168u), (double)MRF32(car + 0x1a8u), (double)MRF32(car + 0x1e8u), (double)MRF32(car + 0x228u));
+            if (car) rlog("[roam]     nitrous %u%%, wheels at %.3f %.3f %.3f %.3f m in the car, blinked out %u (blink from %u)\n", nos_left(car),
+                          (double)MRF32(car + 0x168u), (double)MRF32(car + 0x1a8u), (double)MRF32(car + 0x1e8u), (double)MRF32(car + 0x228u),
+                          MR8(car + CAR_BLINKOUT), MR32(car + CAR_BLINK_T0));
         }
         return 1;
     }
