@@ -305,10 +305,10 @@ export const TEMPLATE = `# NFSU2 settings, read at every launch.
 # the players near you (its free-roam hub).  [NFSU2_ROAM_DISCOVERY]
 #roam_discovery = on
 # Largest group: you and the players you exchange cars with at once (2 to
-# 8; the server picks the nearest), and other players' cars shown at once
-# (0 to 5, the nearest).  [NFSU2_ROAM_MAX_PLAYERS, NFSU2_ROAM_MAX_CARS]
-#roam_max_players = 8
-#roam_max_cars = 5
+# 33; the server picks the nearest), and other players' cars shown at once
+# (0 to 32, the nearest).  [NFSU2_ROAM_MAX_PLAYERS, NFSU2_ROAM_MAX_CARS]
+#roam_max_players = 33
+#roam_max_cars = 32
 # on = the other players' cars are solid: drawn where they are now, and one
 # that appears on your car lets you through until you are apart.
 # off = you drive through them.
@@ -322,7 +322,7 @@ export const TEMPLATE = `# NFSU2 settings, read at every launch.
 #roam_extrap = 250
 # The free-roam car memory pool in KB, raised for other players' cars (the
 # game's own is 11000; it is never lowered).  [NFSU2_ROAM_CARPOOL_KB]
-#roam_carpool_kb = 20000
+#roam_carpool_kb = 48000
 `;
 
 /** The template's default for a key ("#key = value"), '' if the template leaves it empty or does not list it. */
