@@ -12,14 +12,13 @@ import * as P from '../src/net/proto.ts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const H = fs.readFileSync(path.join(HERE, '../../runtime/web/net_proto.h'), 'utf8');
+// the header's NET_* numbers, each evaluated with the ones before it
+const num = {};
+const val = (e) => Function(...Object.keys(num), `return (${e.replace(/(\d+|0x[0-9a-fA-F]+)u\b/g, '$1')});`)(...Object.values(num));
+for (const m of H.matchAll(/^#define\s+(NET_\w+)\s+(.+?)\s*(?:\/\*.*)?$/gm)) num[m[1]] = val(m[2]) >>> 0;
 
 test('constants', () => {
-  const defs = {};
-  for (const m of H.matchAll(/^#define\s+(NET_\w+)\s+(.+?)\s*(?:\/\*.*)?$/gm)) defs[m[1]] = m[2];
-  const val = (e) => Function(...Object.keys(num), `return (${e.replace(/(\d+|0x[0-9a-fA-F]+)u\b/g, '$1')});`)(...Object.values(num));
-  const num = {};
-  for (const [k, e] of Object.entries(defs)) num[k] = val(e) >>> 0;
-  assert.equal(Object.keys(num).length, 34, 'header parsed');
+  assert.equal(Object.keys(num).length, 36, 'header parsed');
   for (const [k, v] of Object.entries(num)) {
     if (!(k in P)) continue;
     assert.equal(P[k] >>> 0, v, k);
@@ -27,7 +26,8 @@ test('constants', () => {
   for (const k of ['NET_MAGIC', 'NET_VERSION', 'NET_HDR_BYTES', 'NET_SLOT_BYTES', 'NET_SLOT_HDR', 'NET_MAX_PAYLOAD', 'NET_TX_SLOTS',
     'NET_RX_SLOTS', 'NET_MAILBOX_BYTES', 'NET_KIND_UDP', 'NET_KIND_UDP_LOOP', 'NET_BROADCAST', 'NET_MODE_CLOSED', 'NET_MODE_VLAN',
     'NET_MODE_LOOP', 'NET_PAGE_NONE', 'NET_PAGE_CONNECTING', 'NET_PAGE_ONLINE', 'NET_PAGE_OFFLINE', 'NET_KIND_LAN_UDP',
-    'NET_KIND_LAN_TCP', 'NET_KIND_LAN_ICMP', 'NET_KIND_NOTICE', 'NET_LAN_HDR', 'NET_LAN_TCP_SYN', 'NET_LAN_TCP_RST', 'NET_LAN_TCP_GONE', 'NET_MODE_LAN', 'NET_ROAM_HUB'])
+    'NET_KIND_LAN_TCP', 'NET_KIND_LAN_ICMP', 'NET_KIND_NOTICE', 'NET_LAN_HDR', 'NET_LAN_TCP_SYN', 'NET_LAN_TCP_RST', 'NET_LAN_TCP_GONE', 'NET_MODE_LAN', 'NET_ROAM_HUB',
+    'NET_PAGE_IDLE', 'NET_PEER_BITS'])
     assert.ok(k in P && k in num, `${k} on both sides`);
 });
 
@@ -40,8 +40,8 @@ test('offsets', () => {
     if (!m) continue;
     const sz = m[1] === 'double' ? 8 : 4;
     for (const f of m[2].split(',').map(s => s.trim())) {
-      const arr = /^(\w+)\[(\d+)\]$/.exec(f);
-      if (arr) { off[arr[1]] = o; o += sz * +arr[2]; } else { off[f] = o; o += sz; }
+      const arr = /^(\w+)\[([^\]]+)\]$/.exec(f);
+      if (arr) { off[arr[1]] = o; o += sz * val(arr[2]); } else { off[f] = o; o += sz; }
     }
   }
   assert.equal(o, P.NET_HDR_BYTES, 'header size');
@@ -49,7 +49,7 @@ test('offsets', () => {
   for (const m of H.matchAll(/offsetof\(net_mailbox, (\w+)\) == (\d+)/g)) assert.equal(off[m[1]], +m[2], m[1]);
   const words = { magic: P.W_MAGIC, version: P.W_VERSION, hdr_bytes: P.W_HDR_BYTES, slot_bytes: P.W_SLOT_BYTES, tx_slots: P.W_TX_SLOTS,
     rx_slots: P.W_RX_SLOTS, tx_off: P.W_TX_OFF, rx_off: P.W_RX_OFF, mode: P.W_MODE, port: P.W_PORT, tx_head: P.W_TX_HEAD,
-    tx_bell: P.W_TX_BELL, rx_tail: P.W_RX_TAIL, c_alive: P.W_C_ALIVE, page_state: P.W_PAGE_STATE, vip: P.W_VIP, netmask: P.W_NETMASK,
+    tx_bell: P.W_TX_BELL, rx_tail: P.W_RX_TAIL, c_alive: P.W_C_ALIVE, want: P.W_WANT, page_state: P.W_PAGE_STATE, vip: P.W_VIP, netmask: P.W_NETMASK,
     generation: P.W_GENERATION, tx_tail: P.W_TX_TAIL, rx_head: P.W_RX_HEAD, rx_bell: P.W_RX_BELL, rx_full_drop: P.W_RX_FULL_DROP,
     tx_offline_drop: P.W_TX_OFFLINE_DROP, rx_oversize: P.W_RX_OVERSIZE, switch_peers: P.W_SWITCH_PEERS, tx_wait_n: P.W_TX_WAIT_N,
     peer_bits: P.W_PEER_BITS };
@@ -62,6 +62,9 @@ test('offsets', () => {
     if (m[1] in slot) assert.equal(slot[m[1]], +m[2], m[1]);
   assert.equal(P.S_DATA, P.NET_SLOT_HDR);
   assert.deepEqual([P.S_LEN, P.S_KIND, P.S_SRC_IP, P.S_DST_IP, P.S_SRC_PORT, P.S_DST_PORT], [0, 4, 8, 12, 16, 18]);
+  // the peer bits fit the header, and a module of before (version 2) kept the same words up to them
+  assert.equal(off.peer_bits + P.NET_PEER_BITS / 8 <= P.NET_HDR_BYTES, true);
+  assert.equal(P.W_PEER_BITS * 4 + 8 * 4 <= P.NET_V2_HDR_BYTES, true, 'version 2: 8 words of peer bits in 256 bytes');
 });
 
 test('addresses', () => {

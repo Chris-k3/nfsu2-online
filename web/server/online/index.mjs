@@ -11,7 +11,7 @@
 //     80     the news and terms pages the config names (http.mjs)
 // Race traffic never comes here: the players' browsers send it to each other
 // through the switch (UDP 3658, a star around the game's creator), as in LAN
-// play.  Every address a player learns is a virtual one (10.77.0.x).
+// play.  Every address a player learns is a virtual one (10.77.x.x).
 //
 // What the server keeps: sessions, rooms, games and chat in memory only; on
 // disk only the races' public results per persona (stats.mjs) and each

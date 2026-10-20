@@ -6,7 +6,7 @@
  * side is web/src/net/proto.ts (same numbers; web/test/net-proto.test.mjs
  * checks that they agree).
  *
- *   header (256 bytes)   fixed fields, then C -> page words, then page -> C words
+ *   header (512 bytes)   fixed fields, then C -> page words, then page -> C words
  *   TX ring              NET_TX_SLOTS slots, C produces, the page consumes and sends
  *   RX ring              NET_RX_SLOTS slots, the page produces, C consumes
  *
@@ -42,8 +42,8 @@
 #include <stddef.h>
 
 #define NET_MAGIC        0x314E544Eu        /* "NTN1" little-endian */
-#define NET_VERSION      2u                 /* 2: peer_bits, the LAN mailbox */
-#define NET_HDR_BYTES    256u
+#define NET_VERSION      3u                 /* 2: peer_bits, the LAN mailbox; 3: want, peer_bits for a /22 */
+#define NET_HDR_BYTES    512u
 #define NET_SLOT_BYTES   1536u
 #define NET_SLOT_HDR     32u
 #define NET_MAX_PAYLOAD  1472u              /* an Ethernet MTU's UDP payload */
@@ -90,6 +90,11 @@
 #define NET_PAGE_CONNECTING  1u
 #define NET_PAGE_ONLINE      2u /* vip and netmask valid */
 #define NET_PAGE_OFFLINE     3u /* lost the switch, reconnecting */
+#define NET_PAGE_IDLE        4u /* no mailbox wants the switch (want 0 for a while): the page let it go, so
+                                   the place is free for another player; it connects again on want */
+
+/* peer_bits: one bit per host of the switch's network (at most a /22) */
+#define NET_PEER_BITS     1024u
 
 typedef struct {
     /* fixed, written by C before it registers the mailbox */
@@ -97,7 +102,11 @@ typedef struct {
     uint32_t tx_slots, rx_slots, tx_off, rx_off;               /*  16: offsets from the mailbox */
     /* C -> page */
     uint32_t mode, port, tx_head, tx_bell;                     /*  32 */
-    uint32_t rx_tail, c_alive, c_pad0, c_pad1;                 /*  48: c_alive: +1 per network-thread loop */
+    uint32_t rx_tail, c_alive, want, c_pad1;                   /*  48: c_alive: +1 per network-thread loop;
+                                                                  want: this endpoint needs the switch now
+                                                                  (free roam: while it runs; LAN play: from
+                                                                  the game's WSAStartup to its last
+                                                                  WSACleanup), C rings tx_bell on a change */
     /* page -> C */
     uint32_t page_state, vip, netmask, generation;             /*  64: generation: +1 per switch connection */
     uint32_t tx_tail, rx_head, rx_bell, rx_full_drop;          /*  80 */
@@ -105,9 +114,9 @@ typedef struct {
     double   switch_rtt_ms;                                    /* 112: last ping to the switch */
     double   tx_wait_ms_sum, tx_wait_ms_max;                   /* 120: C queued -> page sent */
     uint32_t tx_wait_n, page_pad1;                             /* 136 */
-    uint32_t peer_bits[8];                                     /* 144: page: bit (h & 255) set = host
-                                                                  vip/24 + h is on the switch (us too) */
-    uint32_t pad[20];                                          /* 176 .. 255 */
+    uint32_t peer_bits[NET_PEER_BITS / 32];                    /* 144: page: bit h set = the host h of our
+                                                                  network (vip & ~netmask) is on the switch (us too) */
+    uint32_t pad[60];                                          /* 272 .. 511 */
 } net_mailbox;
 
 typedef struct {
@@ -117,10 +126,11 @@ typedef struct {
     uint8_t  data[NET_SLOT_BYTES - NET_SLOT_HDR];              /* 32 */
 } net_slot;
 
-_Static_assert(sizeof(net_mailbox) == NET_HDR_BYTES, "net_mailbox is 256 bytes");
+_Static_assert(sizeof(net_mailbox) == NET_HDR_BYTES, "net_mailbox is 512 bytes");
 _Static_assert(sizeof(net_slot) == NET_SLOT_BYTES, "net_slot is NET_SLOT_BYTES");
 _Static_assert(offsetof(net_mailbox, mode) == 32, "mode");
 _Static_assert(offsetof(net_mailbox, rx_tail) == 48, "rx_tail");
+_Static_assert(offsetof(net_mailbox, want) == 56, "want");
 _Static_assert(offsetof(net_mailbox, page_state) == 64, "page_state");
 _Static_assert(offsetof(net_mailbox, tx_tail) == 80, "tx_tail");
 _Static_assert(offsetof(net_mailbox, tx_offline_drop) == 96, "tx_offline_drop");

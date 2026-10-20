@@ -120,8 +120,8 @@ The rest of this guide is reference.
 
 ## Sizing
 
-For up to 250 players at once: 2–4 vCPU, 4 GB of memory, 40 GB of disk and a 1 Gbit/s port with a few TB of
-traffic a month.
+For up to 1000 players at once (the image's limit): 4 vCPU, 8 GB of memory (the compose file's limit), 40 GB of
+disk and a 1 Gbit/s port with a few TB of traffic a month.
 
 - The server relays and serves files. It used about 110 MB of memory here, plus up to 10 MB queued towards each
   player who falls behind (8 MB on the connection, 2 MB more of LAN-race data in the switch's own queue).
@@ -137,7 +137,7 @@ traffic a month.
   they are, never held up. The image gives Node 8 helper threads for the compressing and the file reads
   (`UV_THREADPOOL_SIZE`, 4 by default).
 - Free roam is at most about 25 KB/s each way per player: the server's free-roam hub pairs each player with the 7
-  nearest, and snapshots go between those only. 250 players roaming at once are about 50 Mbit/s each way through
+  nearest, and snapshots go between those only. 1000 players roaming at once are about 200 Mbit/s each way through
   the VPS. Measured with 62 simulated players and 2 real pages on one server (`web/tools/roam-crowd.mjs`, a Ryzen 9
   5900X): about 9,500 datagrams a second each way through the switch, the server at 11 % of one core. More players
   than that, and a real VPS's CPU, are **UNVERIFIED**.
@@ -225,8 +225,8 @@ traffic a month.
     restarts);
   - closes, without an answer, a connection that asks for another name (the bare address, a scanner's made-up
     name), on 80 and on 443; a TLS handshake without your name fails, so the certificate is not shown;
-  - opens at most 1900 connections to the server (one per request in progress; with 250 players the server takes
-    2000);
+  - opens at most 7900 connections to the server (one per request in progress; with 1000 players the server takes
+    8000);
   - has its admin API off: nothing reconfigures it while it runs, and a changed `.env` takes `docker compose up -d`.
 - **NFSU2_HOST is one name.** For a second name, or a wildcard, edit the Caddyfile in `compose.yml` and the
   server's `NFSU2_HOST` (a comma list; `*.example.com` for one label under it). A wildcard certificate needs Let's
@@ -271,7 +271,7 @@ and HTTP/3's UDP, and port 80 stays with whatever has it (another API, say), whi
 
 ## What the log keeps
 
-`docker compose logs server` is the server's console: start-up, players joining (by virtual address, `10.77.0.x`)
+`docker compose logs server` is the server's console: start-up, players joining (by virtual address, `10.77.x.x`)
 and leaving (by virtual address and nickname), refused requests and connections, and errors (method, path and the
 server's own stack, never the client's details).
 
@@ -373,7 +373,7 @@ With Caddy or nginx already on the VPS, run the server alone on the VPS's networ
 ```sh
 docker run -d --name nfsu2-web --restart unless-stopped --network host \
   --read-only --cap-drop ALL --security-opt no-new-privileges \
-  --memory 8g --memory-swap 8g --ulimit nofile=8192 --log-driver local \
+  --memory 8g --memory-swap 8g --ulimit nofile=16384 --log-driver local \
   -e NFSU2_HOST=game.example.com \
   -v /srv/nfsu2/game:/game:ro -v /srv/nfsu2/module:/module:ro -v nfsu2-state:/state \
   ghcr.io/th0mk/nfsu2-web
@@ -410,10 +410,16 @@ paths to the VPS, so pick a VPS location between you.
 - **Keepalive:** the switch pings every connection every 25 s. Proxies and Cloudflare then never cut a quiet player,
   and the switch finds players whose connection died.
 - **Limits:**
-  - 250 players on the switch with the image (`NFSU2_MAX_PEERS=250`; the server's own default is 128, and 250 is the
-    most its virtual network has addresses for). A game the switch refuses as full shows "The server is full" in
-    the game and tries again every 5 s; it says so again when it gets a place, and the start page says the server
-    is full;
+  - 1000 players on the switch with the image (`NFSU2_MAX_PEERS=1000`; the server's own default is 128, and 1000 is
+    the most its virtual network, 10.77.0.0/22, has addresses for). A game the switch refuses as full shows "The
+    server is full" in the game and tries again every 5 s; it says so again when it gets a place, and the start
+    page says the server is full;
+  - a player holds a place only while a network feature needs it: free roam while it is on, LAN play and Online
+    from the game's LAN or Online screens until it leaves them. 10 s after the last one ends the page closes its
+    connection and the switch frees the address at once; going back into those screens connects again (a new
+    address). Single-player alone never connects;
+  - LAN play's broadcasts (the game's search for LAN games) reach only the players who have the LAN or Online
+    screens open, not everyone on the switch;
   - 8 connections at once per client address and 16 per IPv6 /48; opening them is rate limited per client
     address (a burst of 20, then one a second), so a client that opens and closes connections as fast as it can
     gets 429;
@@ -428,8 +434,8 @@ paths to the VPS, so pick a VPS location between you.
     that queued the most for it is, all its connections (so a flood does not get a player who reads cut; only many
     clients that together outrun that player's link for a long time could). Only a player that stops reading
     altogether (8 MB behind) is disconnected for that;
-  - a player who drops gets the same address back when it reconnects: the switch keeps the address a minute for
-    that player alone (a token only that browser has), also across a restart of the server, and never gives it to
+  - a player who drops (a lost connection, not the page letting go) gets the same address back when it reconnects:
+    the switch keeps the address a minute for that player alone (a token only that browser has), also across a restart of the server, and never gives it to
     anyone else. At most 8 such addresses are kept per client address (16 per /48; past that its own oldest goes;
     the ones kept across a restart do not count). When every address is held or kept, a newcomer gets "LAN full"
     until one frees.
@@ -443,7 +449,7 @@ paths to the VPS, so pick a VPS location between you.
   - **Kept in the state volume:** `online/stats.json` (race results and best times per persona) and
     `online/buddies.json` (EA Messenger friends lists, persona names only), each with the month a persona was last
     seen, written atomically. No passwords (the server never reads them), CD keys, addresses or chat.
-  - **The console** names online players by persona and virtual address (10.77.0.x) only, and shows at most 30
+  - **The console** names online players by persona and virtual address (10.77.x.x) only, and shows at most 30
     Online lines a minute caused by one client address (then one line saying how many were left out).
   - **Who plays now:** `/players` answers anyone who reaches the server with two numbers for the start page and
     whether it is full: `{"players":3,"online":1,"full":false}`, the games on the switch, how many of them are in

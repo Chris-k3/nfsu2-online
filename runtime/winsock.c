@@ -1002,6 +1002,7 @@ static uint32_t ws_cleanup(void){
         int n = 0;
         for (int i = 1; i < NSOCK; i++) if (g_s[i].used && !atomic_load(&g_s[i].closing)){ sclose(&g_s[i], 0); n++; }
         if (n) ws_log("WSACleanup closed %d socket(s)", n);
+        if (g_ws_mode == NET_VLAN && g_vlan_up) vlan_session_end();
     }
     return 0;
 }

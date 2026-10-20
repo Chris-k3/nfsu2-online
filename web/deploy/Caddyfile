@@ -41,11 +41,11 @@ http://game.example.com {
 
 game.example.com {
 	reverse_proxy 127.0.0.1:8080 {
-		# one connection to the server per request in progress, at most this many: fewer than the 2000 the
-		# server takes with the unit's --max-peers 250 (8 per player; 1024 with a smaller --max-peers, then
+		# one connection to the server per request in progress, at most this many: fewer than the 8000 the
+		# server takes with the unit's --max-peers 1000 (8 per player; 1024 with --max-peers 128 or fewer, then
 		# lower this too).  The server itself holds each client address to 64 requests at once.
 		transport http {
-			max_conns_per_host 1900
+			max_conns_per_host 7900
 		}
 	}
 	# say nothing about the software: not on answers, nor on errors
@@ -64,7 +64,7 @@ game.example.com {
 #	reverse_proxy 127.0.0.1:8080 {
 #		header_up CF-Connecting-IP {client_ip}
 #		transport http {
-#			max_conns_per_host 1900
+#			max_conns_per_host 7900
 #		}
 #	}
 #	header -Server

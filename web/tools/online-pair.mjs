@@ -23,7 +23,7 @@
 //        [--canary]  privacy check (implies --ea-login): the password (use a unique one, e.g. CANARY-PASSWORD-123) must appear in no
 //                    server output, trace, page log or file under the server's state directory, the trace
 //                    must show PASS only as <redacted>, and the server's [online]/[lan] lines must name no
-//                    address but virtual ones (10.77.0.x)
+//                    address but virtual ones (10.77.0.0/22)
 //        [--page play [--size 960x540] [--play-only N]]   the renderer's test page (frame dumps to
 //                    <out>/i<n>-*.png through the server's /artifacts/); else the null platform
 //
@@ -391,7 +391,7 @@ if (argv.includes('--canary')) {
   const trace = fs.existsSync(path.join(OUT, 'trace.txt')) ? fs.readFileSync(path.join(OUT, 'trace.txt'), 'utf8') : '';
   const passFields = [...trace.matchAll(/\bPASS\w*=(\S+)/g)].map(m => m[1]);
   const srv = fs.readFileSync(path.join(OUT, 'server.log'), 'utf8').split('\n').filter(l => /^\[(online|lan)\]/.test(l));
-  const realAddr = srv.filter(l => [...l.matchAll(/\b(\d{1,3}(?:\.\d{1,3}){3})\b/g)].some(m => !m[1].startsWith('10.77.0.')) || /::|localhost/.test(l));
+  const realAddr = srv.filter(l => [...l.matchAll(/\b(\d{1,3}(?:\.\d{1,3}){3})\b/g)].some(m => !/^10\.77\.[0-3]\./.test(m[1])) || /::|localhost/.test(l));
   summary.canary = { files: files.length, hits: hits.map(f => path.relative(OUT, f)), passFields: passFields.length,
     passShown: passFields.filter(v => v !== '<redacted>').length, serverLines: srv.length, realAddressLines: realAddr.length };
   if (!OWN) summary.why.push('canary:needs-own-server');

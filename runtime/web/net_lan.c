@@ -11,17 +11,17 @@
  *
  * The rings are the LAN mailbox (net_proto.h layout, registered as
  * HOST_KIND_LAN; free roam has its own, HOST_KIND_NET).  The page gives every
- * browser a virtual address 10.77.0.x and routes frames by destination
+ * browser a virtual address 10.77.x.x and routes frames by destination
  * address; everything else is decided here, in each browser for its own
  * sockets, as a real host's IP stack would.  The rules are vlanhub.py's (the
  * tested reference): Windows bind semantics (a second binder of a port needs
  * SO_REUSEADDR), ephemeral ports 49152-65534, UDP unicast by address and
- * port, broadcast (255.255.255.255 or 10.77.0.255) to every socket bound to
- * that port on every browser *including the sender* (Windows loops its own
- * broadcasts back), a "port unreachable" notice for a unicast nobody listens
- * to, delivered to the socket that sent it (a connected UDP socket's next
- * recv then fails WSAECONNRESET; the receiving browser only knows our
- * port, so each socket remembers where it sent lately), TCP with
+ * port, broadcast (255.255.255.255 or the subnet's, 10.77.3.255) to every
+ * socket bound to that port on every browser *including the sender* (Windows
+ * loops its own broadcasts back), a "port unreachable" notice for a unicast
+ * nobody listens to, delivered to the socket that sent it (a connected UDP
+ * socket's next recv then fails WSAECONNRESET; the receiving browser only
+ * knows our port, so each socket remembers where it sent lately), TCP with
  * refused (RST, no listener or backlog + 4 full), host unreachable after 3 s
  * (no such address on the switch), FIN and RST (abortive close), ICMP echo
  * answered by the receiving browser, raw sockets seeing every ICMP message.
@@ -114,7 +114,8 @@ static int in_subnet_h(uint32_t h){ return g_mask && (h & g_mask) == (g_vip & g_
 static int bcast_h(uint32_t h){ return h == 0xFFFFFFFFu || (g_mask && h == ((g_vip & g_mask) | ~g_mask)); }
 static int peer_present_h(uint32_t h){
     if (!MB || !in_subnet_h(h)) return 0;
-    uint32_t i = h & 255u;
+    uint32_t i = h & ~g_mask;
+    if (i >= NET_PEER_BITS) return 1;                    /* a network wider than the bitmap: ask the host itself */
     return (ld(&MB->peer_bits[i >> 5]) >> (i & 31u)) & 1u;
 }
 
@@ -576,17 +577,20 @@ static int lan_pump(void){
     /* the page's switch link: frames sent while it was down are lost */
     uint32_t ps = ld(&MB->page_state), gen = ld(&MB->generation);
     int up = ps == NET_PAGE_ONLINE, closed = ps == NET_PAGE_NONE;      /* none again: the page closed the link (exit) */
+    int idle = ps == NET_PAGE_IDLE;                                     /* no session wanted it: the page let it go */
     if (g_hello && ((g_was_up && !up) || (up && g_gen_seen && gen != g_gen_seen))){
         pthread_mutex_lock(&g_mu);
         g_ctlq_n = 0;                                    /* frames for the old link: its connections are reset */
         reset_remote(0, up ? "the page reconnected to the switch (frames were lost meanwhile)"
-                           : closed ? "the page closed its link to the switch" : "the page lost the switch");
+                           : closed ? "the page closed its link to the switch"
+                           : idle ? "the page let the switch go (no network session)" : "the page lost the switch");
         pthread_mutex_unlock(&g_mu);
         bump();
     }
     if (g_hello && up != g_was_up)
         ws_log("virtual LAN %s", up ? "up again" : closed ? "closed: the page closed its link to the server's switch"
-                                                         : "down: the page is reconnecting to the server's switch");
+                                 : idle ? "idle: no network session, so the page gave its place on the server's switch back"
+                                 : "down: the page is reconnecting to the server's switch");
     g_was_up = up; if (up) g_gen_seen = gen;
     if (__atomic_load_n(&g_ctlq_n, __ATOMIC_RELAXED)){ pthread_mutex_lock(&g_mu); ctl_flush(); pthread_mutex_unlock(&g_mu); }
     /* received frames */
@@ -657,11 +661,34 @@ static void ident_from_page(NetIdent *id){
             id->name[k++] = ch;
         }
         id->name[k] = 0;
-    } else snprintf(id->name, sizeof id->name, "VLAN-%u", g_vip & 255u);
+    } else snprintf(id->name, sizeof id->name, "VLAN-%u", g_vip & ~g_mask);   /* the host number: unique on the switch */
     { const char *em = getenv("NFSU2_NET_MAC"); unsigned v[6];
       if (em && sscanf(em, "%x:%x:%x:%x:%x:%x", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5]) == 6)
           for (int i = 0; i < 6; i++) id->mac[i] = (uint8_t)v[i]; }
     snprintf(id->ifname, sizeof id->ifname, "vlan0");
+}
+/* want: a network session is open (from the game's WSAStartup to its last
+ * WSACleanup).  While it is 0 the page lets the switch go after a while
+ * (NET_PAGE_IDLE), so a player who left the LAN and Online screens holds no
+ * place on the server; it connects again when want is back. */
+static void set_want(uint32_t on){
+    if (!MB || ld(&MB->want) == on) return;
+    st(&MB->want, on);
+    __atomic_add_fetch(&MB->tx_bell, 1, __ATOMIC_SEQ_CST);
+    __builtin_wasm_memory_atomic_notify((int *)&MB->tx_bell, 1);
+}
+/* the page's link up, at most 5 s; the guest lock is released meanwhile */
+static int wait_online(void){
+    uint64_t t0 = now_us();
+    if (ld(&MB->page_state) == NET_PAGE_ONLINE) return 1;
+    guest_wait_begin();
+    while (ld(&MB->page_state) != NET_PAGE_ONLINE && now_us() - t0 < 5000000ull){
+        uint32_t b = ld(&MB->rx_bell);
+        if (ld(&MB->page_state) == NET_PAGE_ONLINE) break;
+        __builtin_wasm_memory_atomic_wait32((int *)&MB->rx_bell, (int)b, 50000000ll);
+    }
+    guest_wait_end();
+    return ld(&MB->page_state) == NET_PAGE_ONLINE;
 }
 /* The first WSAStartup: the LAN mailbox, the LAN thread, and our address from
  * the page (it connects to the switch once the mailbox is registered).  The
@@ -679,21 +706,14 @@ int vlan_hello(const char *path, NetIdent *id){
     pthread_mutex_unlock(&g_mu);
     if (e) return WSAENETDOWN;
     uint64_t t0 = now_us();
+    set_want(1);
     /* a page that never attached the network (web/src/net): waited for once,
      * then every later WSAStartup fails at once instead of stalling the game */
     static int waited_unattached;
     if (ld(&MB->page_state) == NET_PAGE_NONE && waited_unattached) return WSAENETDOWN;
-    if (ld(&MB->page_state) != NET_PAGE_ONLINE){
-        guest_wait_begin();
-        while (ld(&MB->page_state) != NET_PAGE_ONLINE && now_us() - t0 < 5000000ull){
-            uint32_t b = ld(&MB->rx_bell);
-            if (ld(&MB->page_state) == NET_PAGE_ONLINE) break;
-            __builtin_wasm_memory_atomic_wait32((int *)&MB->rx_bell, (int)b, 50000000ll);
-        }
-        guest_wait_end();
-    }
-    if (ld(&MB->page_state) != NET_PAGE_ONLINE){
+    if (!wait_online()){
         uint32_t ps = ld(&MB->page_state);
+        set_want(0);                                     /* no session opened (the game's WSAStartup fails) */
         if (ps == NET_PAGE_NONE) waited_unattached = 1;
         ws_log("virtual LAN: not connected after 5 s (%s): no LAN play", ps == NET_PAGE_NONE ?
                "the page has not attached the network: web/src/net attachNet" : "the page is still connecting to the server's switch");
@@ -709,12 +729,23 @@ int vlan_hello(const char *path, NetIdent *id){
            ipn(id->ip, b), __builtin_popcount(g_mask), (double)(now_us() - t0) / 1000.0);
     return 0;
 }
-/* At every WSAStartup after the first.  A new address from the switch (the
- * server restarted and gave this browser another one) is taken at the start
- * of a session; within a session the sockets are bound to the old one, so
- * the network is down for it, as with the Mac's hub. */
+/* At every WSAStartup after the first.  A session that starts while the page
+ * has let the switch go (NET_PAGE_IDLE) waits for it to connect again, at
+ * most 5 s.  A new address from the switch (it gave this browser another one
+ * after the page let go, or the server restarted) is taken at the start of a
+ * session; within a session the sockets are bound to the old one, so the
+ * network is down for it, as with the Mac's hub. */
 int vlan_alive(void){
     if (!MB || !g_hello) return 0;
+    if (!winsock_session_active()){
+        set_want(1);
+        if (ld(&MB->page_state) == NET_PAGE_IDLE && !wait_online()){
+            ws_log("virtual LAN: not connected again after 5 s (%s): no LAN play",
+                   ld(&MB->page_state) == NET_PAGE_IDLE ? "the page did not answer" : "the page is still connecting to the server's switch");
+            set_want(0);
+            return 0;
+        }
+    }
     if (ld(&MB->page_state) != NET_PAGE_ONLINE || ld(&MB->vip) == g_vip) return 1;
     if (winsock_session_active()) return 0;
     pthread_mutex_lock(&g_mu);
@@ -725,6 +756,8 @@ int vlan_alive(void){
     ws_log("virtual LAN: the switch gave this browser a new address: %s (was %s)", ipn(H(g_vip), a), ipn(H(old), b));
     return 1;
 }
+/* the last WSACleanup: the network session is over (winsock.c ws_cleanup) */
+void vlan_session_end(void){ set_want(0); }
 void vlan_note(const char *text){ ws_log("note: %s", text); }
 
 int vlan_open(WsSock *s){

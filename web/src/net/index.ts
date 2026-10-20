@@ -24,6 +24,14 @@
 // registers a mailbox, which it does only when a network feature is used (free
 // roam: roam = on; LAN play: the game's first WSAStartup, its LAN screens).
 //
+// A place on the switch is held only while something needs it: each mailbox
+// says so in its want word (free roam while it runs; LAN play from the game's
+// WSAStartup to its last WSACleanup, so the LAN and Online screens).  When no
+// mailbox has wanted it for idleMs the page closes the socket ("idle": the
+// switch frees the address at once) and tells C (NET_PAGE_IDLE); the next
+// want connects again.  The switch also hears whether LAN play is open
+// ({"t":"lan"}): LAN broadcasts go only to the browsers that have it open.
+//
 // TCP frames are never dropped here: while the LAN RX ring is full they wait
 // in order (the C side's streams have no retransmission; the WebSocket and the
 // switch are reliable and ordered).  A TCP connect to this browser while it has
@@ -46,9 +54,11 @@ export interface NetOptions {
   onNotice?: (text: string) => void;
   /** milliseconds between pings to the switch (default 2000) */
   pingMs?: number;
+  /** milliseconds no mailbox wants the switch before the page lets it go (default 10000) */
+  idleMs?: number;
 }
 export interface NetPeer { vip: string; name: string; self: boolean }
-export type NetState = 'waiting' | 'connecting' | 'online' | 'offline' | 'closed';
+export type NetState = 'waiting' | 'connecting' | 'online' | 'offline' | 'idle' | 'closed';
 export interface NetStats {
   state: NetState; vip: string | null; connections: number; reconnects: number;
   framesOut: number; bytesOut: number; framesIn: number; bytesIn: number;
@@ -81,15 +91,18 @@ class Endpoint {
   i32: Int32Array; f64: Float64Array; dv: DataView; u8: Uint8Array;
   /** LAN: received TCP frames waiting for RX ring room, in order */
   waiting: ArrayBuffer[] = [];
-  constructor(readonly kind: 'roam' | 'lan', buf: SharedArrayBuffer, ptr: number, size: number) {
+  constructor(readonly kind: 'roam' | 'lan', readonly ver: number, buf: SharedArrayBuffer, ptr: number, size: number) {
     // shared memory is never detached: views made now stay valid after the
     // memory grows (the mailbox lies inside the current buffer)
-    this.i32 = new Int32Array(buf, ptr, P.NET_HDR_BYTES / 4);
-    this.f64 = new Float64Array(buf, ptr, P.NET_HDR_BYTES / 8);
+    const hdr = ver === 2 ? P.NET_V2_HDR_BYTES : P.NET_HDR_BYTES;
+    this.i32 = new Int32Array(buf, ptr, hdr / 4);
+    this.f64 = new Float64Array(buf, ptr, hdr / 8);
     this.dv = new DataView(buf, ptr, size);
     this.u8 = new Uint8Array(buf, ptr, size);
   }
   mode() { return Atomics.load(this.i32, P.W_MODE); }
+  /** C needs the switch now (a module of before always does) */
+  wants() { return this.ver === 2 || Atomics.load(this.i32, P.W_WANT) !== 0; }
   ring() { Atomics.add(this.i32, P.W_RX_BELL, 1); Atomics.notify(this.i32, P.W_RX_BELL); }
   /** a received frame into the RX ring; false = the ring is full */
   put(b: ArrayBuffer): boolean {
@@ -129,6 +142,9 @@ class Link implements NetLink {
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** whether LAN play is open, as the switch last heard it (hello or {"t":"lan"}) */
+  private lanSent = false;
   private pings = new Map<number, number>();
   private pingSeq = 0;
   private failed = 0;
@@ -158,19 +174,22 @@ class Link implements NetLink {
     const r = await this.proc.registered(kind);
     if (this.closed) return;
     const buf = this.proc.memory.buffer as unknown as SharedArrayBuffer;
-    const ep = new Endpoint(name, buf, r.ptr, r.size);
-    const magic = ep.i32[P.W_MAGIC] >>> 0, ver = ep.i32[P.W_VERSION];
-    if (magic !== P.NET_MAGIC || ver !== P.NET_VERSION || r.size !== P.NET_MAILBOX_BYTES ||
-        ep.i32[P.W_SLOT_BYTES] !== P.NET_SLOT_BYTES || ep.i32[P.W_TX_SLOTS] !== P.NET_TX_SLOTS || ep.i32[P.W_RX_SLOTS] !== P.NET_RX_SLOTS) {
+    const i32 = new Int32Array(buf, r.ptr, P.NET_V2_HDR_BYTES / 4);
+    const magic = i32[P.W_MAGIC] >>> 0, ver = i32[P.W_VERSION];
+    const size = ver === 2 ? P.NET_V2_MAILBOX_BYTES : P.NET_MAILBOX_BYTES, hdr = ver === 2 ? P.NET_V2_HDR_BYTES : P.NET_HDR_BYTES;
+    if (magic !== P.NET_MAGIC || (ver !== P.NET_VERSION && ver !== 2) || r.size !== size || i32[P.W_HDR_BYTES] !== hdr ||
+        i32[P.W_SLOT_BYTES] !== P.NET_SLOT_BYTES || i32[P.W_TX_SLOTS] !== P.NET_TX_SLOTS || i32[P.W_RX_SLOTS] !== P.NET_RX_SLOTS) {
       this.log(`${name} mailbox does not match this page (magic ${magic.toString(16)}, version ${ver}, ${r.size} bytes): no ${name === 'lan' ? 'LAN play' : 'free roam'}`);
       return;
     }
+    const ep = new Endpoint(name, ver, buf, r.ptr, r.size);
     if (name === 'roam') this.roam = ep; else this.lan = ep;
     if (name === 'lan') this.log('LAN play attached (the game opened its LAN screens)');
     this.publishPeers(ep);
     if (this.state === 'online') this.publishOnline(ep);
-    else Atomics.store(ep.i32, P.W_PAGE_STATE, this.state === 'connecting' ? P.NET_PAGE_CONNECTING : this.state === 'offline' ? P.NET_PAGE_OFFLINE : P.NET_PAGE_NONE);
-    if (!this.ws && this.state === 'waiting') this.connect();
+    else Atomics.store(ep.i32, P.W_PAGE_STATE, this.state === 'connecting' ? P.NET_PAGE_CONNECTING : this.state === 'offline' ? P.NET_PAGE_OFFLINE
+      : this.state === 'idle' ? P.NET_PAGE_IDLE : P.NET_PAGE_NONE);
+    this.checkWant();
     void this.txLoop(ep);
   }
 
@@ -184,10 +203,55 @@ class Link implements NetLink {
     ep.ring();                                     // wake C's network thread so it sees the address now
   }
   private publishPeers(ep: Endpoint) {
-    const bits = new Uint32Array(8);
-    for (const v of this.peerVips) if (!this.vipNum || ((v ^ this.vipNum) & this.netmask) === 0) bits[(v & 255) >>> 5] |= 1 << (v & 31);
-    for (let i = 0; i < 8; i++) Atomics.store(ep.i32, P.W_PEER_BITS + i, bits[i] | 0);
+    // bit h: the host h of our network (a module of before: the address's last byte, so 10.77.1.5 sets 10.77.0.5's
+    // bit too; it then only waits for an answer where it could have known at once that nobody is there)
+    const words = ep.ver === 2 ? 8 : P.NET_PEER_BITS / 32, bits = new Uint32Array(words);
+    for (const v of this.peerVips) {
+      if (this.vipNum && ((v ^ this.vipNum) & this.netmask) !== 0) continue;
+      const h = ep.ver === 2 ? v & 255 : (v & ~this.netmask) >>> 0;
+      if (h < words * 32) bits[h >>> 5] |= 1 << (h & 31);
+    }
+    for (let i = 0; i < words; i++) Atomics.store(ep.i32, P.W_PEER_BITS + i, bits[i] | 0);
     Atomics.store(ep.i32, P.W_SWITCH_PEERS, this.peers.length);
+  }
+  /** LAN play is open: the game's LAN or Online screens (a module of before: once it attached) */
+  private lanOpen() { return !!this.lan && this.lan.wants(); }
+  /** connect when a mailbox wants the switch, let it go idleMs after none does, and tell the switch about LAN play */
+  private checkWant() {
+    if (this.closed) return;
+    const want = this.eps().some(ep => ep.wants());
+    if (want) {
+      if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
+      if (!this.ws && (this.state === 'waiting' || this.state === 'idle')) this.connect();
+    } else if (!this.idleTimer && this.state !== 'waiting' && this.state !== 'idle') {
+      this.idleTimer = setTimeout(() => this.goIdle(), this.o.idleMs ?? 10_000);
+    }
+    const lan = this.lanOpen(), ws = this.ws;
+    if (lan !== this.lanSent && ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ t: 'lan', on: lan ? 1 : 0 }));
+      this.lanSent = lan;
+    }
+  }
+  /** nothing wanted the switch for idleMs: its place goes back (the switch frees the address at once) */
+  private goIdle() {
+    this.idleTimer = null;
+    if (this.closed || this.state === 'idle') return;
+    // C stores want, then reads page_state; this stores page_state, then reads want: one of the two sees the other
+    for (const ep of this.eps()) Atomics.store(ep.i32, P.W_PAGE_STATE, P.NET_PAGE_IDLE);
+    if (this.eps().some(ep => ep.wants())) {
+      if (this.state === 'online') for (const ep of this.eps()) this.publishOnline(ep);
+      else this.setPage(this.state === 'connecting' ? P.NET_PAGE_CONNECTING : P.NET_PAGE_OFFLINE);
+      return;
+    }
+    for (const ep of this.eps()) this.drainTx(ep);                 // what C queued last (free roam's BYEs)
+    if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null; }
+    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+    const ws = this.ws; this.ws = null;
+    if (ws) { ws.onopen = null; ws.onmessage = null; ws.onerror = null; ws.onclose = null; ws.close(1000, 'idle'); }
+    this.pings.clear();
+    this.state = 'idle'; this.token = ''; this.full = false; this.backoff = 250; this.failed = 0;
+    this.log('no network feature in use: the place on the server goes back until one is');
+    for (const ep of this.eps()) { Atomics.add(ep.i32, P.W_RX_BELL, 1); Atomics.notify(ep.i32, P.W_RX_BELL); }
   }
   private connect() {
     if (this.closed) return;
@@ -201,8 +265,11 @@ class Link implements NetLink {
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
     ws.onopen = () => {
-      // deltas: the switch sends what changed on the peer list, not the whole list each time (lan.mjs)
-      ws.send(JSON.stringify({ t: 'hello', name: this.o.name ?? 'player', deltas: 1, ...(resume ? { vip: P.ipStr(this.vipNum), token: this.token } : {}) }));
+      // deltas: the switch sends what changed on the peer list, not the whole list each time (lan.mjs); lan: LAN
+      // play is open, so it takes LAN broadcasts
+      this.lanSent = this.lanOpen();
+      ws.send(JSON.stringify({ t: 'hello', name: this.o.name ?? 'player', deltas: 1, lan: this.lanSent ? 1 : 0,
+        ...(resume ? { vip: P.ipStr(this.vipNum), token: this.token } : {}) }));
       this.pingTimer = setInterval(() => this.ping(), this.o.pingMs ?? 2000);
     };
     ws.onmessage = (e) => {
@@ -296,6 +363,7 @@ class Link implements NetLink {
     let sync = 0;                       // turns without a real wait: yield to the event loop now and then
     while (!this.closed) {
       const bell = Atomics.load(ep.i32, P.W_TX_BELL);
+      this.checkWant();
       this.drainTx(ep);
       const w = Atomics.load(ep.i32, P.W_TX_HEAD) !== Atomics.load(ep.i32, P.W_TX_TAIL) ? null
         : waitAsync(ep.i32, P.W_TX_BELL, bell, 1000);
@@ -436,6 +504,7 @@ class Link implements NetLink {
     if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null; }
     if (this.retryTimer) { clearTimeout(this.retryTimer); this.retryTimer = null; }
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+    if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
     // every handler goes: a closing socket lives on until the server answers the
     // close, and a handler would keep this link and the game's memory with it
     const ws = this.ws; this.ws = null;

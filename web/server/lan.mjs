@@ -1,6 +1,11 @@
 // The virtual LAN switch.  Every browser that joins gets a virtual IPv4
-// address (10.77.0.x).  Binary frames carry the game's network traffic; the
-// switch only routes them and never looks inside:
+// address on 10.77.0.0/22: 250 in each of 10.77.0-3.x (host bytes 2-251, so
+// none ends in .0 or .255 and 10.77.0.1 and .253 stay the server's own), 1000
+// in all, handed out in turn across the four (10.77.0.2, 10.77.1.2,
+// 10.77.2.2, 10.77.3.2, 10.77.0.3, ...), so two players are rarely in the
+// same /24 and anything that still takes the network for a /24 shows at once,
+// not only past 250 players.  Binary frames carry the game's network traffic;
+// the switch only routes them and never looks inside:
 //   [0]     u8  kind (opaque to the switch: datagram, stream open/data/close, ...)
 //   [1..3]  reserved
 //   [4..7]  u32 source vip      (rewritten here to the sender's own address)
@@ -12,9 +17,13 @@
 //      always to the broadcast address; only test-mode instances take it)
 //   3, 4, 5  LAN play (the Winsock HLE, runtime/web/net_lan.c): UDP, TCP
 //      segments and ICMP with ports at [12..15] and an 8-byte LAN header
-//      (op, ttl, connection id) before the data; broadcasts as kind 1
-// Text frames are JSON control messages: {"t":"hello","name":...,"deltas":1} and
-// {"t":"ping","id":n} from a client; {"t":"welcome","vip":...,"token":...},
+//      (op, ttl, connection id) before the data.  Their broadcasts go only
+//      to the browsers that have LAN play open (the game's LAN or Online
+//      screens: "lan":1 in the hello, then {"t":"lan","on":0|1}; a page of
+//      before says nothing and gets them all): the others drop them anyway,
+//      and on a full switch each one would reach 1000 browsers
+// Text frames are JSON control messages: {"t":"hello","name":...,"deltas":1,"lan":0|1},
+// {"t":"lan","on":0|1} and {"t":"ping","id":n} from a client; {"t":"welcome","vip":...,"token":...},
 // {"t":"peers",...}, {"t":"delta",...} and {"t":"pong","id":n} from the switch.
 //
 // The peer list.  A connection's first hello names its player (later ones
@@ -31,9 +40,11 @@
 // Addresses belong to the connection that holds them.  The welcome carries a
 // random token (128 bits) that only that client sees.  A client that lost its
 // connection opens /lan?resume and sends, as its first message, a hello with
-// its old address and that token ({"t":"hello","name":...,"vip":"10.77.0.x",
+// its old address and that token ({"t":"hello","name":...,"vip":"10.77.x.x",
 // "token":...}); it gets the address back.  Nobody else can: when a holder
-// leaves, its address stays reserved for its token for reserveMs, and an
+// leaves, its address stays reserved for its token for reserveMs (not when
+// the page closed the connection itself, 1000 "idle" or "closed": no network
+// feature in use, or the game ended; its address is free at once), and an
 // address is never handed out on request without the token (the audit's F1:
 // /lan?vip= gave a dropped player's address, and the frames other players
 // sent to it, to whoever asked first).  A reservation is never given to
@@ -162,9 +173,14 @@
 import crypto from 'node:crypto';
 
 const BASE = (10 << 24) | (77 << 16);
+const ADDRS = 1000;             // 10.77.0.0/22: host bytes 2-251 in each of its four /24s
+const MASK = '255.255.252.0';
+/** the i-th address in the order they are handed out: round the four /24s */
+const vipAt = i => (BASE | ((i & 3) << 8) | ((i >> 2) + 2)) >>> 0;
 const BROADCAST = 0xFFFFFFFF;
 const KIND_UDP = 1;             // free roam's datagrams (and LAN play's broadcasts): dropped first (roamQueue)
 const KIND_STREAM = 4;          // LAN play's TCP segments: never dropped
+const KIND_LAN_UDP = 3, KIND_LAN_ICMP = 5;   // LAN play's kinds (3-5): broadcasts only to the browsers with LAN play open
 const STREAM_LOW = 64 << 10;    // a receiver with less than this queued gets stream segments at once
 
 /** options for the WebSocketServer whose connections the switch takes (see above) */
@@ -210,9 +226,10 @@ export class LanSwitch {
   constructor(opts = {}) {
     this.o = { ...LAN_DEFAULTS };
     for (const k of Object.keys(LAN_DEFAULTS)) if (Number.isFinite(opts[k]) && opts[k] > 0) this.o[k] = opts[k];
-    this.peers = new Map(); this.next = 2; this.frames = 0; this.bytes = 0; this.dropped = 0; this.limited = 0; this.refused = 0;
+    this.peers = new Map(); this.next = 0; this.frames = 0; this.bytes = 0; this.dropped = 0; this.limited = 0; this.refused = 0;
     this.shed = 0;                       // datagrams dropped for a receiver's full queue
     this.resumed = 0;                    // addresses given back to their token
+    this.released = 0;                   // addresses freed at once: the page closed its connection itself
     // a departed holder's address -> { hash, until, group, site }: kept for that token only
     this.reserved = new Map();
     // limits shared by the connections of one client address (group id) and of one site (site id): -> { frames, bytes, n }
@@ -280,7 +297,7 @@ export class LanSwitch {
   info() {
     return { peers: [...this.peers.values()].map(p => ({ vip: vipStr(p.vip), name: p.name, framesIn: p.framesIn, framesOut: p.framesOut })),
       frames: this.frames, bytes: this.bytes, dropped: this.dropped, limited: this.limited, refused: this.refused, shed: this.shed,
-      resumed: this.resumed, reserved: this.reserved.size, evicted: this.evicted, cuts: { ...this.cuts },
+      resumed: this.resumed, released: this.released, reserved: this.reserved.size, evicted: this.evicted, cuts: { ...this.cuts },
       ...(this.impair ? { impair: this.impair, lost: this.lost } : {}),
       ...(this.online ? { online: this.online.info() } : {}), ...(this.roam ? { roam: this.roam.info() } : {}) };
   }
@@ -396,9 +413,9 @@ export class LanSwitch {
   allocate() {
     const now = Date.now();
     for (const [v, r] of this.reserved) if (r.until <= now) this.reserved.delete(v);
-    for (let i = 0; i < 250; i++) {
-      const c = (BASE | (((this.next - 2 + i) % 250) + 2)) >>> 0;
-      if (!this.peers.has(c) && !this.reserved.has(c)) { this.next = (c & 0xff) + 1; return c; }
+    for (let i = 0; i < ADDRS; i++) {
+      const k = (this.next + i) % ADDRS, c = vipAt(k);
+      if (!this.peers.has(c) && !this.reserved.has(c)) { this.next = (k + 1) % ADDRS; return c; }
     }
     return 0;
   }
@@ -406,8 +423,8 @@ export class LanSwitch {
   get full() {
     if (this.peers.size >= this.o.maxPeers) return true;
     const now = Date.now();
-    for (let h = 2; h <= 251; h++) {
-      const c = (BASE | h) >>> 0;
+    for (let i = 0; i < ADDRS; i++) {
+      const c = vipAt(i);
       if (!this.peers.has(c) && !(this.reserved.get(c)?.until > now)) return false;
     }
     return true;
@@ -441,7 +458,7 @@ export class LanSwitch {
     else if (!(vip = this.allocate())) { this.refused++; return ws.close(1013, 'LAN full'); }
     const token = newToken();
     // hello: its first hello came (the name, and deltas: it takes the changes to the peer list)
-    const peer = { ws, vip, name: 'player', hello: false, deltas: false, tokenHash: tokenHash(token), group, site, framesIn: 0, framesOut: 0, alive: true, lastIn: Date.now(), pingData: null,
+    const peer = { ws, vip, name: 'player', hello: false, deltas: false, lan: null, tokenHash: tokenHash(token), group, site, framesIn: 0, framesOut: 0, alive: true, lastIn: Date.now(), pingData: null,
       // stream segments waiting for this receiver (sq: { data, mine, g }), their bytes by sending group ({ n }) and
       // in all, since when the queue is not empty, and when one last went out
       sq: [], pumpTimer: null, streamQueued: new Map(), streamTotal: 0, streamSince: 0, streamOut: 0,
@@ -463,7 +480,7 @@ export class LanSwitch {
       if (peer.pingData && data.equals(peer.pingData)) { peer.alive = true; peer.pingData = null; return; }
       flood();
     });
-    ws.send(JSON.stringify({ t: 'welcome', vip, vipStr: vipStr(vip), mask: '255.255.255.0', token }));
+    ws.send(JSON.stringify({ t: 'welcome', vip, vipStr: vipStr(vip), mask: MASK, token }));
     if (peer.hello) this.send(peer, this.peerList());
     this.peersChanged(vip);
     this.persist();
@@ -482,14 +499,18 @@ export class LanSwitch {
           greet(peer, m);
           this.send(peer, this.peerList());
           if (peer.name !== was) this.peersChanged(vip);
-        } else if (m.t === 'ping' && Number.isSafeInteger(m.id)) this.send(peer, JSON.stringify({ t: 'pong', id: m.id }));
+        } else if (m.t === 'lan') peer.lan = m.on === 1;
+        else if (m.t === 'ping' && Number.isSafeInteger(m.id)) this.send(peer, JSON.stringify({ t: 'pong', id: m.id }));
         return;
       }
       if (n < 12) return;
       if (n > o.maxFrame) { this.limited++; return; }
       const dst = data.readUInt32BE(8);
       const to = [];
-      if (dst === BROADCAST) { for (const p of this.peers.values()) if (p !== peer && p.ws.readyState === 1) to.push(p); }
+      if (dst === BROADCAST) {
+        const lanOnly = data[0] >= KIND_LAN_UDP && data[0] <= KIND_LAN_ICMP;
+        for (const p of this.peers.values()) if (p !== peer && p.ws.readyState === 1 && (!lanOnly || p.lan !== false)) to.push(p);
+      }
       else { const p = this.peers.get(dst); if (p && p.ws.readyState === 1) to.push(p); }
       // what the switch sends for it: a broadcast costs its size for every player it reaches
       const k = Math.max(1, to.length);
@@ -509,12 +530,15 @@ export class LanSwitch {
       if (!to.length) { this.dropped++; return; }
       for (const p of to) this.deliver(peer, p, data);
     });
-    // an old connection's late close must not take the address from a new holder
-    ws.on('close', () => {
+    // an old connection's late close must not take the address from a new holder; a page that closed it itself
+    // (1000 "idle": no network feature in use, "closed": the game ended) comes back with no token, so its
+    // address is free at once
+    ws.on('close', (code, reason) => {
       clearTimeout(peer.pumpTimer); peer.sq.length = 0;
       if (this.peers.get(vip) !== peer) return;
       this.peers.delete(vip);
-      this.reserve(vip, peer);
+      const done = code === 1000 && (String(reason) === 'idle' || String(reason) === 'closed');
+      if (done) this.released++; else this.reserve(vip, peer);
       this.persist();
       for (const k of this.tcpLast.keys()) if (k.startsWith(`${vip}>`) || k.endsWith(`>${vip}`)) this.tcpLast.delete(k);
       this.online?.peerGone(vip);
@@ -581,6 +605,7 @@ export class LanSwitch {
 /** a connection's first hello: its player's name, and whether it takes the changes to the peer list */
 function greet(peer, m) {
   peer.hello = true; peer.deltas = m.deltas === 1;
+  if (m.lan === 0 || m.lan === 1) peer.lan = m.lan === 1;   // a page of before says nothing: it gets every broadcast
   if (typeof m.name === 'string') peer.name = cleanName(m.name);
 }
 function parseImpair(spec) {
@@ -597,5 +622,5 @@ function vipNum(s) {
   const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(s);
   if (!m || m.slice(1).some(x => +x > 255)) return 0;
   const v = ((+m[1] << 24) | (+m[2] << 16) | (+m[3] << 8) | +m[4]) >>> 0;
-  return ((v & 0xffffff00) >>> 0) === BASE && (v & 255) >= 2 && (v & 255) <= 251 ? v : 0;
+  return ((v & 0xfffffc00) >>> 0) === BASE && (v & 255) >= 2 && (v & 255) <= 251 ? v : 0;
 }

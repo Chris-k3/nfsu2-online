@@ -5,14 +5,18 @@
 // only, so Node can load this file as it is.
 
 export const NET_MAGIC = 0x314e544e;          // "NTN1"
-export const NET_VERSION = 2;                 // 2: peer_bits, the LAN mailbox
-export const NET_HDR_BYTES = 256;
+export const NET_VERSION = 3;                 // 2: peer_bits, the LAN mailbox; 3: want, peer_bits for a /22
+export const NET_HDR_BYTES = 512;
 export const NET_SLOT_BYTES = 1536;
 export const NET_SLOT_HDR = 32;
 export const NET_MAX_PAYLOAD = 1472;
 export const NET_TX_SLOTS = 128;
 export const NET_RX_SLOTS = 256;
 export const NET_MAILBOX_BYTES = NET_HDR_BYTES + (NET_TX_SLOTS + NET_RX_SLOTS) * NET_SLOT_BYTES;
+// a module of before (version 2): a 256-byte header, no want (it always wants the switch), 8 words of peer bits
+// by the address's last byte.  This page still serves it, so the page and the module need not change at once.
+export const NET_V2_HDR_BYTES = 256;
+export const NET_V2_MAILBOX_BYTES = NET_V2_HDR_BYTES + (NET_TX_SLOTS + NET_RX_SLOTS) * NET_SLOT_BYTES;
 
 // frame kinds (byte 0 of a binary frame on the switch)
 export const NET_KIND_UDP = 1;                // a UDP datagram between virtual addresses
@@ -42,17 +46,20 @@ export const NET_PAGE_NONE = 0;
 export const NET_PAGE_CONNECTING = 1;
 export const NET_PAGE_ONLINE = 2;
 export const NET_PAGE_OFFLINE = 3;
+export const NET_PAGE_IDLE = 4;               // nothing wanted the switch for a while: the page let it go
+
+export const NET_PEER_BITS = 1024;            // peer_bits: one bit per host of the switch's network (at most a /22)
 
 // header words: u32 index = byte offset / 4
 export const W_MAGIC = 0, W_VERSION = 1, W_HDR_BYTES = 2, W_SLOT_BYTES = 3;
 export const W_TX_SLOTS = 4, W_RX_SLOTS = 5, W_TX_OFF = 6, W_RX_OFF = 7;
 export const W_MODE = 8, W_PORT = 9, W_TX_HEAD = 10, W_TX_BELL = 11;          // C -> page
-export const W_RX_TAIL = 12, W_C_ALIVE = 13;
+export const W_RX_TAIL = 12, W_C_ALIVE = 13, W_WANT = 14;
 export const W_PAGE_STATE = 16, W_VIP = 17, W_NETMASK = 18, W_GENERATION = 19;   // page -> C
 export const W_TX_TAIL = 20, W_RX_HEAD = 21, W_RX_BELL = 22, W_RX_FULL_DROP = 23;
 export const W_TX_OFFLINE_DROP = 24, W_RX_OVERSIZE = 25, W_SWITCH_PEERS = 26;
 export const W_TX_WAIT_N = 34;
-export const W_PEER_BITS = 36;                // 8 words: bit h = 10.77.0.h is on the switch
+export const W_PEER_BITS = 36;                // NET_PEER_BITS / 32 words: bit h = host h of our network is on the switch
 // header doubles: f64 index = byte offset / 8
 export const D_SWITCH_RTT_MS = 14, D_TX_WAIT_MS_SUM = 15, D_TX_WAIT_MS_MAX = 16;
 

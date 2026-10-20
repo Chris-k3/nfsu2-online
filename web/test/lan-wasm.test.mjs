@@ -40,4 +40,8 @@ test('lan_unit on wasm (winsock.c + net_lan.c)', { skip: !CC && 'no wasi-sdk in 
   assert.ok(err.includes('lan_unit: the page closes the link'), 'the test closed the link');
   assert.match(tail, /\[net\] virtual LAN closed/, 'a "closed" line');
   assert.doesNotMatch(tail, /reconnecting/, 'no "reconnecting" line');
+  // the page letting the switch go when no network session wants it is logged as that too
+  const idle = err.slice(err.indexOf('lan_unit: the page lets go'), err.indexOf('lan_unit: the page closes the link'));
+  assert.match(idle, /\[net\] virtual LAN idle: no network session/, 'an "idle" line');
+  assert.doesNotMatch(idle, /reconnecting/, 'no "reconnecting" line');
 });

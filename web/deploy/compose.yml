@@ -39,21 +39,21 @@ services:
       - ${NFSU2_MODULE:-./module}:/module:ro
       - state:/state
     # what the systemd unit (nfsu2-web.service) allows the server, as far as a container goes: nothing to write
-    # but its state, no capabilities, no swap, 8192 open files (250 players); 8 GB of memory, not the unit's 3 GB
+    # but its state, no capabilities, no swap, 16384 open files (1000 players); 8 GB of memory, not the unit's 3 GB
     # (the live server reached 2.6 GB with 110 players)
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     mem_limit: 8g
     memswap_limit: 8g
-    ulimits: { nofile: 8192 }
+    ulimits: { nofile: 16384 }
     # the console, kept by Docker in files it rotates (5 of 20 MB), so the log never fills the VPS's disk
     logging: { driver: local }
 configs:
   caddyfile:
     # web/deploy/Caddyfile for NFSU2_HOST.  Caddy names no software (no Server or Via header, also not on its
     # redirects and errors), closes a connection for any other name (the bare address, a scanner's made-up name)
-    # without an answer, and opens at most 1900 connections to the server (it takes 2000 with 250 players).
+    # without an answer, and opens at most 7900 connections to the server (it takes 8000 with 1000 players).
     # Behind Cloudflare's proxy it believes CF-Connecting-IP only from Cloudflare's addresses
     # (web/server/cloudflare-ips.txt, as of 2026-10-18) and hands the server the address it decided on, so a
     # client that reaches the VPS directly cannot claim another; the server reads that header only with
@@ -81,7 +81,7 @@ configs:
       	reverse_proxy 127.0.0.1:${NFSU2_HTTP_PORT:-8080} {
       		header_up CF-Connecting-IP {client_ip}
       		transport http {
-      			max_conns_per_host 1900
+      			max_conns_per_host 7900
       		}
       	}
       	header -Server

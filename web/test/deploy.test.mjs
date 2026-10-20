@@ -413,7 +413,7 @@ test('limits: methods, bodies, header size, slow headers, /lan per address', { s
     assert.equal((await wsOpen(`ws://127.0.0.1:${P2}/lan`)).status, 101, 'free again once they closed');
     // the console (a VPS's journal) names players by virtual address, never by their real one
     const lanLines = s.out().split('\n').filter(l => l.startsWith('[lan]'));
-    assert.ok(lanLines.some(l => / 10\.77\.0\.\d+ joined/.test(l)) && lanLines.some(l => l.includes('refused')), lanLines.join('\n'));
+    assert.ok(lanLines.some(l => / 10\.77\.[0-3]\.\d+ joined/.test(l)) && lanLines.some(l => l.includes('refused')), lanLines.join('\n'));
     assert.deepEqual(lanLines.filter(l => /127\.0\.0\.1|::1|::ffff/.test(l)), [], 'no client address in the [lan] lines');
     // a handshake the ws library refuses: our 400 with our headers, no body naming the library
     for (const proto of ['a b', 'x,,y', '"q"']) {

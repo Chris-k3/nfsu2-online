@@ -151,7 +151,7 @@ if (LAN_IMPAIR && !DEV) die('--lan-impair is a test aid: it needs --dev');
 if (!['on', 'off'].includes(ONLINE)) die('--online: on or off');
 if (!['on', 'off'].includes(ROAM_HUB)) die('--roam-hub: on or off');
 if (ONLINE_TRACE && !DEV) die('--online-trace is a test aid: it needs --dev');
-if (!Number.isInteger(MAX_PEERS) || MAX_PEERS < 1 || MAX_PEERS > 250) die('--max-peers: 1 to 250');
+if (!Number.isInteger(MAX_PEERS) || MAX_PEERS < 1 || MAX_PEERS > 1000) die('--max-peers: 1 to 1000');
 // how TLS is done: by a proxy in front, with the given certificate, or not at all (this machine only)
 const TLS = BEHIND ? 'proxy' : TLS_CERT ? 'cert' : 'none';
 if (TLS === 'cert' && !HTTPS_PORT) die('--tls-cert needs --port: the HTTPS port');
@@ -206,7 +206,7 @@ const LIMITS = {
   // write is still queued, so a response the client stopped reading is ended by the progress rule below)
   socketIdle: 120_000,
   // per listening socket: each player holds at most 6 HTTP connections and a WebSocket, so with
-  // many players (a VPS with --max-peers 250) the port takes 8 per player
+  // many players (a VPS with --max-peers 1000) the port takes 8 per player
   maxConnections: Math.max(1024, MAX_PEERS * 8),
   // connections at once per client and per site, TCP peers that are not trusted proxies only: Chrome opens at
   // most 6 per server and a WebSocket, so this leaves room for a household of players behind one address, and

@@ -141,5 +141,6 @@ void vlan_close(WsSock *s, int abortive);
 int  vlan_conn_was_reset(WsSock *s);
 void vlan_note(const char *text);                       /* marker line in the hub log */
 int  vlan_alive(void);
+void vlan_session_end(void);                            /* the last WSACleanup: no network session now */
 
 #endif

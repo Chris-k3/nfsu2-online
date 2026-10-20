@@ -326,7 +326,7 @@ test('DEP-4: refused /lan upgrades from one client cost the console a few lines,
     assert.ok(refused >= 1900);
     assert.ok(lines.length >= 1 && lines.length <= 3, `the first ones shown, then at most a few lines a minute (${lines.length})`);
     // the joins of the 8 connections are still each on the console (another topic, its own budget), without an address
-    const joins = s.out().split('\n').filter(l => /^\[lan\] 10\.77\.0\.\d+ joined/.test(l));
+    const joins = s.out().split('\n').filter(l => /^\[lan\] 10\.77\.[0-3]\.\d+ joined/.test(l));
     assert.equal(joins.length, 8);
     assert.deepEqual(s.out().split('\n').filter(l => l.startsWith('[lan]') && /127\.0\.0\.1|::1/.test(l)), [], 'no client address');
   } finally { for (const ws of held) ws.terminate(); await s.stop(); }

@@ -10,7 +10,10 @@
 // messages, a broadcast charged per receiver, limits shared by one client
 // address, a flood never getting a slower receiver cut: the audit's F2),
 // WebSocket keepalive and idle close, the page's notices when the switch is
-// full (web/src/net/index.ts), and (against the real server, when the game
+// full (web/src/net/index.ts), the 1000 addresses of 10.77.0.0/22, LAN play's
+// broadcasts only to the browsers with it open, a page that lets go freeing its
+// address at once, the page holding a place only while a mailbox wants it (and
+// a module of before always), and (against the real server, when the game
 // folder is there) the Origin check and /lan?resume.  The switches made
 // in this process listen on an ephemeral port of 127.0.0.1; the real server
 // on NFSU2_TEST_PORT (8528).
@@ -34,6 +37,8 @@ const { LanSwitch, LAN_WSS_OPTIONS } = await import(process.env.NFSU2_TEST_LAN ?
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ip = (s) => s.split('.').reduce((a, b) => ((a << 8) | +b) >>> 0, 0);
 const ipStr = (v) => [v >>> 24, (v >>> 16) & 255, (v >>> 8) & 255, v & 255].join('.');
+// every address the switch hands out: host bytes 2-251 in each /24 of 10.77.0.0/22
+const ALL_VIPS = [0, 1, 2, 3].flatMap(b => Array.from({ length: 250 }, (_, i) => ((10 << 24) | (77 << 16) | (b << 8) | (i + 2)) >>> 0));
 
 // a switch on an ephemeral port, wired as server.mjs wires it (?g=<id> and ?s=<id>: the group and site ids the
 // server would derive from the client's address; ?vip= is what the switch before the audit took as a request)
@@ -54,16 +59,18 @@ async function startSwitch(opts) {
 
 // a fake browser: collects control messages and frames; resume = { vip, token }: reconnects as the page
 // does (/lan?resume, then a hello with the old address and the token before anything else); deltas: its hello
-// asks for the changes to the peer list, as the page's does (a page of before did not: the whole list each time).
+// asks for the changes to the peer list, as the page's does (a page of before did not: the whole list each time);
+// lan: 0 or 1 in its hello, LAN play open or not, as the page's says (a page of before said nothing).
 // view: the peer list as the whole lists and the changes made it; ctlBytes: the bytes of control messages it got
 class Client {
-  constructor(port, name, query = '', resume = null, { deltas = false } = {}) {
+  constructor(port, name, query = '', resume = null, { deltas = false, lan } = {}) {
     this.name = name; this.frames = []; this.ctl = []; this.waiters = []; this.resume = resume; this.deltas = deltas;
+    this.extra = { ...(deltas ? { deltas: 1 } : {}), ...(lan !== undefined ? { lan } : {}) };
     this.view = null; this.ctlBytes = 0;
     const q = resume ? (query ? query + '&resume' : '?resume') : query;
     this.ws = new WebSocket(`ws://127.0.0.1:${port}/lan${q}`);
     this.ws.binaryType = 'nodebuffer';
-    if (resume) this.ws.on('open', () => this.ws.send(JSON.stringify({ t: 'hello', name, vip: ipStr(resume.vip), token: resume.token, ...(deltas ? { deltas: 1 } : {}) })));
+    if (resume) this.ws.on('open', () => this.ws.send(JSON.stringify({ t: 'hello', name, vip: ipStr(resume.vip), token: resume.token, ...this.extra })));
     this.ws.on('message', (d, bin) => {
       if (bin) this.frames.push({ buf: Buffer.from(d), t: performance.now() });
       else {
@@ -79,7 +86,7 @@ class Client {
   async welcome() {
     const m = await this.until(() => this.ctl.find(m => m.t === 'welcome'));
     this.vip = m.vip >>> 0; this.token = m.token;
-    if (!this.resume) this.ws.send(JSON.stringify({ t: 'hello', name: this.name, ...(this.deltas ? { deltas: 1 } : {}) }));
+    if (!this.resume) this.ws.send(JSON.stringify({ t: 'hello', name: this.name, ...this.extra }));
     return m;
   }
   until(f, ms = 2000) {
@@ -105,9 +112,9 @@ test('addresses, peer lists, unicast, broadcast, ping, disconnect, reconnect', a
   try {
     const a = new Client(sw.port, 'Alice'), b = new Client(sw.port, 'Bob'), c = new Client(sw.port, 'Carol');
     const wa = await a.welcome(), wb = await b.welcome(), wc = await c.welcome();
-    // addresses: 10.77.0.2, .3, .4 in order of arrival; mask /24
-    assert.equal(wa.vipStr, '10.77.0.2'); assert.equal(wb.vipStr, '10.77.0.3'); assert.equal(wc.vipStr, '10.77.0.4');
-    assert.equal(ipStr(wa.vip), '10.77.0.2'); assert.equal(wa.mask, '255.255.255.0');
+    // addresses: round the four /24s of 10.77.0.0/22 in order of arrival; mask /22
+    assert.equal(wa.vipStr, '10.77.0.2'); assert.equal(wb.vipStr, '10.77.1.2'); assert.equal(wc.vipStr, '10.77.2.2');
+    assert.equal(ipStr(wa.vip), '10.77.0.2'); assert.equal(wa.mask, '255.255.252.0');
     // everyone's peer list ends with all three names
     for (const x of [a, b, c])
       await x.until(() => { const p = x.lastPeers(); return p && p.length === 3 && ['Alice', 'Bob', 'Carol'].every(n => p.some(q => q.name === n)); });
@@ -270,7 +277,7 @@ test('what a peer learns about the others: virtual addresses and cleaned names, 
       if (m.t === 'peers' || m.t === 'delta') for (const p of m.peers) assert.deepEqual(Object.keys(p).sort(), ['name', 'vip']);
       if (m.t === 'delta') assert.ok(m.gone.every(v => Number.isInteger(v)), 'gone: addresses only');
       for (const [, ip4] of JSON.stringify(m).matchAll(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/g))
-        assert.ok(ip4.startsWith('10.77.0.') || ip4 === '255.255.255.0', `only virtual addresses (${ip4})`);
+        assert.ok(/^10\.77\.[0-3]\./.test(ip4) || ip4 === '255.255.252.0', `only virtual addresses (${ip4})`);
       assert.ok(!JSON.stringify(m).includes('127.0.0.1') && !/::1|::ffff/.test(JSON.stringify(m)), 'no real address');
     }
     // a peer's token reaches that peer only
@@ -619,14 +626,14 @@ test('a resume replaces the same client\'s older connection (one that died witho
 });
 
 test('reservations: never handed to another client, not even when every address is held or reserved (LAN full instead); a silent ?resume times out to a fresh one', async () => {
-  const sw = await startSwitch({ maxPeers: 250, resumeWaitMs: 300 });
+  const sw = await startSwitch({ maxPeers: 1000, resumeWaitMs: 300 });
   try {
     const now = Date.now();
-    for (let i = 2; i <= 251; i++) sw.lan.reserved.set(((10 << 24) | (77 << 16) | i) >>> 0, { hash: crypto.randomBytes(32), until: now + 60_000 + i, group: 'others' });
+    ALL_VIPS.forEach((v, i) => sw.lan.reserved.set(v, { hash: crypto.randomBytes(32), until: now + 60_000 + i, group: 'others' }));
     const c = new Client(sw.port, 'C', '?g=newcomer');
     const code = await new Promise(r => c.ws.on('close', (k, why) => r(`${k} ${why}`)));
     assert.equal(code, '1013 LAN full', 'a newcomer waits for an address to free; nobody\'s reservation is given away');
-    assert.equal(sw.lan.info().reserved, 250, 'every reservation kept');
+    assert.equal(sw.lan.info().reserved, 1000, 'every reservation kept');
     sw.lan.reserved.clear();
     const t0 = performance.now();
     const silent = new WebSocket(`ws://127.0.0.1:${sw.port}/lan?resume`);
@@ -640,16 +647,14 @@ test('reservations: never handed to another client, not even when every address 
 // the review of F1: with every address held or reserved, opening and closing connections fast enough made the
 // switch hand out the oldest reservation, a dropped player's address, within 60 ms
 test('churning connections never takes a dropped player\'s address; each client keeps only its own share of reservations', async () => {
-  const sw = await startSwitch({ maxPeers: 250, groupReserve: 8, siteReserve: 16 });
+  const sw = await startSwitch({ maxPeers: 1000, groupReserve: 8, siteReserve: 16 });
   try {
     const alice = new Client(sw.port, 'Alice', '?g=alice'), bob = new Client(sw.port, 'Bob', '?g=bob');
     await alice.welcome(); const wb = await bob.welcome();
     // the rest of the addresses held by others, so that the switch has no free one left once Bob drops
     const now = Date.now();
-    for (let i = 2; i <= 251; i++) {
-      const v = ((10 << 24) | (77 << 16) | i) >>> 0;
+    for (const v of ALL_VIPS)
       if (v !== alice.vip && v !== bob.vip) sw.lan.reserved.set(v, { hash: crypto.randomBytes(32), until: now + 60_000, group: 'others' });
-    }
     const bvip = bob.vip;
     bob.ws.terminate();
     await alice.until(() => !alice.lastPeers()?.some(p => p.vip === bvip));
@@ -678,7 +683,7 @@ test('churning connections never takes a dropped player\'s address; each client 
     assert.equal(sw.lan.full, false, 'not full once the kept addresses run out');
   } finally { await sw.close(); }
   // a client that drops many connections keeps groupReserve reservations (its own oldest go), a site siteReserve
-  const sw2 = await startSwitch({ maxPeers: 250, groupReserve: 3, siteReserve: 5 });
+  const sw2 = await startSwitch({ maxPeers: 1000, groupReserve: 3, siteReserve: 5 });
   try {
     const leave = async (q, n) => { const cs = Array.from({ length: n }, () => new Client(sw2.port, 'x', q)); const v = []; for (const c of cs) v.push((await c.welcome()).vip >>> 0); for (const c of cs) await c.close(); await sleep(20); return v; };
     const first = await leave('?g=one', 6);
@@ -907,24 +912,39 @@ test('with a store, a restart of the server keeps each player\'s address for its
   } finally { await sw2.close(); }
 });
 
-// the page (web/src/net/index.ts) on a switch with room for one: the second game hears "the server is full" once
-// while it keeps trying, and "a place freed up" when the first leaves and it gets on
+// the page (web/src/net/index.ts), bundled as the app bundles it, against a switch on port
+let pageJs = null;
+async function pageNet(port) {
+  pageJs ??= (await esbuild.build({ entryPoints: [path.join(HERE, '../src/net/index.ts')], bundle: true, write: false, format: 'esm', platform: 'neutral' })).outputFiles[0].text;
+  globalThis.location ??= new URL(`http://127.0.0.1:${port}/`);
+  return import('data:text/javascript;base64,' + Buffer.from(pageJs).toString('base64'));
+}
+// a net mailbox at ptr of memory as the runtime fills it before it registers it (ver 2: a module of before)
+function mailbox(memory, ptr, ver = P.NET_VERSION) {
+  const hdr = ver === 2 ? P.NET_V2_HDR_BYTES : P.NET_HDR_BYTES, w = new Int32Array(memory.buffer, ptr, hdr / 4);
+  w[P.W_MAGIC] = P.NET_MAGIC; w[P.W_VERSION] = ver; w[P.W_HDR_BYTES] = hdr; w[P.W_SLOT_BYTES] = P.NET_SLOT_BYTES;
+  w[P.W_TX_SLOTS] = P.NET_TX_SLOTS; w[P.W_RX_SLOTS] = P.NET_RX_SLOTS;
+  w[P.W_TX_OFF] = hdr; w[P.W_RX_OFF] = hdr + P.NET_TX_SLOTS * P.NET_SLOT_BYTES;
+  return { w, ptr, size: ver === 2 ? P.NET_V2_MAILBOX_BYTES : P.NET_MAILBOX_BYTES };
+}
+// the runtime's want word: set, then the TX bell rung (net_lan.c / roam_web.c set_want)
+function want(mb, on) { Atomics.store(mb.w, P.W_WANT, on); Atomics.add(mb.w, P.W_TX_BELL, 1); Atomics.notify(mb.w, P.W_TX_BELL); }
+// a game process with these mailboxes (HostKind: Net 4 = free roam, Lan 7 = LAN play); the others never come
+const fakeGame = (memory, boxes) => ({ memory, ctl: new Int32Array(1), exited: new Promise(() => {}),
+  registered: k => boxes[k] ? Promise.resolve({ ptr: boxes[k].ptr, size: boxes[k].size }) : new Promise(() => {}) });
+const until = async (f, ms = 5000) => { const t0 = Date.now(); while (!f()) { if (Date.now() - t0 > ms) throw new Error('timed out'); await sleep(20); } };
+
+// on a switch with room for one: the second game hears "the server is full" once while it keeps trying, and "a
+// place freed up" when the first leaves and it gets on
 test('the page: a notice when the switch is full, and one when a place frees up', async () => {
   const sw = await startSwitch({ maxPeers: 1 });
-  const js = (await esbuild.build({ entryPoints: [path.join(HERE, '../src/net/index.ts')], bundle: true, write: false, format: 'esm', platform: 'neutral' })).outputFiles[0].text;
-  const { attachNet } = await import('data:text/javascript;base64,' + Buffer.from(js).toString('base64'));
-  globalThis.location ??= new URL(`http://127.0.0.1:${sw.port}/`);
-  // a game with free roam's mailbox (HostKind.Net, 4) at 0; LAN play's never comes
+  const { attachNet } = await pageNet(sw.port);
+  // a game with free roam's mailbox at 0, running (want); LAN play's never comes
   const game = (name, notices) => {
-    const memory = new WebAssembly.Memory({ initial: 10, maximum: 10, shared: true }), w = new Int32Array(memory.buffer, 0, P.NET_HDR_BYTES / 4);
-    w[P.W_MAGIC] = P.NET_MAGIC; w[P.W_VERSION] = P.NET_VERSION; w[P.W_HDR_BYTES] = P.NET_HDR_BYTES; w[P.W_SLOT_BYTES] = P.NET_SLOT_BYTES;
-    w[P.W_TX_SLOTS] = P.NET_TX_SLOTS; w[P.W_RX_SLOTS] = P.NET_RX_SLOTS;
-    w[P.W_TX_OFF] = P.NET_HDR_BYTES; w[P.W_RX_OFF] = P.NET_HDR_BYTES + P.NET_TX_SLOTS * P.NET_SLOT_BYTES;
-    const proc = { memory, ctl: new Int32Array(1), exited: new Promise(() => {}),
-      registered: k => k === 4 ? Promise.resolve({ ptr: 0, size: P.NET_MAILBOX_BYTES }) : new Promise(() => {}) };
-    return attachNet(proc, { url: `ws://127.0.0.1:${sw.port}/lan`, name, onNotice: t => notices.push(t), pingMs: 60_000 });
+    const memory = new WebAssembly.Memory({ initial: 10, maximum: 10, shared: true }), mb = mailbox(memory, 0);
+    want(mb, 1);
+    return attachNet(fakeGame(memory, { 4: mb }), { url: `ws://127.0.0.1:${sw.port}/lan`, name, onNotice: t => notices.push(t), pingMs: 60_000 });
   };
-  const until = async (f, ms = 5000) => { const t0 = Date.now(); while (!f()) { if (Date.now() - t0 > ms) throw new Error('timed out'); await sleep(20); } };
   const na = [], nb = [];
   const a = game('A', na);
   try {
@@ -937,10 +957,143 @@ test('the page: a notice when the switch is full, and one when a place frees up'
       assert.equal(nb.length, 1, 'said once while it keeps trying');
       assert.equal(b.state === 'online', false);
       a.close();
-      assert.match(await b.online, /^10\.77\.0\.\d+$/);
+      assert.match(await b.online, /^10\.77\.[0-3]\.\d+$/);
       await until(() => nb.length === 2);
       assert.equal(nb[1], 'A place on the server freed up: you can play with others now');
       assert.deepEqual(na, [], 'the first game heard nothing');
     } finally { b.close(); }
   } finally { a.close(); await sw.close(); }
+});
+
+test('addresses: 1000 on 10.77.0.0/22, handed out round its four /24s; never .0, .1 or .252 and up; full past them', async () => {
+  const lan = new LanSwitch({ maxPeers: 1000 });
+  try {
+    const got = [];
+    for (let i = 0; i < 1000; i++) {
+      const v = lan.allocate();
+      assert.ok(v, `address ${i}`);
+      got.push(v);
+      lan.reserved.set(v, { hash: crypto.randomBytes(32), until: Date.now() + 60_000, group: `g${i}` });
+    }
+    assert.deepEqual(got.slice(0, 6).map(ipStr), ['10.77.0.2', '10.77.1.2', '10.77.2.2', '10.77.3.2', '10.77.0.3', '10.77.1.3']);
+    assert.equal(new Set(got).size, 1000, 'all distinct');
+    assert.deepEqual([...got].sort((x, y) => x - y), [...ALL_VIPS].sort((x, y) => x - y), 'every one of them');
+    assert.equal(lan.allocate(), 0, 'none left');
+    assert.equal(lan.full, true);
+  } finally { lan.stop(); }
+});
+
+test('LAN play\'s broadcasts (kinds 3-5) reach only the browsers with LAN play open; free roam\'s reach everyone', async () => {
+  const sw = await startSwitch();
+  try {
+    const open = new Client(sw.port, 'Open', '', null, { lan: 1 }), shut = new Client(sw.port, 'Shut', '', null, { lan: 0 });
+    const old = new Client(sw.port, 'Old'), later = new Client(sw.port, 'Later', '', null, { lan: 0 });
+    const tx = new Client(sw.port, 'Host', '', null, { lan: 1 });
+    const all = [open, shut, old, later, tx];
+    for (const c of all) await c.welcome();
+    for (const c of all) await c.until(() => c.ctl.some(m => m.t === 'peers'));        // its hello is in
+    tx.udp(0xffffffff, 9999, 9999, 'any LAN games?', 3);
+    tx.udp(0xffffffff, 47210, 47210, 'free roam', 1);
+    await open.until(() => open.frames.length === 2); await old.until(() => old.frames.length === 2);
+    await shut.until(() => shut.frames.length === 1); await later.until(() => later.frames.length === 1);
+    await sleep(50);
+    assert.deepEqual(shut.frames.map(f => f.buf[0]), [1], 'LAN play shut: free roam\'s broadcast only');
+    assert.deepEqual(old.frames.map(f => f.buf[0]).sort(), [1, 3], 'a page of before (no lan in its hello): every broadcast, as before');
+    // LAN play opens later ({"t":"lan"}), then shuts again
+    later.ws.send(JSON.stringify({ t: 'lan', on: 1 }));
+    await sleep(50);
+    tx.udp(0xffffffff, 9999, 9999, 'again', 5);
+    await later.until(() => later.frames.length === 2);
+    assert.equal(later.frames[1].buf[0], 5);
+    later.ws.send(JSON.stringify({ t: 'lan', on: 0 }));
+    await sleep(50);
+    tx.udp(0xffffffff, 9999, 9999, 'once more', 3);
+    await open.until(() => open.frames.length === 4);
+    await sleep(50);
+    assert.equal(later.frames.length, 2, 'shut again: no more of them');
+    assert.equal(shut.frames.length, 1);
+    // unicast is not affected
+    tx.udp(shut.vip, 9999, 9999, 'to you', 3);
+    await shut.until(() => shut.frames.length === 2);
+    for (const c of all) await c.close();
+  } finally { await sw.close(); }
+});
+
+test('a page that lets go (1000 "idle" or "closed") frees its address at once; a connection lost otherwise keeps it for its token', async () => {
+  const sw = await startSwitch();
+  try {
+    const a = new Client(sw.port, 'A'), b = new Client(sw.port, 'B'), c = new Client(sw.port, 'C'), d = new Client(sw.port, 'D');
+    for (const x of [a, b, c, d]) await x.welcome();
+    a.ws.close(1000, 'idle'); b.ws.close(1000, 'closed'); c.ws.close(1000, 'bye'); d.ws.terminate();
+    await Promise.all([a.closed, b.closed, c.closed, d.closed]);
+    await until(() => sw.lan.info().peers.length === 0);
+    assert.deepEqual([...sw.lan.reserved.keys()].sort(), [c.vip, d.vip].sort(), 'only the ones that did not say so keep their address');
+    assert.equal(sw.lan.info().released, 2);
+  } finally { await sw.close(); }
+});
+
+// the page holds a place only while a mailbox wants it (free roam while it runs, LAN play from the game's
+// WSAStartup to its last WSACleanup), and tells the switch whether LAN play is open; a module of before (a
+// version 2 mailbox, no want word) always wants it, as before
+test('the page: the switch let go when no mailbox wants it, taken again when one does; LAN play open or not; a module of before', async () => {
+  const sw = await startSwitch();
+  const { attachNet } = await pageNet(sw.port);
+  const pages = Math.ceil(2 * P.NET_MAILBOX_BYTES / 65536);
+  const memory = new WebAssembly.Memory({ initial: pages, maximum: pages, shared: true });
+  const roam = mailbox(memory, 0), lanMb = mailbox(memory, P.NET_MAILBOX_BYTES);
+  const logs = [];
+  const link = attachNet(fakeGame(memory, { 4: roam, 7: lanMb }), { url: `ws://127.0.0.1:${sw.port}/lan`, name: 'P', pingMs: 60_000, idleMs: 300, log: l => logs.push(l) });
+  const peer = () => [...sw.lan.peers.values()][0];
+  try {
+    await sleep(300);
+    assert.equal(sw.lan.peers.size, 0, 'nothing wants the switch yet: no connection');
+    want(lanMb, 1);                                                        // the game's WSAStartup
+    const v1 = await link.online;
+    await until(() => sw.lan.peers.size === 1 && peer().hello);
+    assert.equal(peer().lan, true, 'LAN play open: said in the hello');
+    assert.equal(Atomics.load(lanMb.w, P.W_PAGE_STATE), P.NET_PAGE_ONLINE);
+    want(roam, 1); want(lanMb, 0);                                         // free roam on, LAN screens left
+    await until(() => peer().lan === false);
+    await sleep(600);
+    assert.equal(sw.lan.peers.size, 1, 'free roam still wants it');
+    want(roam, 0);                                                         // free roam off too
+    await sleep(100);
+    assert.equal(sw.lan.peers.size, 1, 'kept for idleMs');
+    await until(() => sw.lan.peers.size === 0);
+    assert.equal(link.state, 'idle');
+    assert.equal(sw.lan.info().released, 1, 'its address freed at once');
+    assert.equal(sw.lan.reserved.size, 0);
+    for (const mb of [roam, lanMb]) assert.equal(Atomics.load(mb.w, P.W_PAGE_STATE), P.NET_PAGE_IDLE);
+    // a want back within idleMs keeps the place; after it, the page connects again
+    want(lanMb, 1);
+    await until(() => sw.lan.peers.size === 1 && Atomics.load(lanMb.w, P.W_PAGE_STATE) === P.NET_PAGE_ONLINE);
+    assert.equal(peer().lan, true);
+    const v2 = P.ipStr(Atomics.load(lanMb.w, P.W_VIP) >>> 0);
+    assert.notEqual(v2, v1, 'a new address (the old one went back)');
+    want(lanMb, 0); await sleep(100); want(lanMb, 1); await sleep(500);
+    assert.equal(sw.lan.peers.size, 1); assert.equal(sw.lan.info().released, 1, 'a short break keeps the place');
+    // peer bits: one bit per host of the /22 (a peer in another /24 has its own bit)
+    const other = new Client(sw.port, 'O'); await other.welcome();
+    const h = (other.vip & 0x3ff) >>> 0;
+    await until(() => (Atomics.load(lanMb.w, P.W_PEER_BITS + (h >>> 5)) >>> (h & 31)) & 1);
+    await other.close();
+    assert.ok(logs.some(l => /goes back/.test(l)), 'the console says why it let go');
+  } finally { link.close(); await sw.close(); }
+  // a module of before: version 2, no want word, always connected
+  const sw2 = await startSwitch();
+  try {
+    const mem2 = new WebAssembly.Memory({ initial: 10, maximum: 10, shared: true }), old = mailbox(mem2, 0, 2);
+    const l2 = attachNet(fakeGame(mem2, { 7: old }), { url: `ws://127.0.0.1:${sw2.port}/lan`, name: 'Old', pingMs: 60_000, idleMs: 100 });
+    try {
+      await l2.online;
+      await until(() => sw2.lan.peers.size === 1 && [...sw2.lan.peers.values()][0].hello);
+      assert.equal([...sw2.lan.peers.values()][0].lan, true, 'its LAN mailbox counts as open');
+      await sleep(400);
+      assert.equal(sw2.lan.peers.size, 1, 'never let go');
+      const c = new Client(sw2.port, 'C'); await c.welcome();
+      const h = c.vip & 255;                                               // its bitmap: by the last byte, 8 words
+      await until(() => (Atomics.load(old.w, P.W_PEER_BITS + (h >>> 5)) >>> (h & 31)) & 1);
+      await c.close();
+    } finally { l2.close(); }
+  } finally { await sw2.close(); }
 });

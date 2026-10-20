@@ -3,7 +3,7 @@
  *
  * A page cannot open sockets.  The page's main thread holds one WebSocket to
  * the local server's virtual-LAN switch (web/server/lan.mjs, /lan), which gives
- * every browser a virtual IPv4 address (10.77.0.x) and routes frames by virtual
+ * every browser a virtual IPv4 address (10.77.x.x) and routes frames by virtual
  * destination address.  This file is one virtual UDP endpoint on that LAN:
  *
  *   game thread / network thread --TX ring--> page (web/src/net) --WebSocket--> switch
@@ -20,7 +20,7 @@
  *
  * Addresses (what the core sees):
  *   player   our own virtual address and port; peers are virtual addresses
- *            (roam_peers takes 10.77.0.x literals, the page shows them).  Who
+ *            (roam_peers takes 10.77.x.x literals, the page shows them).  Who
  *            our peers are comes from the server's free-roam hub
  *            (NET_ROAM_HUB, web/server/roam-hub.mjs: the players nearest to
  *            us, rc_config.hub_ip), so a server takes far more players than
@@ -121,6 +121,13 @@ static int mailbox_once(void){
     MB = m;
     nfsu2_register(HOST_KIND_NET, m, NET_MAILBOX_BYTES);
     return 0;
+}
+
+/* want (net_proto.h): free roam needs the switch while it runs; the page lets it go when nothing wants it */
+static void set_want(uint32_t on){
+    st(&MB->want, on);
+    __atomic_add_fetch(&MB->tx_bell, 1, __ATOMIC_SEQ_CST);
+    __builtin_wasm_memory_atomic_notify((int *)&MB->tx_bell, 1);
 }
 
 /* queue one datagram for the page (with the lock held) */
@@ -458,6 +465,7 @@ int roam_plat_start(const roam_plat_cfg *cfg, rc_session *s){
     atomic_store(&g_stop, 0);
     if (pthread_create(&g_thr, 0, net_main, 0) != 0){ st(&MB->mode, NET_MODE_CLOSED); return -1; }
     g_thr_on = 1;
+    set_want(1);
     if (webtest_vlan())
         fprintf(stderr, "[roam] automated run on the virtual LAN (NFSU2_ROAM_WEBTEST=vlan): virtual addresses and discovery as "
                         "for players; the switch reaches only browsers on this server\n");
@@ -478,6 +486,7 @@ void roam_plat_stop(uint8_t reason){
     pthread_join(g_thr, 0); g_thr_on = 0;
     roam_plat_lock(); web_stats_log("closed"); roam_plat_unlock();
     st(&MB->mode, NET_MODE_CLOSED);
+    set_want(0);
 }
 
 int roam_plat_parse_peers(const char *list, int test_mode, uint16_t defport, uint32_t *ip, uint16_t *port, int max){

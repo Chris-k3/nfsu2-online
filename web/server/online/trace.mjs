@@ -8,7 +8,7 @@
 // Off unless asked for.  Every value that could be a secret (PASS..., REGKEY,
 // PSES, and LKEY, the key of a persona's Messenger login) is written as
 // <redacted>, without ever being decoded (aries.mjs redactBody); the addresses
-// are virtual (10.77.0.x).  Raw frames are never written.  The file is the
+// are virtual (10.77.x.x).  Raw frames are never written.  The file is the
 // server user's alone (0600): it holds chat and private messages.  At most
 // MAX_STREAMS streams are followed at once, the oldest going first.
 import fs from 'node:fs';

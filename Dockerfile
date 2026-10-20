@@ -46,7 +46,7 @@ COPY --from=page --chown=node:node --chmod=700 /state /state
 ENV NFSU2_DATA=/game \
     NFSU2_WASM=/module/nfsu2.wasm \
     NFSU2_STATE=/state \
-    NFSU2_MAX_PEERS=250 \
+    NFSU2_MAX_PEERS=1000 \
     UV_THREADPOOL_SIZE=8
 USER node
 VOLUME /state

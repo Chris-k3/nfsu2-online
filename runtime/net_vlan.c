@@ -117,6 +117,7 @@ static int ctl_call(uint16_t type, const uint8_t *pl, uint32_t n, int pass_fd, u
 }
 
 int vlan_alive(void){ return g_ctl >= 0 && !g_dead; }
+void vlan_session_end(void){}                           /* the hub link stays: it holds no server's place */
 
 int vlan_hello(const char *path, NetIdent *id){
     if (g_ctl >= 0 && !g_dead) return 0;
