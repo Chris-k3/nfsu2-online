@@ -199,7 +199,9 @@ from the same server address can meet there.
    start page, or your profile name when that is empty. There are no EA accounts, so the game's EA Login screens are
    skipped.
 2. **Lobby** shows the games. **Create Game** (race type, track, options; Game Type Unranked), or **Refresh** and
-   **Join Game**. In the game room, chat, press **Ready**; the creator presses **Start Race**.
+   **Join Game**. In the game room, chat, press **Ready**; the creator presses **Start Race**. When only some
+   players are ready, Start Race counts down 10 seconds: whoever is still not ready then is removed from the game,
+   and the race starts without them.
 
 Good to know:
 

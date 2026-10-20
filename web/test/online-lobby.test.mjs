@@ -6,8 +6,10 @@
 // personas (one holder per name, the LKEY the buddy login gets), the config
 // blob, rooms and chat (with the flood mute), the game list, a game from
 // creation to the race start (+ses with every player's virtual address, the
-// same AUTH for all), the lobby link closing at the start without ending the
-// race, leaving and deleting, the buddy login, and the limits.
+// same AUTH for all), the countdown of a start before every player is ready
+// and the kick of those still not ready, the lobby link closing at the start
+// without ending the race, leaving and deleting, the buddy login, and the
+// limits.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { OnlineHost, PORTS } from '../server/online/index.mjs';
@@ -214,6 +216,43 @@ test('six players: a game asked for 8 takes 6, the seventh finds it full; +ses n
   cs[0].send('gsta', [['NAME', 'six']]);
   const s = cs[5].last('+ses');
   assert.equal(s.f.get('COUNT'), '6'); assert.equal(s.f.get('OPPO5'), 'Foxtrot'); assert.equal(s.f.get('ADDR5'), '10.77.0.7');
+});
+
+test('Start Race before every player is ready: the room counts down, the players still not ready are kicked, the race starts', () => {
+  const READY = 1 << 27, COUNTDOWN = 1 << 12, RANKED = 1 << 18, ACTIVE = 1 << 19;
+  const w = world(), [a, b, c, d] = ['Alpha', 'Bravo', 'Charlie', 'Delta'].map((n, i) => w.client(`10.77.0.${i + 2}`).login(n));
+  a.send('gcre', [['NAME', 'g'], ['MAXSIZE', 4], ['MINSIZE', 2], ['PARAMS', 'TRACK=4011']]);
+  for (const x of [b, c, d]) x.send('gjoi', [['NAME', 'g']]);
+  b.send('gset', [['NAME', 'g'], ['USERFLAGS', READY]]);
+  const sys = m => Number(m.f.get('SYSFLAGS'));
+  // the creator's Start Race (SPEED2.EXE 0x58aa20): the game's SYSFLAGS with the countdown, the creator ready;
+  // only the countdown bit is the creator's to set
+  a.send('gset', [['NAME', 'g'], ['SYSFLAGS', sys(a.last('+mgm')) | COUNTDOWN | RANKED | ACTIVE], ['USERFLAGS', READY]]);
+  assert.equal(sys(a.last('gset')), COUNTDOWN);
+  for (const x of [b, c, d]) assert.equal(sys(x.last('+mgm')), COUNTDOWN, 'every game in the room counts down');
+  assert.equal(a.last('+mgm').f.get('OPFLAG0'), String(READY));
+  c.send('gset', [['NAME', 'g'], ['SYSFLAGS', 0]]);
+  assert.equal(sys(c.last('gset')), COUNTDOWN, 'a joiner does not stop it');
+  // a start that fails clears it (0x58ab40), and Start Race sets it again
+  a.send('gset', [['NAME', 'g'], ['SYSFLAGS', 0], ['USERFLAGS', 0]]);
+  assert.equal(sys(b.last('+mgm')), 0);
+  a.send('gset', [['NAME', 'g'], ['SYSFLAGS', COUNTDOWN], ['USERFLAGS', READY]]);
+  // the countdown's end (0x58a7e0): the players not ready in one KICK list, then the start
+  a.send('gset', [['NAME', 'g'], ['KICK', 'Charlie,Delta']]);
+  for (const [x, n] of [[c, 'Charlie'], [d, 'Delta']]) {
+    // the game leaves the room on the game's record after its own without the game (SPEED2.EXE 0x58dab0)
+    const [who, mgm] = x.msgs.slice(-2);
+    assert.deepEqual([who.kind, who.f.get('G')], ['+who', '0'], `${n} is out of the game`);
+    assert.equal(mgm.kind, '+mgm');
+    const named = [...mgm.f].filter(([k]) => k.startsWith('OPPO')).map(([, v]) => v);
+    assert.ok(named.includes('Bravo') && !named.includes(n), `${n}'s game record without ${n}: ${named}`);
+  }
+  assert.equal(b.last('+mgm').f.get('COUNT'), '2');
+  a.send('gsta', [['NAME', 'g']]);
+  assert.equal(a.last('gsta').code, '');
+  const s = b.last('+ses');
+  assert.equal(s.f.get('COUNT'), '2'); assert.deepEqual([s.f.get('OPPO0'), s.f.get('OPPO1')], ['Alpha', 'Bravo']);
+  assert.ok(!c.last('+ses') && !d.last('+ses'));
 });
 
 test('leaving: a joiner leaves, the creator leaves, the creator deletes; a browser that goes', () => {

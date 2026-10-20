@@ -108,6 +108,11 @@ const READY = 1 << 27, PASSWORD = 1 << 16, ACTIVE = 1 << 19;
 // SYSFLAGS bit of a ranked game (Options: Game Type Ranked; the game then asks for 3 players at least, and its
 // lobby's default search asks for unranked games: SYSMASK bits 18 and 19)
 const RANKED = 1 << 18;
+// SYSFLAGS bit of a game counting down to its start (the creator's gset; server.dll takes the creator's SYSFLAGS):
+// Start Race while some players are ready and others not sets it (SPEED2.EXE 0x58aa20), every game in the room then
+// counts down 10 s (0x4d2852, 0x4e5982), and the creator's game kicks the players still not ready (gset KICK, a list)
+// and starts (0x58a7e0); a start that fails clears it (0x58ab40)
+const COUNTDOWN = 1 << 12;
 // CUSTFLAGS bit of a private game (Options: Private Room, SPEED2.EXE 0x58d55d; the game's own search always asks for
 // it clear, 0x590669: its players come by invitation)
 const PRIVATE = 1 << 8;
@@ -721,14 +726,19 @@ export class Lobby {
       if (f.has('PARAMS')) set(g, 'params', String(f.get('PARAMS')).slice(0, 256));
       if (f.has('MAXSIZE')) set(g, 'maxSize', Math.min(this.L.gameSize, Math.max(g.players.length, 2, Number(f.get('MAXSIZE')) | 0)));
       if (f.has('MINSIZE')) set(g, 'minSize', Math.min(g.maxSize, Math.max(2, Number(f.get('MINSIZE')) | 0)));
-      const kick = f.get('KICK');
-      if (kick) {
-        const k = g.players.find(x => x.name.toLowerCase() === String(kick).toLowerCase() && x.s !== s);
+      // of its SYSFLAGS only the countdown: ranked, password and started stay the server's
+      if (f.has('SYSFLAGS')) set(g, 'sysFlags', ((g.sysFlags & ~COUNTDOWN) | ((Number(f.get('SYSFLAGS')) >>> 0) & COUNTDOWN)) >>> 0);
+      // one name (the Kick button) or several, comma-separated (the players not ready when the countdown ends)
+      const kicks = new Set(String(f.get('KICK') ?? '').split(',').map(n => n.trim().toLowerCase()).filter(Boolean));
+      for (const kick of kicks) {
+        const k = g.players.find(x => x.name.toLowerCase() === kick && x.s !== s);
         if (k) {
           this.log(`[online] "${g.name}": ${k.name} kicked out by ${s.persona}`, s.group);
           this.gameLeave(k.s, null);
-          this.send(k.s, 'gset', [['NAME', g.name], ['KICK', k.name]]);
+          // its game learns it from the game's record that comes after its own record without the game: it leaves
+          // the room (SPEED2.EXE 0x58dab0)
           this.send(k.s, '+who', this.userFields(k.s));
+          this.send(k.s, '+mgm', this.gameFields(g));
         }
       }
     }
