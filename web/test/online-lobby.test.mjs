@@ -146,10 +146,8 @@ test('a game: create, list, join, ready, start; +ses names every player by virtu
   assert.equal(cre.code, ''); assert.equal(cre.f.get('HOST'), 'Alpha'); assert.equal(cre.f.get('ADDR0'), '10.77.0.2');
   assert.equal(cre.f.get('PARAMS'), P);
   assert.ok(a.last('+mgm') && a.last('+who').f.get('F') === 'G');
-  // the game list, filtered as the game asks (CUSTFLAGS under CUSTMASK)
+  // the game list: a Filter of another race type lists it too
   b.send('gsea', [['START', 0], ['COUNT', 20], ['CUSTFLAGS', 67109107], ['CUSTMASK', 67109363], ['SYSFLAGS', 0], ['SYSMASK', 786432]]);
-  assert.equal(b.last('gsea').f.get('COUNT'), '0', 'another mode: not listed');
-  b.send('gsea', [['START', 0], ['COUNT', 20], ['CUSTFLAGS', 134217971], ['CUSTMASK', 134218227], ['SYSFLAGS', 0], ['SYSMASK', 786432]]);
   assert.equal(b.last('gsea').f.get('COUNT'), '1'); assert.equal(b.last('+gam').f.get('NAME'), '088.Alpha');
   b.send('gjoi', [['NAME', '088.Alpha']]);
   const j = b.last('gjoi');
@@ -180,6 +178,29 @@ test('a game: create, list, join, ready, start; +ses names every player by virtu
   assert.equal(a2.last('gsea').f.get('COUNT'), '0', 'a started race is not listed');
   w.advance(31 * 60_000);
   assert.equal(w.host.lobby.games.size, 0, 'forgotten after raceMs');
+});
+
+test('the game list: every open game but a private one, the Filter\'s games first', () => {
+  const w = world(), [a, b, c, d, e] = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo'].map((n, i) => w.client(`10.77.0.${i + 2}`).login(n));
+  // the game's default search: race type 0, Collision Detection and Race Breaker on, no car restriction, unranked,
+  // not private (CUSTMASK bit 8)
+  const search = [['START', 0], ['COUNT', 20], ['CUSTFLAGS', 0x40000f3], ['CUSTMASK', 0x40001f3], ['SYSFLAGS', 0], ['SYSMASK', 0xc0000]];
+  e.send('gsea', search);
+  a.send('gcre', [['NAME', 'no collision'], ['CUSTFLAGS', 0x40000f2], ['PARAMS', 'TRACK=4011']]);
+  b.send('gcre', [['NAME', 'private'], ['CUSTFLAGS', 0x40001f3], ['PARAMS', 'TRACK=4011']]);
+  c.send('gcre', [['NAME', 'as asked'], ['CUSTFLAGS', 0x40000f3], ['PARAMS', 'TRACK=4011']]);
+  d.send('gcre', [['NAME', 'ranked sprint'], ['CUSTFLAGS', 0x80000f3], ['SYSFLAGS', 1 << 18], ['PARAMS', 'TRACK=4011']]);
+  w.advance(1000);
+  const names = kind => e.take().filter(m => m.kind === kind).map(m => m.f.get('NAME'));
+  assert.deepEqual(names('+agm').sort(), ['as asked', 'no collision', 'ranked sprint'], 'a private game is not announced');
+  e.send('gsea', search);
+  assert.equal(e.last('gsea').f.get('COUNT'), '3');
+  assert.deepEqual(names('+gam'), ['as asked', 'no collision', 'ranked sprint']);
+  e.send('gsea', [['START', 1], ['COUNT', 1], ...search.slice(2)]);
+  assert.deepEqual(names('+gam'), ['no collision']);
+  // a private game's players come by invitation: by its name
+  e.send('gjoi', [['NAME', 'private']]);
+  assert.equal(e.last('gjoi').code, '');
 });
 
 test('six players: a game asked for 8 takes 6, the seventh finds it full; +ses names all six', () => {

@@ -106,8 +106,11 @@ export function configFields(ports) {
 // and of a started one
 const READY = 1 << 27, PASSWORD = 1 << 16, ACTIVE = 1 << 19;
 // SYSFLAGS bit of a ranked game (Options: Game Type Ranked; the game then asks for 3 players at least, and its
-// lobby's default search hides ranked games: SYSMASK bits 18 and 19)
+// lobby's default search asks for unranked games: SYSMASK bits 18 and 19)
 const RANKED = 1 << 18;
+// CUSTFLAGS bit of a private game (Options: Private Room, SPEED2.EXE 0x58d55d; the game's own search always asks for
+// it clear, 0x590669: its players come by invitation)
+const PRIVATE = 1 << 8;
 // the race types a report may name: RACE_TYPES, which have their stat blocks, and the game's seventh (a game with
 // CUSTFLAGS bit 25, which SPEED2.EXE 0x5fe8d0 reports as 6), which has no stat block or tier points: its results
 // count nowhere
@@ -614,12 +617,19 @@ export class Lobby {
     return [...f, ...extra];
   }
   gameByName(name) { for (const g of this.games.values()) if (g.name === name) return g; return null; }
+  /**
+   * The game list: every open game but a private one, those the player's Filter asks for first.  The game's search
+   * asks for its Filter exactly (Game Mode, Collision Detection, Race Breaker, Car Performance Restrictions, Game
+   * Type: CUSTFLAGS and SYSFLAGS under their masks), and EA's server took it so (server.dll 0x10017870), but with
+   * this server's players a game of other settings than the Filter's default was seen by no one.
+   */
   gameSearch(s, f) {
     const n = v => Number(v ?? 0) >>> 0;
     const cf = n(f.get('CUSTFLAGS')), cm = n(f.get('CUSTMASK')), sf = n(f.get('SYSFLAGS')), sm = n(f.get('SYSMASK'));
     const start = Math.max(0, Number(f.get('START') ?? 0) | 0), count = Math.min(50, Math.max(0, Number(f.get('COUNT') ?? 20) | 0));
-    const list = [...this.games.values()].filter(g => !g.started && (!s.room || !g.room || g.room === s.room) &&
-      ((g.custFlags & cm) >>> 0) === ((cf & cm) >>> 0) && ((g.sysFlags & sm) >>> 0) === ((sf & sm) >>> 0)).slice(start, start + count);
+    const asked = g => ((g.custFlags & cm) >>> 0) === ((cf & cm) >>> 0) && ((g.sysFlags & sm) >>> 0) === ((sf & sm) >>> 0);
+    const open = [...this.games.values()].filter(g => !g.started && !(g.custFlags & PRIVATE) && (!s.room || !g.room || g.room === s.room));
+    const list = [...open.filter(asked), ...open.filter(g => !asked(g))].slice(start, start + count);
     this.send(s, 'gsea', [['COUNT', list.length]]);
     for (const g of list) this.send(s, s.game === g.id ? '+mgm' : '+gam', this.gameFields(g));
   }
@@ -666,6 +676,7 @@ export class Lobby {
   /** a game's record to everyone looking at the game list in its room who is not in it (their lists update), at
    *  most every announceMs: the latest */
   announce(g, gone = false) {
+    if (g.custFlags & PRIVATE) return;                     // not on the game list
     let a = this.agm.get(g.id);
     if (!a) this.agm.set(g.id, a = { at: -Infinity, timer: null, fn: null, gone: false });
     if (gone) a.gone = true;

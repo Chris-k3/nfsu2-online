@@ -198,7 +198,7 @@ function raceFlow(w, host, race, raceMs, inst) {
   } else {
     w(`+${race > 1 ? JOIN_WAIT + 15000 : JOIN_WAIT}ms dump lobby${x}`);
     if (RANKED && race === 1) {
-      // the lobby lists ranked games only when the Filter says so: Filter (the 4th button), Game Type (two rows
+      // the Filter asks for ranked games (the lobby lists them first): Filter (the 4th button), Game Type (two rows
       // down) -> Ranked; leaving the Filter searches again, with the focus back on Create Game
       w('+0    log filter-ranked');
       w('+0    tap RIGHT'); w('+40   tap RIGHT'); w('+40   tap RIGHT');

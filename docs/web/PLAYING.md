@@ -218,8 +218,11 @@ Good to know:
   Drag keeps one car per lane: 4, or 3 on the track with three lanes.
 - **Horn:** H (or the controller's left stick click) honks in a race too, as in free roam: the others hear it from your
   car. The same in the game's LAN races.
-- **Ranked games** need three players at least, and the others see them only with the lobby's **Filter**, Game
-  Type set to **Ranked**. Ranked wins give ranking points.
+- **The Lobby lists every open game**, whatever its race type and options (Collision Detection, Race Breaker, Car
+  Performance Restrictions, Ranked). The lobby's **Filter** only puts the games it asks for first; in the original
+  game it hid all others, so a game made with Collision Detection off was seen by no one. A game with **Private
+  Room** on is not listed, as in the original game.
+- **Ranked games** need three players at least. Ranked wins give ranking points.
 - **A race counts** in Rankings once two of its players' games sent the same result (every game sends its own at
   the results screen), so a race that only one player finished does not count. Each player races from their own
   browser.
