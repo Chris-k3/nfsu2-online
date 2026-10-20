@@ -730,6 +730,7 @@ int rc_add_peer(rc_session *s, uint32_t ip, uint16_t port, int configured, int64
 static void fill_hello(rc_session *s, rc_msg *m, const rc_peer *to){
     hdr(s, m, RC_MSG_HELLO);
     if (s->conf.duels) m->h.flags = RC_HF_DUELS;
+    if (!to) m->h.flags |= RC_HF_ALL;
     m->u.hello.core_ver = RC_CORE_VER; m->u.hello.platform = s->conf.platform; m->u.hello.status = s->status;
     m->u.hello.listen_port = s->conf.port; m->u.hello.cfg_rev = s->cfg_rev; m->u.hello.room = s->conf.room;
     memcpy(m->u.hello.name, s->conf.name, sizeof m->u.hello.name);
@@ -895,8 +896,11 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
         memcpy(p->name, m.u.hello.name, sizeof p->name);
         p->platform = m.u.hello.platform; p->status = m.u.hello.status; p->cfg_rev_seen = m.u.hello.cfg_rev;
         p->core_ver = m.u.hello.core_ver; p->duels = (m.h.flags & RC_HF_DUELS) != 0;
-        p->hears_us = 0;
-        for (int k = 0; k < m.u.hello.n_seen; k++) if (m.u.hello.seen[k] == s->conf.self_id) p->hears_us = 1;
+        int heard = 0;
+        for (int k = 0; k < m.u.hello.n_seen; k++) if (m.u.hello.seen[k] == s->conf.self_id) heard = 1;
+        /* the beacon of a group past 8: a full list without our id (RC_HF_ALL) */
+        int vague = !heard && (m.h.flags & RC_HF_ALL) && m.u.hello.n_seen >= RC_PEERS_V1;
+        if (!(vague && p->state == RC_PS_EST)) p->hears_us = heard;
         if (p->hears_us) p->hears_miss = 0;
         if (p->state != RC_PS_EST){
             if (p->state == RC_PS_CANDIDATE) p->state = RC_PS_HEARD;
@@ -910,7 +914,7 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
                     answer_cfg(s, p, 0, now);
                 }
             } else if (now - p->last_hello_tx > 100000) send_hello(s, p, now);   /* answer: now we hear it */
-        } else if (!p->hears_us){
+        } else if (!p->hears_us && !vague){
             if (s->hub_was == 2 && !p->hears_miss){
                 /* with the hub, once: the hub may have just linked us again
                  * after the peer let us go, and it hears us at our answer */

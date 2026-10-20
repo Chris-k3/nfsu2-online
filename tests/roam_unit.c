@@ -940,6 +940,20 @@ static void t_bigmesh(void){
     }
     CHECK(ok_rate, "snapshots in 2 s by distance: %d at 50 m, %d at 450 m, %d at 1950 m (40, 10, 4), header flags %d %d %d",
           g_big[0].snaps, g_big[4].snaps, g_big[19].snaps, g_big[0].every, g_big[4].every, g_big[19].every);
+    /* the beacon of a player whose group is past 8 names 7 of its ids
+     * (RC_HF_ALL): ours not among them says nothing; a HELLO to us without
+     * our id says it no longer hears us */
+    int before = rc_established(&s);
+    for (int pass = 0; pass < 2; pass++){
+        rc_msg m; memset(&m, 0, sizeof m); m.h.type = RC_MSG_HELLO; m.h.sender = 0x1000u; m.h.flags = pass ? 0 : RC_HF_ALL;
+        m.u.hello.core_ver = RC_CORE_VER; m.u.hello.status = RC_ST_ROAM; m.u.hello.listen_port = 51000;
+        snprintf(m.u.hello.name, sizeof m.u.hello.name, "p0"); m.u.hello.n_seen = RC_PEERS_V1;
+        for (int k = 0; k < RC_PEERS_V1; k++) m.u.hello.seen[k] = 0x1001u + (uint32_t)k;
+        uint8_t b[RC_MAX_DGRAM]; int n = rc_encode(&m, b, sizeof b);
+        rc_receive(&s, 0x7f000001u, 51000, b, n, t + 2000000 + pass * 1000);
+        if (!pass) CHECK(rc_established(&s) == before, "a beacon of 7 ids without ours: the player stays (%d of %d)", rc_established(&s), before);
+        else CHECK(rc_established(&s) == before - 1, "a HELLO to us without our id: the player left (%d of %d)", rc_established(&s), before);
+    }
 }
 
 /* ---- 4d. outruns between players: DUEL only to a peer that takes them, only for us -- */
