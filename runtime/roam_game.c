@@ -98,6 +98,8 @@
 #define FX_NOS          0xau          /* ...the nitrous flames (0x5F5730: on the throttle, from 5 mph) */
 #define FX_PURGE        0xdu          /* ...the nitrous let out (standing, off the throttle; and before a race) */
 #define CAR_SUSP        0x380u        /* float[4]: each wheel's suspension offset (m, up), 0 at rest */
+#define CAR_STEER       0x40eu        /* u16: the front wheels' steering angle (65536 a turn, left positive) */
+#define CAR_SPIN        0x4e8u        /* float[4]: each wheel's spinner angle (rad); +0x10: its speed (rad/s) */
 #define CAR_NOS         0x40u         /* Car: its nitrous (+0x414 a full shot, +0x41C left, +0x420 on since; nos_left) */
 #define G_TICKS         0x0086518cu   /* game time, 4000 ticks a second: the nitrous's clock (0x592480) */
 #define G_HYD_LEVEL     0x007e949cu   /* int: every car's hydraulics level, -1: each its own (a debug setting) */
@@ -108,6 +110,14 @@
 #define FN_RIDE_INIT    0x00610270u   /* thiscall (type, 0, b5, b6) */
 #define FN_RIDE_STOCK   0x00637040u   /* thiscall (0): stock parts */
 #define FN_RIDE_PARTSON 0x0061bcd0u   /* thiscall (): UpdatePartsEnabled */
+#define FN_RIDE_SETPART 0x00631d20u   /* thiscall (slot, part) -> the part it had: SetPart, then UpdatePartsEnabled */
+#define G_SLOTKIND      0x00802960u   /* u32[RC_PART_SLOTS]: a ride slot's parts' kind (CarPart +4; NewGetCarPart) */
+#define FN_PART_ATTR    0x0061b500u   /* thiscall CarPart (attribute hash, 0) -> its value */
+#define FN_PART_NAME    0x00610000u   /* thiscall CarPart () -> its name */
+#define FN_HASH         0x0043db50u   /* cdecl (string) -> the game's hash of it */
+#define ATTR_WHEELTYPE  0xebb03e66u   /* a wheel's type: the hash of "SPINNER" for a spinner */
+#define ATTR_RIMSIZE    0xce7d8db5u   /* a wheel's size: the car type's +0xDC for one that fits (the shop's list) */
+#define S_SPINNER       0x0079bde0u   /* "SPINNER" */
 #define FN_RIDE_SKINS   0x0061c280u   /* thiscall (n): DUMMY_SKIN<n> / WHEEL / SPINNER */
 #define FN_PERF_SET     0x005ac4b0u   /* thiscall RideInfo +0x2F0 (perf*): installed performance parts from bits */
 #define FN_PHYS_UPDATE  0x005b4fc0u   /* thiscall RideInfo +0x10 (1, 1, 1): physics from tuning and parts */
@@ -1092,7 +1102,15 @@ static void sincos_pi(float a, float *sn, float *cs){
  * 180 degrees x steer at speed under the game's autopilot, and at 45 degrees
  * for the keys' full lock standing still); so whatever the friend steers
  * shows, counter-steer and standing still too.  Smoothed over 80 ms, at most
- * 0.8 rad. */
+ * 0.8 rad.  Spinners have matrices of their own, made at the render
+ * (0x5EC7F0): at the wheel's place (with CAR_SUSP), the front ones steered by
+ * CAR_STEER, and each turned by its own angle (CAR_SPIN), which follows the
+ * wheel with inertia (0x5ECAC0: the spinner's speed goes to the wheel's,
+ * +0x330, by 0.156 of the difference a second, so it turns on for seconds
+ * after the car stops).  The game runs that for a friend's car too, from the
+ * wheel speeds apply_pose writes; the steering is the physics', which leaves
+ * it at 0 in mode 0, so apply_pose writes it (else a front spinner pointed
+ * straight on a wheel that steered). */
 static void wheels_pose(Slot *s, const rc_pose *P, float dt){
     uint32_t car = s->car, ph = MR32(car + 0x20u);
     int phok = ok(ph, 0xc0);
@@ -1196,6 +1214,7 @@ static void apply_pose(CPU *c, Slot *s, const rc_pose *P, float dt){
     gcall1(c, FN_ROADTRACK, car + 0x8d8u, car + 0x60u);
     gcall0(c, FN_CAR_SECTION, car);
     wheels_pose(s, P, dt);
+    MR16(car + CAR_STEER) = (uint16_t)(int16_t)(int)(s->steer * 10430.378f);      /* the spinners' steering (wheels_pose) */
     nos_pose(c, s, P);
     s->pose_frames++;
 }
@@ -2652,9 +2671,10 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
                     sqrt((double)(dx * dx + dy * dy)), car ? MR16(car + 0x40cu) : 0, car ? MR8(car + 0x5c0u) : 0, car ? MR8(car + 0x550u) : 0,
                     car ? MR32(car + 0x24u) : 0, car ? MR32(car + 0x28u) : 0, car ? MR32(car + 0x554u) : 0, car ? (int16_t)MR16(car + 8u) : -1,
                     car ? (double)MRF32(car + 0x50u) : 0, car ? (double)MRF32(car + 0x54u) : 0, car ? (double)MRF32(car + 0x58u) : 0);
-            if (car) rlog("[roam]     nitrous %u%%, wheels at %.3f %.3f %.3f %.3f m in the car, blinked out %u (blink from %u)\n", nos_left(car),
-                          (double)MRF32(car + 0x168u), (double)MRF32(car + 0x1a8u), (double)MRF32(car + 0x1e8u), (double)MRF32(car + 0x228u),
-                          MR8(car + CAR_BLINKOUT), MR32(car + CAR_BLINK_T0));
+            if (car) rlog("[roam]     nitrous %u%%, wheels at %.3f %.3f %.3f %.3f m in the car, front spinners at %.2f rad turning %.2f rad/s, "
+                          "blinked out %u (blink from %u)\n",
+                          nos_left(car), (double)MRF32(car + 0x168u), (double)MRF32(car + 0x1a8u), (double)MRF32(car + 0x1e8u), (double)MRF32(car + 0x228u),
+                          (double)MRF32(car + CAR_SPIN), (double)MRF32(car + CAR_SPIN + 0x10u), MR8(car + CAR_BLINKOUT), MR32(car + CAR_BLINK_T0));
         }
         return 1;
     }
@@ -2690,10 +2710,12 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
         return 0;
     }
     if (!strcasecmp(sub, "follow")){
-        /* "mp follow K [back] [left]": the player jumps behind slot K's car
-         * (hot-position jump), for frame dumps; left 0 puts it right behind
-         * (the collision tests drive into the friend's car from there) */
-        char a3[32] = {0}; sscanf(args + used, "%*s %*s %31s", a3);
+        /* "mp follow K [back] [left] [turn]": the player jumps behind slot K's
+         * car (hot-position jump), for frame dumps; left 0 puts it right
+         * behind (the collision tests drive into the friend's car from
+         * there); turn (degrees, left positive) turns it from the friend's
+         * heading: -90 from its left looks at its side */
+        char a3[32] = {0}, a4[32] = {0}; sscanf(args + used, "%*s %*s %31s %31s", a3, a4);
         int k = atoi(a1); float back = a2[0] ? (float)atof(a2) : 12.f;
         if (a1[0] < '0' || a1[0] > '9'){ k = -1; for (int j = 0; j < NSLOT; j++) if (g_sl[j].st != SL_FREE && !strcasecmp(g_sl[j].name, a1)) k = j; }
         if (k < 0 || k >= NSLOT || g_sl[k].st != SL_ACTIVE || g_sl[k].hidden){ rlog("[roam] f=%ld mp follow %d: no car shown there\n", f, k); return 1; }
@@ -2704,7 +2726,8 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
         float side = a3[0] ? (float)atof(a3) : 3.5f;
         MRF32(G_HOTPOS) = MRF32(car + 0x60u) - back * fx + side * lx; MRF32(G_HOTPOS + 4) = MRF32(car + 0x64u) - back * fy + side * ly;
         MRF32(G_HOTPOS + 8) = MRF32(car + 0x68u) + 0.5f;
-        MR16(G_HOTPOS_ANGLE) = MR16(car + 0x40cu); MR8(G_HOTPOS_VALID) = 1; MR8(G_HOTPOS_JUMP) = 1;
+        MR16(G_HOTPOS_ANGLE) = (uint16_t)(MR16(car + 0x40cu) + (int)(atof(a4) * 65536.0 / 360.0));
+        MR8(G_HOTPOS_VALID) = 1; MR8(G_HOTPOS_JUMP) = 1;
         rlog("[roam] f=%ld mp follow: behind %s's car at %.1f %.1f %.1f\n", f, g_sl[k].name,
                 (double)MRF32(car + 0x60u), (double)MRF32(car + 0x64u), (double)MRF32(car + 0x68u));
         return 1;
@@ -2767,7 +2790,7 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
         }
         return 1;
     }
-    if (!strcasecmp(sub, "cfgdump") || !strcasecmp(sub, "cfgtest")){
+    if (!strcasecmp(sub, "cfgdump") || !strcasecmp(sub, "cfgtest") || !strcasecmp(sub, "parts") || !strcasecmp(sub, "setpart")){
         if (g_njob == NJOB){ rlog("[roam] f=%ld mp %s: busy\n", f, sub); return 1; }
         snprintf(g_job[g_njob++], sizeof g_job[0], "%s", args);
         return 1;
@@ -2776,9 +2799,9 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
     return 1;
 }
 static void run_job(CPU *c, const char *job){
-    char sub[32] = {0}, a1[200] = {0}, a2[64] = {0}; int used = 0;
+    char sub[32] = {0}, a1[200] = {0}, a2[64] = {0}, a3[32] = {0}; int used = 0;
     sscanf(job, "%31s %n", sub, &used);
-    sscanf(job + used, "%199s %63s", a1, a2);
+    sscanf(job + used, "%199s %63s %31s", a1, a2, a3);
     long f = rh_frame();
     if (!strcasecmp(sub, "cfgdump")){
         /* write a car-look record: the player's car, or a stock car of type N */
@@ -2816,6 +2839,47 @@ static void run_job(CPU *c, const char *job){
         rlog("[roam] f=%ld mp cfgtest: %s, %d parts in a %d-byte record, %d not found%s%s; rebuilt ride: %d of 170 part slots differ, "
                         "%d other bytes differ (first at +0x%x); performance/tuning bytes differing %d, physics block bytes differing %d\n",
                 f, tn, cc.n_parts, n, miss, why[0] ? ": " : "", why, diff_slots, diff_bytes, first, diff_perf, diff_phys);
+        return;
+    }
+    if (!strcasecmp(sub, "parts") || !strcasecmp(sub, "setpart")){
+        /* "mp parts SLOT [spinner]": the CarPartDB's parts for ride slot SLOT
+         * (hex; its packs on the list at G_CARPARTDB, +0x34 the parts of 14
+         * bytes, +0x38 how many; a part's kind, +4, is G_SLOTKIND's for the
+         * slot), with "spinner" only the spinners that fit the car (type
+         * SPINNER and the car type's size: the spinner shop's list,
+         * 0x539960); "mp setpart SLOT N [spinner]": the
+         * N-th of them on the player's ride (RideInfo::SetPart), as a shop
+         * would but without loading the car again: its look has it, so
+         * friends' games show it */
+        uint32_t slot = (uint32_t)strtoul(a1, 0, 16), want = (uint32_t)atoi(a2), n = 0, all = 0, owners = rd32(G_PARTOWNERS);
+        uint32_t kind = slot < RC_PART_SLOTS ? rd32(G_SLOTKIND + 4u * slot) : 0xffu, str = S_SPINNER;
+        uint32_t spinner = rh_call(c, FN_HASH, 0, 0, 1, &str), ride0 = rd32(player_car() + 0x10u), types = rd32(G_CARTYPES);
+        int size = ride0 && types ? (int8_t)MR8(types + MR32(ride0) * 0x890u + 0xdcu) : -1;   /* the car type's rim size */
+        int set = !strcasecmp(sub, "setpart"), only = !strcasecmp(set ? a3 : a2, "spinner");
+        for (uint32_t node = rd32(G_CARPARTDB), i = 0; node && node != G_CARPARTDB && i < 64; node = rd32(node), i++){
+            uint32_t base = rd32(node + 0x34u), cnt = rd32(node + 0x38u);
+            for (uint32_t p = base; p && cnt < 0x10000u && p < base + cnt * 0xeu && ok(p, 0xe); p += 0xeu){
+                all++;
+                if (MR8(p + 4u) != kind) continue;
+                uint32_t key = (uint32_t)MR16(p + 2u) << 16 | MR16(p), at[2] = { ATTR_WHEELTYPE, 0 }, as[2] = { ATTR_RIMSIZE, 0 };
+                int spin = rh_call(c, FN_PART_ATTR, p, 0, 2, at) == spinner;
+                int fits = (int8_t)(rh_call(c, FN_PART_ATTR, p, 0, 2, as) & 0xffu) == size;
+                if (only && !(spin && fits)) continue;
+                char nm[48] = {0}; uint32_t np = rh_call(c, FN_PART_NAME, p, 0, 0, 0);
+                if (np) cstr(np, nm, sizeof nm);
+                if (!set) rlog("[roam] f=%ld mp parts %x: #%u 0x%08x %s key %08x owner %08x level %u%s%s\n", f, slot, n, p, nm, key,
+                               owners ? rd32(owners + 4u * MR8(p + 7u)) : 0u, (uint32_t)MR8(p + 5u) >> 5, spin ? " spinner" : "", fits ? " fits" : "");
+                else if (n == want){
+                    uint32_t ride = rd32(player_car() + 0x10u), a[2] = { slot, p };
+                    uint32_t old = ok(ride, 0x8f0) ? rh_call(c, FN_RIDE_SETPART, ride, 0, 2, a) : 0u;
+                    g_cfg_next = 0;                                        /* the look goes out now */
+                    rlog("[roam] f=%ld mp setpart %x: part 0x%08x (key %08x) on ride 0x%08x, was 0x%08x\n", f, slot, p, key, ride, old);
+                    return;
+                }
+                n++;
+            }
+        }
+        rlog("[roam] f=%ld mp %s %x: %u part(s) of %u%s\n", f, sub, slot, n, all, set ? ", none set" : "");
         return;
     }
 }
