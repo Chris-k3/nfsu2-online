@@ -39,12 +39,13 @@ services:
       - ${NFSU2_MODULE:-./module}:/module:ro
       - state:/state
     # what the systemd unit (nfsu2-web.service) allows the server, as far as a container goes: nothing to write
-    # but its state, no capabilities, 3 GB of memory and no swap, 8192 open files (250 players)
+    # but its state, no capabilities, no swap, 8192 open files (250 players); 8 GB of memory, not the unit's 3 GB
+    # (the live server reached 2.6 GB with 110 players)
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
-    mem_limit: 3g
-    memswap_limit: 3g
+    mem_limit: 8g
+    memswap_limit: 8g
     ulimits: { nofile: 8192 }
     # the console, kept by Docker in files it rotates (5 of 20 MB), so the log never fills the VPS's disk
     logging: { driver: local }

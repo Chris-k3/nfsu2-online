@@ -231,8 +231,9 @@ traffic a month.
   server's `NFSU2_HOST` (a comma list; `*.example.com` for one label under it). A wildcard certificate needs Let's
   Encrypt's DNS challenge, which the stock Caddy image cannot do.
 - **The server's container** runs as the user `node`, with a read-only root, no capabilities, `no-new-privileges`,
-  3 GB of memory without swap and 8192 open files. Those are the systemd unit's limits, as far as a container has
-  them. It writes only to `/state`. At the memory limit the kernel stops the server and Docker starts it again.
+  8 GB of memory without swap and 8192 open files. Those are the systemd unit's limits, as far as a container has
+  them, but for the memory: the unit's 3 GB was too little for 110 players (2.6 GB). It writes only to `/state`.
+  At the memory limit the kernel stops the server and Docker starts it again.
 - **Keep the state volume.** It holds the ETag key (a new key makes every player's browser download the game data
   again), the switch's addresses (`lan-addresses.json`: a player who reconnects gets the same one back) and the
   Online mode's records (`online/`). `docker compose down` keeps it; `down -v` deletes it.
@@ -364,7 +365,7 @@ With Caddy or nginx already on the VPS, run the server alone on the VPS's networ
 ```sh
 docker run -d --name nfsu2-web --restart unless-stopped --network host \
   --read-only --cap-drop ALL --security-opt no-new-privileges \
-  --memory 3g --memory-swap 3g --ulimit nofile=8192 --log-driver local \
+  --memory 8g --memory-swap 8g --ulimit nofile=8192 --log-driver local \
   -e NFSU2_HOST=game.example.com \
   -v /srv/nfsu2/game:/game:ro -v /srv/nfsu2/module:/module:ro -v nfsu2-state:/state \
   ghcr.io/th0mk/nfsu2-web
