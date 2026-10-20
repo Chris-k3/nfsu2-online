@@ -587,6 +587,12 @@ void sub_005f46a0(CPU *c){
                 MR32(c->esp + 4u), MR32(c->esp), MR32(G.car + 0x28u));
     sub_005f46a0_orig(c);
 }
+/* The race's end, for the random encounters (0x42EFB0): new goals for the AI
+ * range's cars that are out, through their brains; friends' cars have none
+ * to give up and are left out (roam_game.c, roam_game_goals) */
+void sub_0042cd60_orig(CPU *c);
+void roam_game_goals(CPU *c, void (*orig)(CPU *));
+void sub_0042cd60(CPU *c){ roam_game_goals(c, sub_0042cd60_orig); }
 /* GetTextureInfo(hash, default, ...) (cdecl): friends' cars past the game's
  * six paint slots composite into textures of our own, DUMMY_SKIN7 and up
  * (roam_game.c, roam_game_texture); every other name is the game's */

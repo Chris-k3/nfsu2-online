@@ -2513,6 +2513,31 @@ int roam_game_inert(uint32_t car, uint32_t mode, uint32_t from){
     }
     return 0;
 }
+/* roam.c, 0x42CD60, from the race's end (0x5F8490 -> 0x42EFB0): every car of
+ * the World's AI range that is out gets a new goal from its brain (car +0x2C):
+ * the one at the brain's +0x6FC is looked at and let go through its vtable
+ * (0x42AA20 -> 0x402070), and the new one kept there.  During an outrun
+ * between players friends' cars are out in that range (the three opponent
+ * cars and the first 2 of ours), and their brains (vtable 0x7A5CA8, driver 0)
+ * hold no goal there: one held 0xE490B3FC in the tests, and a player's game
+ * trapped at an outrun's end reading past the memory (2026-10-20).  The AI
+ * range goes without friends' cars for the call, as du_start narrows it. */
+void roam_game_goals(CPU *c, void (*orig)(CPU *)){
+    uint32_t w = world(), first = w ? MR32(w + 0x14u) : 0, end = w ? MR32(w + 0x18u) : 0, was[WORLD_INDEX], n = first;
+    if (!w || first > end || end > WORLD_INDEX){ orig(c); return; }
+    for (uint32_t i = first; i < end; i++){
+        uint32_t car = was[i] = MR32(w + 0x1cu + 4u * i);
+        int ours = 0;
+        for (int k = 0; k < NSLOT && !ours; k++) ours = car && g_sl[k].car == car;
+        if (!ours) MR32(w + 0x1cu + 4u * n++) = car;
+    }
+    if (n == end){ orig(c); return; }
+    rlog("[roam] f=%ld the race's end: new goals for the AI range's cars, not for %u friends' car(s)\n", rh_frame(), end - n);
+    MR32(w + 0x18u) = n;
+    orig(c);
+    for (uint32_t i = first; i < end; i++) MR32(w + 0x1cu + 4u * i) = was[i];
+    MR32(w + 0x18u) = end;
+}
 /* roam.c, bSlotPool's constructor (0x440DF0), at the game's start.  With
  * free-roam multiplayer on, three pools get more entries:
  *  - the car loader's rides (CarLoadedRideInfoSlotPool, 22 x 0x1240 bytes):

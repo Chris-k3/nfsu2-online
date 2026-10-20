@@ -19,6 +19,8 @@
 //        [--hide Bob:60:8]  that page reports itself hidden (document.hidden + visibilitychange, as when
 //                    its tab goes to the background; headless pages are never really hidden) at 60 s
 //                    after the first page opened, for 8 s
+//        [--crowd <n>]  web/tools/roam-crowd.mjs's n simulated players on the same server for the whole run
+//                    (<out>/crowd.log): with 5 or more friends the first cars of our own come into use, in the AI range
 //
 // Without --base it starts its own server (web/server/server.mjs --dev on the given
 // ports, the game folder from --data or NFSU2_DATA) and stops it at the end.
@@ -116,6 +118,13 @@ async function stopServer() {
   serverLog.write(`--- server stopped at ${new Date().toISOString()}\n`);
 }
 if (OWN) server = await startServer();
+const CROWD = +opt('crowd', 0);
+let crowd = null;
+if (CROWD) {
+  const log = fs.openSync(path.join(OUT, 'crowd.log'), 'w');
+  crowd = spawn(process.execPath, [path.join(REPO, 'web/tools/roam-crowd.mjs'), '--base', BASE, '--n', String(CROWD), '--seconds', String(TMO / 1000)],
+    { cwd: REPO, stdio: ['ignore', log, log] });
+}
 
 const browser = await chromium.launch({ channel: 'chrome', headless: !argv.includes('--headed') });
 const t0 = Date.now();
@@ -195,6 +204,7 @@ for (const x of inst) {
   x.log.end();
 }
 await browser.close();
+if (crowd) crowd.kill('SIGTERM');
 if (bounced) await bounced;
 await stopServer();
 serverLog.end();
