@@ -33,11 +33,11 @@ const ALL_CARS = ['PEUGOT', 'FOCUS', 'COROLLA', '240SX', 'MIATA', 'CIVIC', 'PEUG
 const CARS = opt('cars', '') === 'all' ? ALL_CARS : opt('cars', '') ? opt('cars', '').split(',') : [CAR];
 const HUB = 0x0A4D00FD, PORT = 47210;
 
-// the core for wasm: no C library, bulk memory for the copies
+// the core for wasm: no C library (wasip1 for its headers: names.h's <string.h>), bulk memory for the copies
 const WASI = fs.readdirSync(path.join(REPO, 'deps')).filter(d => d.startsWith('wasi-sdk-')).map(d => path.join(REPO, 'deps', d)).pop();
 const WASM = path.join(REPO, 'out/web/test/roam_crowd.wasm');
 fs.mkdirSync(path.dirname(WASM), { recursive: true });
-execFileSync(path.join(WASI, 'bin/clang'), ['--target=wasm32', '-O2', '-ffreestanding', '-nostdlib', '-mbulk-memory', '-ffp-contract=off',
+execFileSync(path.join(WASI, 'bin/clang'), ['--target=wasm32-wasip1', '-O2', '-ffreestanding', '-nostdlib', '-mbulk-memory', '-ffp-contract=off',
   '-Iruntime', '-Wl,--no-entry', '-Wl,--export-dynamic', '-o', WASM, 'tests/roam_crowd.c', 'runtime/roam_core.c'], { cwd: REPO, stdio: 'inherit' });
 const mod = await WebAssembly.compile(fs.readFileSync(WASM));
 
