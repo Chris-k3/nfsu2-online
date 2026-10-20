@@ -45,7 +45,7 @@ function closeFile(cf: CacheFile | null) { if (cf) { cf.h.flush(); cf.h.close();
 
 async function download(cfg: { manifestUrl: string; dataBase: string }): Promise<{ have: number; total: number } | null> {
   const r = await fetch(cfg.manifestUrl, { cache: 'no-cache', signal: abort.signal });
-  if (!r.ok) throw new Error(`the list of game files did not download (HTTP ${r.status})`);
+  if (!r.ok) throw new Error(`the list of game files did not load (HTTP ${r.status})`);
   const m = await r.json() as Manifest;
   const served = blockRuns(m), runMax = served ? 1 : RUN;
   const scan = await scanCache(manifestFiles(m).filter(fetchedAhead));

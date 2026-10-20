@@ -129,7 +129,7 @@ traffic a month.
 - Each new player downloads the 7 MB module and then the game data they play (about 70 MB for a quick race, up to
   the whole 3 GB over a career), once: the browser keeps it. The data is compressed on the way (zstd, or br through
   Cloudflare): all but the movies is 1.37 GB on the network for 1.98 GB, the tracks about 40 %; the movies' video
-  does not compress and goes as it is. "Download the game data" on the start page fetches all but the movies at
+  does not compress and goes as it is. "Preload the game data" on the start page fetches all but the movies at
   once, 4 requests at a time, so a player on a slow line never waits on a loading screen. It asks for one block a
   request at the addresses the game's own reads use, so with the Cache Rule below Cloudflare serves both.
 - Compressing costs the server about 5 s of one core per player for that whole download (zstd; br about 1.5 times

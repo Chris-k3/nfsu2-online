@@ -130,7 +130,7 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
     mtime (`m`), and the server lets a shared cache (Cloudflare) keep a run for good when `m` is the file's, the run
     is compressed or does not compress, the movies too (`EDGE_KEEP`). An older server: byte ranges
     of `/data/`. The data but the movies crosses the network in 69 % of its size (1.37 of 1.98 GB; tracks about 40 %).
-    "Download the game data" (Game data on this PC, at the bottom of the start page) fills the cache with all but the
+    "Preload the game data" (Game data on this PC, at the bottom of the start page) fills the cache with all but the
     movies ahead of play from its own worker (`predownload-worker.ts`, 4 blocks at once, each at the address the game's
     own reads use, so one copy in Cloudflare's cache serves both). It runs only while no game
     runs in the tab: Play pauses it, and the game's end resumes it.
@@ -234,7 +234,7 @@ struct VOut { @builtin(position) pos: vec4f; @location(0) col0: vec4f; @location
   - `cd web && node --test test/*.test.mjs`: the unit tests (the LAN backend `lan_unit.c`, free roam, the C ns* key
     driver against the page's key path, `settings.ts` against `bundle.m`, the alias guard and test, the server,
     deployment, the security and privacy audit's regressions: `audit.test.mjs`, `page-audit.test.mjs`). They build their wasm programs with wasi-sdk from `deps/`.
-- `node web/tools/predownload-test.mjs` checks "Download the game data" in Chrome against its own server and a
+- `node web/tools/predownload-test.mjs` checks "Preload the game data" in Chrome against its own server and a
   made-up game folder: byte-exact cache, no movies, zstd where the bytes compress, stop and resume, retries, a refused
   file, Play pausing it, a second tab. `web/test/data-blocks.test.mjs` checks the server's `/data-blocks/`.
 - `node web/tools/offline-test.mjs` checks offline mode with the real game folder and a server it starts and stops:

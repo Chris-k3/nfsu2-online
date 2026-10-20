@@ -50,7 +50,7 @@ export class Predownload {
     const w = this.w = new Worker(new URL('/host/predownload-worker.js', import.meta.url), { type: 'module', name: 'predownload' });
     this.samples = [];
     w.onmessage = (e: MessageEvent<FromPredownload>) => this.message(w, e.data);
-    w.onerror = e => this.message(w, { t: 'error', msg: e.message || 'the download stopped unexpectedly' });
+    w.onerror = e => this.message(w, { t: 'error', msg: e.message || 'it stopped unexpectedly' });
     w.postMessage({ t: 'start', manifestUrl: MANIFEST_URL, dataBase: DATA_BASE } satisfies ToPredownload);
     this.set({ state: 'running', have: 0, total: 0, rate: 0, error: undefined });     // counted again by the worker
     this.log('[app] predownload: started');

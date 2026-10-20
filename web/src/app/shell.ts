@@ -140,7 +140,7 @@ function evaluate() {
   if (phase === 'starting' || phase === 'playing') return;
   const bad = blocking();
   if (bad) {
-    setPhase('error', 'Not ready', bad.id === 'module' ? 'The game did not download. It is tried again by itself, or press Retry.' : 'Fix the problem below, then reload this page.');
+    setPhase('error', 'Not ready', bad.id === 'module' ? 'The game did not load. It is tried again by itself, or press Retry.' : 'Fix the problem below, then reload this page.');
     return;
   }
   if (!instance.owner) {
@@ -150,7 +150,7 @@ function evaluate() {
   const pending = ORDER.map(id => checks.get(id)).find(c => c?.state === 'pending');
   if (!loaded) {
     // downloading (again, after a failure): the headline says so, the progress fills in the line below
-    if (pending?.id === 'module' && phase !== 'boot' && phase !== 'exited') setPhase('boot', 'Loading', 'Downloading the game.');
+    if (pending?.id === 'module' && phase !== 'boot' && phase !== 'exited') setPhase('boot', 'Loading', 'Loading the game.');
     return;
   }
   if (pending) { if (phase !== 'exited') setPhase('boot', 'Loading', `${pending.label}: ${pending.detail}`); return; }
@@ -559,11 +559,11 @@ async function loadModule() {
   clearTimeout(moduleTimer);
   if (moduleLoading || loaded) return;
   moduleLoading = true;
-  setCheck({ id: 'module', label: 'Game module', state: 'pending', detail: moduleFails ? `Downloading again (attempt ${moduleFails + 1}).` : 'Downloading.' });
+  setCheck({ id: 'module', label: 'Game module', state: 'pending', detail: moduleFails ? `Loading again (attempt ${moduleFails + 1}).` : 'Loading.' });
   try {
     loaded = await loadGame((got, total) => {
       setProgress(total ? got / total : 0);
-      if (phase === 'boot') $('#status-sub').textContent = `Downloading the game: ${fmtBytes(got)} of ${fmtBytes(total)}.`;
+      if (phase === 'boot') $('#status-sub').textContent = `Loading the game: ${fmtBytes(got)} of ${fmtBytes(total)}.`;
     });
     setProgress(1);
     log.add(`[app] game module ${loaded.info.rev}: ${fmtBytes(loaded.info.size)} in ${loaded.ms.toFixed(0)} ms, ${loaded.transferred} bytes transferred${moduleFails ? `, after ${moduleFails} failed attempts` : ''}`);
@@ -577,7 +577,7 @@ async function loadModule() {
     log.add(`[app] the game module did not load (attempt ${moduleFails}): ${e}; next try in ${wait} s`);
     moduleLoading = false;
     setProgress(0);
-    setCheck({ id: 'module', label: 'Game download', state: 'fail', detail: `The game did not download (${e}). Trying again in ${wait} s, or press Retry.` });
+    setCheck({ id: 'module', label: 'Game module', state: 'fail', detail: `The game did not load (${e}). Trying again in ${wait} s, or press Retry.` });
     moduleTimer = setTimeout(() => void loadModule(), wait * 1000);
   }
 }
@@ -650,8 +650,8 @@ export async function boot() {
   setCheck(checkIsolation());
   setCheck({ id: 'gpu', label: 'WebGPU', state: 'pending', detail: 'Asking for a graphics adapter.' });
   setCheck({ id: 'storage', label: 'Browser storage', state: 'pending', detail: 'Checking.' });
-  setCheck({ id: 'module', label: 'Game module', state: 'pending', detail: 'Downloading.' });
-  setPhase('boot', 'Loading', 'Downloading the game.');
+  setCheck({ id: 'module', label: 'Game module', state: 'pending', detail: 'Loading.' });
+  setPhase('boot', 'Loading', 'Loading the game.');
   setProgress(0);
 
   showOverrides(given, dev);
@@ -667,7 +667,7 @@ export async function boot() {
   refreshMeasured = measureRefresh(60).then(r => { displayHz = r.hz; log.add(`[app] display refresh ${r.raw.toFixed(1)} Hz -> ${r.hz}`); });
 
   if (crossOriginIsolated) await loadModule();
-  else setCheck({ id: 'module', label: 'Game download', state: 'fail', detail: 'Not downloaded: the page is not isolated (see above).' });
+  else setCheck({ id: 'module', label: 'Game module', state: 'fail', detail: 'Not loaded: the page is not isolated (see above).' });
   evaluate();
   (window as any).__nfsu2 = {
     get phase() { return phase; }, get lastExit() { return lastExit; }, get fps() { return { game: fps.gameFps, page: fps.pageFps, source: $('#fps').dataset.source }; },

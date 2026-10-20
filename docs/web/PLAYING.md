@@ -36,8 +36,8 @@ the ways to set that up. Each player then opens that `https://` address in the l
 **Firefox** and presses **Play**.
 
 The first start on a PC downloads about 7 MB of game code and, while playing, the game data it needs, compressed on
-the way. That PC keeps the data, so later starts are quick. To download it up front, press **Download the game data**
-in Game data on this PC, at the bottom of the start page: 2 GB (all but the movies), about 1.4 GB over the network.
+the way. That PC keeps the data, so later starts are quick. To load it up front, press **Preload the game data** in
+Game data on this PC, at the bottom of the start page: 2 GB (all but the movies), about 1.4 GB over the network.
 After that no loading screen waits on the network, which matters on a slow line to a remote server. The movies
 stream from the server as they play; with Movies off (Settings, Game) the game never asks for them.
 
@@ -129,12 +129,13 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
 - **Backups are your safety net.** When the disk is nearly full, the browser may clear a site's storage unless it
   promised to keep it. Chrome decides that by itself, and the page cannot see how full the disk is, so it does not warn.
   Firefox asks by the address bar (the Saves section says so while it asks): allow it. Make a backup now and then.
-- **Downloading the game data:** "Download the game data" in Game data on this PC fetches the game folder but the
-  movies into this browser, compressed on the way, with its progress and the time left. You can play meanwhile: the download pauses while the game runs and goes on
-  when it ends. Stop it whenever you like; what came is kept, and "Download the rest" goes on from there, also after
-  a reload. It needs about 2 GB of free disk space. The page says so before it starts when the browser has less room.
-- **Downloaded game data:** "Delete the downloaded game data" in Game data on this PC frees disk space on this PC. Your saves stay;
-  the data downloads again when needed.
+- **Preloading the game data:** "Preload the game data" in Game data on this PC fetches the game folder but the
+  movies into this browser, compressed on the way, with its progress and the time left. You can play meanwhile:
+  preloading pauses while the game runs and goes on when it ends. Stop it whenever you like; what came is kept, and
+  "Preload the rest" goes on from there, also after a reload. It needs about 2 GB of free disk space. The page says
+  so before it starts when the browser has less room.
+- **Game data on this PC:** "Delete the game data on this PC" frees disk space on this PC. Your saves stay; the game
+  loads the data from the server again when it needs it.
 
 ## 6. Free roam with other players
 
@@ -232,7 +233,7 @@ Good to know:
 | "WebGPU" | Update the browser; look at `chrome://gpu` in Chrome, about:support (Graphics) in Firefox. The game needs WebGPU. Firefox has it on Windows and macOS; where it is off, Chrome plays. |
 | "WebGPU" in Chrome on Linux, while `chrome://gpu` says WebGPU is hardware accelerated | Most likely the Vulkan driver is missing: Chrome runs WebGPU on Vulkan there (the rest of Chrome on OpenGL). `ls /usr/share/vulkan/icd.d/` lists the installed ones (`intel_icd` for Intel, `radeon_icd` for AMD). Install it with `sudo apt install mesa-vulkan-drivers` on Debian and Ubuntu, `sudo dnf install mesa-vulkan-drivers` on Fedora, `vulkan-intel` or `vulkan-radeon` on Arch, then quit Chrome completely and start it again. If the driver is there, the Dawn Info section further down `chrome://gpu` lists each adapter WebGPU sees and why one is blocked. |
 | "WebGPU" with a note about compressed textures | Nothing to do: the game plays. This GPU (in many phones, Pixels among them) cannot read the game's compressed textures, so the page unpacks them as the game loads: about 200 MB more memory, and loading screens may pause for a moment. |
-| "Game download" | The download failed, or the server is not reachable. The page tries again by itself, or press **Retry**. If the module is missing, start the server with `web/start.sh`, which builds it. |
+| "Game module" | The game did not load, or the server is not reachable. The page tries again by itself, or press **Retry**. If the module is missing, start the server with `web/start.sh`, which builds it. |
 | "Open elsewhere" | The game runs in another tab of this browser. Switch to it, or close it. |
 | No sound | Click the game or press a key. Check the sound setting and the output latency (try "Robust"). |
 | Stuck on a loading screen | F9, Quit game; then "Close the game now"; then "Stop the game". |

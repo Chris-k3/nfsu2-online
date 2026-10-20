@@ -1,4 +1,4 @@
-// "Download the game data" (Game data on this PC) in headless Chrome,
+// "Preload the game data" (Game data on this PC) in headless Chrome,
 // against a server of its own over a made-up game folder, in sizes that hit
 // the edges of the 1 MiB blocks and the 8-block range requests: random bytes (they
 // go as they are) and bytes that compress (they go compressed):
@@ -12,7 +12,7 @@
 //   fail      a server that refuses one file (404): the download stops and says why, keeping the files before it
 //   play      Play pauses a running download (its worker is gone while the game runs), the game's end resumes it
 //   tabs      a second tab on the same saves cannot start one
-//   delete    "Delete the downloaded game data" during a download stops it and leaves nothing
+//   delete    "Delete the game data on this PC" while it preloads stops it and leaves nothing
 // The game module is out/web/nfsu2.wasm, as for the server (--wasm to use another).
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
@@ -150,8 +150,8 @@ try {
   await open();
   {
     const btn = await text('#fetch-all'), info = await text('#cache-info');
-    const want = `Download the game data (${(TOTAL / 1e6).toFixed(1)} MB)`;
-    report('fresh', btn === want && /^Nothing downloaded yet/.test(info) && await page.locator('#data-bar').isHidden(), { btn, want, info });
+    const want = `Preload the game data (${(TOTAL / 1e6).toFixed(1)} MB)`;
+    report('fresh', btn === want && /^Nothing here yet/.test(info) && await page.locator('#data-bar').isHidden(), { btn, want, info });
   }
 
   // ------------------------------------------------------------- full --
@@ -182,9 +182,9 @@ try {
     await slow(400);
     await page.click('#fetch-all');
     const part = await until(s => s.have > 4 * M);
-    await page.click('#fetch-all');                                    // Stop the download
+    await page.click('#fetch-all');                                    // Stop preloading
     const stopped = await until(s => s.state === 'idle', 5000);
-    const label = await page.waitForFunction(() => /^Download the rest/.test(document.querySelector('#fetch-all').textContent) && document.querySelector('#fetch-all').textContent, null, { timeout: 15000 })
+    const label = await page.waitForFunction(() => /^Preload the rest/.test(document.querySelector('#fetch-all').textContent) && document.querySelector('#fetch-all').textContent, null, { timeout: 15000 })
       .then(h => h.jsonValue()).catch(() => text('#fetch-all'));
     await unroute();
     await open();
@@ -193,7 +193,7 @@ try {
     await page.click('#fetch-all');
     const s = await until(s => s.state === 'done' || s.state === 'error');
     const c = await cacheMatches();
-    report('resume', part.have > 0 && stopped.state === 'idle' && stopped.have < TOTAL && /^Download the rest/.test(label) && after === label && s.state === 'done' && c.ok,
+    report('resume', part.have > 0 && stopped.state === 'idle' && stopped.have < TOTAL && /^Preload the rest/.test(label) && after === label && s.state === 'done' && c.ok,
       { stoppedAt: stopped.have, total: TOTAL, label, afterReload: after, state: s.state, restRequests: dataRequests - before, mismatched: c.bad });
   }
 
@@ -228,9 +228,9 @@ try {
     await page.click('#fetch-all');
     const s = await until(s => s.state === 'done' || s.state === 'error');
     await unroute();
-    await page.waitForFunction(() => /^Download the rest/.test(document.querySelector('#fetch-all').textContent), null, { timeout: 15000 }).catch(() => {});
+    await page.waitForFunction(() => /^Preload the rest/.test(document.querySelector('#fetch-all').textContent), null, { timeout: 15000 }).catch(() => {});
     const msg = await text('#data-msg'), btn = await text('#fetch-all');
-    report('fail', s.state === 'error' && /HTTP 404/.test(s.error) && /^The download stopped: .*HTTP 404.*What it downloaded is kept\.$/.test(msg) && /^Download the rest/.test(btn),
+    report('fail', s.state === 'error' && /HTTP 404/.test(s.error) && /^Preloading stopped: .*HTTP 404.*What it preloaded is kept\.$/.test(msg) && /^Preload the rest/.test(btn),
       { state: s.state, error: s.error, msg, btn });
   }
 
@@ -287,7 +287,7 @@ try {
     const st = await status();
     const left = await page.evaluate(async () => { try { await (await navigator.storage.getDirectory()).getDirectoryHandle('cache'); return true; } catch { return false; } });
     const info = await text('#cache-info');
-    report('delete', /stops the download/.test(ask) && st.state === 'idle' && !left && /^Nothing downloaded yet/.test(info), { ask, state: st.state, cacheLeft: left, info });
+    report('delete', /stops preloading/.test(ask) && st.state === 'idle' && !left && /^Nothing here yet/.test(info), { ask, state: st.state, cacheLeft: left, info });
   }
 } catch (e) {
   report('run', false, String(e?.stack ?? e));

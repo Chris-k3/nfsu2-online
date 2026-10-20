@@ -29,7 +29,7 @@ export interface DataFile { path: string; size: number; mtime: number }
 export interface CacheFile { h: FileSystemSyncAccessHandle; have: Uint8Array; haveH: FileSystemSyncAccessHandle }
 
 export const manifestFiles = (m: Manifest): DataFile[] => m.files.filter(f => !f.d).map(f => ({ path: f.p, size: f.s ?? 0, mtime: f.m ?? 0 }));
-/** What "Download all game data" fetches: all but the movies (MOVIES/, a third of the folder in VP6 video that
+/** What "Preload the game data" fetches: all but the movies (MOVIES/, a third of the folder in VP6 video that
  *  does not compress).  They stream as they play, and with Movies off the game never opens them. */
 export const fetchedAhead = (f: DataFile) => f.path.split('/')[0].toLowerCase() !== 'movies';
 export const dataUrl = (base: string, path: string) => base + path.split('/').map(encodeURIComponent).join('/');

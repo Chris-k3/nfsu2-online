@@ -2,7 +2,7 @@
 //   node web/tools/offline-test.mjs [--data "<game folder>"] [--port 8659] [--out <dir>] [--headed]
 // Steps (each prints PASS/FAIL with evidence):
 //   kept      online: the service worker controls the page and keeps the page, its scripts, the module and the
-//             list of game files; "Download the game data" fills the cache
+//             list of game files; "Preload the game data" fills the cache
 //   offline   the server gone: the page reloads from the copies, says it is offline, and Play gets to the title
 //             screen with the movies off and no game data asked of the network
 //   proxy502  a proxy in front of a stopped server (every answer 502): the same, from the copies

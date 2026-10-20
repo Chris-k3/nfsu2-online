@@ -384,7 +384,7 @@ try {
       return r;
     };
     const auto = await run1(false), button = await run1(true);
-    const ok = (r) => r.whileFailed.status === 'Not ready' && r.whileFailed.retryShown && r.whileFailed.playDisabled && /did not download/.test(r.whileFailed.problem ?? '') &&
+    const ok = (r) => r.whileFailed.status === 'Not ready' && r.whileFailed.retryShown && r.whileFailed.playDisabled && /did not load/.test(r.whileFailed.problem ?? '') &&
       r.after === 'ready' && r.wasmRequests === 2 && r.retryHiddenAfter;
     report('retry', ok(auto) && ok(button) && button.recoveredMs < 1500, { byItself: auto, retryButton: button });
   }
