@@ -424,6 +424,10 @@ paths to the VPS, so pick a VPS location between you.
   - **Its own cost:** in a Room of more than 256 players the hub finds each player's nearest through a grid of the
     map instead of weighing every pair, with the same links. Measured on a Ryzen 9 5900X: 1000 players in one Room
     took about 30 ms a second (every pair took 0.5 s), 2000 about 70 ms, spread over the city or all in one spot.
+  - **A busy server gives every player fewer links:** each second the hub looks at how busy the server's thread was.
+    Over 85 %, the most links a player may have goes down by a quarter (32, 24, 18, 13, 9, 8 at the least), at most
+    every 5 s; under 65 %, it goes back up by 2, at most every 15 s. The nearest links stay. The console says each
+    change (`[roam] the server's thread was 93 % busy: at most 24 links a player (was 32)`).
 - **Free roam** draws another player's car where it is now (solid cars, the default: the newest snapshot carried on
   by half the round trip), or with Solid cars off `roam_delay` milliseconds (100 by default) behind its newest
   snapshot. That delay hides the 50 ms between snapshots, jitter and the odd lost snapshot. Network delay comes on
