@@ -26,6 +26,15 @@
 //                    address but virtual ones (10.77.0.0/22)
 //        [--page play [--size 960x540] [--play-only N]]   the renderer's test page (frame dumps to
 //                    <out>/i<n>-*.png through the server's /artifacts/); else the null platform
+//        [--page app]  each instance is the player's start page (web/index.html): Play is clicked; the
+//                    renderer, audio, input and network are the app's (the name from roam_name, free roam off)
+//        [--hide N[:FROM[:TO]]]   instance N's tab goes to the background (another tab in front: really hidden,
+//                    no animation frames and throttled timers, as in Chrome for a player) when its script logs
+//                    FROM (default: the host race-start, a joiner ready) and comes back when it logs TO (default
+//                    results).  This tool starts Chrome itself then (Playwright keeps its own pages visible) and
+//                    that instance runs without NOFOCUS, so the game hears the page go to the background.
+//                    Fails unless the game was told (app: deactivated) and still made frames there (its [status]
+//                    lines, the fps in summary.json), as the game does in a network race.
 //
 // Without --base it starts its own server (web/server/server.mjs --dev, the
 // game folder from --data or NFSU2_DATA; --online-trace <out>/trace.txt) and
@@ -66,6 +75,8 @@ const HORN = argv.includes('--horn');
 const EA_LOGIN = argv.includes('--ea-login') || argv.includes('--canary');
 // --quit-mid N:MS: instance N quits its game MS after its race started (the others race on)
 const QUIT_MID = opt('quit-mid', '') ? opt('quit-mid', '').split(':').map(Number) : [0, 0];
+// --hide N[:FROM[:TO]]: instance N's tab in the background from its script's "log FROM" to "log TO"
+const HIDE = opt('hide', '') ? (([n, from, to]) => ({ n: +n, from: from || (+n === 1 ? 'race-start' : 'ready'), to: to || 'results' }))(opt('hide', '').split(':')) : null;
 fs.mkdirSync(OUT, { recursive: true });
 
 const NAMES = ['OLHOST', 'OLJOIN', 'OLJOIN3', 'OLJOIN4', 'OLJOIN5', 'OLJOIN6'];
@@ -222,7 +233,8 @@ function raceFlow(w, host, race, raceMs, inst) {
     w(`+3000ms dump room_ready${x}`);
   }
   // the race: GameFlow 6, then the game's AI driver (drag: the synthetic pad)
-  w('+0    waitmem 0x008654a4 6 20000');
+  // (a joiner is Ready up to the host's whole room wait before the race: frames at 60 fps)
+  w(`+0    waitmem 0x008654a4 6 ${Math.max(20000, Math.ceil((WAIT_ROOM / 1000 + 60) * 60))}`);
   w('+0    log race-loaded');
   // every player's car in the race (the coordinator's racer count), and the car memory pool as it goes
   w(`+0    waitexpr i:[0x00890118]+0x24 == ${PLAYERS} 1200`);
@@ -267,9 +279,16 @@ const stamp = Date.now().toString(36);
 const scriptPath = i => `/tests/online-pair/${stamp}-i${i + 1}.txt`;
 function url(i) {
   const env = { ...COMMON, NFSU2_OL_NAME: NAMES[i], ...(EA_LOGIN ? {} : { NFSU2_ROAM_NAME: NAMES[i] }) };
+  if (HIDE?.n === i + 1) env.NOFOCUS = '0';        // the game hears the page go to the background
   for (const kv of opts(`env-i${i + 1}`)) env[kv.slice(0, kv.indexOf('='))] = kv.slice(kv.indexOf('=') + 1);
   const q = new URLSearchParams({ wasm: '/game.wasm', pages: '16384', arg: '/data/SPEED2.EXE',
     reg: '/tests/web/seed/registry_perf4_native.txt', save: `ol-${stamp}-i${i + 1}`, net: NAMES[i], script: scriptPath(i) });
+  if (PAGE === 'app') {
+    // the player's page: no wasm/pages/arg/net (the app's own), the switch name from roam_name, free roam off
+    const a = new URLSearchParams({ reg: q.get('reg'), save: q.get('save'), script: q.get('script') });
+    for (const [k, v] of Object.entries({ ...env, NFSU2_ROAM: '0' })) if (k !== 'NFSU2_SAVEDIR') a.append('env', `${k}=${v}`);
+    return `${BASE}/?${a}&fresh`;
+  }
   const page = PAGE === 'play' && (!PLAY_ONLY || PLAY_ONLY === i + 1) ? 'play' : 'hostcheck';
   if (page === 'play') { q.set('w', String(SIZE[0])); q.set('h', String(SIZE[1])); q.set('artifacts', `/artifacts/i${i + 1}-`); q.set('dumpscale', '1'); }
   for (const [k, v] of Object.entries(env)) q.append('env', `${k}=${v}`);
@@ -300,34 +319,90 @@ async function stopServer() {
 }
 if (OWN) server = await startServer();
 
-const browser = await chromium.launch({ channel: 'chrome', headless: !argv.includes('--headed'),
-  args: ['--enable-unsafe-webgpu', ...(process.env.CHROME_ARGS ? process.env.CHROME_ARGS.split(' ') : [])] });
+const CHROME_ARGS = ['--enable-unsafe-webgpu', ...(process.env.CHROME_ARGS ? process.env.CHROME_ARGS.split(' ') : [])];
+let browser, chrome = null;
+if (HIDE) {
+  // Chrome of our own, over CDP without Playwright's defaults: its focus emulation keeps every page it
+  // made visible; a page of the default context without it goes to the background like a player's tab
+  const prof = path.join(OUT, 'chrome-profile');
+  fs.rmSync(prof, { recursive: true, force: true });
+  const exe = process.env.CHROME_PATH || (process.platform === 'darwin'
+    ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' : '/opt/google/chrome/chrome');
+  chrome = spawn(exe, [...(argv.includes('--headed') ? [] : ['--headless=new']), '--remote-debugging-port=0', `--user-data-dir=${prof}`,
+    '--no-first-run', '--no-default-browser-check', '--use-mock-keychain', '--password-store=basic', ...CHROME_ARGS, 'about:blank'],
+  { stdio: ['ignore', 'ignore', 'pipe'] });
+  const ws = await new Promise((res, rej) => {
+    let err = '';
+    const t = setTimeout(() => rej(new Error(`Chrome did not start: ${err}`)), 20000);
+    chrome.stderr.on('data', d => { err += d; const m = /DevTools listening on (ws:\S+)/.exec(err); if (m) { clearTimeout(t); res(m[1]); } });
+    chrome.on('exit', code => { clearTimeout(t); rej(new Error(`Chrome exited (${code}): ${err}`)); });
+  });
+  browser = await chromium.connectOverCDP(ws, { noDefaults: true });
+} else browser = await chromium.launch({ channel: 'chrome', headless: !argv.includes('--headed'), args: CHROME_ARGS });
 const t0 = Date.now();
 const inst = [];
 async function start(i) {
   const dir = path.join(OUT, `i${i + 1}`); fs.mkdirSync(dir, { recursive: true });
-  const ctx = await browser.newContext();
+  const hide = HIDE?.n === i + 1 ? HIDE : null;
+  const ctx = hide ? browser.contexts()[0] : await browser.newContext();
   const page = await ctx.newPage();
   await page.route(`**${scriptPath(i)}`, r => r.fulfill({ status: 200, contentType: 'text/plain; charset=utf-8', body: scripts[i] }));
   const plog = fs.createWriteStream(path.join(dir, 'page.log'));
   const lines = [];
   let exit = null;
   const w = (s) => plog.write(`${((Date.now() - t0) / 1000).toFixed(3)} ${s}\n`);
+  // --hide: a blank tab in front of this one from "log FROM" to "log TO"; the times and what the page said
+  const hidden = [];
+  let bs = null, self = null, blank = null, queue = Promise.resolve();
+  if (hide) {
+    bs = await browser.newBrowserCDPSession();
+    self = (await (await ctx.newCDPSession(page)).send('Target.getTargetInfo')).targetInfo.targetId;
+  }
+  const background = (on) => (queue = queue.then(async () => {
+    if (on === !!blank) return;
+    const at = (Date.now() - t0) / 1000;
+    if (on) { blank = (await bs.send('Target.createTarget', { url: 'about:blank', newWindow: false })).targetId; await bs.send('Target.activateTarget', { targetId: blank }); }
+    else { await bs.send('Target.activateTarget', { targetId: self }); await bs.send('Target.closeTarget', { targetId: blank }); blank = null; }
+    await new Promise(r => setTimeout(r, 300));
+    const state = await page.evaluate(() => document.visibilityState).catch(e => `? ${e}`);
+    if (on) hidden.push({ at, state }); else Object.assign(hidden[hidden.length - 1] ?? {}, { back: at, backState: state });
+    const s = `[online-pair] ${on ? 'another tab in front' : 'this tab in front again'} at ${at.toFixed(1)} s: the page is ${state}`;
+    w(s); lines.push(s); console.log(`online-pair: ${NAMES[i]} ${s.slice(14)}`);
+  }).catch(e => w(`[online-pair] tab switch failed: ${e}`)));
+  const hideRe = hide && new RegExp(`\\bLOG ${hide.from}$`), showRe = hide && new RegExp(`\\bLOG ${hide.to}(_r\\d+)?$`);
   page.on('console', m => {
     const t = m.text(); w(t);
     const g = /^\[\d+!?\] ([^]*)$/.exec(t);
     if (g) lines.push(g[1]); else { const e = /^EXIT (-?\d+)$/.exec(t); if (e) exit = +e[1]; lines.push(t); }
+    if (PAGE === 'app') { const x = /guest exited with code (-?\d+)|\[app\] the game exited with code (-?\d+)/.exec(t); if (x) exit = +(x[1] ?? x[2]); }
+    if (hide && hideRe.test(t)) void background(true);
+    if (hide && showRe.test(t)) void background(false);
+    // the game's frame rate while in the background ([status] every NFSU2_STATUS_EVERY frames: none = parked)
+    const fps = hide && blank && /\[status\] f=\d+ .*\bfps=([\d.]+)/.exec(t), cur = hidden[hidden.length - 1];
+    if (fps && cur && cur.back === undefined) (cur.fps ??= []).push(+fps[1]);
   });
   page.on('pageerror', e => { w('PAGEERROR ' + e); lines.push(`PAGEERROR ${e}`); });
   page.on('crash', () => lines.push('CRASH (renderer process)'));
   const u = url(i);
   w(`URL ${u.replace(/NFSU2_OL_PASS%3D[^&]*/, 'NFSU2_OL_PASS%3D<redacted>')}`);
   await page.goto(u);
+  if (PAGE === 'app') {
+    await page.waitForFunction(() => window.__nfsu2?.phase === 'ready', null, { timeout: 120000 });
+    await page.click('#play');
+    w('[online-pair] clicked Play');
+  }
   const timer = setInterval(async () => {
-    try { const s = await page.evaluate(() => { const n = globalThis.nfsu2Net; return n ? { ...n.stats(), peers: n.peers } : null; }); if (s) w(`NETSTAT ${JSON.stringify(s)}`); } catch {}
+    try {
+      const s = await page.evaluate(() => {
+        const n = window.__nfsu2?.session?.net ?? globalThis.nfsu2Net;
+        return n ? { ...n.stats(), peers: typeof n.peers === 'function' ? n.peers() : n.peers } : null;
+      });
+      if (s) w(`NETSTAT ${JSON.stringify(s)}`);
+    } catch {}
   }, 10000);
-  const r = { i, name: NAMES[i], dir, page, ctx, plog, lines, timer, exitCode: () => exit, done: null };
-  r.done = page.waitForFunction(() => document.title === 'DONE', null, { timeout: TMO, polling: 1000 }).then(() => 'done', () => 'timeout');
+  const r = { i, name: NAMES[i], dir, page, ctx, plog, lines, timer, hidden, exitCode: () => exit, done: null };
+  r.done = page.waitForFunction(() => document.title === 'DONE' || window.__nfsu2?.phase === 'exited', null, { timeout: TMO, polling: 1000 })
+    .then(() => 'done', () => 'timeout');
   inst.push(r);
   console.log(`online-pair: ${r.name} started at ${((Date.now() - t0) / 1000).toFixed(1)} s`);
   return r;
@@ -342,6 +417,7 @@ for (const x of inst) {
   x.plog.end();
 }
 await browser.close();
+if (chrome) { const gone = new Promise(r => chrome.once('exit', r)); chrome.kill('SIGTERM'); await gone; }
 await stopServer();
 serverLog.end();
 
@@ -369,12 +445,19 @@ for (const x of inst) {
   if (log.includes('UNRESOLVED INDIRECT')) why.push(`${n}:unresolved-icall`);
   if (has(/^\[net\] BLOCKED/m)) why.push(`${n}:net-blocked`);
   if (has(/^PAGEERROR|^CRASH/m)) why.push(`${n}:page-error`);
+  if (HIDE?.n === x.i + 1) {
+    // in the background the game was told (deactivated) and kept running in the network session
+    if (!x.hidden.some(h => h.state === 'hidden')) why.push(`${n}:never-hidden`);
+    if (!has(/^app: deactivated/m)) why.push(`${n}:not-deactivated`);
+    if (x.hidden.some(h => (h.back ?? (Date.now() - t0) / 1000) - h.at >= 30 && !h.fps?.length)) why.push(`${n}:paused-in-background`);
+  }
   const L = log.split('\n'), grab = (re) => L.filter(l => re.test(l));
   summary.result[x.name] = {
     exit: x.exitCode(), quit: grab(/quit at guest frame/).pop() ?? null,
     screens: [...new Set(grab(/^\[fng\] screen /).map(l => l.replace(/^\[fng\] screen /, '').split(' ')[0]))],
     online: grab(/^\[net\] (online|virtual LAN: tcp connect 10\.77\.0\.1)/).slice(0, 8),
     lanstats: grab(/^\[net\] virtual LAN (stats|at exit)/).slice(-1),
+    ...(HIDE?.n === x.i + 1 ? { hidden: x.hidden, background: grab(/^app: (de)?activated|the game keeps running|^\[online-pair\]/) } : {}),
     why,
   };
   summary.why.push(...why);
