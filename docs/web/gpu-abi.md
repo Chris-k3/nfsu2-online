@@ -45,6 +45,7 @@ group 0  (per draw; K and P with dynamic offsets)
   binding 0  VERTEX    buffer read-only-storage   VB : array<u32>   hasDynamicOffset false
   binding 1  VERTEX    buffer uniform             K  : VSPar        hasDynamicOffset true   minBindingSize 4112
   binding 2  FRAGMENT  buffer uniform             P  : PSPar        hasDynamicOffset true   minBindingSize 560
+  binding 3  FRAGMENT  buffer uniform             H  : HLPar        hasDynamicOffset false  minBindingSize 656
 group 1  (textures and samplers of stages 0..3)
   binding 0  FRAGMENT  texture  sampleType float, viewDimension "2d"   (layout CUBE: "cube")   tex0
   binding 1  FRAGMENT  texture  sampleType float, viewDimension "2d"                             tex1
@@ -92,6 +93,12 @@ struct PSPar {                     // 560 bytes, uniform (= the Mac's PSPar)
   c: array<vec4f, 32>,             // 32  pixel shader constants c0..c31 (MDraw.psci block)
   fog: vec4f,                      // 544 MDraw.fogv: FOGCOLOR rgb, a = FOGENABLE (0 or 1)
 }
+struct HLight { t: mat4x4f, col: vec4f }   // 80 bytes
+struct HLPar {                     // 656 bytes, uniform (gpu_proto.h GwHL)
+  n: u32,                          //  0  other cars' headlights this frame (0..8)
+  s: f32, o: f32, pad: f32,        //  4  falloff: ramp u = s * w + o (the lit VS's own constants)
+  l: array<HLight, 8>,             // 16  car k: its light coordinate is uv1 * t; col = its HEADLIGHTCOLOR
+}
 ```
 
 - **K header** is what `raw_rec` (`metal.m`) writes, plus `base`: `stride` = the draw's stride, `tsel` = `Σ ((int)proj[k] & 3) << 8k`,
@@ -103,6 +110,10 @@ struct PSPar {                     // 560 bytes, uniform (= the Mac's PSPar)
   ignores `K.stride` (a TVert is always 112 bytes: pos, col0, col1, t[4], all `f32`, `gfx.h`).
 - **P** is the Mac's per-draw `PSPar` (`metal.m` encoder): the renderer fills it from the MDraw record and the PS constant
   pool, 256-aligned (a 768-byte slot stride is the simplest).
+- **H** is the frame's, not the draw's: bytes `[GW_K_HL, + 656)` of the frame's K arena (`gpu_web.c` keeps the draws'
+  blocks after them), bound at that fixed offset of the K buffer. Only the worldheadlight pixel shaders declare it: the
+  translator adds `hl_more()` (the other cars' headlights, `runtime/headlights.c`) after their `t1 * t2 * c0 + v0`
+  (`vsemu_wgsl.inc` `W_HL`); a web-only addition, the Mac has no such term.
 
 ## 4. Vertex pulling (game VS modules)
 

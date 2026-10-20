@@ -22,6 +22,9 @@
  * entry point. */
 #include <stdarg.h>
 #include "wgsl.h"
+#include "gpu_proto.h"
+#define WSTR_(x) #x
+#define WSTR(x) WSTR_(x)
 
 typedef struct { char *p; size_t cap, n; int ok; } WBuf;
 static void wb_init(WBuf *b, char *p, size_t cap){
@@ -263,6 +266,31 @@ static int w_defs_finite(const VSProg *p){
     return 1;
 }
 
+/* The other cars' headlights (runtime/headlights.c, gpu_proto.h GwHL).  The
+ * worldheadlight pixel shaders (ps_1_1) light a surface with
+ *     mul rA.rgb, t1, t2          headlight texture (stage 1, at uv1.xy / uv1.w)
+ *                                 x falloff ramp (stage 2)
+ *     mad rA.rgb, rA, c0, v0      x HEADLIGHTCOLOR + the vertex light
+ * before the texture multiply; after that mad, every other car's light is
+ * added the same way, from its coordinate uv1 * t and its own colour. */
+static const char W_HL[] =
+    "struct HLight { t: mat4x4f, col: vec4f }\n"
+    "struct HLPar { n: u32, s: f32, o: f32, pad: f32, l: array<HLight, " WSTR(GW_HL_MAX) "> }\n"
+    "@group(0) @binding(3) var<uniform> H: HLPar;\n"
+    "fn hl_more(q: vec4f, v: f32) -> vec3f {\n"
+    "  var a = vec3f(0.0);\n"
+    "  for (var k = 0u; k < min(H.n, " WSTR(GW_HL_MAX) "u); k++) {\n"
+    "    let p = q * H.l[k].t;\n"
+    "    let l1 = textureSample(tex1, smp1, p.xy / p.w).rgb;\n"
+    "    let l2 = textureSample(tex2, smp2, vec2f(H.s * p.w + H.o, v)).rgb;\n"
+    "    a += select(vec3f(0.0), l1 * l2 * H.l[k].col.rgb, p.w > 0.0);\n"
+    "  }\n"
+    "  return a;\n"
+    "}\n";
+static int w_plain(unsigned tok, int ty, int n){
+    return RT(tok) == ty && RN(tok) == n && SWIZ(tok) == 0xE4u && SMOD(tok) == 0;
+}
+
 /* ====================================================================
  * Pixel shader (ps_to_msl_ex2)
  * ==================================================================== */
@@ -305,6 +333,7 @@ int ps_to_wgsl_ex2(const VSProg *p, int id, char *out, size_t cap, unsigned cube
     for (int k = 0; k < 4; k++)
         if (tcuse & (1u << k)) wb_put(&bb, "  let tc%d = tcoord(i.uv%d, P.proj[%d]);\n", k, k, k);
 
+    int hl_mul = -1, hl_used = 0;
     for (unsigned q = 0; q < p->n && bb.ok && !x.bad; q++){
         const VSIns *y = &p->ins[q];
         if (y->nsrc > 0) w_src(&x, s0, WEX, y->src[0], y->rel[0]);
@@ -405,16 +434,29 @@ int ps_to_wgsl_ex2(const VSProg *p, int id, char *out, size_t cap, unsigned cube
         else                     w = snprintf(val, WEX, "%s", ex);
         if (w < 0 || w >= WEX){ x.bad = 1; break; }
         w_store(&bb, d, WMASK(y->dst), val, 0);
+        /* the headlight term (W_HL) */
+        int dn = RN(y->dst);
+        if (p->version < 0x0200 && dty == R_TEMP && (WMASK(y->dst) & 7u) == 7u && !sh && !SATUR(y->dst)){
+            if (y->op == O_MUL && ((w_plain(y->src[0], R_ADDR, 1) && w_plain(y->src[1], R_ADDR, 2)) ||
+                                   (w_plain(y->src[0], R_ADDR, 2) && w_plain(y->src[1], R_ADDR, 1)))){
+                hl_mul = dn; continue; }
+            if (y->op == O_MAD && dn == hl_mul && w_plain(y->src[0], R_TEMP, dn) && w_plain(y->src[1], R_CONST, 0)
+                && (tcuse & 6u) == 6u){
+                wb_put(&bb, "  r%d = vec4f(r%d.xyz + hl_more(i.uv1, tc2.y), r%d.w);\n", dn, dn, dn);
+                hl_used = 1; hl_mul = -1; continue; }
+        }
+        if (dty == R_TEMP && dn == hl_mul) hl_mul = -1;
     }
     if (x.bad || !bb.ok) goto done;
 
     int usec = ps_uses_colorout(p);
     if (usec) x.oC = 1; else x.r |= 1u;          /* the result register */
     WBuf ob; wb_init(&ob, out, cap);
-    wb_put(&ob, "// ps_%d: %s_%u_%u, %u instructions%s\n", id, "ps", p->version >> 8, p->version & 0xFF,
-           p->n, (cubemask & 1u) ? ", stage 0 cube" : "");
+    wb_put(&ob, "// ps_%d: %s_%u_%u, %u instructions%s%s\n", id, "ps", p->version >> 8, p->version & 0xFF,
+           p->n, (cubemask & 1u) ? ", stage 0 cube" : "", hl_used ? ", other cars' headlights" : "");
     wb_put(&ob, "%s%s", W_VOUT, W_PSPAR);
     w_textures(&ob, cubemask);
+    if (hl_used) wb_put(&ob, "%s", W_HL);
     wb_put(&ob, "@fragment fn ps_%d(i: VOut) -> @location(0) vec4f {\n", id);
     w_decls(&ob, &x, 16);
     if (x.v & 1u) wb_put(&ob, "  var v0 = i.col0;\n");

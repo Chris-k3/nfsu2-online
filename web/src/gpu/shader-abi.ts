@@ -7,6 +7,8 @@
 export const VSPAR_SIZE = 4112;
 /** PSPar: {aref, usec, pad0, pad1}, proj, 32 vec4f, fog. */
 export const PSPAR_SIZE = 560;
+/** HLPar (gpu_proto.h GwHL): the other cars' headlights, {n, s, o, pad} + 8 x {mat4x4f, vec4f}. */
+export const HLPAR_SIZE = 656;
 /** One CPU-transformed vertex (gfx.h TVert): pos, col0, col1, t[4], all f32. */
 export const TVERT_SIZE = 112;
 /** Pixel shader id offset of the stage-0 cube twin (com.c / metal.m PSCUBE). */
@@ -30,7 +32,7 @@ export interface PsConstants { ALPHA_FUNC: number; PS20_TEXCOORD?: number }
 export function isCubePs(id: number): boolean { return id >= PSCUBE; }
 
 export interface ShaderAbi {
-  /** group 0: VB (storage), K and P (uniform, dynamic offsets in that order). */
+  /** group 0: VB (storage), K and P (uniform, dynamic offsets in that order), H (uniform, the frame's). */
   group0: GPUBindGroupLayout;
   /** group 1: tex0..tex3 (2d) at bindings 0..3, smp0..smp3 at 4..7. */
   group1: GPUBindGroupLayout;
@@ -48,6 +50,7 @@ export function createShaderAbi(device: GPUDevice): ShaderAbi {
       { binding: 0, visibility: V, buffer: { type: 'read-only-storage', hasDynamicOffset: false } },
       { binding: 1, visibility: V, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: VSPAR_SIZE } },
       { binding: 2, visibility: F, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: PSPAR_SIZE } },
+      { binding: 3, visibility: F, buffer: { type: 'uniform', hasDynamicOffset: false, minBindingSize: HLPAR_SIZE } },
     ],
   });
   const textures = (cube: boolean): GPUBindGroupLayoutEntry[] => {

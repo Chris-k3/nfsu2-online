@@ -3074,4 +3074,11 @@ int roam_game_friends(void){
     roam_plat_unlock();
     return n;
 }
+/* headlights.c, on the guest thread: is this a friend's car being shown? */
+int roam_game_friend_car(uint32_t car){
+    if (!O.on || !car) return 0;
+    for (int k = 0; k < NSLOT; k++)
+        if (g_sl[k].car == car && g_sl[k].st == SL_ACTIVE && !g_sl[k].hidden) return 1;
+    return 0;
+}
 #endif

@@ -1211,6 +1211,11 @@ static int gpuvs_id(const VSProg *prog, uint32_t vs, uint32_t decl,
     g_gvs_next++;
     g_gvs[slot].gid = gid; g_gvs[slot].state = 1;
     g_gvs_nk[gid] = vs_kmax(prog);
+#ifdef __wasm__
+    /* the falloff of a lit shader (oT2.x = s * w + o) for the other cars' headlights */
+    { float rp[2]; void headlights_vs_ramp(float, float);
+      if (vs_light_creg(prog, rp) >= 0) headlights_vs_ramp(rp[0], rp[1]); }
+#endif
 #if NFS_ENHANCED
     /* HD ray tracing experiment: offset/type of the position element, the
      * constant register of the position matrix and whether it is skinned
@@ -4542,6 +4547,9 @@ void draw_stats_save(uint64_t *a, uint64_t *b){ g_ptype=a; g_stride=b; }
 void com_report(void){
     fprintf(stderr,"\n=== COM / D3D9 LAYER ===\n");
     ws_report();
+#ifdef __wasm__
+    { void headlights_report(void); headlights_report(); }
+#endif
     if (g_aspfix != 1.f)
         { fprintf(stderr,"  widescreen       : aspfix %.4f, %lu perspective / %lu orthographic draws\n",
                   g_aspfix, g_asp_persp, g_asp_ortho);

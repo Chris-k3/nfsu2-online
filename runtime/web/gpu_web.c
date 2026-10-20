@@ -64,6 +64,8 @@ static int      g_detached;      /* the page never attached: dropped back to nul
 #define MAXKB  ( 4u * 1024u * 1024u)        /* VS constant arena (bytes) */
 #define RQ_CAP (64u * 1024u * 1024u)        /* resource queue ring (bytes, power of two) */
 #define KZERO  256u                         /* K arena bytes [0, 256): an all-zero block for TVert draws (base 0) */
+#define KFIRST 1024u                        /* [GW_K_HL, + GW_HL_BYTES): the frame's headlights; the draws' blocks from here */
+_Static_assert(GW_K_HL >= KZERO && GW_K_HL + GW_HL_BYTES <= KFIRST, "K arena");
 
 typedef struct {
     GwDraw  *d;  unsigned dn;
@@ -122,7 +124,7 @@ static void gw_init(void){
             B->rv = zalloc(MAXRV); B->kb = zalloc(MAXKB + 4096); B->psc = zalloc(sizeof *B->psc * MAXD);
             if (!B->d || !B->v || !B->rv || !B->kb || !B->psc) ok = 0;
         }
-        for (int b = 0; b < GW_NBUF; b++) g_b[b].kn = KZERO;
+        for (int b = 0; b < GW_NBUF; b++) g_b[b].kn = KFIRST;
         uint8_t *rq = zalloc(RQ_CAP);
         if (!rq) ok = 0;
         if (!ok){ fprintf(stderr, "[gpu] out of memory for the record buffers: no rendering\n"); want = 0; }
@@ -805,6 +807,11 @@ static void vsync_feed(void){
  * mailbox mode, or after 60 ms when the page is not encoding at all (a hidden
  * tab).  A frame being encoded is always waited for: its buffer is the one
  * the game would write next. */
+/* runtime/headlights.c: the other cars' headlights for the frame being recorded */
+void gw_headlights(const GwHL *blk){
+    if (!g_on || !blk) return;
+    memcpy(g_b[g_cur].kb + GW_K_HL, blk, sizeof *blk);
+}
 void metal_request_dump(long guest_frame, const char *label){
     snprintf(g_dump_label, sizeof g_dump_label, "%s", label ? label : "dump");
     for (char *q = g_dump_label; *q; q++) if (*q == '/' || *q == ' ' || *q == '\\') *q = '_';
@@ -866,7 +873,8 @@ void metal_present(void){
     /* the other buffer is free now (the page released it before taking ours, or it was replaced) */
     g_cur ^= 1;
     Buf *N = &g_b[g_cur];
-    N->dn = N->vn = N->rvn = N->pscn = 0; N->kn = KZERO; N->last_ksz = 0;
+    N->dn = N->vn = N->rvn = N->pscn = 0; N->kn = KFIRST; N->last_ksz = 0;
+    ((GwHL *)(N->kb + GW_K_HL))->n = 0;           /* no other cars' headlights until headlights.c sets them */
     g_frame_clear = g_clear_argb;
     g_gframe++;
     tex_free_due(0);

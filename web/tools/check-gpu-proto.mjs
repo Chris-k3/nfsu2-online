@@ -28,7 +28,8 @@ for (const [s, fl] of Object.entries(fields)) {
   c += `printf("${s} sizeof %u\\n", (unsigned)sizeof(${s}));\n`;
   for (const f of fl) c += `printf("${s} ${f} %u\\n", (unsigned)offsetof(${s}, ${f}));\n`;
 }
-c += 'printf("LAYOUT %u\\n", (unsigned)GW_LAYOUT);\nprintf("ATTACHED %u\\n", (unsigned)GW_ATTACHED);\nprintf("DETACHED %u\\n", (unsigned)GW_DETACHED);\nreturn 0; }\n';
+c += 'printf("LAYOUT %u\\n", (unsigned)GW_LAYOUT);\nprintf("ATTACHED %u\\n", (unsigned)GW_ATTACHED);\nprintf("DETACHED %u\\n", (unsigned)GW_DETACHED);\n';
+c += 'printf("K_HL %u\\n", (unsigned)GW_K_HL);\nprintf("HL_BYTES %u\\n", (unsigned)sizeof(GwHL));\nprintf("HL_MAX %u\\n", (unsigned)GW_HL_MAX);\nreturn 0; }\n';
 fs.writeFileSync(path.join(tmp, 'p.c'), c);
 execFileSync(path.join(ROOT, 'deps', wasi, 'bin/clang'), ['--target=wasm32-wasip1', '-O1', '-I', path.join(ROOT, 'runtime/web'), '-o', path.join(tmp, 'p.wasm'), path.join(tmp, 'p.c')]);
 let out = '';
@@ -56,6 +57,7 @@ eq('GwVsync.ts_ms', C['GwVsync ts_ms'] / 8, T.V.tsF64); eq('GwVsync.period_ms', 
 eq('GwVsync.hz', C['GwVsync hz'] / 4, T.V.hz); eq('GwVsync.visible', C['GwVsync visible'] / 4, T.V.visible);
 eq('layout word', C['LAYOUT'], T.LAYOUT);
 eq('GW_ATTACHED', C['ATTACHED'], T.ATTACHED); eq('GW_DETACHED', C['DETACHED'], T.DETACHED);
+eq('GW_K_HL', C['K_HL'], T.K_HL); eq('GwHL size', C['HL_BYTES'], T.HL_BYTES); eq('GW_HL_MAX', C['HL_MAX'], T.HL_MAX);
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(bad ? `${bad} mismatches` : `gpu proto OK: ${Object.keys(C).length} values match (layout ${C.LAYOUT.toString(16)})`);
 process.exit(bad ? 1 : 0);

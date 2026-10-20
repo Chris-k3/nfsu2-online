@@ -20,7 +20,7 @@
 #include <stddef.h>
 
 #define GW_MAGIC   0x55504757u          /* "WGPU" */
-#define GW_VERSION 1u
+#define GW_VERSION 2u                   /* 2: the headlights block in the K arena (GwHL) */
 #define GW_NBUF    2                    /* record buffers: one being written, one handed off */
 
 /* GwDraw.kind */
@@ -144,6 +144,17 @@ enum {
 typedef struct { uint32_t op, len; uint32_t a[6]; } GwCmd;
 #define GW_CMD_HDR 32u
 
+/* The other cars' headlights (runtime/headlights.c): every frame's VS
+ * constant arena holds this block at GW_K_HL, bound as group 0 binding 3 (H)
+ * for the lit pixel shaders, which add car k's light at q * t (q: their
+ * coordinate in the player's light, uv1; t: columns) with the falloff
+ * coordinate s * q'.w + o (gpu-abi.md section 2).  n = 0: none this frame. */
+#define GW_HL_MAX   8
+typedef struct { float t[16]; float col[4]; } GwHLight;
+typedef struct { uint32_t n; float s, o, pad; GwHLight l[GW_HL_MAX]; } GwHL;
+#define GW_K_HL     256u
+#define GW_HL_BYTES 656u
+
 /* Layout word: changes whenever a struct above changes shape. */
 #define GW_LAYOUT ((uint32_t)(sizeof(GwDraw) | sizeof(GwFrame) << 8 | (sizeof(GwCtl) & 0xFFF) << 16) ^ (GW_VERSION << 28))
 
@@ -163,4 +174,5 @@ _Static_assert(offsetof(GwCtl, st_draws) == 64 && offsetof(GwCtl, st_pipelines) 
 _Static_assert(sizeof(GwCtl) == 96 + 2 * 136, "GwCtl");
 _Static_assert(sizeof(GwVsync) == 32 && offsetof(GwVsync, ts_ms) == 8 && offsetof(GwVsync, hz) == 24, "GwVsync");
 _Static_assert(sizeof(GwCmd) == GW_CMD_HDR, "GwCmd");
+_Static_assert(sizeof(GwHLight) == 80 && sizeof(GwHL) == GW_HL_BYTES && offsetof(GwHL, l) == 16, "GwHL");
 #endif

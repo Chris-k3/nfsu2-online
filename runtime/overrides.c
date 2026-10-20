@@ -470,14 +470,20 @@ void sub_0060faa0(CPU *c){
  * The game only passes identity matrices to SetTransform; the camera can only
  * be read here.  Behaviour is UNCHANGED: only the address is captured and (in
  * the HD build) the main view's matrices are recorded into the frame.  In the
- * original build enh_view_setup is an empty inline function.               */
+ * original build enh_view_setup is an empty inline function.  The web build
+ * keeps the headlight view's (9) for the other cars' lights (headlights.c). */
 void sub_005c7ec0_orig(CPU *c);
 void sub_005c7ec0(CPU *c){
     uint32_t plat = c->ecx, view = MR32(c->esp + 4u);
     sub_005c7ec0_orig(c);
-    if (view && plat && mem_is_committed(view + 0x43u) && mem_is_committed(plat + 0xbfu))
+    if (view && plat && mem_is_committed(view + 0x43u) && mem_is_committed(plat + 0xbfu)){
         enh_view_setup(MR32(view + 4u), (const float *)(g_mem + plat),
                        MR32(view + 0x40u));
+#ifdef __wasm__
+        void headlights_view(uint32_t id, const float *plat);
+        headlights_view(MR32(view + 4u), (const float *)(g_mem + plat));
+#endif
+    }
 }
 
 

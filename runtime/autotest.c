@@ -60,6 +60,8 @@
  *     wzero [now]              world-time origin for absolute Nwms lines: the
  *                              start of the current race (GameFlow 6) when
  *                              racing, else (or with "now") the current time
+ *     headlights MODE          the other cars' headlights (headlights.c): its
+ *                              NFSU2_HEADLIGHTS modes, for an A/B in one run
  *     displayhz HZ             act as if the window moved to a screen with
  *                              this refresh rate (framerate.c, NFSU2_FPS=auto
  *                              tests); 0 = the detected rate again
@@ -221,7 +223,7 @@ static void key_event(unsigned dik, int down){
 
 /* ---- script ----------------------------------------------------------- */
 enum { C_DOWN, C_UP, C_TAP, C_TYPE, C_DUMP, C_WAITMEM, C_LOG, C_QUIT, C_PEEK, C_POKE, C_WAITFNG, C_TAPUNTIL,
-       C_CLOSE, C_BLUR, C_AUDIORESET, C_WZERO, C_DISPLAYHZ, C_TEXREP,
+       C_CLOSE, C_BLUR, C_AUDIORESET, C_WZERO, C_DISPLAYHZ, C_TEXREP, C_HEADLIGHTS,
        C_PAD, C_TAPPAD, C_AXIS, C_TAPPADUNTIL,
        C_NSDOWN, C_NSUP, C_NSTAP, C_NSREPEAT, C_NSTYPE, C_NSFOCUS, C_NSMOUSE, C_NSTAPUNTIL,
        C_LOOP, C_ENDLOOP, C_STATUS, C_STALL, C_CAREER,
@@ -369,6 +371,7 @@ static void load_script(const char *path){
         else if (!strcasecmp(cmd, "click")) { e.cmd = C_CLICK; e.fv = (float)atof(a1); e.val = (uint32_t)(atof(a2) * 1e6); }
         else if (!strcasecmp(cmd, "srvcycle")) { e.cmd = C_SRVCYCLE; e.n = a1[0] ? atol(a1) : 1; e.val = a2[0] ? (uint32_t)atol(a2) : 0u; }
         else if (!strcasecmp(cmd, "texrep")) { e.cmd = C_TEXREP; e.n = !strcasecmp(a1, "off") ? 0 : !strcasecmp(a1, "on") ? 1 : -1; }
+        else if (!strcasecmp(cmd, "headlights")) { e.cmd = C_HEADLIGHTS; snprintf(e.text, sizeof e.text, "%s", a1); }
         else if (!strcasecmp(cmd, "waitfng")){ e.cmd = C_WAITFNG;
             snprintf(e.text, sizeof e.text, "%s", a1); e.n = a2[0] ? atol(a2) : 0; }
         else if (!strcasecmp(cmd, "tapuntil")){ e.cmd = C_TAPUNTIL;
@@ -696,6 +699,11 @@ static int fire(CPU *c, Ev *e, double tms){
         g_wzero = (!e->n && rs >= 0) ? rs : hfr_sim_ms();
         fprintf(stderr, "[autotest] f=%ld t=%.0fms world-time origin at w=%.3fms (now w=%.3fms)\n",
                 g_frame, tms, g_wzero, hfr_sim_ms());
+        break; }
+    case C_HEADLIGHTS: {   /* "headlights MODE": the other cars' headlights (headlights.c), A/B in one run */
+        int headlights_set(const char *mode);
+        fprintf(stderr, "[autotest] f=%ld t=%.0fms headlights %s%s\n", g_frame, tms, e->text,
+                headlights_set(e->text) ? "" : " (not known here)");
         break; }
     case C_TEXREP: {       /* "texrep on|off|toggle": show / hide a texture pack (A/B) */
         void texrep_set_shown(int on);

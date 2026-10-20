@@ -4,8 +4,10 @@
 // the renderer refuses a control block whose layout word differs.
 
 export const GW_MAGIC = 0x55504757;
-export const GW_VERSION = 1;
+export const GW_VERSION = 2;
 export const GW_NBUF = 2;
+// GwHL: the other cars' headlights at this byte offset of every frame's VS constant arena (group 0 binding 3)
+export const K_HL = 256, HL_BYTES = 656, HL_MAX = 8;
 
 // GwDraw: 152 bytes, all 32-bit fields (word index = byte offset / 4)
 export const DRAW_BYTES = 152, DRAW_WORDS = 38;

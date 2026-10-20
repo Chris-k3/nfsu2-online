@@ -92,7 +92,7 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
 |---|---|
 | Online | its own section under Saves: how many play on this server now, free roam with others, your name (in free roam and online), room, the game's Online mode (on by default); more: solid cars and the free-roam network |
 | Game | movies, autosave; more: startup movies (skippable, original or off), sound, pause or keep running in the background, sound output latency |
-| Display | full screen on Play (off: the game plays in the browser window), resolution scale, frame rate (auto follows the screen: 120 on a 120 Hz display, 240 on a 240 Hz one; 60, 120 or 240; Online and LAN races at most 120); more: HUD layout, movie framing, cutscene bars, frame-rate counter |
+| Display | full screen on Play (off: the game plays in the browser window), resolution scale, frame rate (auto follows the screen: 120 on a 120 Hz display, 240 on a 240 Hz one; 60, 120 or 240; Online and LAN races at most 120); more: HUD layout, movie framing, cutscene bars, other cars' headlights (players, all cars, off), frame-rate counter |
 | Controller | rumble; more: controller on or off, menu buttons, dead zones |
 
 - **More settings:** each group's "More … settings" has the less common ones, and says how many of them you
@@ -174,6 +174,9 @@ Good to know:
 - **Hydraulics and nitrous:** the others see your car lift, tilt and bounce on its hydraulics, with its wheels on the
   road, and your nitrous as the game draws it on any car: the light trails behind it. A player on an older version
   sees the body move but not the wheels, and no nitrous.
+- **Headlights:** the other players' headlights light the road in front of their cars, as yours do, a little dimmer
+  and in their own colour; in Online and LAN races too. Display, more: Other cars' headlights (All cars: AI racers and
+  traffic too; Off: only yours, as in the original game). The Windows plugin draws only your own.
 - **Outruns:** stay within about 30 m of another player for 3 seconds and the game offers an outrun, as it does with
   its own tuners: the outrun icon lights up and the top of the screen says "Press Enter to challenge ... to an
   outrun" (on a controller, D-pad up, the game's Engage). The other player sees "... challenges you to an outrun" and

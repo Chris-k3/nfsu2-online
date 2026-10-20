@@ -20,7 +20,7 @@
 import * as P from './proto';
 import { D, F, Kind, Op } from './proto';
 import { COPY, FF_FS, TVERT_VS } from './wgsl';
-import { createShaderAbi, alphaFunc, PSCUBE, VSPAR_SIZE, PSPAR_SIZE } from './shader-abi';
+import { createShaderAbi, alphaFunc, PSCUBE, VSPAR_SIZE, PSPAR_SIZE, HLPAR_SIZE } from './shader-abi';
 import { unpackDxt } from './dxt';
 
 export interface EncodeStats {
@@ -439,7 +439,9 @@ export class Encoder {
       g = this.device.createBindGroup({ layout: this.bgl0, entries: [
         { binding: 0, resource: { buffer: vb } },
         { binding: 1, resource: { buffer: this.kBuf, size: KBIND } },
-        { binding: 2, resource: { buffer: this.pBuf, size: PSPAR_BYTES } }] });
+        { binding: 2, resource: { buffer: this.pBuf, size: PSPAR_BYTES } },
+        // the frame's other cars' headlights, in its VS constant arena (gpu_proto.h GwHL)
+        { binding: 3, resource: { buffer: this.kBuf, offset: P.K_HL, size: HLPAR_SIZE } }] });
       this.bg0[src] = g;
     }
     return g;
