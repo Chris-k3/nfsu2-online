@@ -16,6 +16,8 @@
 //        [--page play [--size 960x540] [--play-only Bob]]   the renderer's test page (test/play.html, WebGPU)
 //                    instead: frame dumps go to the server's /artifacts/ as <name>-*.png (a server of our own
 //                    gets --artifacts <out>); --play-only: only that instance renders, the others run hostcheck
+//        [--fetch snd.raw]  a file of each page's save folder (OPFS) copied out as <out>/<name>.<file>,
+//                    e.g. the sound output of --env SNDDUMP=/save/snd.raw (s16le stereo, 44.1 kHz)
 //        [--hide Bob:60:8]  that page reports itself hidden (document.hidden + visibilitychange, as when
 //                    its tab goes to the background; headless pages are never really hidden) at 60 s
 //                    after the first page opened, for 8 s
@@ -66,6 +68,7 @@ const SPECS = (argv.includes('--solo') ? [opt('a', 'Alice:roam_mp_drive.txt')]
 const N = SPECS.length;
 const APP = opt('page', 'test') === 'app';
 const PLAY = opt('page', 'test') === 'play', SIZE = opt('size', '960x540').split('x').map(Number), PLAY_ONLY = opt('play-only', '');
+const FETCH = opts('fetch');                 // files of each page's save folder to copy out, as <out>/<name>.<file>
 const HIDE = opts('hide').map(x => { const [n, at, dur] = x.split(':'); return { name: n, at: +at * 1000, dur: +(dur ?? 8) * 1000 }; });
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -203,6 +206,19 @@ for (const x of inst) {
     fs.writeFileSync(path.join(OUT, `${x.name}.pose.csv`), txt);
     console.log(`roam-pair: ${x.name}.pose.csv ${txt.split('\n').length - 1} rows`);
   } catch (e) { console.log(`roam-pair: no pose log from ${x.name}: ${e}`); }
+  for (const f of FETCH) {
+    try {
+      const b64 = await x.page.evaluate(async ([dir, name]) => {
+        const root = await navigator.storage.getDirectory();
+        const u8 = new Uint8Array(await (await (await (await root.getDirectoryHandle(dir)).getFileHandle(name)).getFile()).arrayBuffer());
+        let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode(...u8.subarray(i, i + 0x8000));
+        return btoa(s);
+      }, [`roam-${x.name}`, f]);
+      const buf = Buffer.from(b64, 'base64');
+      fs.writeFileSync(path.join(OUT, `${x.name}.${f}`), buf);
+      console.log(`roam-pair: ${x.name}.${f} ${buf.length} bytes`);
+    } catch (e) { console.log(`roam-pair: no ${f} from ${x.name}: ${e}`); }
+  }
   x.log.end();
 }
 await browser.close();

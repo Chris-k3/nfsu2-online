@@ -50,6 +50,7 @@
 #include "cpu.h"
 #include "roam_core.h"
 #include "roam_plat.h"
+#include "carsfx.h"
 #include "asi_vm.h"
 #include "asi_win32.h"
 #include <stdio.h>
@@ -141,6 +142,9 @@ int horn_held(int stick){ (void)stick; return 0; }   /* the companion has no hor
 void horn_begin(const float *pos, const float *fwd, const float *vel){ (void)pos; (void)fwd; (void)vel; }
 int horn_sound(uint32_t who, const char *name, const float *p, const float *v){ (void)who; (void)name; (void)p; (void)v; return 0; }
 void horn_end(void){}
+void carsfx_begin(const float *pos, const float *fwd, const float *vel){ (void)pos; (void)fwd; (void)vel; }
+void carsfx_car(uint32_t who, const char *name, const float *p, const float *v, const carsfx_state *st){ (void)who; (void)name; (void)p; (void)v; (void)st; }
+void carsfx_end(void){}
 
 /* ---- datagrams ---------------------------------------------------------------------- */
 typedef struct { uint32_t ip; uint16_t port; int len; uint8_t b[RC_MAX_DGRAM]; } Dg;

@@ -206,21 +206,24 @@ static void put_statex(rc_w *w, const rc_state *s){
     rc_put8(w, RC_STATEX_BYTES - 1);
     for (int i = 0; i < 4; i++) rc_put16(w, (uint16_t)q16(f_clamp(s->wz[i], -32.f, 32.f), 1000.f));
     rc_put8(w, s->nos);
+    rc_put8(w, s->hyd); rc_put8(w, s->thumps);
 }
 static int get_statex(rc_r *r, rc_state *s){
     uint32_t n = rc_get8(r);
     if (r->err) return RC_E_SHORT;
     if (!n) return RC_OK;
-    if (n < RC_STATEX_BYTES - 1) return RC_E_FIELD;
+    if (n < RC_STATEX_V4 - 1) return RC_E_FIELD;
     if (!r_have(r, n)) return RC_E_SHORT;
     for (int i = 0; i < 4; i++) s->wz[i] = (float)(int16_t)rc_get16(r) / 1000.f;
     s->nos = (uint8_t)rc_get8(r);
-    r->n += n - (RC_STATEX_BYTES - 1);                              /* a newer core's fields */
+    uint32_t k = RC_STATEX_V4 - 1;
+    if (n >= RC_STATEX_BYTES - 1){ s->hyd = (uint8_t)rc_get8(r); s->thumps = (uint8_t)rc_get8(r); k = RC_STATEX_BYTES - 1; }
+    r->n += n - k;                                                  /* a newer core's fields */
     s->ext = 1;
     return RC_OK;
 }
 static int get_state(rc_r *r, rc_state *s){
-    s->ext = 0; s->nos = 0;
+    s->ext = 0; s->nos = 0; s->hyd = 0; s->thumps = 0;
     for (int i = 0; i < 4; i++) s->wz[i] = 0;
     s->t_us = rc_get32(r);
     for (int i = 0; i < 3; i++) s->p[i] = rc_getf(r);
@@ -513,14 +516,14 @@ static void lerp_rest(const rc_state *a, const rc_state *b, float u, rc_pose *o)
     o->speed = a->speed + u * (b->speed - a->speed);
     const rc_state *n = u < 0.5f ? a : b;
     o->gear = n->gear; o->bits = n->bits;
-    o->ext = n->ext; o->nos = n->nos;
+    o->ext = n->ext; o->nos = n->nos; o->hyd = n->hyd; o->thumps = n->thumps;
     for (int i = 0; i < 4; i++) o->wz[i] = a->ext && b->ext ? a->wz[i] + u * (b->wz[i] - a->wz[i]) : n->wz[i];
 }
 static void from_state(const rc_state *s, rc_pose *o){
     for (int i = 0; i < 3; i++){ o->p[i] = s->p[i]; o->v[i] = s->v[i]; o->w[i] = s->w[i]; }
     for (int i = 0; i < 4; i++){ o->q[i] = s->q[i]; o->wz[i] = s->wz[i]; }
     o->steer = s->steer; o->throttle = s->throttle; o->brake = s->brake; o->rpm = s->rpm; o->speed = s->speed;
-    o->gear = s->gear; o->bits = s->bits; o->ext = s->ext; o->nos = s->nos;
+    o->gear = s->gear; o->bits = s->bits; o->ext = s->ext; o->nos = s->nos; o->hyd = s->hyd; o->thumps = s->thumps;
 }
 int rc_interp_peek(const rc_interp *ip, int64_t rt, int64_t cap_us, rc_pose *o){
     memset(o, 0, sizeof *o); o->q[3] = 1;

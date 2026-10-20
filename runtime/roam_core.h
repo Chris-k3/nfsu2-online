@@ -38,7 +38,8 @@
 #define RC_TABLE         64         /* known addresses (configured, gossiped, heard) */
 #define RC_SNAP_STATES   3          /* states per SNAP (newest first): loss redundancy */
 #define RC_STATE_BYTES   52
-#define RC_STATEX_BYTES  10         /* a state's extension (RC_HF_STATEX), its length byte included */
+#define RC_STATEX_BYTES  12         /* a state's extension (RC_HF_STATEX), its length byte included */
+#define RC_STATEX_V4     10         /* ...as the first cores of version 4 sent it (no hydraulics) */
 #define RC_BUF_STATES    32         /* jitter buffer per peer */
 #define RC_OFFWIN        64         /* clock-offset samples per peer */
 #define RC_CFG_MAX       2048       /* car-look record, bytes */
@@ -89,8 +90,9 @@ enum { RC_PLAT_MAC = 1, RC_PLAT_WIN = 2, RC_PLAT_TOOL = 3 };
 #define RC_HF_ALL        0x0020
 /* header flags (HELLO): this player reads state extensions; (SNAP): every
  * state is followed by its extension: a length byte (what follows, at least
- * RC_STATEX_BYTES - 1), the wheel places' heights in the car (4 x int16, mm)
- * and the nitrous left (u8, see rc_state), then whatever a newer core adds,
+ * RC_STATEX_V4 - 1), the wheel places' heights in the car (4 x int16, mm)
+ * and the nitrous left (u8, see rc_state), then (RC_STATEX_BYTES) the
+ * hydraulics and the landings (u8 each), then whatever a newer core adds,
  * skipped.  Only to a peer whose HELLO carries the flag: an older core counts
  * the longer SNAP as bad */
 #define RC_HF_STATEX     0x0040
@@ -139,6 +141,8 @@ typedef struct {
     uint8_t  ext;
     float    wz[4];                /* the wheel places' heights in the car (m): suspension and hydraulics */
     uint8_t  nos;                  /* nitrous: 0 off, else what is left of it in 1/100 (the game's left / full, up to 2.55) */
+    uint8_t  hyd;                  /* each wheel's hydraulics, 2 bits from bit 2 k: the game's state of it (0x5ED470), 0 down */
+    uint8_t  thumps;               /* how many times the car landed on its hydraulics (counts on, wraps) */
 } rc_state;
 
 typedef struct {
@@ -197,7 +201,7 @@ typedef struct {
     float   steer, throttle, brake, rpm, speed;
     int8_t  gear;
     uint8_t bits;
-    uint8_t ext, nos;              /* as rc_state: ext 0 when the sender sent no extension */
+    uint8_t ext, nos, hyd, thumps; /* as rc_state: ext 0 when the sender sent no extension */
     float   wz[4];
     int     mode;                  /* RC_MODE_* */
 } rc_pose;

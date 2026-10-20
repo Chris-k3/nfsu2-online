@@ -58,6 +58,7 @@ What to expect
   sent. Only your car's position and its look (with its hydraulics and
   nitrous: friends see the car lift and bounce, and the nitrous trails).
 - No horn: players in the browser and the Mac port honk with N, but this
-  plugin neither sounds one nor plays theirs.
+  plugin neither sounds one nor plays theirs.  They also hear your nitrous
+  and hydraulics from your car; this plugin does not play theirs.
 
 Uninstall: delete the two files.

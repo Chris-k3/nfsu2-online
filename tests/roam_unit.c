@@ -995,29 +995,39 @@ static void t_duel(void){
           "inbox: %d kept, %u dropped, %d taken", kept, g_n[1].duel_dropped, taken);
 }
 
-/* ---- 4f. state extensions: wheel heights and nitrous, only to a peer that reads them -- */
+/* ---- 4f. state extensions: wheel heights, nitrous, hydraulics, only to a peer that reads them -- */
 static void t_statex(void){
-    /* layout: a length byte, 4 x int16 mm, the nitrous byte; 0 = none */
+    /* layout: a length byte, 4 x int16 mm, the nitrous byte, the hydraulics and landings bytes; 0 = none */
     uint8_t b[RC_MAX_DGRAM];
     rc_msg m; memset(&m, 0, sizeof m);
     m.h.type = RC_MSG_SNAP; m.h.sender = 5; m.h.flags = RC_HF_STATEX; m.u.snap.status = RC_ST_ROAM; m.u.snap.n = 2;
     for (int k = 0; k < 2; k++){ m.u.snap.s[k].q[3] = 1; m.u.snap.s[k].t_us = 1000u - (uint32_t)k; }
     rc_state *s = &m.u.snap.s[0];
-    s->ext = 1; s->wz[0] = 0.187f; s->wz[1] = -0.0355f; s->wz[2] = 40.f; s->wz[3] = -0.0004f; s->nos = 150;
+    s->ext = 1; s->wz[0] = 0.187f; s->wz[1] = -0.0355f; s->wz[2] = 40.f; s->wz[3] = -0.0004f; s->nos = 150; s->hyd = 0x9c; s->thumps = 0xfe;
     int n = rc_encode(&m, b, sizeof b);
-    CHECK(n == 16 + 6 + 2 * 52 + 10 + 1 + 4, "STATEX SNAP length %d (one state with its extension, one without)", n);
+    CHECK(n == 16 + 6 + 2 * 52 + 12 + 1 + 4, "STATEX SNAP length %d (one state with its extension, one without)", n);
     const uint8_t *x = b + 22 + 52;
-    CHECK(x[0] == 9 && (int16_t)le16(x + 1) == 187 && (int16_t)le16(x + 3) == -36 && (int16_t)le16(x + 5) == 32000 &&
-          (int16_t)le16(x + 7) == 0 && x[9] == 150 && x[10 + 52] == 0, "STATEX layout (mm, clamped to 32 m, nitrous byte, 0 for none)");
+    CHECK(x[0] == 11 && (int16_t)le16(x + 1) == 187 && (int16_t)le16(x + 3) == -36 && (int16_t)le16(x + 5) == 32000 &&
+          (int16_t)le16(x + 7) == 0 && x[9] == 150 && x[10] == 0x9c && x[11] == 0xfe && x[12 + 52] == 0,
+          "STATEX layout (mm, clamped to 32 m, nitrous, hydraulics, landings, 0 for none)");
     rc_msg d; int e = rc_decode(b, n, &d);
     CHECK(e == RC_OK && d.u.snap.s[0].ext && fabsf(d.u.snap.s[0].wz[0] - 0.187f) < 1e-6f && fabsf(d.u.snap.s[0].wz[1] + 0.036f) < 1e-6f &&
-          d.u.snap.s[0].nos == 150 && !d.u.snap.s[1].ext && d.u.snap.s[1].nos == 0, "STATEX decodes (e %d)", e);
+          d.u.snap.s[0].nos == 150 && d.u.snap.s[0].hyd == 0x9c && d.u.snap.s[0].thumps == 0xfe &&
+          !d.u.snap.s[1].ext && d.u.snap.s[1].nos == 0 && !d.u.snap.s[1].hyd && !d.u.snap.s[1].thumps, "STATEX decodes (e %d)", e);
+    /* the first form of version 4 (9 bytes: no hydraulics) */
+    uint8_t ob[RC_MAX_DGRAM]; memcpy(ob, b, 22 + 52 + 10);
+    ob[22 + 52] = 9; memcpy(ob + 22 + 52 + 10, b + 22 + 52 + 12, (size_t)(n - 4 - (22 + 52 + 12)));
+    int on = n - 2; ob[6] = (uint8_t)on; ob[7] = (uint8_t)(on >> 8);
+    uint32_t oc = rc_crc32(ob, (uint32_t)on - 4); for (int k = 0; k < 4; k++) ob[on - 4 + k] = (uint8_t)(oc >> (8 * k));
+    e = rc_decode(ob, on, &d);
+    CHECK(e == RC_OK && d.u.snap.s[0].ext && d.u.snap.s[0].nos == 150 && fabsf(d.u.snap.s[0].wz[0] - 0.187f) < 1e-6f &&
+          !d.u.snap.s[0].hyd && !d.u.snap.s[0].thumps && !d.u.snap.s[1].ext, "the first version 4 form decodes, without hydraulics (e %d)", e);
     /* a newer core's longer extension: its own fields skipped */
     memset(&m, 0, sizeof m); m.h.type = RC_MSG_SNAP; m.h.sender = 5; m.h.flags = RC_HF_STATEX; m.u.snap.status = RC_ST_ROAM; m.u.snap.n = 1;
     m.u.snap.s[0].q[3] = 1; m.u.snap.s[0].ext = 1; m.u.snap.s[0].nos = 7; m.u.snap.s[0].wz[2] = 0.25f;
     n = rc_encode(&m, b, sizeof b);
     uint8_t lb[RC_MAX_DGRAM]; memcpy(lb, b, (size_t)n - 4);
-    lb[22 + 52] = 12; lb[n - 4] = 0xAA; lb[n - 3] = 0xBB; lb[n - 2] = 0xCC;
+    lb[22 + 52] = RC_STATEX_BYTES - 1 + 3; lb[n - 4] = 0xAA; lb[n - 3] = 0xBB; lb[n - 2] = 0xCC;
     int ln = n + 3; lb[6] = (uint8_t)ln; lb[7] = (uint8_t)(ln >> 8);
     uint32_t c = rc_crc32(lb, (uint32_t)ln - 4); for (int k = 0; k < 4; k++) lb[ln - 4 + k] = (uint8_t)(c >> (8 * k));
     e = rc_decode(lb, ln, &d);
@@ -1037,7 +1047,7 @@ static void t_statex(void){
     while (g_now < until){
         for (int i = 0; i < 3; i++){
             rc_state st; memset(&st, 0, sizeof st); st.q[3] = 1; st.t_us = (uint32_t)g_now; st.p[0] = (float)i;
-            st.ext = 1; st.nos = 60; for (int w = 0; w < 4; w++) st.wz[w] = 0.1f * (float)(w + 1);
+            st.ext = 1; st.nos = 60; st.hyd = 0x36; st.thumps = 3; for (int w = 0; w < 4; w++) st.wz[w] = 0.1f * (float)(w + 1);
             rc_set_status(&g_n[i], RC_ST_ROAM); rc_push_state(&g_n[i], &st, g_now);
         }
         net_run(g_now + 10000, 3);
@@ -1052,10 +1062,10 @@ static void t_statex(void){
     CHECK(g_hub_snap[0] > 0 && !g_hub_snapx[0], "the hub gets plain SNAPs (%d, %d extended)", g_hub_snap[0], g_hub_snapx[0]);
     rc_pose P;
     int ok1 = k1 >= 0 && rc_interp_peek(&g_n[1].peer[k1].mo, g_n[1].peer[k1].mo.t[g_n[1].peer[k1].mo.n - 1], 250000, &P);
-    CHECK(ok1 && P.ext && P.nos == 60 && fabsf(P.wz[0] - 0.1f) < 1e-6f && fabsf(P.wz[3] - 0.4f) < 1e-6f,
-          "the newer peer's pose has the wheel heights and the nitrous (%d %d %g)", P.ext, P.nos, (double)P.wz[3]);
+    CHECK(ok1 && P.ext && P.nos == 60 && P.hyd == 0x36 && P.thumps == 3 && fabsf(P.wz[0] - 0.1f) < 1e-6f && fabsf(P.wz[3] - 0.4f) < 1e-6f,
+          "the newer peer's pose has the wheel heights, the nitrous and the hydraulics (%d %d %x %u %g)", P.ext, P.nos, P.hyd, P.thumps, (double)P.wz[3]);
     int ok2 = k2 >= 0 && rc_interp_peek(&g_n[2].peer[k2].mo, g_n[2].peer[k2].mo.t[g_n[2].peer[k2].mo.n - 1], 250000, &P);
-    CHECK(ok2 && !P.ext && !P.nos, "the older peer's pose has none");
+    CHECK(ok2 && !P.ext && !P.nos && !P.hyd && !P.thumps, "the older peer's pose has none");
 }
 
 int main(int argc, char **argv){

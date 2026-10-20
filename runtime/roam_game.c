@@ -38,12 +38,14 @@
  *  - names over friends' cars, as the game's own LAN races show them
  *    (roam_game_hud).
  *  - horns: the player's goes out with the snapshots, friends' sound from
- *    their cars (horns_update, horn.c).
+ *    their cars (sounds_update, horn.c).
  *  - hydraulics and nitrous: the snapshots' extension carries the wheel
- *    places' heights and the nitrous left; a friend's car gets its wheels
- *    where the friend's are (wheels_pose: the hydraulics lift the body, the
- *    pose has that) and a shot of nitrous of its own while theirs is on, so
- *    the game draws its streaks and flames (nos_pose).
+ *    places' heights, the nitrous left, each wheel's hydraulics and the
+ *    landings; a friend's car gets its wheels where the friend's are
+ *    (wheels_pose: the hydraulics lift the body, the pose has that) and a
+ *    shot of nitrous of its own while theirs is on, so the game draws its
+ *    streaks and flames (nos_pose), and both sound from it (sounds_update,
+ *    carsfx.c: the game's own samples).
  *  - outruns: two players who stay near each other can challenge each other
  *    to the game's own outrun, raced against each other's car (du_frame).
  *  - leaving free roam (shop, crib, race, menus) parks the cars; their
@@ -68,6 +70,7 @@
 #endif
 #include "roam_core.h"
 #include "roam_plat.h"
+#include "carsfx.h"
 
 /* ---- game addresses (v1.2 NA) ------------------------------------------------ */
 #define G_FLOW          0x008654a4u   /* GameFlowManager state: 3 front end, 6 in the world */
@@ -103,6 +106,11 @@
 #define CAR_NOS         0x40u         /* Car: its nitrous (+0x414 a full shot, +0x41C left, +0x420 on since; nos_left) */
 #define G_TICKS         0x0086518cu   /* game time, 4000 ticks a second: the nitrous's clock (0x592480) */
 #define G_HYD_LEVEL     0x007e949cu   /* int: every car's hydraulics level, -1: each its own (a debug setting) */
+#define CAR_PHYS        0x34u         /* Car: its physics (+CAR_HYD + 4 k: wheel k's hydraulics, 0x5ED470, in physics mode 1) */
+#define CAR_HYD         0x74u
+#define CAR_BUMP        0x408u        /* u8[4]: wheel k landed this frame (the hydraulics' landing, 0x47DD40) */
+#define CAR_SOUND       0x968u        /* Car: its sound state: +0x30 the car, +0x20 its children (each +0x50 the next) */
+#define VT_SFX_NOS      0x0078ac58u   /* CARSFX_Nitrous (vtable): its update 0x484F20 sounds a car's nitrous */
 #define FN_CAR_SETRIDE  0x00601110u   /* thiscall (RideInfo*) */
 #define FN_BODY_DISABLE 0x005930f0u   /* DynamicCollisionBody (car +0x3C): ++[+0x17] */
 #define FN_TYPE_BY_HASH 0x00610130u   /* cdecl (hash) -> CarTypeInfo* or 0 */
@@ -259,6 +267,7 @@ static int64_t g_last_host;
 static float g_lp[3]; static int g_lp_ok;
 static int64_t g_cfg_next;
 static int g_horn;                            /* the player's horn sounds this frame */
+static uint8_t g_thumps; static int g_landed;  /* the player's car's landings so far; it landed last frame */
 /* guest memory for rides and records (allocated once, never freed) */
 static uint32_t g_gmem;
 /* slots */
@@ -385,6 +394,15 @@ static int local_state(rc_state *s){
     }
     s->nos = nos_left(car);
     if (s->nos) s->bits |= RC_BIT_NOS;
+    /* the hydraulics, for their sound on friends' screens (carsfx.c): each
+     * wheel's state (0x5ED470: the physics' own, so only in physics mode 1)
+     * and the landings so far (CAR_BUMP is set for a frame as the car lands) */
+    uint32_t ph = rd32(car + CAR_PHYS); int landed = 0;
+    if (MR32(car + 0x28u) == 1 && ok(ph, CAR_HYD + 0x10u))
+        for (uint32_t w = 0; w < 4; w++) s->hyd |= (uint8_t)((MR32(ph + CAR_HYD + 4u * w) & 3u) << (2u * w));
+    for (uint32_t w = 0; w < 4; w++) landed |= MR8(car + CAR_BUMP + w) != 0;
+    if (landed && !g_landed) g_thumps++;
+    g_landed = landed; s->thumps = g_thumps;
     if (g_sync_paused > 1){ for (int i = 0; i < 3; i++){ s->v[i] = 0; s->w[i] = 0; } s->speed = 0; s->rpm = 0; }
     for (int i = 0; i < 3; i++) if (!__builtin_isfinite(s->p[i]) || !__builtin_isfinite(s->v[i])) return 0;
     /* the stamp clock may run a little faster than the world (it is pulled
@@ -1683,19 +1701,52 @@ typedef struct { int idx; uint32_t id; char name[RC_NAME_MAX + 1]; int visible, 
                  uint8_t cfg[RC_CFG_MAX]; int have_pose; rc_pose pose; float err; uint32_t look; } PeerView;
 static PeerView g_pv[RC_TABLE]; static int g_npv;
 
-/* ---- horns ----------------------------------------------------------------------------------------- */
-/* H or the controller's left stick click sounds the player's horn in free
+/* ---- horns, friends' nitrous and hydraulics -------------------------------------------------------- */
+/* N or the controller's left stick click sounds the player's horn in free
  * roam while the world runs, and the snapshots carry it (RC_BIT_HORN); a
  * friend's horn sounds from their car, as the camera hears it (horn.c: the
- * distance, the side, Doppler). */
-static int g_horns_on;                        /* horns were driven last frame */
-static void horns_update(const rc_state *ls, int heard){
+ * distance, the side, Doppler).  So do a friend's nitrous and hydraulics,
+ * which the game sounds for the player's car (and, for a friend's car that
+ * has an AI racer's sound state, its nitrous going on and off): carsfx.c
+ * plays the rest with the game's own samples from the friend's state, the
+ * nitrous with the friend's throttle and speed as nos_pose draws it (let
+ * out unless on the throttle from 5 mph), each wheel's hydraulics and the
+ * landings (NFSU2_ROAM_CARSFX=0: not those). */
+static int g_horns_on, g_carsfx_on;           /* horns, friends' car sounds were driven last frame */
+static int g_carsfx_off = -1;
+/* the game sounds this car's nitrous itself: its sound state (an AI
+ * racer's) has a nitrous child */
+static int game_sounds_nos(uint32_t car){
+    uint32_t st = ok(car, 0x9e0) ? rd32(car + CAR_SOUND) : 0;
+    if (!ok(st, 0x100) || rd32(st + 0x30u) != car) return 0;
+    for (uint32_t ch = rd32(st + 0x20u), i = 0; ok(ch, 0x100) && i < 64u; ch = rd32(ch + 0x50u), i++)
+        if (rd32(ch) == VT_SFX_NOS) return 1;
+    return 0;
+}
+static void sounds_update(const rc_state *ls, int heard){
     float L[3] = {0}, f[3] = {1.f, 0.f, 0.f};
     uint32_t cam = rd32(G_VIEW1 + 0x40u), me = player_car();
     if (!ls) heard = 0;
     if (heard && ok(cam, 0x60)){ rd3(cam + 0x40u, L); rd3(cam + 0x50u, f); }       /* the listener: the camera, */
     else if (heard && ok(me, 0x9e0)){ rd3(me + 0x60u, L); rd3(me + 0x90u, f); }   /* else the player's car */
     else heard = 0;
+    if (g_carsfx_off < 0){ const char *e = rh_opt("NFSU2_ROAM_CARSFX"); g_carsfx_off = e && *e == '0'; }
+    if ((heard || g_carsfx_on) && !g_carsfx_off){
+        rh_carsfx_begin(heard ? L : 0, f, ls ? ls->v : 0);
+        for (int i = 0; heard && i < g_npv; i++){
+            const PeerView *v = &g_pv[i];
+            if (!v->visible || v->paused || !v->have_pose || !v->pose.ext) continue;
+            const rc_pose *P = &v->pose;
+            uint32_t car = 0;
+            for (int k = 0; k < NSLOT && !car; k++)
+                if (g_sl[k].st == SL_ACTIVE && g_sl[k].peer_id == v->id && !g_sl[k].hidden) car = g_sl[k].car;
+            carsfx_state st = { (uint8_t)(P->nos != 0), (uint8_t)!(__builtin_fabsf(P->throttle) > 0.001f && P->speed * 2.237f >= 5.f),
+                                P->hyd, P->thumps, (uint8_t)game_sounds_nos(car) };
+            rh_carsfx_car(v->id, v->name, P->p, P->v, &st);
+        }
+        rh_carsfx_end();
+        g_carsfx_on = heard;
+    }
     if (!heard && !g_horn && !g_horns_on) return;     /* racehorn.c may have the voices */
     rh_horn_begin(heard ? L : 0, f, ls ? ls->v : 0);
     if (g_horn) rh_horn_sound(g_s.conf.self_id, O.name, 0, 0);
@@ -2638,7 +2689,7 @@ void roam_game_frame(CPU *c){
         }
     }
     du_frame(c, host, in_roam, world_runs, duin, nduin);
-    horns_update(have_ls ? &ls : 0, world_runs);
+    sounds_update(have_ls ? &ls : 0, world_runs);
     if (g_poselog && have_ls){
         uint32_t me = player_car();
         rh_fprintf(g_poselog, "L,%lld,%.0f,%08x,%.4f,%.4f,%.4f,%.3f,0,0,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f\n", (long long)host, g_sync, g_s.conf.self_id,
@@ -2738,10 +2789,10 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
                     sqrt((double)(dx * dx + dy * dy)), car ? MR16(car + 0x40cu) : 0, car ? MR8(car + 0x5c0u) : 0, car ? MR8(car + 0x550u) : 0,
                     car ? MR32(car + 0x24u) : 0, car ? MR32(car + 0x28u) : 0, car ? MR32(car + 0x554u) : 0, car ? (int16_t)MR16(car + 8u) : -1,
                     car ? (double)MRF32(car + 0x50u) : 0, car ? (double)MRF32(car + 0x54u) : 0, car ? (double)MRF32(car + 0x58u) : 0);
-            if (car) rlog("[roam]     nitrous %u%%, wheels at %.3f %.3f %.3f %.3f m in the car, front spinners at %.2f rad turning %.2f rad/s, "
+            if (car) rlog("[roam]     nitrous %u%% (the game sounds it: %s), wheels at %.3f %.3f %.3f %.3f m in the car, front spinners at %.2f rad turning %.2f rad/s, "
                           "blinked out %u (blink from %u)\n",
-                          nos_left(car), (double)MRF32(car + 0x168u), (double)MRF32(car + 0x1a8u), (double)MRF32(car + 0x1e8u), (double)MRF32(car + 0x228u),
-                          (double)MRF32(car + CAR_SPIN), (double)MRF32(car + CAR_SPIN + 0x10u), MR8(car + CAR_BLINKOUT), MR32(car + CAR_BLINK_T0));
+                          nos_left(car), game_sounds_nos(car) ? "yes" : "no", (double)MRF32(car + 0x168u), (double)MRF32(car + 0x1a8u), (double)MRF32(car + 0x1e8u),
+                          (double)MRF32(car + 0x228u), (double)MRF32(car + CAR_SPIN), (double)MRF32(car + CAR_SPIN + 0x10u), MR8(car + CAR_BLINKOUT), MR32(car + CAR_BLINK_T0));
         }
         return 1;
     }

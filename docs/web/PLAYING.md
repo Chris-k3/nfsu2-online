@@ -172,8 +172,10 @@ Good to know:
   own pitch, so you can tell who honks. It sounds while the game runs, not in the pause menu or on the map. It works
   in Online and LAN races too.
 - **Hydraulics and nitrous:** the others see your car lift, tilt and bounce on its hydraulics, with its wheels on the
-  road, and your nitrous as the game draws it on any car: the light trails behind it. A player on an older version
-  sees the body move but not the wheels, and no nitrous.
+  road, and your nitrous as the game draws it on any car: the light trails behind it. They hear them from your car
+  with the game's own sounds, as you hear your own: the nitrous going on and off, letting it out while standing or
+  off the throttle, each wheel's pump and valve and a landing, louder the nearer they are. A player on an older
+  version sees the body move but not the wheels, and no nitrous, and hears none of it.
 - **Headlights:** the other players' headlights light the road in front of their cars, as yours do, a little dimmer
   and in their own colour; in Online and LAN races too. Display, more: Other cars' headlights (All cars: AI racers and
   traffic too; Off: only yours, as in the original game). The Windows plugin draws only your own.
