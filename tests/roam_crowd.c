@@ -3,7 +3,8 @@
  * mode, built for wasm without a C library and driven from JavaScript.  The
  * script moves it along a track and hands it what arrives; it sends through
  * the import crowd.send, and tells its joins and leaves through crowd.event.
- * Its car is a stock car of the type the script names. */
+ * Its car is a car of the type the script names, stock or with the parts it
+ * names. */
 #include "roam_core.h"
 
 __attribute__((import_module("crowd"), import_name("send"))) void js_send(uint32_t ip, uint32_t port, const uint8_t *b, int n);
@@ -30,7 +31,7 @@ int strcmp(const char *a, const char *b){
 }
 
 static rc_session S;
-static uint8_t IO[RC_MAX_DGRAM];
+static uint8_t IO[4096];                     /* a datagram, or the name, car type and parts */
 static void io_send(void *u, uint32_t ip, uint16_t port, const uint8_t *b, int n){ (void)u; js_send(ip, port, b, n); }
 static void io_event(void *u, int ev, int peer, const char *t){ (void)u; (void)peer; js_event(ev, t, (int)strlen(t)); }
 
@@ -48,7 +49,20 @@ __attribute__((export_name("crowd_init"))) void crowd_init(uint32_t id, uint32_t
     rc_session_init(&S, &cf, &io);
     rc_carcfg cc; memset(&cc, 0, sizeof cc);
     cc.type_hash = type_hash; cc.ride_b[3] = 1;
-    { const char *n = (const char *)IO + strlen((const char *)IO) + 1; for (int i = 0; i < RC_CFG_TYPE_NAME && n[i]; i++) cc.type_name[i] = n[i]; }
+    { const char *n = (const char *)IO + strlen((const char *)IO) + 1; for (int i = 0; i < RC_CFG_TYPE_NAME && n[i]; i++) cc.type_name[i] = n[i];
+      /* then parts, "slot:key:owner" in hex, comma-separated (--parts) */
+      const char *p = n + strlen(n) + 1;
+      while (*p && cc.n_parts < RC_PART_SLOTS){
+          uint32_t v[3] = { 0, 0, 0 };
+          for (int k = 0; k < 3; k++){
+              for (; (*p >= '0' && *p <= '9') || ((*p | 0x20) >= 'a' && (*p | 0x20) <= 'f'); p++)
+                  v[k] = v[k] << 4 | (uint32_t)(*p <= '9' ? *p - '0' : (*p | 0x20) - 'a' + 10);
+              if (*p == ':') p++;
+          }
+          cc.part[cc.n_parts].slot = (uint8_t)v[0]; cc.part[cc.n_parts].key = v[1]; cc.part[cc.n_parts].owner = v[2]; cc.n_parts++;
+          while (*p && *p != ',') p++;
+          if (*p == ',') p++;
+      } }
     uint8_t rec[RC_CFG_MAX]; int len = rc_carcfg_encode(&cc, rec, sizeof rec);
     if (len > 0) rc_set_cfg(&S, rec, len, (int64_t)now_us);
     rc_set_status(&S, RC_ST_ROAM);

@@ -258,17 +258,25 @@ static int st_unload(void *u, xvm *vm, uint32_t a, uint32_t *r){ (void)u; (void)
 /* Car::SetRideInfo(ride): rebuilds the render info (textures) -> remember the ride */
 static int st_setride(void *u, xvm *vm, uint32_t a, uint32_t *r){
     (void)a; Eng *e = eng_of(u); e->setride_last = xvm_rd32(vm, r[XR_ESP] + 4); e->setrides++; r[XR_EAX] = 0; return 4; }
+/* the rim brands' model packs (roam_game.c rim_packs): loading one reads a
+ * file -> nothing, and the streamer has none of them, so no ride waits */
+#define FN_PACK_LOAD      0x004941c0u
+#define FN_PACK_FIND      0x0048ce80u
+static int st_packload(void *u, xvm *vm, uint32_t a, uint32_t *r){ (void)u; (void)vm; (void)a; r[XR_EAX] = 0; return 0; }
+static int st_packfind(void *u, xvm *vm, uint32_t a, uint32_t *r){ (void)u; (void)vm; (void)a; r[XR_EAX] = 0; return 4; }
 static void add_stubs(xvm *vm){
     xvm_stub(vm, FN_LOADER_LOAD, st_load);
     xvm_stub(vm, FN_LOADER_SERVICE, st_service); xvm_stub(vm, FN_LOADER_LOADED, st_loaded);
     xvm_stub(vm, FN_LOADER_WAIT, st_wait); xvm_stub(vm, FN_LOADER_UNLOAD, st_unload);
     xvm_stub(vm, FN_CAR_SETRIDE, st_setride);
+    xvm_stub(vm, FN_PACK_LOAD, st_packload); xvm_stub(vm, FN_PACK_FIND, st_packfind);
 }
 /* the arguments each function takes (for the trace comparison) */
 static int fn_nargs(uint32_t fn){
     static const uint32_t T[][2] = { {0x575620,1},{0x5f6d50,0},{0x5f6e20,0},{0x5eba30,1},{0x5f46a0,1},{0x5f6cd0,0},{0x5da330,1},
         {0x5f5010,0},{0x601110,1},{0x5930f0,0},{0x610130,1},{0x61b980,5},{0x610270,4},{0x637040,1},{0x61bcd0,0},{0x61c280,1},
-        {0x5ac4b0,1},{0x5b4fc0,3},{0x63bc70,3},{0x63bcd0,2},{0x610910,1},{0x61ca50,1},{0x63ae00,1},{0x606480,2},{0x5f0d20,0} };
+        {0x5ac4b0,1},{0x5b4fc0,3},{0x63bc70,3},{0x63bcd0,2},{0x610910,1},{0x61ca50,1},{0x63ae00,1},{0x606480,2},{0x5f0d20,0},
+        {0x61b670,5},{0x610000,0},{0x4941c0,4},{0x48ce80,1} };
     for (unsigned i = 0; i < sizeof T / sizeof T[0]; i++) if (T[i][0] == fn) return (int)T[i][1];
     return 5;
 }
