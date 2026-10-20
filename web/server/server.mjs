@@ -461,10 +461,10 @@ async function sendFile(q, s, root, file, { type, cache = 'store', extra = {}, f
 // under way at once.  The CPU follows the bytes, not the answers (br 3 does 200 MB/s on one core of an M4 Pro), so
 // the total bounds memory: 128 compressors take about 200 MB at most (zstd 1.5 MB each, br 0.9, gzip 0.4).
 // A shared cache (Cloudflare's, with a Cache Rule for /data-blocks/*) may keep a run for good (EDGE_KEEP), as the
-// game data is the same for every player: only when its address names this version of the file (m, the manifest's
-// mtime, so a changed file is a new address) and it is as small as it gets (compressed, or a run that does not
-// compress; not one sent as it is because the compressors were taken).  The movies too.  At about 110 players the
-// 1 Gbit uplink was full without it.
+// game data is the same for every player: only when its address names this version of the file (m and s, the
+// manifest's mtime and size, so a changed file is a new address) and it is as small as it gets (compressed, or a run
+// that does not compress; not one sent as it is because the compressors were taken).  The movies too.  At about
+// 110 players the 1 Gbit uplink was full without it.
 const BLOCK = 1 << 20, BLOCKS_MAX = 8, PROBE = 64 << 10;
 const EDGE_KEEP = 'public, max-age=31536000, immutable';
 const COMPRESSORS = { perClient: 8, perSite: 16, total: 128 };
@@ -477,50 +477,57 @@ const ENCODERS = {
   gzip: () => zlib.createGzip({ level: 4 }),
 };
 /** whether the bytes from start compress, judged from the first PROBE of them (deflate 1: about 0.3 ms) */
-async function compresses(real, start, end) {
-  const fh = await fsp.open(real, 'r');
-  try {
-    const buf = Buffer.alloc(Math.min(PROBE, end - start));
-    const { bytesRead } = await fh.read(buf, 0, buf.length, start);
-    const z = await new Promise((res, rej) => zlib.deflateRaw(buf.subarray(0, bytesRead), { level: 1 }, (e, b) => e ? rej(e) : res(b)));
-    return z.length < bytesRead * 0.97;
-  } finally { await fh.close(); }
+async function compresses(fh, start, end) {
+  const buf = Buffer.alloc(Math.min(PROBE, end - start));
+  const { bytesRead } = await fh.read(buf, 0, buf.length, start);
+  const z = await new Promise((res, rej) => zlib.deflateRaw(buf.subarray(0, bytesRead), { level: 1 }, (e, b) => e ? rej(e) : res(b)));
+  return z.length < bytesRead * 0.97;
 }
 async function sendBlocks(q, s, file, u) {
   const f = await locate(DATA, file);
   if (!f) return notFound(q, s);
-  const { real, st } = f;
   const b = u.searchParams.get('b') ?? '', n = u.searchParams.get('n') ?? '';
   if (!/^\d{1,7}$/.test(b) || !/^\d{1,2}$/.test(n) || +n < 1 || +n > BLOCKS_MAX) return plain(q, s, 400, 'Bad request');
-  const start = +b * BLOCK, end = Math.min(st.size, (+b + +n) * BLOCK);
-  if (start >= st.size) return plain(q, s, 416, 'Range not satisfiable');
-  const ip = clientIp(q, trust, REAL_IP), key = addressKey(ip), site = siteKey(ip);
-  const enc = pickEncoding(q.headers['accept-encoding'], Object.keys(ENCODERS));
-  let held = q.method !== 'HEAD' && !!enc && compressors.take(key, site);
-  const free = () => { if (held) { held = false; compressors.give(key, site); } };
-  const asIs = held && !await compresses(real, start, end).catch(() => false);
-  if (asIs) free();
-  const z = held;
-  const keep = (z || asIs) && u.searchParams.get('m') === String(Math.floor(st.mtimeMs / 1000));
-  s.writeHead(200, headers(q, { 'content-type': 'application/octet-stream', vary: 'accept-encoding',
-    ...(keep ? { 'cdn-cache-control': EDGE_KEEP, 'cloudflare-cdn-cache-control': EDGE_KEEP } : {}),
-    ...(z ? { 'content-encoding': enc } : { 'content-length': end - start }) }));
-  if (q.method === 'HEAD') return s.end();
-  const flow = mustFlow(s);
-  // the file and the compressor live as long as the answer and the connection (sendFile)
-  const conn = q.socket;
-  if (!conn || conn.destroyed) { free(); return; }
-  const rs = fs.createReadStream(real, { start, end: end - 1 });
-  const zs = z ? ENCODERS[enc]() : null;
-  const out = zs ? rs.pipe(zs) : rs;
-  out.on('data', c => { flow.bytes += c.length; });
-  const stop = () => { rs.destroy(); zs?.destroy(); free(); };
-  rs.on('error', () => s.destroy());
-  zs?.on('error', () => s.destroy());
-  s.once('close', stop); s.once('finish', free);
-  conn.once('close', stop);
-  out.once('close', () => { s.off('close', stop); conn.off('close', stop); free(); });
-  out.pipe(s);
+  // one open file for the whole answer, its size and version, the probe and the bytes: a file put in place meanwhile
+  // is another one, and a run kept for good is the version its address names
+  let fh;
+  try { fh = await fsp.open(f.real, 'r'); } catch { return notFound(q, s); }
+  let rs = null;
+  try {
+    const st = await fh.stat();
+    const start = +b * BLOCK, end = Math.min(st.size, (+b + +n) * BLOCK);
+    if (start >= st.size) return plain(q, s, 416, 'Range not satisfiable');
+    const ip = clientIp(q, trust, REAL_IP), key = addressKey(ip), site = siteKey(ip);
+    const enc = pickEncoding(q.headers['accept-encoding'], Object.keys(ENCODERS));
+    let held = q.method !== 'HEAD' && !!enc && compressors.take(key, site);
+    const free = () => { if (held) { held = false; compressors.give(key, site); } };
+    // a run whose probe failed is compressed: never kept as it is
+    const asIs = held && await compresses(fh, start, end).catch(() => true) === false;
+    if (asIs) free();
+    const z = held;
+    // the version: m and s (a page of before names no size)
+    const keep = (z || asIs) && u.searchParams.get('m') === String(Math.floor(st.mtimeMs / 1000)) &&
+      (u.searchParams.get('s') ?? String(st.size)) === String(st.size);
+    s.writeHead(200, headers(q, { 'content-type': 'application/octet-stream', vary: 'accept-encoding',
+      ...(keep ? { 'cdn-cache-control': EDGE_KEEP, 'cloudflare-cdn-cache-control': EDGE_KEEP } : {}),
+      ...(z ? { 'content-encoding': enc } : { 'content-length': end - start }) }));
+    if (q.method === 'HEAD') return s.end();
+    const flow = mustFlow(s);
+    // the file and the compressor live as long as the answer and the connection (sendFile)
+    const conn = q.socket;
+    if (!conn || conn.destroyed) { free(); return; }
+    rs = fh.createReadStream({ start, end: end - 1 });            // it closes the file
+    const zs = z ? ENCODERS[enc]() : null;
+    const out = zs ? rs.pipe(zs) : rs;
+    out.on('data', c => { flow.bytes += c.length; });
+    const stop = () => { rs.destroy(); zs?.destroy(); free(); };
+    rs.on('error', () => s.destroy());
+    zs?.on('error', () => s.destroy());
+    s.once('close', stop); s.once('finish', free);
+    conn.once('close', stop);
+    out.once('close', () => { s.off('close', stop); conn.off('close', stop); free(); });
+    out.pipe(s);
+  } finally { if (!rs) await fh.close().catch(() => {}); }
 }
 
 // A response that does not move is let go: fewer than progressBytes in progressMs, or longer than

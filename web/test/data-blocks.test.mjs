@@ -136,7 +136,8 @@ test('/data-blocks/: a shared cache may keep a run for good: this version of the
   const s = await server();
   try {
     const m = await mtimes();
-    const run = (f, b, n, mt = m[f], ae) => get(`/data-blocks/${f}?b=${b}&n=${n}${mt === null ? '' : `&m=${mt}`}`, ae ? { ae } : undefined);
+    const run = (f, b, n, mt = m[f], ae, sz = FILES[f].length) =>
+      get(`/data-blocks/${f}?b=${b}&n=${n}${mt === null ? '' : `&m=${mt}`}${sz === null ? '' : `&s=${sz}`}`, ae ? { ae } : undefined);
     // compressed, or a run that does not compress: kept, and still exact
     for (const [f, b, n, ae] of [['TRACKS/L4RA.BUN', 1, 8], ['TRACKS/L4RA.BUN', 0, 1, 'gzip, br'], ['SPEED2.EXE', 0, 4], ['PFDATA/MIX.MUS', 0, 1],
       ['MOVIES/INTRO.VP6', 0, 2]]) {
@@ -146,10 +147,13 @@ test('/data-blocks/: a shared cache may keep a run for good: this version of the
       assert.match(r.headers['cache-control'], /private, no-store/, 'the browser keeps none (the page has its own cache)');
       assert.ok(r.body.equals(slice(f, b, n)), f);
     }
-    // not kept: no version, another version, a client that takes no compression
+    // not kept: no version, another version (mtime or size), a client that takes no compression
     assert.equal(edge(await run('TRACKS/L4RA.BUN', 1, 1, null)), 'no');
     assert.equal(edge(await run('TRACKS/L4RA.BUN', 1, 1, m['TRACKS/L4RA.BUN'] - 1)), 'no');
+    assert.equal(edge(await run('TRACKS/L4RA.BUN', 1, 1, m['TRACKS/L4RA.BUN'], undefined, FILES['TRACKS/L4RA.BUN'].length + 1)), 'no');
     assert.equal(edge(await run('TRACKS/L4RA.BUN', 1, 1, m['TRACKS/L4RA.BUN'], 'identity')), 'no');
+    // a page of before names no size: kept on the mtime
+    assert.equal(edge(await run('TRACKS/L4RA.BUN', 1, 1, m['TRACKS/L4RA.BUN'], undefined, null)), 'keep');
   } finally { await s.stop(); }
 });
 
@@ -170,7 +174,7 @@ test('/data-blocks/: a client holding all its compressors gets the rest as they 
     assert.deepEqual(encs.slice(0, 8).map(e => e !== 'none'), Array(8).fill(true), encs.join(' '));
     assert.deepEqual(encs.slice(8), ['none', 'none'], encs.join(' '));
     // the uncompressed answers are still exact, and no shared cache keeps one (compressed, it is a quarter)
-    const plain = await get(`/data-blocks/TRACKS/L4RA.BUN?b=2&n=1&m=${(await mtimes())['TRACKS/L4RA.BUN']}`);
+    const plain = await get(`/data-blocks/TRACKS/L4RA.BUN?b=2&n=1&m=${(await mtimes())['TRACKS/L4RA.BUN']}&s=${FILES['TRACKS/L4RA.BUN'].length}`);
     assert.equal(plain.headers['content-encoding'], undefined);
     assert.ok(plain.body.equals(slice('TRACKS/L4RA.BUN', 2, 1)));
     assert.equal(edge(plain), 'no');

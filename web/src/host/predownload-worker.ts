@@ -88,7 +88,7 @@ async function download(cfg: { manifestUrl: string; dataBase: string }): Promise
     if (first === run.end) return;
     const start = first * BLOCK, end = Math.min(run.f.size, run.end * BLOCK);
     // compressed runs (the browser undoes the Content-Encoding), or a byte range
-    const res = served ? await fetch(runUrl(served.url, run.f.path, first, run.end - first, run.f.mtime), { cache: 'no-store', signal: abort.signal })
+    const res = served ? await fetch(runUrl(served.url, run.f.path, first, run.end - first, run.f), { cache: 'no-store', signal: abort.signal })
       : await fetch(dataUrl(cfg.dataBase, run.f.path), { headers: { Range: `bytes=${start}-${end - 1}` }, cache: 'no-store', signal: abort.signal });
     if (res.status === 429 || res.status >= 500) { await res.body?.cancel(); throw new Retry(`HTTP ${res.status}`); }
     if (res.status !== 206 && res.status !== 200) throw new Error(`the server answered HTTP ${res.status} for ${run.f.path}`);

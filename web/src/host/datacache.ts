@@ -22,9 +22,10 @@ export function blockRuns(m: Manifest): { url: string; max: number } | null {
   return b && typeof b.url === 'string' && b.url.startsWith('/') && b.size === BLOCK && b.max >= 1 ? { url: b.url, max: b.max } : null;
 }
 /** blocks first .. first+n-1 of a file, compressed: a 200 whose body (decoded by the browser) is exactly their bytes.  The
- *  file's mtime (m) makes a changed file a new address, so the server lets Cloudflare keep the answer for good. */
-export const runUrl = (base: string, path: string, first: number, n: number, mtime: number) =>
-  `${dataUrl(base, path)}?b=${first}&n=${n}&m=${mtime}`;
+ *  file's mtime and size (m, s) make a changed file a new address, so the server lets Cloudflare keep the answer for
+ *  good. */
+export const runUrl = (base: string, path: string, first: number, n: number, f: { mtime: number; size: number }) =>
+  `${dataUrl(base, path)}?b=${first}&n=${n}&m=${f.mtime}&s=${f.size}`;
 export interface DataFile { path: string; size: number; mtime: number }
 export interface CacheFile { h: FileSystemSyncAccessHandle; have: Uint8Array; haveH: FileSystemSyncAccessHandle }
 
