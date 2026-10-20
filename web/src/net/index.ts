@@ -73,8 +73,10 @@ export interface NetStats {
   /** main-thread time spent moving frames (both directions), ms in total, and calls */
   mainMs: number; mainCalls: number;
   /** LAN play: frames each way, TCP frames that waited for RX ring room (most at once),
-   *  TCP connects refused here because the game had no LAN endpoint, peers that left */
-  lan: { attached: boolean; framesOut: number; framesIn: number; waited: number; waitedMax: number; refusedNoEndpoint: number; peersGone: number };
+   *  TCP connects refused here because the game had no LAN endpoint (and left unanswered, over the limit of such
+   *  answers), peers that left */
+  lan: { attached: boolean; framesOut: number; framesIn: number; waited: number; waitedMax: number; refusedNoEndpoint: number;
+    refuseHeld: number; peersGone: number };
 }
 export interface NetLink {
   readonly state: NetState;
@@ -84,6 +86,21 @@ export interface NetLink {
   readonly online: Promise<string>;
   stats(): NetStats;
   close(): void;
+}
+
+/** The page's own answers (a RST to a connect when the game has no LAN endpoint): at most AUTO_SRC bytes a second
+ *  to one sender and AUTO_ALL to all of them, a burst of 2 s each, an answer its frame's size and AUTO_COST more, as
+ *  the runtime's (runtime/web/net_lan.c auto_ok): stray SYNs cannot make this browser spend its share of the switch
+ *  on answers, and its free-roam snapshots dropped then */
+const AUTO_COST = 64, AUTO_SRC = 4096, AUTO_ALL = 32768;
+class AutoBucket {
+  private t = -1; v = 0;
+  /** filled up to now; n bytes in it? */
+  has(rate: number, n: number, t: number) {
+    this.v = this.t < 0 ? 2 * rate : Math.min(2 * rate, this.v + (t - this.t) * rate);
+    this.t = t;
+    return this.v >= n;
+  }
 }
 
 /** One mailbox (free roam's or LAN play's) in shared wasm memory. */
@@ -154,9 +171,12 @@ class Link implements NetLink {
   /** the switch's peer list (the online host on it too), as its last whole list and the changes since made it */
   private peerMap = new Map<number, { name: string; server: boolean }>();
   private peerVips = new Set<number>();
+  /** the page's answers so far (AUTO_*): per sender (a vip of the switch, which writes the source), and all */
+  private autoSrc = new Map<number, AutoBucket>();
+  private autoAll = new AutoBucket();
   private st = { connections: 0, reconnects: 0, framesOut: 0, bytesOut: 0, framesIn: 0, bytesIn: 0, rxFiltered: 0,
     rttSum: 0, rttN: 0, rttMax: 0, mainMs: 0, mainCalls: 0, rxFull: 0, rxOversize: 0,
-    lanOut: 0, lanIn: 0, lanWaited: 0, lanWaitedMax: 0, lanRefused: 0, lanGone: 0 };
+    lanOut: 0, lanIn: 0, lanWaited: 0, lanWaitedMax: 0, lanRefused: 0, lanRefuseHeld: 0, lanGone: 0 };
 
   constructor(private proc: GameProcess, private o: NetOptions) {
     this.online = new Promise(r => (this.resolveOnline = r));
@@ -468,9 +488,14 @@ class Link implements NetLink {
   private refuse(b: ArrayBuffer) {
     const ws = this.ws;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    const fv = new DataView(b), r = new Uint8Array(P.F_DATA + P.NET_LAN_HDR), rv = new DataView(r.buffer);
+    const fv = new DataView(b), src = fv.getUint32(P.F_SRC), n = P.F_DATA + P.NET_LAN_HDR + AUTO_COST, t = performance.now() / 1000;
+    let sb = this.autoSrc.get(src);
+    if (!sb) this.autoSrc.set(src, (sb = new AutoBucket()));
+    if (!sb.has(AUTO_SRC, n, t) || !this.autoAll.has(AUTO_ALL, n, t)) { this.st.lanRefuseHeld++; return; }
+    sb.v -= n; this.autoAll.v -= n;
+    const r = new Uint8Array(P.F_DATA + P.NET_LAN_HDR), rv = new DataView(r.buffer);
     r[P.F_KIND] = P.NET_KIND_LAN_TCP;
-    rv.setUint32(P.F_SRC, this.vipNum); rv.setUint32(P.F_DST, fv.getUint32(P.F_SRC));
+    rv.setUint32(P.F_SRC, this.vipNum); rv.setUint32(P.F_DST, src);
     rv.setUint16(P.F_SPORT, fv.getUint16(P.F_DPORT)); rv.setUint16(P.F_DPORT, fv.getUint16(P.F_SPORT));
     r[P.F_DATA] = P.NET_LAN_TCP_RST; r[P.F_DATA + 1] = 64;
     r.set(new Uint8Array(b, P.F_DATA + 4, 4), P.F_DATA + 4);              // the connection id
@@ -493,7 +518,7 @@ class Link implements NetLink {
       txWaitMeanMs: txn ? tws / txn : 0, txWaitMaxMs: twm,
       peersOnSwitch: this.peers.length, mainMs: s.mainMs, mainCalls: s.mainCalls,
       lan: { attached: !!this.lan, framesOut: s.lanOut, framesIn: s.lanIn, waited: s.lanWaited, waitedMax: s.lanWaitedMax,
-        refusedNoEndpoint: s.lanRefused, peersGone: s.lanGone },
+        refusedNoEndpoint: s.lanRefused, refuseHeld: s.lanRefuseHeld, peersGone: s.lanGone },
     };
   }
   close() {
