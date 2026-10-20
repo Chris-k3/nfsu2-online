@@ -202,10 +202,12 @@ let untrack: (() => void) | null = null;
  * once; Not now and Esc are off.  Not asked when the file or the page address sets it already, on a test page
  * (the address's test settings), offline or with network = off.  The name shows only when there is one (Your
  * name, else the newest career profile's): a new player has none yet, the game asks for it before free roam.
+ * Not asked at all for now (ASK_ROAM): free roam is off until the player turns it on under Online.
  */
+const ASK_ROAM = false;
 async function askRoam() {
   const r = resolved();
-  if (r.source.NFSU2_ROAM || TEST_PARAMS.some(k => q.has(k)) || offline || /^(off|0|none)$/i.test(r.env.NFSU2_NET?.trim() ?? '')) return;
+  if (!ASK_ROAM || r.source.NFSU2_ROAM || TEST_PARAMS.some(k => q.has(k)) || offline || /^(off|0|none)$/i.test(r.env.NFSU2_NET?.trim() ?? '')) return;
   const name = (r.source.NFSU2_ROAM_NAME === 'settings.ini' ? r.env.NFSU2_ROAM_NAME : '') || (await newestProfile())?.name || '';
   const p = (text: string) => Object.assign(document.createElement('p'), { textContent: text });
   const body = document.createElement('div');
