@@ -5,8 +5,13 @@
 //   node web/tools/roam-crowd.mjs [--base http://localhost:8655] [--n 62] [--seconds 120] [--room <name>]
 //        [--track <pose.csv>] [--speed 15] [--spread 20] [--car 350Z] [--cars A,B,..|all] [--parts <list>|@<file>] [--stagger 50] [--states 1]
 //        [--out <summary.json>]
-//        [--race 1-3:60:120]
+//        [--race 1-3:60:120] [--bundle] [--first 0]
 //
+// --bundle the players send and take bundles as the page does (web/src/net/index.ts TxBundle, lan.mjs kind 32): what
+//          one tick or one received message made them send goes as one message, a snapshot to several friends once
+//          with their addresses.  Without it each datagram is a message of its own, as a page of before sends them.
+// --first  the first player's number (from 0), for several of these at once on one server: their names and client
+//          addresses stay apart.
 // --cars   the players' cars in turn (car type names, CarTypeInfo +0), or all: the game's 31 player cars, PEUGOT to
 //          IMPREZAWRX; without it every player drives --car.
 // --parts  the players' cars' parts instead of the stock ones, slot:key:owner in hex, comma-separated (or from a file): a
@@ -32,7 +37,7 @@ const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && i + 1 < argv.length ? argv[i + 1] : d; };
 const BASE = opt('base', 'http://localhost:8655'), N = +opt('n', 62), SECONDS = +opt('seconds', 120), ROOM = opt('room', '');
 const SPEED = +opt('speed', 15), CAR = opt('car', '350Z'), STAGGER = +opt('stagger', 50), TRACK = opt('track', ''), OUTF = opt('out', '');
-const STATES = +opt('states', 1), SPREAD = +opt('spread', 20);
+const STATES = +opt('states', 1), SPREAD = +opt('spread', 20), BUNDLE = argv.includes('--bundle'), FIRST = +opt('first', 0);
 const PARTS = (p => p.startsWith('@') ? fs.readFileSync(p.slice(1), 'utf8').trim() : p)(opt('parts', ''));
 const RACE = (opt('race', '').match(/^(\d+)-(\d+):(\d+):(\d+)$/) ?? []).slice(1).map(Number);
 const ALL_CARS = ['PEUGOT', 'FOCUS', 'COROLLA', '240SX', 'MIATA', 'CIVIC', 'PEUGOT106', 'CORSA', 'HUMMER', 'NAVIGATOR', 'ESCALADE', 'TIBURON',
@@ -76,12 +81,39 @@ if (TRACK) {
   };
 }
 
-const st = { inDg: 0, outDg: 0, inB: 0, outB: 0, joins: 0, outOfRange: 0, otherLeaves: 0, notes: 0 }, why = {};
+const st = { inDg: 0, outDg: 0, inB: 0, outB: 0, inMsg: 0, outMsg: 0, joins: 0, outOfRange: 0, otherLeaves: 0, notes: 0 }, why = {};
 const tally = t => { const k = t.replace(/^Bot\d+/, '<bot>').replace(/\d+(\.\d+)*(:\d+)?/g, '#'); why[k] = (why[k] ?? 0) + 1; };
+/** the frames of one tick (or one received message) as bundles, as the page's TxBundle makes them: a snapshot of
+ *  the same bytes to another friend in the entry before it, unless something for that friend came between */
+function bundled(q) {
+  const e = [], last = new Map();
+  for (const f of q) {
+    const dst = f.readUInt32BE(8);
+    let i = (last.get(dst) ?? -1) + 1;
+    for (; i < e.length; i++) {
+      const g = e[i].f;
+      if (e[i].dst.length < 64 && g.length === f.length && !f.compare(g, 0, 8, 0, 8) && !f.compare(g, 12, g.length, 12, f.length)) break;
+    }
+    if (i < e.length) e[i].dst.push(dst); else e.push({ f, dst: [dst] });
+    last.set(dst, i);
+  }
+  if (e.length === 1 && e[0].dst.length === 1) return [e[0].f];
+  const n = 4 + e.reduce((a, x) => a + 4 + (x.dst.length > 1 ? 4 * x.dst.length : 0) + x.f.length, 0), b = Buffer.alloc(n);
+  b[0] = 32;
+  let at = 4;
+  for (const { f, dst } of e) {
+    const k = dst.length > 1 ? dst.length : 0;
+    b[at] = k; b.writeUInt16BE(f.length, at + 2);
+    for (let j = 0; j < k; j++) b.writeUInt32BE(dst[j], at + 4 + 4 * j);
+    f.copy(b, at + 4 + 4 * k); at += 4 + 4 * k + f.length;
+  }
+  return [b];
+}
 class Bot {
   constructor(i) {
     this.i = i; this.name = `Bot${String(i + 1).padStart(2, '0')}`; this.vip = 0; this.ready = false; this.car = CARS[i % CARS.length];
     this.id = (Math.random() * 0xfffffffe + 1) >>> 0;
+    this.bundles = false; this.q = [];                     // the switch takes bundles; what waits to go as one
   }
   async start() {
     this.inst = await WebAssembly.instantiate(mod, { crowd: {
@@ -102,7 +134,8 @@ class Bot {
       if (!bin) {
         const m = JSON.parse(String(d));
         if (m.t === 'welcome' && !this.vip) {
-          this.vip = m.vip >>> 0; ws.send(JSON.stringify({ t: 'hello', name: this.name, deltas: 1 }));
+          this.vip = m.vip >>> 0; this.bundles = BUNDLE && m.bundle === 1;
+          ws.send(JSON.stringify({ t: 'hello', name: this.name, deltas: 1, ...(BUNDLE ? { bundle: 1 } : {}) }));
           const io = this.x.crowd_io(), m8 = this.mem();
           const b = Buffer.from(`${this.name}\0${this.car}\0${PARTS}\0`, 'latin1'); m8.set(b, io);
           this.x.crowd_init(this.id, fnv1a(ROOM), HUB, PORT, bhash(this.car), STATES, nowUs());
@@ -110,11 +143,23 @@ class Bot {
         }
         return;
       }
-      if (d.length < 16 || d[0] !== 1 || d.readUInt16BE(14) !== PORT || d.length - 16 > 1200) return;
-      st.inDg++; st.inB += d.length;
-      this.mem().set(d.subarray(16), this.x.crowd_io());
-      this.x.crowd_recv(d.readUInt32BE(4), d.readUInt16BE(12), d.length - 16, nowUs());
+      st.inMsg++;
+      if (d[0] === 32) {
+        for (let at = 4; at + 4 <= d.length;) {
+          const f = at + 4 + 4 * d[at], end = f + d.readUInt16BE(at + 2);
+          if (end > d.length) break;
+          this.take(d.subarray(f, end)); at = end;
+        }
+      } else this.take(d);
+      this.flush();
     });
+  }
+  /** a datagram from the switch into the core */
+  take(d) {
+    if (d.length < 16 || d[0] !== 1 || d.readUInt16BE(14) !== PORT || d.length - 16 > 1200) return;
+    st.inDg++; st.inB += d.length;
+    this.mem().set(d.subarray(16), this.x.crowd_io());
+    this.x.crowd_recv(d.readUInt32BE(4), d.readUInt16BE(12), d.length - 16, nowUs());
   }
   mem() { return new Uint8Array(this.x.memory.buffer); }
   out(ip, port, ptr, n) {
@@ -122,7 +167,14 @@ class Bot {
     const f = Buffer.alloc(16 + n);
     f[0] = 1; f.writeUInt32BE(this.vip, 4); f.writeUInt32BE(ip >>> 0, 8); f.writeUInt16BE(PORT, 12); f.writeUInt16BE(port, 14);
     f.set(this.mem().subarray(ptr, ptr + n), 16);
-    this.ws.send(f); st.outDg++; st.outB += f.length;
+    st.outDg++; st.outB += f.length;
+    if (this.bundles) this.q.push(f); else { this.ws.send(f); st.outMsg++; }
+  }
+  /** what waits, as bundles */
+  flush() {
+    if (!this.q.length) return;
+    if (this.ws.readyState === 1) for (const m of bundled(this.q)) { this.ws.send(m); st.outMsg++; }
+    this.q = [];
   }
   tick(t) {
     if (!this.ready) return;
@@ -131,15 +183,16 @@ class Bot {
       this.racing = racing; this.x.crowd_status(racing ? 3 : 2);
       console.log(`roam-crowd: t=${t.toFixed(0)}s ${this.name} ${racing ? 'in a race' : 'back in free roam'}`);
     }
-    if (racing) { this.x.crowd_wait(nowUs()); return; }
+    if (racing) { this.x.crowd_wait(nowUs()); this.flush(); return; }
     const { p, v } = track(t, this.i);
     this.x.crowd_tick(nowUs(), p[0], p[1], p[2], v[0], v[1], v[2], Math.atan2(v[1], v[0]));
+    this.flush();
   }
-  stop() { if (this.ready) this.x.crowd_stop(); setTimeout(() => this.ws.close(), 200); }
+  stop() { if (this.ready) { this.x.crowd_stop(); this.flush(); } setTimeout(() => this.ws.close(), 200); }
 }
 
 const bots = [];
-for (let i = 0; i < N; i++) { const b = new Bot(i); bots.push(b); await b.start(); await new Promise(r => setTimeout(r, STAGGER)); }
+for (let i = 0; i < N; i++) { const b = new Bot(FIRST + i); bots.push(b); await b.start(); await new Promise(r => setTimeout(r, STAGGER)); }
 const t0 = performance.now();
 const timer = setInterval(() => { const t = (performance.now() - t0) / 1000; for (const b of bots) b.tick(t); }, 50);
 let last = { ...st }, lastT = performance.now();
@@ -149,10 +202,11 @@ const report = setInterval(() => {
   const s = { t: Math.round((performance.now() - t0) / 1000), players: on.length, peersMin: Math.min(...peers), peersMean: +(peers.reduce((a, b) => a + b, 0) / Math.max(1, peers.length)).toFixed(2),
     peersMax: Math.max(...peers), inPerS: Math.round((st.inDg - last.inDg) / dt), outPerS: Math.round((st.outDg - last.outDg) / dt),
     inKBs: +((st.inB - last.inB) / dt / 1024).toFixed(1), outKBs: +((st.outB - last.outB) / dt / 1024).toFixed(1),
+    inMsgPerS: Math.round((st.inMsg - last.inMsg) / dt), outMsgPerS: Math.round((st.outMsg - last.outMsg) / dt),
     joins: st.joins - last.joins, outOfRange: st.outOfRange - last.outOfRange, otherLeaves: st.otherLeaves - last.otherLeaves };
   samples.push(s);
   console.log(`roam-crowd: t=${s.t}s players ${s.players}, peers ${s.peersMin}/${s.peersMean}/${s.peersMax}, datagrams ${s.inPerS}/s in ${s.outPerS}/s out ` +
-    `(${s.inKBs} / ${s.outKBs} KB/s with the switch's 16-byte header), ` +
+    `(${s.inKBs} / ${s.outKBs} KB/s with the switch's 16-byte header) in ${s.inMsgPerS} / ${s.outMsgPerS} messages a second, ` +
     `joins ${s.joins}, out of range ${s.outOfRange}, other leaves ${s.otherLeaves}`);
   last = { ...st }; lastT = performance.now();
 }, 10_000);

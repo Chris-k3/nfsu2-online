@@ -36,6 +36,11 @@
 // and tells C NET_PAGE_IDLE (Online and LAN play lose their connections, free
 // roam its friends), and nothing connects until setAway(false).
 //
+// With a switch that takes bundles (its welcome's "bundle":1, lan.mjs) what C
+// queued at once goes as one message: free roam's snapshot to each friend, the
+// same bytes, once with the friends' addresses (TxBundle); and the switch sends
+// this page its datagrams as bundles too (the hello's "bundle":1).
+//
 // TCP frames are never dropped here: while the LAN RX ring is full they wait
 // in order (the C side's streams have no retransmission; the WebSocket and the
 // switch are reliable and ordered).  A TCP connect to this browser while it has
@@ -110,6 +115,62 @@ class AutoBucket {
   }
 }
 
+/** What one drain of a TX ring sends, as bundles (kind 32, lan.mjs): a free-roam datagram (kind 1) of the same
+ *  bytes as one before it goes in that one's entry with its destination added (when nothing for that destination
+ *  came between, so each destination gets its frames in order), everything else in an entry of its own, in the
+ *  order C queued it */
+const MULTI_MAX = 64;
+/** a frame of our own (a socket cannot send shared memory) */
+type Frame = Uint8Array<ArrayBuffer>;
+class TxBundle {
+  private e: { f: Frame; dst: number[] }[] = [];
+  /** destination -> its last entry */
+  private last = new Map<number, number>();
+  add(f: Frame, dst: number) {
+    if (f[P.F_KIND] === P.NET_KIND_UDP && dst !== P.NET_BROADCAST) {
+      for (let i = (this.last.get(dst) ?? -1) + 1; i < this.e.length; i++) {
+        const e = this.e[i];
+        if (e.f.length === f.length && e.f[P.F_KIND] === P.NET_KIND_UDP && e.dst[0] !== P.NET_BROADCAST && e.dst.length < MULTI_MAX && sameBut(e.f, f)) {
+          e.dst.push(dst); this.last.set(dst, i); return;
+        }
+      }
+    }
+    this.last.set(dst, this.e.length);
+    this.e.push({ f, dst: [dst] });
+  }
+  /** the messages: one frame alone as it is, else bundles of NET_BUNDLE_MAX bytes at most */
+  messages(): Frame[] {
+    if (this.e.length === 1 && this.e[0].dst.length === 1) return [this.e[0].f];
+    const out: Frame[] = [];
+    let part: { f: Frame; dst: number[] }[] = [], bytes = 4;
+    const done = () => {
+      const b = new Uint8Array(bytes), dv = new DataView(b.buffer);
+      b[0] = P.NET_KIND_BUNDLE;
+      let at = 4;
+      for (const { f, dst } of part) {
+        const k = dst.length > 1 ? dst.length : 0;
+        b[at] = k; dv.setUint16(at + 2, f.length);
+        for (let j = 0; j < k; j++) dv.setUint32(at + 4 + 4 * j, dst[j]);
+        b.set(f, at + 4 + 4 * k);
+        at += 4 + 4 * k + f.length;
+      }
+      out.push(b); part = []; bytes = 4;
+    };
+    for (const x of this.e) {
+      const n = 4 + (x.dst.length > 1 ? 4 * x.dst.length : 0) + x.f.length;
+      if (part.length && bytes + n > P.NET_BUNDLE_MAX) done();
+      part.push(x); bytes += n;
+    }
+    if (part.length) done();
+    return out;
+  }
+}
+/** two frames the same but for their destination (bytes 8-11) */
+function sameBut(a: Uint8Array, b: Uint8Array) {
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i] && (i < P.F_DST || i >= P.F_DST + 4)) return false;
+  return true;
+}
+
 /** One mailbox (free roam's or LAN play's) in shared wasm memory. */
 class Endpoint {
   i32: Int32Array; f64: Float64Array; dv: DataView; u8: Uint8Array;
@@ -169,6 +230,10 @@ class Link implements NetLink {
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   /** whether LAN play is open, as the switch last heard it (hello or {"t":"lan"}) */
   private lanSent = false;
+  /** the switch takes bundles (its welcome said so) */
+  private bundles = false;
+  /** while a bundle from the switch is taken apart: the endpoints to ring once it is */
+  private ringLater: Set<Endpoint> | null = null;
   private pings = new Map<number, number>();
   private pingSeq = 0;
   private failed = 0;
@@ -311,9 +376,9 @@ class Link implements NetLink {
     this.ws = ws;
     ws.onopen = () => {
       // deltas: the switch sends what changed on the peer list, not the whole list each time (lan.mjs); lan: LAN
-      // play is open, so it takes LAN broadcasts
+      // play is open, so it takes LAN broadcasts; bundle: this page takes bundles
       this.lanSent = this.lanOpen();
-      ws.send(JSON.stringify({ t: 'hello', name: this.o.name ?? 'player', deltas: 1, lan: this.lanSent ? 1 : 0,
+      ws.send(JSON.stringify({ t: 'hello', name: this.o.name ?? 'player', deltas: 1, lan: this.lanSent ? 1 : 0, bundle: 1,
         ...(resume ? { vip: P.ipStr(this.vipNum), token: this.token } : {}) }));
       this.pingTimer = setInterval(() => this.ping(), this.o.pingMs ?? 2000);
     };
@@ -353,6 +418,7 @@ class Link implements NetLink {
       const again = this.vipNum === vip;
       this.vipNum = vip; this.vip = P.ipStr(vip); this.netmask = mask; this.generation++;
       this.token = typeof m.token === 'string' ? m.token : '';
+      this.bundles = m.bundle === 1;
       this.state = 'online'; this.backoff = 250; this.failed = 0; this.st.connections++;
       for (const ep of this.eps()) { this.publishPeers(ep); this.publishOnline(ep); }
       this.log(`on the virtual LAN as ${this.vip}${this.st.connections > 1 ? (again ? ' (the same address again)' : ' (a new address)') : ''}`);
@@ -423,7 +489,7 @@ class Link implements NetLink {
     if (tail === head) return;
     const c0 = performance.now();
     const txOff = i32[P.W_TX_OFF], ws = this.ws, open = !!ws && ws.readyState === WebSocket.OPEN && this.state === 'online';
-    const t = now();
+    const t = now(), bundle = open && this.bundles ? new TxBundle() : null;
     let waitSum = 0, waitMax = ep.f64[P.D_TX_WAIT_MS_MAX], n = 0;
     while (tail !== head) {
       const s = txOff + ((tail >>> 0) % P.NET_TX_SLOTS) * P.NET_SLOT_BYTES;
@@ -435,14 +501,14 @@ class Link implements NetLink {
           this.o.onNotice?.(k < 0 ? t : t.slice(0, k) + t.slice(k + 1), k < 0 ? undefined : t.slice(0, k));
         }
       } else if (open && len <= P.NET_MAX_PAYLOAD) {
-        const f = new Uint8Array(P.F_DATA + len), fv = new DataView(f.buffer);
+        const f = new Uint8Array(P.F_DATA + len), fv = new DataView(f.buffer), dst = dv.getUint32(s + P.S_DST_IP, true);
         f[P.F_KIND] = dv.getUint32(s + P.S_KIND, true);
         fv.setUint32(P.F_SRC, this.vipNum);                      // the switch writes the real one
-        fv.setUint32(P.F_DST, dv.getUint32(s + P.S_DST_IP, true));
+        fv.setUint32(P.F_DST, dst);
         fv.setUint16(P.F_SPORT, dv.getUint16(s + P.S_SRC_PORT, true));
         fv.setUint16(P.F_DPORT, dv.getUint16(s + P.S_DST_PORT, true));
         f.set(ep.u8.subarray(s + P.S_DATA, s + P.S_DATA + len), P.F_DATA);   // a copy: a socket cannot send shared memory
-        ws!.send(f);
+        if (bundle) bundle.add(f, dst >>> 0); else ws!.send(f);
         this.st.framesOut++; this.st.bytesOut += len;
         if (ep.kind === 'lan') this.st.lanOut++;
         const w = t - dv.getFloat64(s + P.S_T_MS, true);
@@ -451,6 +517,7 @@ class Link implements NetLink {
       tail = (tail + 1) | 0;
       Atomics.store(i32, P.W_TX_TAIL, tail);
     }
+    if (bundle) for (const m of bundle.messages()) ws!.send(m);
     if (n) {
       ep.f64[P.D_TX_WAIT_MS_SUM] += waitSum; ep.f64[P.D_TX_WAIT_MS_MAX] = waitMax;
       Atomics.add(i32, P.W_TX_WAIT_N, n);
@@ -461,9 +528,23 @@ class Link implements NetLink {
   // ---- switch -> C ----
   private rx(b: ArrayBuffer) {
     const c0 = performance.now();
-    this.rxFrame(b);
+    const u = new Uint8Array(b);
+    if (u.length >= 4 && u[0] === P.NET_KIND_BUNDLE) {
+      // each frame on its own (a copy: a LAN TCP frame may wait in a queue), C rung once for all of them
+      const dv = new DataView(b), ring = this.ringLater = new Set();
+      for (let at = 4; at + 4 <= u.length;) {
+        const f = at + 4 + 4 * u[at], end = f + dv.getUint16(at + 2);
+        if (end > u.length) break;
+        this.rxFrame(b.slice(f, end));
+        at = end;
+      }
+      this.ringLater = null;
+      for (const ep of ring) ep.ring();
+    } else this.rxFrame(b);
     this.st.mainMs += performance.now() - c0; this.st.mainCalls++;
   }
+  /** C's network thread hears of what came: now, or once the bundle it came in is taken apart */
+  private rang(ep: Endpoint) { if (this.ringLater) this.ringLater.add(ep); else ep.ring(); }
   private rxFrame(b: ArrayBuffer) {
     if (b.byteLength < P.F_DATA) return;
     const kind = new Uint8Array(b, 0, 1)[0];
@@ -476,7 +557,7 @@ class Link implements NetLink {
     if (!ep || (kind !== P.NET_KIND_UDP && kind !== P.NET_KIND_UDP_LOOP) || mode === P.NET_MODE_CLOSED ||
         (kind === P.NET_KIND_UDP) !== (mode === P.NET_MODE_VLAN)) { this.st.rxFiltered++; return; }
     if (!ep.put(b)) { Atomics.add(ep.i32, P.W_RX_FULL_DROP, 1); this.st.rxFull++; return; }
-    ep.ring();
+    this.rang(ep);
     this.st.framesIn++; this.st.bytesIn += len;
   }
   private lanRx(b: ArrayBuffer, kind: number) {
@@ -495,7 +576,7 @@ class Link implements NetLink {
   /** into the LAN RX ring; TCP frames wait (in order) when it is full, others are dropped like UDP */
   private lanIn(ep: Endpoint, b: ArrayBuffer, keep: boolean) {
     if (ep.waiting.length && keep) { this.queue(ep, b); return; }
-    if (ep.put(b)) { ep.ring(); return; }
+    if (ep.put(b)) { this.rang(ep); return; }
     if (keep) this.queue(ep, b);
     else { Atomics.add(ep.i32, P.W_RX_FULL_DROP, 1); this.st.rxFull++; }
   }

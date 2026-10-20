@@ -777,7 +777,8 @@ setInterval(() => {
   if (!b.players && !breakdownShown) return;
   breakdownShown = b.players > 0;
   console.log(`[players] ${b.players} on the switch: ${b.online} in Online mode, ${b.lan} on the LAN or Online screens, ` +
-    `${b.roam} in free roam, ${b.older} on an older page (until its tab closes), ${b.other} leaving or starting`);
+    `${b.roam} in free roam, ${b.older} on an older page (until its tab closes), ${b.other} leaving or starting; ` +
+    `${b.bundles} of all of them bundling (a page loaded since the server has bundles)`);
 }, BREAKDOWN_MS).unref();
 const wss = new WebSocketServer({ noServer: true, maxPayload: LIMITS.wsMaxPayload, perMessageDeflate: false, clientTracking: false,
   ...LAN_WSS_OPTIONS });

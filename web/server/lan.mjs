@@ -23,8 +23,20 @@
 //      screens: "lan":1 in the hello, then {"t":"lan","on":0|1}; a page of
 //      before says nothing and gets them all): the others drop them anyway,
 //      and on a full switch each one would reach 2000 browsers
-// Text frames are JSON control messages: {"t":"hello","name":...,"deltas":1,"lan":0|1},
-// {"t":"lan","on":0|1} and {"t":"ping","id":n} from a client; {"t":"welcome","vip":...,"token":...},
+//   32 a bundle: several frames in one message, [1..3] reserved, then entries of
+//      [0] u8 n, [1] reserved, [2..3] u16 frame length, n x u32 destination vip,
+//      the frame: to each of the n (the frame's own destination is ignored), or
+//      with n = 0 to its own.  A switch takes them from anyone (the welcome
+//      says "bundle":1) and sends a client its datagrams as bundles (n = 0)
+//      when its hello said "bundle":1: what came for it in one turn of the
+//      event loop goes out at the end of that turn as one message (one frame
+//      alone goes as it is).  Free roam sends each friend the same snapshot
+//      20 times a second: 32 friends were 640 messages a second each way per
+//      player, and each message, not its bytes, is what the server's one
+//      thread and the tunnel in front pay for.  LAN play's TCP segments (kind
+//      4) are never bundled by the switch (their queue, streamQueue below).
+// Text frames are JSON control messages: {"t":"hello","name":...,"deltas":1,"lan":0|1,"bundle":1},
+// {"t":"lan","on":0|1} and {"t":"ping","id":n} from a client; {"t":"welcome","vip":...,"token":...,"bundle":1},
 // {"t":"peers",...}, {"t":"delta",...} and {"t":"pong","id":n} from the switch.
 //
 // The peer list.  A connection's first hello names its player (later ones
@@ -81,6 +93,8 @@
 // runtime/web/net_proto.h NET_SLOT_BYTES 1536):
 //   maxPeers     players on the switch at once (one more: closed with 1013)
 //   maxFrame     bytes in one binary frame (larger ones are dropped)
+//   maxBundle    bytes in one bundle from a client (larger ones are dropped); one to a client is at most
+//                BUNDLE_OUT, then the next begins
 //   frameRate    binary frames per second per connection (token bucket, burst = 2 s worth): 32 friends at 60
 //                snapshots a second, and the page's answers to stray connects (web/src/net, 32 KB/s at most)
 //   byteRate     binary bytes per second per connection (the same)
@@ -188,12 +202,14 @@ const KIND_UDP = 1;             // free roam's datagrams (and LAN play's broadca
 const KIND_STREAM = 4;          // LAN play's TCP segments: never dropped
 const KIND_LAN_UDP = 3, KIND_LAN_ICMP = 5;   // LAN play's kinds (3-5): broadcasts only to the browsers with LAN play open
 const STREAM_LOW = 64 << 10;    // a receiver with less than this queued gets stream segments at once
+const KIND_BUNDLE = 32;         // several frames in one message (see above)
+const BUNDLE_OUT = 32 << 10;    // bytes in one bundle to a client at most
 
 /** options for the WebSocketServer whose connections the switch takes (see above) */
 export const LAN_WSS_OPTIONS = Object.freeze({ autoPong: false });
 
 export const LAN_DEFAULTS = Object.freeze({
-  maxPeers: 128, maxFrame: 8192, frameRate: 2500, byteRate: 256 << 10, groupFrameRate: 5000, groupByteRate: 512 << 10,
+  maxPeers: 128, maxFrame: 8192, maxBundle: 64 << 10, frameRate: 2500, byteRate: 256 << 10, groupFrameRate: 5000, groupByteRate: 512 << 10,
   siteFrameRate: 10000, siteByteRate: 1 << 20,
   textRate: 20, maxText: 1024, ctlRate: 10, shedQueue: 256 << 10, roamQueue: 64 << 10, streamQueue: 2 << 20, streamShare: 1 << 20, stallMs: 1000,
   sendBuffer: 8 << 20, keepaliveMs: 25_000, idleMs: 10 * 60_000, reserveMs: 60_000, groupReserve: 8, siteReserve: 16,
@@ -236,6 +252,8 @@ export class LanSwitch {
     for (const k of Object.keys(LAN_DEFAULTS)) if (Number.isFinite(opts[k]) && opts[k] > 0) this.o[k] = opts[k];
     this.peers = new Map(); this.next = 0; this.frames = 0; this.bytes = 0; this.dropped = 0; this.limited = 0; this.refused = 0;
     this.shed = 0;                       // datagrams dropped for a receiver's full queue
+    // bundles taken and sent; the receivers with a bundle waiting for the end of this turn (setImmediate)
+    this.bundlesIn = 0; this.bundlesOut = 0; this.waiting = new Set(); this.flushing = false;
     this.resumed = 0;                    // addresses given back to their token
     this.released = 0;                   // addresses freed at once: the page closed its connection itself
     // a departed holder's address -> { hash, until, group, site }: kept for that token only
@@ -304,25 +322,30 @@ export class LanSwitch {
   /** what the players on the switch do, each counted once, in this order: Online mode (the online host's
    *  vips()), the LAN or Online screens open, free roam (the hub's vips()), a page from before the page said
    *  whether LAN play is open (it holds its place until its tab closes), the rest (leaving: the page lets go
-   *  10 s after the last network feature; or starting: free roam not yet heard by the hub) */
+   *  10 s after the last network feature; or starting: free roam not yet heard by the hub); and apart from that, how
+   *  many of them take bundles (a page loaded since the switch has them) */
   breakdown() {
     const online = this.online?.vips?.() ?? new Set(), roam = this.roam?.vips?.() ?? new Set();
-    const n = { players: this.peers.size, online: 0, lan: 0, roam: 0, older: 0, other: 0 };
-    for (const p of this.peers.values())
+    const n = { players: this.peers.size, online: 0, lan: 0, roam: 0, older: 0, other: 0, bundles: 0 };
+    for (const p of this.peers.values()) {
       n[online.has(p.vip) ? 'online' : p.lan === true ? 'lan' : roam.has(p.vip) ? 'roam' : p.lan === null ? 'older' : 'other']++;
+      if (p.bundle) n.bundles++;
+    }
     return n;
   }
   /** for the tests: names and virtual addresses only, never a real address */
   info() {
     return { peers: [...this.peers.values()].map(p => ({ vip: vipStr(p.vip), name: p.name, framesIn: p.framesIn, framesOut: p.framesOut })),
       frames: this.frames, bytes: this.bytes, dropped: this.dropped, limited: this.limited, refused: this.refused, shed: this.shed,
+      bundlesIn: this.bundlesIn, bundlesOut: this.bundlesOut,
       resumed: this.resumed, released: this.released, reserved: this.reserved.size, evicted: this.evicted, cuts: { ...this.cuts },
       ...(this.impair ? { impair: this.impair, lost: this.lost } : {}),
       ...(this.online ? { online: this.online.info() } : {}), ...(this.roam ? { roam: this.roam.info() } : {}) };
   }
-  /** one frame to one peer: through the impairment when it is on, always through send() (the queue rules) */
-  deliver(from, p, data) {
-    const out = () => { if (p.ws.readyState === 1 && this.sendFrame(from, p, data)) p.framesOut++; };
+  /** one frame to one peer (dst: its destination, the frame's own or one of a bundle's list): through the
+   *  impairment when it is on, always through sendFrame() (the queue rules) */
+  deliver(from, p, data, dst) {
+    const out = () => { if (p.ws.readyState === 1 && this.sendFrame(from, p, data, dst)) p.framesOut++; };
     const im = this.impair, kind = data[0];
     if (!im || kind < 3 || kind > 5) return out();
     let d = im.delay;
@@ -339,11 +362,12 @@ export class LanSwitch {
   }
   /** a binary frame to a receiver: a datagram is dropped while the receiver's queue is long, a stream
    *  segment never is (see streamQueue: the receiver or the client flooding it goes instead) */
-  sendFrame(from, p, data) {
+  sendFrame(from, p, data, dst) {
     if (data[0] !== KIND_STREAM) {
-      if (p.ws.bufferedAmount > (data[0] === KIND_UDP ? this.o.roamQueue : this.o.shedQueue)) { this.shed++; return false; }
-      return this.send(p, data);
+      if (p.ws.bufferedAmount + p.outBytes > (data[0] === KIND_UDP ? this.o.roamQueue : this.o.shedQueue)) { this.shed++; return false; }
+      return this.post(p, data, dst);
     }
+    if (data.readUInt32BE(8) !== dst) data = toDst(data, dst);
     const g = from.group.id, len = data.length;
     let mine = p.streamQueued.get(g);
     if ((mine?.n ?? 0) + len > this.o.streamShare || p.streamTotal + len > this.o.streamQueue) {
@@ -366,6 +390,40 @@ export class LanSwitch {
     p.sq.push({ data, mine, g });
     this.pump(p);
     return true;
+  }
+  /** a datagram to p: into its bundle when it takes them (out at the end of this turn), else as it is */
+  post(p, data, dst) {
+    if (!p.bundle) return this.send(p, data.readUInt32BE(8) === dst ? data : toDst(data, dst));
+    if (!this.room(p)) { this.dropped++; return false; }
+    if (p.outBytes + 4 + data.length > BUNDLE_OUT) this.flushOut(p);
+    p.out.push(data, dst); p.outBytes += 4 + data.length;
+    this.waiting.add(p);
+    if (!this.flushing) { this.flushing = true; setImmediate(() => this.flushAll()); }
+    return true;
+  }
+  flushAll() {
+    this.flushing = false;
+    for (const p of this.waiting) this.flushOut(p);
+    this.waiting.clear();
+  }
+  /** p's bundle as one message (one frame alone as it is), each frame with p's destination written in */
+  flushOut(p) {
+    const out = p.out;
+    if (!out.length) return;
+    p.out = []; const bytes = p.outBytes; p.outBytes = 0;
+    if (p.ws.readyState !== 1) return;
+    if (out.length === 2) { p.ws.send(out[0].readUInt32BE(8) === out[1] ? out[0] : toDst(out[0], out[1])); return; }
+    const b = Buffer.allocUnsafe(4 + bytes);
+    b[0] = KIND_BUNDLE; b[1] = 0; b[2] = 0; b[3] = 0;
+    let at = 4;
+    for (let i = 0; i < out.length; i += 2) {
+      const d = out[i];
+      b[at] = 0; b[at + 1] = 0; b.writeUInt16BE(d.length, at + 2);
+      d.copy(b, at + 4); b.writeUInt32BE(out[i + 1], at + 12);
+      at += 4 + d.length;
+    }
+    p.ws.send(b);
+    this.bundlesOut++;
   }
   /** p's queued stream segments into its connection, as far as it has taken the ones before */
   pump(p) {
@@ -481,6 +539,8 @@ export class LanSwitch {
       // stream segments waiting for this receiver (sq: { data, mine, g }), their bytes by sending group ({ n }) and
       // in all, since when the queue is not empty, and when one last went out
       sq: [], pumpTimer: null, streamQueued: new Map(), streamTotal: 0, streamSince: 0, streamOut: 0,
+      // bundle: it takes bundles (its hello said so); out: its datagrams of this turn (frame, destination, ...)
+      bundle: false, out: [], outBytes: 0,
       frames: new Bucket(o.frameRate), bytes: new Bucket(o.byteRate), texts: new Bucket(o.textRate), ctl: new Bucket(o.ctlRate) };
     if (hello) { peer.texts.take(1); greet(peer, hello); }
     this.peers.set(vip, peer);
@@ -499,7 +559,7 @@ export class LanSwitch {
       if (peer.pingData && data.equals(peer.pingData)) { peer.alive = true; peer.pingData = null; return; }
       flood();
     });
-    ws.send(JSON.stringify({ t: 'welcome', vip, vipStr: vipStr(vip), mask: MASK, token }));
+    ws.send(JSON.stringify({ t: 'welcome', vip, vipStr: vipStr(vip), mask: MASK, token, bundle: 1 }));
     if (peer.hello) this.send(peer, this.peerList());
     this.peersChanged(vip);
     this.persist();
@@ -523,37 +583,28 @@ export class LanSwitch {
         return;
       }
       if (n < 12) return;
-      if (n > o.maxFrame) { this.limited++; return; }
-      const dst = data.readUInt32BE(8);
-      const to = [];
-      if (dst === BROADCAST) {
-        const lanOnly = data[0] >= KIND_LAN_UDP && data[0] <= KIND_LAN_ICMP;
-        for (const p of this.peers.values()) if (p !== peer && p.ws.readyState === 1 && (!lanOnly || p.lan !== false)) to.push(p);
-      }
-      else { const p = this.peers.get(dst); if (p && p.ws.readyState === 1) to.push(p); }
-      // what the switch sends for it: a broadcast costs its size for every player it reaches
-      const k = Math.max(1, to.length);
-      const buckets = site ? [peer, group, site] : [peer, group];
-      if (!buckets.every(b => b.frames.has(k) && b.bytes.has(n * k))) { this.limited++; return; }
-      for (const b of buckets) { b.frames.take(k); b.bytes.take(n * k); }
-      data.writeUInt32BE(vip, 4);
-      this.frames++; this.bytes += n; peer.framesIn++;
-      this.tap?.(data);
-      if (this.roam && dst === this.roam.vip) { this.roam.frame(vip, data); return; }
-      if (this.online && dst === this.online.vip) {
-        this.cause = buckets; this.causeOver = false;
-        try { this.online.frame(vip, data, { group: group.id, site: site?.id ?? null }); } finally { this.cause = null; }
-        if (this.causeOver) { this.limited++; this.online.overrun?.(vip, data); }
+      if (data[0] === KIND_BUNDLE) {
+        if (n > o.maxBundle) { this.limited++; return; }
+        this.bundlesIn++;
+        // each entry as a frame of its own; a broken entry, or one over the budgets, ends the bundle
+        for (let at = 4; at + 4 <= n;) {
+          const k = data[at], len = data.readUInt16BE(at + 2), f = at + 4 + 4 * k, end = f + len;
+          if (len < 12 || len > o.maxFrame || end > n || data[f] === KIND_BUNDLE) { this.limited++; return; }
+          const frame = data.subarray(f, end);
+          if (!k) { if (!this.route(peer, frame, frame.readUInt32BE(8))) return; }
+          else for (let j = 0; j < k; j++) if (!this.route(peer, frame, data.readUInt32BE(at + 4 + 4 * j))) return;
+          at = end;
+        }
         return;
       }
-      if (!to.length) { this.dropped++; return; }
-      for (const p of to) this.deliver(peer, p, data);
+      if (n > o.maxFrame) { this.limited++; return; }
+      this.route(peer, data, data.readUInt32BE(8));
     });
     // an old connection's late close must not take the address from a new holder; a page that closed it itself
     // (1000 "idle": no network feature in use, "closed": the game ended) comes back with no token, so its
     // address is free at once
     ws.on('close', (code, reason) => {
-      clearTimeout(peer.pumpTimer); peer.sq.length = 0;
+      clearTimeout(peer.pumpTimer); peer.sq.length = 0; peer.out = []; peer.outBytes = 0;
       if (this.peers.get(vip) !== peer) return;
       this.peers.delete(vip);
       const done = code === 1000 && (String(reason) === 'idle' || String(reason) === 'closed');
@@ -565,6 +616,39 @@ export class LanSwitch {
       this.peersChanged(vip, true);
       opts.onLeave?.(vip, peer.name);
     });
+  }
+  /** one frame from peer to dst (its own destination, or one of a bundle's list): to the browsers it reaches, the
+   *  free-roam hub or the online host, within peer's budgets.  false: over them (what follows in a bundle goes
+   *  too) */
+  route(peer, data, dst) {
+    const n = data.length, { group, site, vip } = peer;
+    const to = [];
+    if (dst === BROADCAST) {
+      const lanOnly = data[0] >= KIND_LAN_UDP && data[0] <= KIND_LAN_ICMP;
+      for (const p of this.peers.values()) if (p !== peer && p.ws.readyState === 1 && (!lanOnly || p.lan !== false)) to.push(p);
+    }
+    else { const p = this.peers.get(dst); if (p && p.ws.readyState === 1) to.push(p); }
+    // what the switch sends for it: a broadcast costs its size for every player it reaches
+    const k = Math.max(1, to.length);
+    const buckets = site ? [peer, group, site] : [peer, group];
+    if (!buckets.every(b => b.frames.has(k) && b.bytes.has(n * k))) { this.limited++; return false; }
+    for (const b of buckets) { b.frames.take(k); b.bytes.take(n * k); }
+    data.writeUInt32BE(vip, 4);
+    this.frames++; this.bytes += n; peer.framesIn++;
+    // the hub, the online host and the trace see the frame as sent to them (one of a bundle's list: a copy)
+    const own = () => (data.readUInt32BE(8) === dst ? data : toDst(data, dst));
+    if (this.tap) this.tap(own());
+    if (this.roam && dst === this.roam.vip) { this.roam.frame(vip, own()); return true; }
+    if (this.online && dst === this.online.vip) {
+      const d = own();
+      this.cause = buckets; this.causeOver = false;
+      try { this.online.frame(vip, d, { group: group.id, site: site?.id ?? null }); } finally { this.cause = null; }
+      if (this.causeOver) { this.limited++; this.online.overrun?.(vip, d); }
+      return true;
+    }
+    if (!to.length) { this.dropped++; return true; }
+    for (const p of to) this.deliver(peer, p, data, dst);
+    return true;
   }
   /** room in p's queue; a peer that cannot keep up is disconnected instead of buffered without end */
   room(p, why = 'slow') {
@@ -623,7 +707,7 @@ export class LanSwitch {
 }
 /** a connection's first hello: its player's name, and whether it takes the changes to the peer list */
 function greet(peer, m) {
-  peer.hello = true; peer.deltas = m.deltas === 1;
+  peer.hello = true; peer.deltas = m.deltas === 1; peer.bundle = m.bundle === 1;
   if (m.lan === 0 || m.lan === 1) peer.lan = m.lan === 1;   // a page of before says nothing: it gets every broadcast
   if (typeof m.name === 'string') peer.name = cleanName(m.name);
 }
@@ -636,6 +720,8 @@ function parseImpair(spec) {
   }
   return o;
 }
+/** a copy of frame with dst as its destination */
+function toDst(frame, dst) { const c = Buffer.from(frame); c.writeUInt32BE(dst >>> 0, 8); return c; }
 export function vipStr(v) { return [v >>> 24, (v >>> 16) & 255, (v >>> 8) & 255, v & 255].join('.'); }
 function vipNum(s) {
   const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(s);

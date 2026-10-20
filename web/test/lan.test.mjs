@@ -62,10 +62,12 @@ async function startSwitch(opts) {
 // asks for the changes to the peer list, as the page's does (a page of before did not: the whole list each time);
 // lan: 0 or 1 in its hello, LAN play open or not, as the page's says (a page of before said nothing).
 // view: the peer list as the whole lists and the changes made it; ctlBytes: the bytes of control messages it got
+// bundle: its hello says it takes bundles (the switch then sends it its datagrams as bundles, kind 32); dgrams()
+// takes them apart
 class Client {
-  constructor(port, name, query = '', resume = null, { deltas = false, lan } = {}) {
+  constructor(port, name, query = '', resume = null, { deltas = false, lan, bundle = false } = {}) {
     this.name = name; this.frames = []; this.ctl = []; this.waiters = []; this.resume = resume; this.deltas = deltas;
-    this.extra = { ...(deltas ? { deltas: 1 } : {}), ...(lan !== undefined ? { lan } : {}) };
+    this.extra = { ...(deltas ? { deltas: 1 } : {}), ...(lan !== undefined ? { lan } : {}), ...(bundle ? { bundle: 1 } : {}) };
     this.view = null; this.ctlBytes = 0;
     const q = resume ? (query ? query + '&resume' : '?resume') : query;
     this.ws = new WebSocket(`ws://127.0.0.1:${port}/lan${q}`);
@@ -103,9 +105,37 @@ class Client {
     f.writeUInt16BE(sport, 12); f.writeUInt16BE(dport, 14); Buffer.from(data).copy(f, 16);
     this.ws.send(f);
   }
+  /** a bundle: entries of { f: a frame, to: [vip, ...] } (no to: the frame's own destination) */
+  sendBundle(entries) { this.ws.send(bundleOf(entries)); }
+  /** every datagram it got, the bundles taken apart: { buf, msg (which message), kind, src, dst, data } */
+  dgrams() {
+    const out = [];
+    this.frames.forEach(({ buf }, msg) => {
+      const one = b => out.push({ buf: b, msg, kind: b[0], src: b.readUInt32BE(4), dst: b.readUInt32BE(8), data: b.subarray(16).toString() });
+      if (buf[0] !== 32) return one(buf);
+      for (let at = 4; at + 4 <= buf.length;) { const f = at + 4 + 4 * buf[at], end = f + buf.readUInt16BE(at + 2); one(buf.subarray(f, end)); at = end; }
+    });
+    return out;
+  }
   close() { this.ws.close(); return this.closed; }
 }
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+/** a frame as Client.udp makes one */
+function frameOf(dst, data, kind = 1, sport = 9999, dport = 9999) {
+  const f = Buffer.alloc(16 + Buffer.byteLength(data));
+  f[0] = kind; f.writeUInt32BE(dst >>> 0, 8); f.writeUInt16BE(sport, 12); f.writeUInt16BE(dport, 14); Buffer.from(data).copy(f, 16);
+  return f;
+}
+/** a bundle (lan.mjs kind 32) of entries { f, to } */
+function bundleOf(entries) {
+  const parts = [Buffer.from([32, 0, 0, 0])];
+  for (const { f, to = [] } of entries) {
+    const h = Buffer.alloc(4 + 4 * to.length);
+    h[0] = to.length; h.writeUInt16BE(f.length, 2); to.forEach((v, j) => h.writeUInt32BE(v >>> 0, 4 + 4 * j));
+    parts.push(h, f);
+  }
+  return Buffer.concat(parts);
+}
 
 test('addresses, peer lists, unicast, broadcast, ping, disconnect, reconnect', async () => {
   const sw = await startSwitch();
@@ -271,7 +301,7 @@ test('what a peer learns about the others: virtual addresses and cleaned names, 
     assert.equal([...names[1]].length <= 32, true);
     // every control message has only these fields, and no address but a virtual one
     await b.until(() => b.ctl.some(m => m.t === 'delta'));
-    const shape = { welcome: ['t', 'vip', 'vipStr', 'mask', 'token'], peers: ['t', 'peers'], delta: ['t', 'peers', 'gone'], pong: ['t', 'id'] };
+    const shape = { welcome: ['t', 'vip', 'vipStr', 'mask', 'token', 'bundle'], peers: ['t', 'peers'], delta: ['t', 'peers', 'gone'], pong: ['t', 'id'] };
     for (const m of [...a.ctl, ...b.ctl]) {
       assert.deepEqual(Object.keys(m).sort(), [...shape[m.t]].sort(), `fields of ${m.t}`);
       if (m.t === 'peers' || m.t === 'delta') for (const p of m.peers) assert.deepEqual(Object.keys(p).sort(), ['name', 'vip']);
@@ -1185,7 +1215,123 @@ test('breakdown: Online mode, the LAN or Online screens, free roam, an older pag
     for (const x of all) await x.welcome();
     for (const x of all) await x.until(() => x.ctl.some(m => m.t === 'peers'));
     inOnline.add(ol.vip); inRoam.add(fr.vip); inRoam.add(oldRoam.vip); inRoam.add(ol.vip);
-    assert.deepEqual(sw.lan.breakdown(), { players: 6, online: 1, lan: 1, roam: 2, older: 1, other: 1 });
+    assert.deepEqual(sw.lan.breakdown(), { players: 6, online: 1, lan: 1, roam: 2, older: 1, other: 1, bundles: 0 });
     for (const x of all) await x.close();
   } finally { await sw.close(); }
+});
+
+// ---- bundles (kind 32): several frames in one message ------------------------------------------------------------
+test('bundles: each entry reaches its destinations as a frame of its own; a client that takes bundles gets one message a turn, one that does not gets frames as before', async () => {
+  const sw = await startSwitch();
+  try {
+    const a = new Client(sw.port, 'A', '', null, { bundle: true }), b = new Client(sw.port, 'B', '', null, { bundle: true });
+    const c = new Client(sw.port, 'C'), d = new Client(sw.port, 'D', '', null, { bundle: true });
+    const [wa] = [await a.welcome(), await b.welcome(), await c.welcome(), await d.welcome()];
+    assert.equal(wa.bundle, 1, 'the welcome says the switch takes bundles');
+    await sleep(100);
+    // a snapshot to three friends once, one frame to B alone, a LAN broadcast
+    a.sendBundle([{ f: frameOf(0, 'snap'), to: [b.vip, c.vip, d.vip] }, { f: frameOf(b.vip, 'only-b') }, { f: frameOf(0xFFFFFFFF, 'lan', 3) }]);
+    await b.until(() => b.dgrams().length >= 3); await c.until(() => c.dgrams().length >= 2); await d.until(() => d.dgrams().length >= 2);
+    await sleep(100);
+    const got = x => x.dgrams().map(g => `${g.data}>${g.dst === 0xFFFFFFFF ? 'all' : g.dst === x.vip ? 'me' : g.dst}`);
+    assert.deepEqual(got(b), ['snap>me', 'only-b>me', 'lan>all'], 'B: in order, each with its own destination');
+    assert.deepEqual(got(c), ['snap>me', 'lan>all']);
+    assert.deepEqual(got(d), ['snap>me', 'lan>all']);
+    for (const x of [b, c, d]) assert.ok(x.dgrams().every(g => g.src === a.vip), 'from A, as the switch wrote it');
+    assert.equal(b.frames.length, 1, 'B (takes bundles): one message for the three');
+    assert.equal(b.frames[0].buf[0], 32);
+    assert.equal(c.frames.length, 2, 'C (a client of before): two frames, as before');
+    assert.ok(c.frames.every(f => f.buf[0] !== 32));
+    assert.deepEqual(a.dgrams(), [], 'nothing back to the sender');
+    const i = sw.lan.info();
+    assert.equal(i.bundlesIn, 1); assert.equal(i.bundlesOut, 2); assert.equal(i.frames, 5, 'five frames routed');
+    // what comes in one turn from several senders goes to B as one message
+    const n0 = b.frames.length;
+    c.udp(b.vip, 9999, 9999, 'c1'); d.udp(b.vip, 9999, 9999, 'd1'); a.udp(b.vip, 9999, 9999, 'a1');
+    await b.until(() => b.dgrams().length >= 6);
+    assert.deepEqual(b.dgrams().slice(3).map(g => g.data).sort(), ['a1', 'c1', 'd1']);
+    console.log(`three senders to B: ${b.frames.length - n0} message(s)`);
+    for (const x of [a, b, c, d]) await x.close();
+  } finally { await sw.close(); }
+});
+
+test('bundles: each frame pays the budgets as a frame of its own; a broken entry, one over the budget, or a bundle too large ends it', async () => {
+  const sw = await startSwitch({ frameRate: 10 });
+  try {
+    const a = new Client(sw.port, 'A', '?g=a'), b = new Client(sw.port, 'B', '?g=b');
+    await a.welcome(); await b.welcome(); await sleep(50);
+    // 30 times to B in one entry: the burst (2 s of 10 a second) gets through, the rest and what follows do not
+    a.sendBundle([{ f: frameOf(0, 'x'), to: Array(30).fill(b.vip) }, { f: frameOf(b.vip, 'after') }]);
+    await sleep(300);
+    assert.equal(b.dgrams().length, 20); assert.ok(b.dgrams().every(g => g.data === 'x'));
+    assert.ok(sw.lan.info().limited >= 1);
+  } finally { await sw.close(); }
+  const sw2 = await startSwitch();
+  try {
+    const a = new Client(sw2.port, 'A'), b = new Client(sw2.port, 'B');
+    await a.welcome(); await b.welcome(); await sleep(50);
+    const good = bundleOf([{ f: frameOf(b.vip, 'one') }]);
+    // an entry longer than what is left: the ones before it went, nothing after
+    a.ws.send(Buffer.concat([good, Buffer.from([0, 0, 0x10, 0x00]), frameOf(b.vip, 'cut off')]));
+    // a bundle in a bundle, a bundle over maxBundle (64 KB)
+    a.sendBundle([{ f: Buffer.concat([Buffer.from([32, 0, 0, 0]), frameOf(b.vip, 'nested').subarray(4)]) }]);
+    a.ws.send(bundleOf(Array.from({ length: 9 }, () => ({ f: frameOf(b.vip, 'z'.repeat(8000)) }))));
+    await sleep(300);
+    assert.deepEqual(b.dgrams().map(g => g.data), ['one']);
+    assert.ok(sw2.lan.info().limited >= 3, `limited ${sw2.lan.info().limited}`);
+    a.udp(b.vip, 9999, 9999, 'still fine');
+    await b.until(() => b.dgrams().length === 2);
+  } finally { await sw2.close(); }
+});
+
+// the page's TX ring (as C fills it) and RX ring (as C reads it)
+function txPush(memory, mb, { kind = 1, dst, sport = 47210, dport = 47210, data }) {
+  const w = mb.w, dv = new DataView(memory.buffer), head = Atomics.load(w, P.W_TX_HEAD);
+  const s = mb.ptr + w[P.W_TX_OFF] + ((head >>> 0) % P.NET_TX_SLOTS) * P.NET_SLOT_BYTES, d = Buffer.from(data);
+  dv.setUint32(s + P.S_LEN, d.length, true); dv.setUint32(s + P.S_KIND, kind, true); dv.setUint32(s + P.S_DST_IP, dst >>> 0, true);
+  dv.setUint16(s + P.S_SRC_PORT, sport, true); dv.setUint16(s + P.S_DST_PORT, dport, true);
+  dv.setFloat64(s + P.S_T_MS, performance.timeOrigin + performance.now(), true);
+  new Uint8Array(memory.buffer).set(d, s + P.S_DATA);
+  Atomics.store(w, P.W_TX_HEAD, (head + 1) | 0);
+}
+const txBell = mb => { Atomics.add(mb.w, P.W_TX_BELL, 1); Atomics.notify(mb.w, P.W_TX_BELL); };
+function rxTake(memory, mb) {
+  const w = mb.w, dv = new DataView(memory.buffer), out = [];
+  let tail = Atomics.load(w, P.W_RX_TAIL);
+  for (const head = Atomics.load(w, P.W_RX_HEAD); tail !== head; tail = (tail + 1) | 0) {
+    const s = mb.ptr + w[P.W_RX_OFF] + ((tail >>> 0) % P.NET_RX_SLOTS) * P.NET_SLOT_BYTES;
+    out.push({ src: dv.getUint32(s + P.S_SRC_IP, true), dst: dv.getUint32(s + P.S_DST_IP, true),
+      data: Buffer.from(new Uint8Array(memory.buffer, s + P.S_DATA, dv.getUint32(s + P.S_LEN, true))).toString() });
+  }
+  Atomics.store(w, P.W_RX_TAIL, tail);
+  return out;
+}
+
+test('the page: what C queued at once goes as one bundle, a snapshot to several friends once; bundles from the switch are taken apart in order', async () => {
+  const sw = await startSwitch();
+  const { attachNet } = await pageNet(sw.port);
+  const memory = new WebAssembly.Memory({ initial: 10, maximum: 10, shared: true }), roam = mailbox(memory, 0);
+  want(roam, 1); Atomics.store(roam.w, P.W_MODE, P.NET_MODE_VLAN);
+  const link = attachNet(fakeGame(memory, { 4: roam }), { url: `ws://127.0.0.1:${sw.port}/lan`, name: 'P', pingMs: 60_000 });
+  try {
+    const me = P.ipNum(await link.online);
+    const b = new Client(sw.port, 'B'), c = new Client(sw.port, 'C', '', null, { bundle: true });
+    await b.welcome(); await c.welcome(); await sleep(100);
+    // a tick of free roam: the same snapshot to B and C, another frame to B, the snapshot to the hub's address
+    txPush(memory, roam, { dst: b.vip, data: 'snap' }); txPush(memory, roam, { dst: c.vip, data: 'snap' });
+    txPush(memory, roam, { dst: b.vip, data: 'more' }); txPush(memory, roam, { dst: P.NET_ROAM_HUB, data: 'snap' });
+    txBell(roam);
+    await b.until(() => b.dgrams().length >= 2); await c.until(() => c.dgrams().length >= 1);
+    assert.deepEqual(b.dgrams().map(g => [g.data, g.src === me, g.dst === b.vip]), [['snap', true, true], ['more', true, true]]);
+    assert.deepEqual(c.dgrams().map(g => [g.data, g.src === me, g.dst === c.vip]), [['snap', true, true]]);
+    assert.equal(sw.lan.info().bundlesIn, 1, 'the four went as one message');
+    // three from C at once (one bundle): the switch sends them to the page as one message, and C hears them in order
+    c.sendBundle([{ f: frameOf(me, 'r1', 1, 47210, 47210) }, { f: frameOf(me, 'r2', 1, 47210, 47210) }, { f: frameOf(me, 'r3', 1, 47210, 47210) }]);
+    await until(() => Atomics.load(roam.w, P.W_RX_HEAD) - Atomics.load(roam.w, P.W_RX_TAIL) >= 3);
+    assert.deepEqual(rxTake(memory, roam).map(r => [r.data, r.src === c.vip, r.dst === me]), [['r1', true, true], ['r2', true, true], ['r3', true, true]]);
+    assert.ok(sw.lan.info().bundlesOut >= 1, 'to the page as a bundle');
+    const s = link.stats();
+    assert.equal(s.framesOut, 4); assert.equal(s.framesIn, 3, 'frames counted one by one');
+    await b.close(); await c.close();
+  } finally { link.close(); await sw.close(); }
 });

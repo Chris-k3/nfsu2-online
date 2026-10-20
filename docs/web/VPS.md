@@ -412,6 +412,15 @@ paths to the VPS, so pick a VPS location between you.
     300 m and 2 past 1 km. 32 players in one spot: about 60 KB/s each way per player, and the switch relays about
     2 MB/s (measured with 32 `web/tools/roam-crowd.mjs` players: 22,000 datagrams a second each way, 10 % of one core
     for the server).
+  - **Bundles:** what the page sends at once (a snapshot to each friend, the same bytes) goes as one WebSocket
+    message with the friends' addresses, and the switch sends each page what came for it in one turn as one message
+    (`web/server/lan.mjs`, frame kind 32; a page or switch of before keeps one message a datagram, and both sides
+    still work with it). The server's one thread pays per message, not per byte: on a live server with about 600
+    players in free roam it was at 100 % of a core, and its switch took 0.1-0.7 s to answer a ping. Measured with
+    120 `roam-crowd.mjs` players in one spot (a Ryzen 9 5900X): one message a datagram took the server past one core
+    (20,000 datagrams a second in, pings answered after 11 s, links falling apart); bundled, 44,000 datagrams a
+    second in took 74 % of a core, pings 2.7 ms (p50), 7.5 ms (p90). Only a page loaded after the server has them
+    sends and takes bundles.
   - **Its own cost:** in a Room of more than 256 players the hub finds each player's nearest through a grid of the
     map instead of weighing every pair, with the same links. Measured on a Ryzen 9 5900X: 1000 players in one Room
     took about 30 ms a second (every pair took 0.5 s), 2000 about 70 ms, spread over the city or all in one spot.
@@ -448,7 +457,8 @@ paths to the VPS, so pick a VPS location between you.
   - frames up to 8 KB; 2500 frames and 256 KB a second per connection, 5000 and 512 KB for all of one client
     address's connections together, 10000 and 1 MB for all of one IPv6 /48 (a 3-player LAN race's host sent at
     most 100 frames and 7.7 KB a second; free roam is 1.9 KB a second per friend, and 32 friends at 60 snapshots
-    a second are about 2000 frames). A broadcast counts once for every player it reaches;
+    a second are about 2000 frames). A broadcast counts once for every player it reaches, and a frame in a bundle
+    (64 KB at most) once for every address it is for;
   - datagrams to a player whose connection is 256 KB behind are dropped, as a full link would; free roam's already
     at 64 KB (about a second of them), so a player whose link falls behind gets the newest positions as soon as it
     catches up, not seconds of old ones first. LAN-race stream data is never dropped. A player with more than 2 MB of it waiting, or more than 1 MB of it from one client, is
