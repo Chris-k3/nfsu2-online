@@ -37,6 +37,9 @@
 //             Chrome with --js-flags=--expose-gc), so is every AudioContext and GPU device, and
 //             measureUserAgentSpecificMemory comes back to where it was before the first Play
 //   cache     page -> Ready and Play -> title screen, first time and again (persistent profile)
+//   roamask   a player's first Play (no test settings in the address) asks about free roam: without a name
+//             no name line, Esc is Not now (roam = off), not asked again; with one, the name to change (a
+//             refused one keeps the question open), Enter in it turns free roam on with the new name
 //   page      what the page shows and asks for: no /server-info, /setup or /ca.crt (all 404), every
 //             setting has a name and a description, the controls sheet is on the page and in F9's dialog
 //   mobile    the start page at phone size
@@ -740,6 +743,62 @@ try {
     fs.rmSync(dir, { recursive: true, force: true });
     report('cache', /\b\d+ bytes transferred/.test(again.module) && +(/(\d+) bytes transferred/.exec(again.module)?.[1] ?? 1e9) < 65536 && warm < cold,
       { firstVisit: first, repeatVisit: again, playToTitleMs: { emptyDataCache: cold, warmDataCache: warm, afterReload: warm2 }, cachedMiB: cache });
+  }
+
+  // ---------------------------------------------------------- roamask --
+  // a player's page: no test settings in the address, so its own save folder in a context of its own
+  if (want('roamask')) {
+    const c5 = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const r = watch(await c5.newPage(), 'R');
+    const ini = () => readOpfs(r, 'save', 'settings.ini').then(f => f?.text ?? '');
+    const roamLines = t => t.split('\n').filter(l => /^roam(_name)? = /.test(l));
+    const asked = () => r.evaluate(() => ({ title: document.querySelector('#confirm-title').textContent,
+      field: document.querySelector('#roam-ask-name')?.value ?? null, ok: document.querySelector('#confirm-ok').textContent,
+      okClass: document.querySelector('#confirm-ok').className, cancel: document.querySelector('#confirm-cancel').textContent,
+      focus: document.activeElement?.id ?? null }));
+    const stop = async () => {
+      await r.waitForFunction(() => !!window.__nfsu2.session, null, { timeout: 60000 });
+      await r.evaluate(() => window.__nfsu2.session.terminate());
+      await waitPhase(r, ['exited'], 30000);
+    };
+    await r.goto(`${BASE}/`);
+    await waitPhase(r, ['ready', 'error'], 60000);
+    // a new player: no name line; Esc is Not now
+    await r.click('#play');
+    await r.waitForSelector('#confirm[open]', { timeout: 10000 });
+    const first = await asked();
+    await r.locator('#confirm').screenshot({ path: path.join(OUT, 'roam-ask.png') });
+    await r.keyboard.press('Escape');
+    await waitPhase(r, ['playing', 'exited'], 60000);
+    const afterEsc = roamLines(await ini());
+    await stop();
+    // once only
+    await r.click('#play');
+    const again = await r.waitForSelector('#confirm[open]', { timeout: 4000 }).then(() => true, () => false);
+    await waitPhase(r, ['playing', 'exited'], 60000);
+    await stop();
+    // a player with a name (Your name): the name to change
+    const t = (await ini()).replace(/^roam = off$/m, '#roam = off').replace(/^#roam_name =$/m, 'roam_name = Racer');
+    await r.evaluate(async t => { const w = await (await (await (await navigator.storage.getDirectory()).getDirectoryHandle('save')).getFileHandle('settings.ini')).createWritable(); await w.write(t); await w.close(); }, t);
+    await r.click('#play');
+    await r.waitForSelector('#confirm[open]', { timeout: 10000 });
+    const named = await asked();
+    await r.locator('#confirm').screenshot({ path: path.join(OUT, 'roam-ask-named.png') });
+    await r.fill('#roam-ask-name', 'Zoë');
+    await r.click('#confirm-ok');
+    await r.waitForTimeout(300);
+    const refused = await r.evaluate(() => ({ open: document.querySelector('#confirm').open, why: document.querySelector('#roam-ask-name').validationMessage }));
+    await r.fill('#roam-ask-name', 'New Racer');
+    await r.press('#roam-ask-name', 'Enter');
+    await waitPhase(r, ['playing', 'exited'], 60000);
+    const afterOn = roamLines(await ini());
+    const env = await r.evaluate(() => window.__nfsu2.env());
+    await stop();
+    await c5.close();
+    report('roamask', first.title === 'Free roam with others?' && first.field === null && first.ok === 'Turn on' && first.okClass === 'btn selected' &&
+      first.cancel === 'Not now' && first.focus === 'confirm-ok' && afterEsc.join() === 'roam = off' && !again && named.field === 'Racer' &&
+      refused.open && /not a name/.test(refused.why) && [...afterOn].sort().join() === 'roam = on,roam_name = New Racer' && env.NFSU2_ROAM === '1' && env.NFSU2_ROAM_NAME === 'New Racer',
+      { first, afterEsc, askedAgain: again, named, refused, afterOn, env: { NFSU2_ROAM: env.NFSU2_ROAM, NFSU2_ROAM_NAME: env.NFSU2_ROAM_NAME } });
   }
 
   // ------------------------------------------------------------- page --

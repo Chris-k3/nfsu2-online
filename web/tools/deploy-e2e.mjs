@@ -142,7 +142,8 @@ async function run(mode) {
   const t0 = Date.now();
   try {
     // a production server: the page takes no settings from its address (the audit's PAGE-1), so the test's own
-    // (no movies, the front-end log the checks below read) go into this fresh browser's settings.ini, as a player's would
+    // (no movies, the front-end log the checks below read, free roam answered: the first Play would ask) go into
+    // this fresh browser's settings.ini, as a player's would
     const resp = await page.goto(`${origin}/`);
     const h = resp.headers();
     report(`${mode}: document headers`, !!h['content-security-policy'] && h['cross-origin-embedder-policy'] === 'require-corp' &&
@@ -164,7 +165,7 @@ async function run(mode) {
     await page.evaluate(async () => {
       const d = await (await navigator.storage.getDirectory()).getDirectoryHandle('save', { create: true });
       const w = await (await d.getFileHandle('settings.ini', { create: true })).createWritable();
-      await w.write('# NFSU2 settings, read at every launch.\nmovies = off\nNFSU2_FNG_LOG = 1\n'); await w.close();
+      await w.write('# NFSU2 settings, read at every launch.\nmovies = off\nNFSU2_FNG_LOG = 1\nroam = off\n'); await w.close();
     });
     // Play
     await page.evaluate(() => window.__nfsu2.log.clear());

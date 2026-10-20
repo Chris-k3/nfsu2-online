@@ -181,7 +181,7 @@ kbd {
 }
 .switch:disabled { cursor: not-allowed; opacity: 0.5; }
 
-.set input[type="number"], .set input[type="text"], .profiles input[type="text"] {
+.set input[type="number"], .set input[type="text"], .profiles input[type="text"], .dlg input[type="text"] {
   width: 128px; height: 40px; padding: 0 12px; border: 2px solid var(--edge); border-radius: 8px;
   background: var(--field); color: var(--lime); font: italic 700 16px/24px var(--font);
 }
@@ -281,6 +281,8 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.64); }
 .dlg p { margin-bottom: 16px; }
 .dlg ul { margin: 0 0 16px; padding-left: 24px; color: var(--muted); font-size: 14px; line-height: 20px; }
 .dlg .row.end { margin-top: 8px; }
+.dlg-field { display: flex; align-items: center; gap: 12px; }
+.dlg-field input[type="text"] { flex: 1; min-width: 0; }
 .dlg.help { width: min(560px, calc(100vw - 32px)); }
 .dlg-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 .dlg-head h2 { margin: 0; }

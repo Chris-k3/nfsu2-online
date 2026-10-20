@@ -66,7 +66,8 @@ pc.on('requestfailed', r => { if (/^\/data(-blocks)?\//.test(new URL(r.url()).pa
 const page = pc.pages()[0] ?? await pc.newPage();
 page.on('pageerror', e => console.log(`  PAGEERROR ${e}`));
 // no page address parameters: offline the page cannot ask whether the server is a development server, so it
-// takes none (shell.ts); the game's screen log (for the title screen) is in settings.ini instead
+// takes none (shell.ts); the game's screen log (for the title screen) is in settings.ini instead, with free
+// roam answered (a player's first Play asks)
 async function open(ms = 90000) {
   const t0 = Date.now();
   await page.goto(`${BASE}/`, { timeout: ms });
@@ -97,7 +98,7 @@ try {
       try {
         const fh = await (await (await navigator.storage.getDirectory()).getDirectoryHandle('save')).getFileHandle('settings.ini');
         const text = await (await fh.getFile()).text();
-        if (!/^NFSU2_FNG_LOG = 1$/m.test(text)) { const w = await fh.createWritable(); await w.write(text + '\nNFSU2_FNG_LOG = 1\n'); await w.close(); }
+        if (!/^NFSU2_FNG_LOG = 1$/m.test(text)) { const w = await fh.createWritable(); await w.write(text + '\nNFSU2_FNG_LOG = 1\nroam = off\n'); await w.close(); }
         return true;
       } catch { return false; }
     }, null, { timeout: 30000, polling: 250 });

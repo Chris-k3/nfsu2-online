@@ -242,6 +242,12 @@ try {
     await until(s => s.have > 2 * M);
     const workers = () => page.workers().map(w => new URL(w.url()).pathname.replace(/^\/host\/|\.js$/g, '')).filter(n => n !== 'game-worker');
     const before = workers();
+    // free roam answered, so the first Play does not ask (shell.ts askRoam)
+    await page.evaluate(async () => {
+      const fh = await (await (await navigator.storage.getDirectory()).getDirectoryHandle('save', { create: true })).getFileHandle('settings.ini', { create: true });
+      const text = await (await fh.getFile()).text();
+      const w = await fh.createWritable(); await w.write(`${text}\nroam = off\n`); await w.close();
+    });
     await page.click('#play');
     const paused = await until(s => s.state === 'paused', 10000);
     // the game made from random bytes does not get far: its I/O worker is up, then the game ends or is stopped

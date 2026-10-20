@@ -23,10 +23,10 @@ import { loadGame, serverRev, type Loaded } from './loader';
 import { claimInstance } from './instance';
 import { LogRing, downloadBlob, stamp } from './logs';
 import { enterFullscreen, exitFullscreen, isFullscreen, measureRefresh, settledSize, trackCanvasSize } from './display';
-import { HOST_FIXED, pageOnly, resolveEnv, settingsUpgrade, TEMPLATE, type Resolved } from './settings';
+import { checkSetting, HOST_FIXED, pageOnly, resolveEnv, settingsUpgrade, TEMPLATE, type Resolved } from './settings';
 import { exists, filesOf, listProfiles, PROFILES_DIR, readText, removeSaveDir, writeFile } from './savefs';
 import { turnOnAutosave } from './profile';
-import { SettingsPanel } from './settings-ui';
+import { putKey, SettingsPanel } from './settings-ui';
 import { serverAnswers, watchPlayers } from './players';
 import { SavesPanel } from './saves-ui';
 import { FpsOverlay, FPS_MODES, type FpsMode } from './overlay';
@@ -196,6 +196,46 @@ function stageCanvas(): HTMLCanvasElement {
 
 let untrack: (() => void) | null = null;
 
+/**
+ * The first Play asks whether to play free roam with others (off by default: with it on, everyone on the server
+ * sees the player's name and status).  The answer goes into settings.ini as roam = on or off, so it is asked
+ * once; Not now and Esc are off.  Not asked when the file or the page address sets it already, on a test page
+ * (the address's test settings), offline or with network = off.  The name shows only when there is one (Your
+ * name, else the newest career profile's): a new player has none yet, the game asks for it before free roam.
+ */
+async function askRoam() {
+  const r = resolved();
+  if (r.source.NFSU2_ROAM || TEST_PARAMS.some(k => q.has(k)) || offline || /^(off|0|none)$/i.test(r.env.NFSU2_NET?.trim() ?? '')) return;
+  const name = (r.source.NFSU2_ROAM_NAME === 'settings.ini' ? r.env.NFSU2_ROAM_NAME : '') || (await newestProfile())?.name || '';
+  const p = (text: string) => Object.assign(document.createElement('p'), { textContent: text });
+  const body = document.createElement('div');
+  body.append(p('Other players on this server can drive in your career\'s free roam with you. You see their cars with their names over them, they see yours, and you can challenge each other to outruns. Races, traffic and money stay your own.'),
+    p('With this on, everyone on this server sees your picked name and whether you\'re driving or in the menus. Players near you also see your car and where it is.'));
+  let field: HTMLInputElement | null = null;
+  if (name) {
+    const row = document.createElement('p'); row.className = 'dlg-field';
+    const label = Object.assign(document.createElement('label'), { className: 'set-label', htmlFor: 'roam-ask-name', textContent: 'Your name' });
+    const f = field = Object.assign(document.createElement('input'), { type: 'text', id: 'roam-ask-name', value: name, maxLength: 24, autocomplete: 'off', spellcheck: false });
+    // a name the setting refuses keeps the question open (Not now and Esc still close it)
+    f.oninput = () => { const v = f.value.trim(), c = v ? checkSetting('roam_name', v) : null; f.setCustomValidity(c && !c.ok ? `${c.reason}.` : ''); };
+    // Enter in the field turns it on (the form's first button, which Enter would press, is Not now)
+    f.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); $<HTMLButtonElement>('#confirm-ok').click(); } };
+    row.append(label, f);
+    body.append(row);
+  }
+  body.append(p('You can change this any time under Online on the start page.'));
+  const answer = confirmBox('Free roam with others?', body, 'Turn on', false, '', 'Not now');
+  $<HTMLButtonElement>('#confirm-ok').focus();
+  const on = await answer;
+  let text = putKey(settingsText ?? TEMPLATE, 'roam', on ? 'on' : 'off').text;
+  const typed = field?.value.trim() ?? name;
+  if (on && typed !== name) text = putKey(text, 'roam_name', typed || null).text;
+  await writeFile(SAVE, 'settings.ini', text);
+  settingsText = text;
+  void settings.refresh();
+  log.add(`[app] free roam with others: ${on ? 'on' : 'off'} (asked at the first Play)${on && typed !== name ? `, name ${typed || '(the profile\'s)'}` : ''}`);
+}
+
 async function play() {
   if ($<HTMLButtonElement>('#play').disabled || session || starting) return;
   starting = true; updatePlay();
@@ -205,8 +245,10 @@ async function play() {
 async function startGame() {
   // settings.ini as it is now (another tab or the raw editor may have changed it,
   // and the Mac app reads it at every launch); a short read, well inside the click's
-  // user activation, which full screen needs
+  // user activation, which full screen needs (after the free-roam question, its
+  // button's click is the activation)
   await Promise.race([loadSettings().catch(e => log.add(`[app] settings.ini not read again: ${e}`)), new Promise(r => setTimeout(r, 1000))]);
+  await askRoam();
   const pre = resolved();
   // inside the click: things that need a user gesture.  The context runs at the
   // mixer's own rate (44.1 kHz), so the worklet does not resample.
@@ -579,12 +621,13 @@ function quitLabel(): string {
 }
 
 // ------------------------------------------------------------- helpers --
-function confirmBox(title: string, body: Node | string, ok: string, danger = false, about = ''): Promise<boolean> {
+function confirmBox(title: string, body: Node | string, ok: string, danger = false, about = '', cancel = 'Cancel'): Promise<boolean> {
   const d = $<HTMLDialogElement>('#confirm');
   d.dataset.about = about;            // 'quit': closed when the game ends (endStage)
   $('#confirm-title').textContent = title;
   const b = $('#confirm-body'); b.replaceChildren(typeof body === 'string' ? Object.assign(document.createElement('p'), { textContent: body }) : body);
-  const okb = $<HTMLButtonElement>('#confirm-ok'); okb.textContent = ok; okb.className = danger ? 'danger' : 'solid';
+  const okb = $<HTMLButtonElement>('#confirm-ok'); okb.textContent = ok; okb.className = danger ? 'btn danger' : 'btn selected';
+  $('#confirm-cancel').textContent = cancel;
   d.returnValue = '';
   d.showModal();
   return new Promise(res => d.addEventListener('close', () => res(d.returnValue === 'ok'), { once: true }));
