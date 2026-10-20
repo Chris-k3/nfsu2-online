@@ -90,7 +90,7 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
 |---|---|
 | Online | its own section under Saves: how many play on this server now, free roam with others, your name (in free roam and online), room, the game's Online mode (on by default); more: solid cars and the free-roam network |
 | Game | movies, autosave; more: startup movies (skippable, original or off), sound, pause or keep running in the background, sound output latency |
-| Display | full screen on Play (off: the game plays in the browser window), resolution scale, frame rate (auto follows the screen: 120 on a 120 Hz display; 60 or 120); more: HUD layout, movie framing, cutscene bars, frame-rate counter |
+| Display | full screen on Play (off: the game plays in the browser window), resolution scale, frame rate (auto follows the screen: 120 on a 120 Hz display, 240 on a 240 Hz one; 60, 120 or 240); more: HUD layout, movie framing, cutscene bars, frame-rate counter |
 | Controller | rumble; more: controller on or off, menu buttons, dead zones |
 
 - **More settings:** each group's "More … settings" has the less common ones, and says how many of them you
