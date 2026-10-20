@@ -16,6 +16,9 @@
 //   instance  a second tab on the same saves waits, and takes over when the first closes
 //   readonly  that second tab's Settings are read-only; Play reads settings.ini again
 //   retry     a failed game.wasm download is its own check, retried by itself and by Retry
+//   update    the server on the loaded version: nothing offered after a game or when the tab is shown again;
+//             on another one: offered then (with the log's note once a game ran), offline mode's copy of
+//             /game.json untouched, and Reload loads the new page and module
 //   enterlink Enter in a focused field stays in the field, not the game; Enter on the page plays
 //   late      Stop right after Play: whatever attaches after the end is detached at once, and
 //             every WebGPU device made for it is destroyed (also when the game ended before it
@@ -387,6 +390,54 @@ try {
     const ok = (r) => r.whileFailed.status === 'Not ready' && r.whileFailed.retryShown && r.whileFailed.playDisabled && /did not load/.test(r.whileFailed.problem ?? '') &&
       r.after === 'ready' && r.wasmRequests === 2 && r.retryHiddenAfter;
     report('retry', ok(auto) && ok(button) && button.recoveredMs < 1500, { byItself: auto, retryButton: button });
+  }
+
+  // ----------------------------------------------------------- update --
+  if (want('update')) {
+    const c2 = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const p = watch(await c2.newPage(), 'U');
+    // the server's answer to the page's question; with deployed set, it has another version than the page loaded
+    let deployed = null, asked = 0;
+    await p.route('**/game.json?latest', async route => {
+      asked++;
+      const r = await route.fetch(), info = await r.json();
+      await route.fulfill({ response: r, json: deployed ? { ...info, rev: deployed } : info });
+    });
+    const state = () => p.evaluate(async () => ({ newer: window.__nfsu2.newer(), reloadShown: !document.querySelector('#reload').hidden,
+      line: document.querySelector('#newer').hidden ? null : document.querySelector('#newer').textContent,
+      kept: await (await caches.match('/game.json'))?.json().then(j => j.rev).catch(() => null) ?? null }));
+    const shown = () => p.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await open(p, `save=${RUN}-u&fresh&env=NOMOVIES%3D1`);
+    const rev = await p.evaluate(() => window.__nfsu2.checks().find(c => c.id === 'module').label.split(' ').pop());
+    await p.click('#play');
+    await p.waitForFunction(() => !!window.__nfsu2.session, null, { timeout: 30000, polling: 5 });
+    await p.evaluate(() => window.__nfsu2.session.terminate());
+    await waitPhase(p, ['exited'], 30000);
+    await shown();
+    await p.waitForTimeout(1500);
+    const same = { ...await state(), asked };
+    deployed = 'upd0000';
+    await shown();
+    await p.waitForFunction(() => !!window.__nfsu2.newer(), null, { timeout: 10000 }).catch(() => {});
+    const offered = { ...await state(), asked };
+    await shot(p, 'update-offer.png');
+    // Reload: the server's version is the page's again, and a new one offered before any game has no note on the log
+    deployed = null;
+    await Promise.all([p.waitForEvent('load'), p.click('#reload')]);
+    await waitPhase(p, ['ready'], 60000);
+    await shown();
+    await p.waitForTimeout(1500);
+    const reloaded = await state();
+    deployed = 'upd0001';
+    await shown();
+    await p.waitForFunction(() => !!window.__nfsu2.newer(), null, { timeout: 10000 }).catch(() => {});
+    const beforeGame = await state();
+    const ok = same.asked >= 2 && !same.newer && !same.reloadShown && same.line === null &&
+      offered.newer === 'upd0000' && offered.reloadShown && /new version/.test(offered.line ?? '') && /Download the log first/.test(offered.line ?? '') &&
+      (offered.kept === null || offered.kept === rev) && !reloaded.newer && !reloaded.reloadShown &&
+      beforeGame.newer === 'upd0001' && beforeGame.reloadShown && !/Download the log/.test(beforeGame.line ?? '');
+    report('update', ok, { rev, same, offered, reloaded, beforeGame });
+    await c2.close();
   }
 
   // -------------------------------------------------------- enterlink --

@@ -140,6 +140,9 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
     manifest are brought up to date too, so the copies are one version), the copies when it fails, answers 5xx or
     keeps the start page waiting 4 s, and then for 30 s first. Nothing else passes through it. At Play the page asks
     the server (`/players`, 2 s); without an answer the movies are off for that game unless all of them are cached.
+  - A newer version: the module stays loaded while the page is open, through every game it plays. After each game,
+    and when the tab is shown again, the page asks for `/game.json?latest` (the query keeps it past the offline
+    copies) and, when the server has another revision than the loaded one, says so and offers Reload.
   - `/save`: OPFS save overlay. Holds saves, `registry.txt`, `settings.ini` and logs. Closing a file the game wrote
     there posts `{ t: 'saved', path }` to the page (the "Progress saved" note, F9's last save, the end screen). Before
     each Play the page sets every profile still on the game's Save = Prompt to Autosave, once per profile

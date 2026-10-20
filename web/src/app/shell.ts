@@ -19,7 +19,7 @@
 
 import registryDefaults from '../../../app/registry-defaults.txt';
 import { checkBrowser, checkGpu, checkIsolation, checkStorage, firefoxVersion, fmtBytes, type Check } from './checks';
-import { loadGame, type Loaded } from './loader';
+import { loadGame, serverRev, type Loaded } from './loader';
 import { claimInstance } from './instance';
 import { LogRing, downloadBlob, stamp } from './logs';
 import { enterFullscreen, exitFullscreen, isFullscreen, measureRefresh, settledSize, trackCanvasSize } from './display';
@@ -414,6 +414,8 @@ function onExit(s: GameSession, code: number) {
     });
   }
   void saves.refresh();               // new or changed profiles
+  showNewer();                        // the note on the log, now that there is one
+  void checkNewer();
 }
 
 /** the game finished writing a file of the save folder: a profile is the player's progress */
@@ -582,6 +584,35 @@ async function loadModule() {
   }
 }
 
+// ------------------------------------------------------- newer version --
+// The module stays loaded while the page is open, through every game it plays,
+// so a page left open plays the version it loaded first even once the server
+// has a newer one (a player's log of 2026-10-20: one page, open from 07:50 to
+// 11:10 UTC, ran four games on it).  After each game, and when the tab is
+// shown again, the page asks the server which version it has; when that is
+// not the loaded one, it says so and offers Reload, which brings the page and
+// the module of the new version together.
+let newer: string | null = null;
+async function checkNewer() {
+  if (!loaded || newer || session || starting || offline) return;
+  const rev = await serverRev(5000);
+  if (!rev || rev === loaded.info.rev || newer) return;
+  newer = rev;
+  log.add(`[app] the server has game ${rev} now, this page ${loaded.info.rev}: Reload offered`);
+  showNewer();
+}
+/** the offer; once a game has run here, with a word on its log (only in this page: a reload clears it) */
+function showNewer() {
+  const line = $('#newer');
+  line.textContent = !newer ? '' : 'A new version of the game is on the server. Reload this page to play it: your saves and settings stay.' +
+    (lastExit ? ' Download the log first if you want to keep it: the reload clears it.' : '');
+  line.hidden = $('#reload').hidden = !newer;
+}
+async function reload() {
+  await saves.settled();              // a rename or restore the Saves section is writing ends first
+  location.reload();
+}
+
 // ----------------------------------------------------------------- boot --
 /** the start page says when the address carries test settings: in effect (a development server) or ignored */
 function showOverrides(given: string[], dev: boolean) {
@@ -622,6 +653,7 @@ export async function boot() {
   });
   $<HTMLButtonElement>('#play').onclick = () => void play();
   $<HTMLButtonElement>('#retry').onclick = () => void loadModule();
+  $<HTMLButtonElement>('#reload').onclick = () => void reload();
   $<HTMLButtonElement>('#log-btn').onclick = downloadLog;
   $('#menu').addEventListener('click', e => { const a = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-act]'); if (a) void menuAction(a.dataset.act!); });
   $('#menu').addEventListener('close', () => { $('#stage').classList.remove('cursor'); $('#stage').querySelector('canvas')?.focus(); });
@@ -645,6 +677,7 @@ export async function boot() {
   }, { capture: true });
   window.addEventListener('beforeunload', e => { if (session) { e.preventDefault(); e.returnValue = ''; } });
   document.addEventListener('fullscreenchange', () => { if (!isFullscreen() && session) toast('Full screen left. F9 has it in the menu.', 3000); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') void checkNewer(); });
 
   setCheck(checkBrowser());
   setCheck(checkIsolation());
@@ -672,6 +705,7 @@ export async function boot() {
   (window as any).__nfsu2 = {
     get phase() { return phase; }, get lastExit() { return lastExit; }, get fps() { return { game: fps.gameFps, page: fps.pageFps, source: $('#fps').dataset.source }; },
     get session() { return session; }, log, save: SAVE, download: () => download.status, offline: () => offline, displayHz: () => displayHz, retryModule: () => loadModule(),
+    newer: () => newer,
     env: () => resolved().env, settingsText: () => settingsText, checks: () => [...checks.values()],
     fpsMode: (m?: FpsMode) => { if (m && FPS_MODES.includes(m)) fps.set(m); return fps.mode; },
     quitTimes: { forcedCloseMaxMs: FORCED_CLOSE_MAX_MS, stopAfterMs: STOP_AFTER_MS },

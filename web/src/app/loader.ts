@@ -36,3 +36,12 @@ export async function loadGame(onProgress: (got: number, total: number) => void,
   const pe = performance.getEntriesByName(url).pop() as PerformanceResourceTiming | undefined;
   return { module, info, ms, transferred: pe ? pe.transferSize : -1 };
 }
+
+/** The revision the server has now, or null (no answer within ms).  The query keeps the request past offline
+ *  mode (sw.ts keeps bare paths only), so asking never makes its copy of /game.json one its module is not. */
+export async function serverRev(ms: number): Promise<string | null> {
+  try {
+    const r = await fetch('/game.json?latest', { cache: 'no-store', signal: AbortSignal.timeout(ms) });
+    return r.ok ? ((await r.json()) as GameInfo).rev || null : null;
+  } catch { return null; }
+}
