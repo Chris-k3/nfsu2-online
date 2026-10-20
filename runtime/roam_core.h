@@ -251,6 +251,7 @@ typedef struct {
     uint32_t ip;  uint16_t port;
     uint32_t id;
     int64_t  added_us, last_rx_us, last_hello_tx, last_ping_tx, last_cfgreq_tx, last_snap_rx;
+    int64_t  cfg_answer_us;        /* our record goes to it again (asked for, or at its join) from then on */
     int64_t  hub_listed_us;        /* the hub's list named it last (0: never) */
     char     name[RC_NAME_MAX + 1];
     uint8_t  platform, status;

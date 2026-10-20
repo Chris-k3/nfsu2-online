@@ -586,6 +586,7 @@ int rc_interp_eval(rc_interp *ip, int64_t now_us, int64_t frame_dt_us, int64_t d
 #define T_DROP        10000000      /* forget the peer */
 #define T_GOSSIP_FORGET 60000000
 #define T_CFGREQ        500000
+#define T_CFG_ANSWER    250000      /* the record to one peer, asked for or at its join: at most this often */
 #define T_MISMATCH_NOTE 30000000    /* a protocol or room mismatch is noted at most this often */
 #define T_HUB_HELLO    1000000      /* to the hub: a HELLO this often */
 #define T_HUB_SNAP      500000      /* and a SNAP (where we are) this often */
@@ -737,6 +738,15 @@ static void send_cfg(rc_session *s, rc_peer *p, uint8_t have_mask){
         tx(s, p, &m);
     }
 }
+/* the record to a peer that asked for it, or joined: at most every
+ * T_CFG_ANSWER (it asks every T_CFGREQ), so that a peer asking without end (a
+ * 23-byte request for up to 2 KB) cannot spend this player's link on answers
+ * (the security review: past the switch's limit its car froze for everyone) */
+static void answer_cfg(rc_session *s, rc_peer *p, uint8_t have_mask, int64_t now){
+    if (now < p->cfg_answer_us && p->cfg_answer_us - now <= T_CFG_ANSWER) return;
+    p->cfg_answer_us = now + T_CFG_ANSWER;
+    send_cfg(s, p, have_mask);
+}
 static void drop_peer(rc_session *s, int i, const char *why){
     rc_peer *p = &s->peer[i];
     if (p->state == RC_PS_EST) note(s, RC_EV_LEAVE, i, p->name, " left: ", why);
@@ -860,7 +870,7 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
                     p->state = RC_PS_EST; s->peers_dirty = 1;
                     note(s, RC_EV_JOIN, i, p->name, " joined", "");
                     send_hello(s, p, now);                       /* so it learns at once */
-                    send_cfg(s, p, 0);
+                    answer_cfg(s, p, 0, now);
                 }
             } else if (now - p->last_hello_tx > 100000) send_hello(s, p, now);   /* answer: now we hear it */
         } else if (!p->hears_us){
@@ -920,8 +930,8 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
         }
         break; }
     case RC_MSG_CFG_REQ:
-        if (p->state != RC_PS_EST || m.u.cfgreq.cfg_rev != s->cfg_rev) { if (p->state == RC_PS_EST) send_cfg(s, p, 0); return; }
-        send_cfg(s, p, m.u.cfgreq.have_mask);
+        if (p->state != RC_PS_EST) return;
+        answer_cfg(s, p, m.u.cfgreq.cfg_rev == s->cfg_rev ? m.u.cfgreq.have_mask : 0, now);
         break;
     case RC_MSG_PING: {
         if (p->state != RC_PS_EST) return;

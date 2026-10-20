@@ -242,6 +242,7 @@ static uint32_t node_ip(int i){ return 0x7f000001u; (void)i; }
 static uint16_t node_port(int i){ return (uint16_t)(50000 + i); }
 static int node_of(uint32_t ip, uint16_t port){ if (ip != 0x7f000001u) return -1; for (int i = 0; i < NN; i++) if (node_port(i) == port) return i; return -1; }
 static int g_bcast_calls;
+static int g_cfg_tx[NN];                    /* CFG datagrams each node sent */
 /* a stand-in for the server's free-roam hub (web/server/roam-hub.mjs): it
  * counts what each node sends it and, while on, lists g_hub_link[i] for node
  * i every second */
@@ -258,6 +259,7 @@ static void hub_in(int from, const uint8_t *b, int len){
 static void net_send(void *u, uint32_t ip, uint16_t port, const uint8_t *buf, int len){
     if (ip == HUB_IP && port == HUB_PORT){ hub_in((int)(intptr_t)u, buf, len); return; }
     int from = (int)(intptr_t)u, to = node_of(ip, port);
+    if (len > 5 && buf[5] == RC_MSG_CFG) g_cfg_tx[from]++;
     if (to < 0 || g_drop[from][to]) return;
     if (g_loss_pct && (int)(rnd() % 100u) < g_loss_pct) return;
     for (int copy = 0; copy < 2; copy++){
@@ -593,6 +595,28 @@ static void t_review(void){
     rc_set_cfg(&g_n[1], ok_rec, okn, g_now);
     drive(2, g_now + 2000000);
     CHECK(k01 >= 0 && g_n[0].peer[k01].cfg_len == okn, "a new revision is fetched again");
+    /* a peer asking for the car record without end (a 23-byte CFG_REQ, for
+     * the current revision or another, each answered with the whole record):
+     * answered at most every 250 ms (the security review: every one was) */
+    { mesh(2, 8); g_now = 0;
+      rc_add_peer(&g_n[0], node_ip(1), node_port(1), 1, 0); rc_add_peer(&g_n[1], node_ip(0), node_port(0), 1, 0);
+      rc_carcfg big; memset(&big, 0, sizeof big); big.type_hash = 0x77u; strcpy(big.type_name, "SKYLINE"); big.n_parts = 150;
+      for (int i = 0; i < 150; i++){ big.part[i].slot = (uint8_t)i; big.part[i].key = 0x2000u + (uint32_t)i; }
+      uint8_t brec[RC_CFG_MAX]; int bn = rc_carcfg_encode(&big, brec, sizeof brec);
+      rc_set_cfg(&g_n[0], brec, bn, 0);
+      drive(2, 2000000);
+      int k10 = peer_of(1, 0x500), c0 = g_cfg_tx[0], asked = 0;
+      int64_t end = g_now + 2000000;
+      while (g_now < end){
+          rc_msg q; memset(&q, 0, sizeof q); q.h.type = RC_MSG_CFG_REQ; q.h.sender = 0x501;
+          q.u.cfgreq.cfg_rev = (uint16_t)(g_n[0].cfg_rev + (uint16_t)(asked++ & 1));
+          uint8_t qb[64]; int qn = rc_encode(&q, qb, sizeof qb);
+          rc_receive(&g_n[0], node_ip(1), node_port(1), qb, qn, g_now);
+          drive(2, g_now + 20000);
+      }
+      int frags = g_cfg_tx[0] - c0;
+      CHECK(bn > RC_CFG_FRAG && k10 >= 0 && g_n[1].peer[k10].cfg_len == bn && est(0) == 1 && asked == 100 && frags <= 2 * 9,
+            "a peer asking for the car record 50 times a second: %d fragments back for %d requests in 2 s", frags, asked); }
     /* encoder edge values: NaN and out-of-range floats give defined bytes
      * (the same on x86: tests/roam_selftest.c) */
     memset(&m, 0, sizeof m); m.h.type = RC_MSG_SNAP; m.h.sender = 1; m.u.snap.n = 1; m.u.snap.status = RC_ST_ROAM;

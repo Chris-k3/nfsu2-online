@@ -94,7 +94,7 @@ static struct {
     uint64_t udp_out, udp_in, udp_local, udp_noport, udp_outside, udp_qfull, udp_oversize, udp_bcast_out;
     uint64_t tcp_out, tcp_in, tcp_local, tcp_refused, tcp_unreach, tcp_timeout, tcp_rst_in, tcp_rst_out, tcp_bytes_out, tcp_bytes_in;
     uint64_t tcp_reset_link, tcp_overflow, icmp_out, icmp_in, echo_answered, bad;
-    uint64_t unreach_sender, unreach_conn, unreach_first, unreach_none, ctl_waited, ctl_lost;
+    uint64_t unreach_sender, unreach_conn, unreach_first, unreach_none, ctl_waited, ctl_lost, auto_held;
 } S;
 
 static uint64_t now_us(void){ return ws_now_us(); }
@@ -425,6 +425,39 @@ static void race_note(uint32_t ip_h){
 }
 
 /* ---- the LAN thread: received frames ------------------------------------------------- */
+/* Answers this "host" gives by itself, not the game: a port unreachable, an
+ * echo reply, a RST to a segment of no connection.  Each costs its frame's
+ * size and AUTO_COST more; at most AUTO_SRC bytes a second go to one sender
+ * and AUTO_ALL to all of them (a burst of 2 s each), so that someone on the
+ * switch who sends stray frames cannot make this browser spend its share of
+ * the switch on answers: its own traffic was dropped then (the security
+ * review).  The game asks for none of them, so none waits: one over is not
+ * sent (g_mu held). */
+#define AUTO_COST  64u
+#define AUTO_SRC   4096u
+#define AUTO_ALL   32768u
+typedef struct { uint64_t t, v; int set; } AutoBucket;       /* v: bytes x 10^6 */
+static AutoBucket g_auto_src[256], g_auto_all;
+static int auto_has(AutoBucket *b, uint64_t rate, uint64_t n, uint64_t now){
+    uint64_t cap = 2u * rate * 1000000u;
+    if (!b->set){ b->set = 1; b->v = cap; }
+    else if (now > b->t){ b->v += (now - b->t) * rate; if (b->v > cap) b->v = cap; }
+    b->t = now;
+    return b->v >= n * 1000000u;
+}
+static int auto_ok(uint32_t src_h, uint32_t len){
+    uint64_t now = now_us(), n = (uint64_t)len + AUTO_COST;
+    AutoBucket *b = &g_auto_src[src_h & 255u];
+    if (!auto_has(b, AUTO_SRC, n, now) | !auto_has(&g_auto_all, AUTO_ALL, n, now)){ S.auto_held++; return 0; }
+    b->v -= n * 1000000u; g_auto_all.v -= n * 1000000u;
+    return 1;
+}
+/* a RST to a segment of no connection (under the limit above): sent? */
+static int rst_back(const net_slot *sl, uint32_t cid){
+    if (!auto_ok(sl->src_ip, NET_LAN_HDR)) return 0;
+    tx_ctl(sl->src_ip, sl->dst_port, sl->src_port, NET_LAN_TCP_RST, cid);
+    return 1;
+}
 static void rx_frame(const net_slot *sl){
     uint32_t n = sl->len;
     if (n < NET_LAN_HDR || n > NET_MAX_PAYLOAD){ S.bad++; return; }
@@ -448,14 +481,15 @@ static void rx_frame(const net_slot *sl){
         if (!bc && (sport == RACE_PORT || dport == RACE_PORT)) race_note(sl->src_ip);
         if (!udp_deliver(src_n, sport, bc ? 0xFFFFFFFFu : own_n(), dport, p, pn, bc) && !bc){
             S.udp_noport++;
-            tx(NET_KIND_LAN_UDP, sl->src_ip, dport, sport, NET_LAN_UDP_UNREACH, 64, 0, 0, 0);   /* "ICMP port unreachable" */
+            if (auto_ok(sl->src_ip, NET_LAN_HDR))
+                tx(NET_KIND_LAN_UDP, sl->src_ip, dport, sport, NET_LAN_UDP_UNREACH, 64, 0, 0, 0);   /* "ICMP port unreachable" */
         }
         break;
     case NET_KIND_LAN_ICMP:
         if (pn < 8) break;
         S.icmp_in++;
         icmp_deliver(src_n, p, pn);                              /* raw sockets see every ICMP message */
-        if (p[0] == 8 && !bc){                                   /* echo request: answered by this "host" */
+        if (p[0] == 8 && !bc && auto_ok(sl->src_ip, n)){         /* echo request: answered by this "host" */
             uint8_t rep[NET_MAX_PAYLOAD];
             memcpy(rep, p, (size_t)pn); rep[0] = 0; rep[1] = 0; icmp_cksum(rep, pn);
             if (tx(NET_KIND_LAN_ICMP, sl->src_ip, 0, 0, 0, 64, 0, rep, (uint32_t)pn)) S.echo_answered++;
@@ -474,12 +508,12 @@ static void rx_frame(const net_slot *sl){
             VSock *l = find_listener(own_n(), dport);
             if (!l || l->pending >= l->backlog + 4){
                 S.tcp_refused++;
-                tx_ctl(sl->src_ip, dport, sport, NET_LAN_TCP_RST, cid);
-                ws_log("virtual LAN: tcp %s:%u -> :%u refused (%s)", ipn(src_n, b1), sport, dport, l ? "backlog full" : "no listener");
+                if (rst_back(sl, cid))
+                    ws_log("virtual LAN: tcp %s:%u -> :%u refused (%s)", ipn(src_n, b1), sport, dport, l ? "backlog full" : "no listener");
                 break;
             }
             k = conn_new(own_n(), dport, src_n, sport, cid, C_EST);
-            if (!k){ tx_ctl(sl->src_ip, dport, sport, NET_LAN_TCP_RST, cid); break; }
+            if (!k){ rst_back(sl, cid); break; }
             acc_push(l, k);
             S.tcp_in++;
             tx_ctl(sl->src_ip, dport, sport, NET_LAN_TCP_SYNACK, cid);
@@ -488,14 +522,14 @@ static void rx_frame(const net_slot *sl){
             break; }
         case NET_LAN_TCP_SYNACK:
             if (k && k->state == C_SYN_SENT) k->state = C_EST;
-            else if (!k || k->state != C_EST) tx_ctl(sl->src_ip, dport, sport, NET_LAN_TCP_RST, cid);
+            else if (!k || k->state != C_EST) rst_back(sl, cid);
             break;
         case NET_LAN_TCP_RST:
             if (k){ S.tcp_rst_in++; if (k->state == C_SYN_SENT) S.tcp_refused++; got_rst(k); }
             break;
         case NET_LAN_TCP_DATA:
             if (!k || k->state != C_EST || k->rx_rst){
-                if (!k || !k->rst_sent) tx_ctl(sl->src_ip, dport, sport, NET_LAN_TCP_RST, cid);
+                if (!k || !k->rst_sent) rst_back(sl, cid);
                 break;
             }
             if (k->rx_fin) break;
@@ -521,7 +555,7 @@ static void stats_line(const char *when){
     ws_log("virtual LAN %s: frames out %llu in %llu; udp out %llu (broadcast %llu, local %llu) in %llu, no port %llu, "
            "outside the LAN %llu, queue full %llu; tcp out %llu in %llu local %llu, refused %llu, unreachable %llu, "
            "timed out %llu, resets in %llu out %llu, link resets %llu, bytes out %llu in %llu; icmp out %llu in %llu, "
-           "echo answered %llu; port unreachable to the sender %llu (connected %llu, first binder %llu, nobody %llu); "
+           "echo answered %llu, answers over the limit %llu; port unreachable to the sender %llu (connected %llu, first binder %llu, nobody %llu); "
            "TX ring full %llu (control frames waited %llu, lost %llu), offline %llu; page: switch rtt %.2f ms, RX ring full %u",
            when, (unsigned long long)S.tx_frames, (unsigned long long)S.rx_frames, (unsigned long long)S.udp_out,
            (unsigned long long)S.udp_bcast_out, (unsigned long long)S.udp_local, (unsigned long long)S.udp_in,
@@ -530,7 +564,7 @@ static void stats_line(const char *when){
            (unsigned long long)S.tcp_refused, (unsigned long long)S.tcp_unreach, (unsigned long long)S.tcp_timeout,
            (unsigned long long)S.tcp_rst_in, (unsigned long long)S.tcp_rst_out, (unsigned long long)S.tcp_reset_link,
            (unsigned long long)S.tcp_bytes_out, (unsigned long long)S.tcp_bytes_in, (unsigned long long)S.icmp_out,
-           (unsigned long long)S.icmp_in, (unsigned long long)S.echo_answered, (unsigned long long)S.unreach_sender,
+           (unsigned long long)S.icmp_in, (unsigned long long)S.echo_answered, (unsigned long long)S.auto_held, (unsigned long long)S.unreach_sender,
            (unsigned long long)S.unreach_conn, (unsigned long long)S.unreach_first, (unsigned long long)S.unreach_none,
            (unsigned long long)S.tx_full, (unsigned long long)S.ctl_waited, (unsigned long long)S.ctl_lost,
            (unsigned long long)S.tx_offline, MB ? MB->switch_rtt_ms : 0.0, MB ? ld(&MB->rx_full_drop) : 0u);

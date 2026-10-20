@@ -15,8 +15,9 @@
  * browser (SYN/SYNACK/DATA/FIN/RST, GONE, link loss), ICMP echo, select,
  * Netbios, identity; a port-unreachable notice reaching the socket that sent
  * (several binders of one port), control frames (FIN) after a send that
- * filled the TX ring, and the page closing its link at exit (the log line,
- * checked by the .mjs).  Also SHA-256 (runtime/web/sha256.c) against FIPS
+ * filled the TX ring, the answers the backend gives by itself (port
+ * unreachable, echo reply, RST) limited per sender and in all, and the page
+ * closing its link at exit (the log line, checked by the .mjs).  Also SHA-256 (runtime/web/sha256.c) against FIPS
  * 180-4 vectors.  Output: one line per check, then "lan_unit: N passed, M failed". */
 #include "cpu.h"
 #include "winsock.h"
@@ -478,6 +479,33 @@ int main(void){
         WS("sendto", 6, u3, GA(g_buf), 9u, 0u, sa(g_sa, ipn(10, 77, 0, 3), 3658), 16u);
         vlan_test_pump();
         check("... and nothing is sent twice", tx_take(&f) && f.kind == NET_KIND_LAN_UDP && tx_count() == 0, 0);
+    }
+
+    printf("answers this host gives by itself: limited per sender and in all (the security review)\n");
+    {   /* someone on the switch sends stray frames as fast as it can: echo requests of 1400 bytes, datagrams to
+         * a port nobody holds, SYNs to a port nobody listens on, DATA of no connection.  Each was answered, and
+         * the answers spent this browser's share of the switch, past which its own frames were dropped */
+        tx_drain();
+        static uint8_t ping[1400]; memset(ping, 0, sizeof ping); ping[0] = 8;
+        const uint32_t X = 0x0A4D0010u, Y = 0x0A4D0011u;            /* 10.77.0.16, .17 */
+        Frame g; int back = 0, bytes = 0;
+        for (int i = 0; i < 100; i++){
+            rx_put(NET_KIND_LAN_ICMP, X, ME, 0, 0, 0, 0, ping, sizeof ping);
+            rx_put(NET_KIND_LAN_UDP, X, ME, 5000, 4444, 0, 0, "x", 1);
+            rx_put(NET_KIND_LAN_TCP, X, ME, 50100, 9999, NET_LAN_TCP_SYN, 0x7000u + (uint32_t)i, 0, 0);
+            rx_put(NET_KIND_LAN_TCP, X, ME, 50101, 9900, NET_LAN_TCP_DATA, 0x8000u + (uint32_t)i, "zz", 2);
+            while (tx_take(&g)){ back++; bytes += (int)g.len + 64; }
+        }
+        check("400 stray frames from one sender: answers stop at its 8 KB", back > 0 && bytes <= 2 * 4096 + 200, "%d answers, %d bytes", back, bytes);
+        rx_put(NET_KIND_LAN_ICMP, Y, ME, 0, 0, 0, 0, echo, 16);
+        int ans = 0; while (tx_take(&g)) if (g.kind == NET_KIND_LAN_ICMP && g.dst == Y && g.d[0] == 0) ans++;
+        check("... and another sender's ping is still answered", ans == 1, "%d", ans);
+        back = 0; bytes = 0;
+        for (uint32_t h = 0x20; h < 0x40; h++) for (int i = 0; i < 10; i++){
+            rx_put(NET_KIND_LAN_ICMP, 0x0A4D0000u | h, ME, 0, 0, 0, 0, ping, sizeof ping);
+            while (tx_take(&g)){ back++; bytes += (int)g.len + 64; }
+        }
+        check("32 senders together: answers stop at 64 KB for all", back > 0 && bytes <= 2 * 32768 + 500, "%d answers, %d bytes", back, bytes);
     }
 
     printf("cleanup\n");
