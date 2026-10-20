@@ -20,6 +20,14 @@
 // within 240 m changed links 28 times a second with 20 % instead).  The game shows a car for each of a player's
 // links (runtime/roam_game.c).
 //
+// A busy server gives every player fewer links.  Each link is two players' snapshots to each other, 20 a second each
+// way (fewer for far ones), so a crowd costs its players times their links, all on the server's one thread, which the
+// switch, Online mode and the page's files share; a thread that cannot keep up delays every snapshot, and the cars
+// stutter for everyone (nfsu2.xyz at 855 players, 2026-10-20: 180-600 ms for a /players answer).  While the thread
+// worked more than busyHigh of the last tick (performance.eventLoopUtilization) the cap on the links goes down by a
+// quarter, at most every capDownMs, to minDegree at the least; once it has room again (under busyLow) the cap goes
+// back up by 2 every capUpMs.  The nearest links stay.
+//
 // What the hub keeps, in memory only: per player endpoint its virtual address, port, id, room hash, status, name
 // (for info()) and last position; gone goneMs after its last message, when it says BYE, or when it leaves the
 // switch.  Reading positions is what choosing by distance costs: the switch itself never looks inside a frame.
@@ -37,7 +45,7 @@ const DEGREE_V1 = 7;                            // roam_core.h RC_PEERS_V1: what
 // order but only as far as it needs them: each player's nearest one after another (a grid) until it has its links
 // (every pair of 2000 players in one room took the hub 1.5-4.5 s a tick, 1000 players 0.5 s)
 export const ROAM_HUB_DEFAULTS = Object.freeze({ degree: 32, tickMs: 1000, staleMs: 60_000, goneMs: 6_000, keep: 0.5, holdMs: 5_000,
-  maxPerVip: 2, maxPlayers: 2048, exactRoom: 256 });
+  maxPerVip: 2, maxPlayers: 2048, exactRoom: 256, minDegree: 8, busyHigh: 0.85, busyLow: 0.6, capDownMs: 5_000, capUpMs: 15_000 });
 const PER_CELL = 8, MIN_CELL = 5;               // the grid: cells (x and y) for about 8 players each, 5 m at least
 
 /** one free-roam datagram, or null: the fields the hub needs (HELLO, SNAP, BYE), checked as roam_core.c's decoder does */
@@ -160,7 +168,7 @@ class Heap {
 
 export class RoamHub {
   /** opts: any of ROAM_HUB_DEFAULTS; now() (ms, for the tests); log(line); timer: false for no tick timer (the tests
-   *  call tick()) */
+   *  call tick()); busy() (0 to 1, for the tests): how busy the server's thread was since the last tick */
   constructor(opts = {}) {
     this.o = { ...ROAM_HUB_DEFAULTS };
     for (const k of Object.keys(ROAM_HUB_DEFAULTS)) if (Number.isFinite(opts[k]) && opts[k] > 0) this.o[k] = opts[k];
@@ -170,7 +178,11 @@ export class RoamHub {
     this.players = new Map();                   // `${vip}:${port}` -> player
     this.id = (Math.random() * 0xfffffffe + 1) >>> 0;
     this.seq = 0;
-    this.st = { frames: 0, bad: 0, refused: 0, lists: 0, ticks: 0, tickMsMax: 0 };
+    // the cap on every player's links (its degree at most), and when it last changed
+    this.cap = this.o.degree; this.capAt = -Infinity;
+    let elu = performance.eventLoopUtilization();
+    this.busy = opts.busy ?? (() => { const e = performance.eventLoopUtilization(), d = performance.eventLoopUtilization(e, elu); elu = e; return d.utilization; });
+    this.st = { frames: 0, bad: 0, refused: 0, lists: 0, ticks: 0, tickMsMax: 0, busy: 0, capCuts: 0 };
     this.timer = opts.timer === false ? null : setInterval(() => this.tick(), this.o.tickMs);
     this.timer?.unref?.();
   }
@@ -214,6 +226,7 @@ export class RoamHub {
   /** every tickMs: who is linked to whom, and every player's list */
   tick() {
     const t0 = performance.now(), now = this.now(), o = this.o;
+    this.adjust(now);
     for (const [k, p] of this.players) if (now - p.seen > o.goneMs) this.drop(k);
     const rooms = new Map();
     for (const p of this.players.values()) {
@@ -242,19 +255,33 @@ export class RoamHub {
     const ms = performance.now() - t0;
     this.st.ticks++; if (ms > this.st.tickMsMax) this.st.tickMsMax = ms;
   }
+  /** the cap on the links: a quarter down while the server's thread is busy, 2 up once it has room again */
+  adjust(now) {
+    const o = this.o, busy = this.busy(), was = this.cap;
+    this.st.busy = Math.round(busy * 100);
+    if (busy > o.busyHigh && now - this.capAt >= o.capDownMs) this.cap = Math.max(Math.min(o.minDegree, o.degree), Math.floor(this.cap * 3 / 4));
+    else if (busy < o.busyLow && now - this.capAt >= o.capUpMs) this.cap = Math.min(o.degree, this.cap + 2);
+    if (this.cap === was) return;
+    this.capAt = now;
+    if (this.cap < was) this.st.capCuts++;
+    this.log(`[roam] the server's thread was ${this.st.busy} % busy: at most ${this.cap} links a player (was ${was})`);
+  }
+  /** a player's links at most: its degree, under the cap */
+  degreeOf(p) { return Math.min(p.degree, this.cap); }
   /** a pair of players and its place in the order: a link younger than holdMs first, an older one at keep its distance */
   pair(a, b, now) {
     const since = a.links.get(b.key);
     const d = since === undefined ? Math.hypot(a.p[0] - b.p[0], a.p[1] - b.p[1], a.p[2] - b.p[2])
       : now - since < this.o.holdMs ? -1 : Math.hypot(a.p[0] - b.p[0], a.p[1] - b.p[1], a.p[2] - b.p[2]) * this.o.keep;
-    return { d, a: a.key, b: b.key, da: a.degree, db: b.degree, since: since ?? now };
+    return { d, a: a.key, b: b.key, da: this.degreeOf(a), db: this.degreeOf(b), since: since ?? now };
   }
   /** the links of a room larger than exactRoom, as link() makes them from every pair sorted (at one place in the
    *  order the pair of the lower index first), without sorting them all: the last tick's links at their own place,
    *  and each player's nearest one after another (Near) while it has room, merged in that order (a Heap) */
   linkMany(list, links, now) {
     const at = new Map(list.map((p, i) => [p.key, i])), mine = list.map(p => links.get(p.key));
-    const room = i => mine[i].size < list[i].degree, old = (i, j) => list[i].links.has(list[j].key) || list[j].links.has(list[i].key);
+    const deg = list.map(p => this.degreeOf(p));
+    const room = i => mine[i].size < deg[i], old = (i, j) => list[i].links.has(list[j].key) || list[j].links.has(list[i].key);
     const g = grid(list, list.map((_, i) => i)), heap = new Heap(), near = [];
     const put = (d, i, j, since, nearest) => heap.push([d, Math.min(i, j), Math.max(i, j), i, j, since, nearest]);
     const ahead = i => { const c = near[i].next(); if (c) put(c[0], i, c[1], now, true); };
@@ -281,7 +308,7 @@ export class RoamHub {
   info() {
     let linked = 0, links = 0;
     for (const p of this.players.values()) { if (p.links.size) linked++; links += p.links.size; }
-    return { players: this.players.size, linked, links: links / 2, ...this.st };
+    return { players: this.players.size, linked, links: links / 2, cap: this.cap, ...this.st };
   }
   stop() { clearInterval(this.timer); this.timer = null; }
 }

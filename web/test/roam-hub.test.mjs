@@ -68,7 +68,8 @@ function lists(sent) {
 }
 function hubFor(opts = {}) {
   let t = 1_000_000;
-  const hub = new RoamHub({ timer: false, now: () => t, ...opts }), sent = [];
+  // an idle server unless a test says otherwise (the tests call tick() back to back: the real thread looks busy)
+  const hub = new RoamHub({ timer: false, now: () => t, busy: () => 0, ...opts }), sent = [];
   hub.attachSwitch((vip, f) => { sent.push({ vip, f }); return true; });
   return { hub, sent, at: ms => { t = ms; }, now: () => t, step: ms => { t += ms; } };
 }
@@ -208,6 +209,38 @@ for (const core of [1, 2]) test(`64 players of core version ${core} in one place
   assert.ok(n.every(x => x <= most) && n.filter(x => x === most).length >= 60, `lists of ${most} (${n.join(' ')})`);
   console.log(`64 players of core version ${core}: ${hub.info().links} links, tick at most ${hub.info().tickMsMax.toFixed(2)} ms`);
   assert.ok(hub.info().tickMsMax < 50);
+});
+
+// a busy server: the cap on the links a quarter down at most every 5 s to 8, nothing between 60 and 85 %, 2 up every 15 s
+for (const [way, opts] of WAYS) test(`a busy server: every player gets fewer links, and more again once it has room (${way})`, () => {
+  let busy = 0.95;
+  const lines = [], { hub, sent, step } = hubFor({ ...opts, busy: () => busy, log: l => lines.push(l) });
+  const caps = [];
+  const second = () => {
+    sent.length = 0;
+    for (let i = 0; i < 40; i++) {
+      const v = ip(`10.77.0.${2 + i}`);
+      hub.frame(v, frame(v, hello(500 + i, { core: 2 }))); hub.frame(v, frame(v, snap(500 + i, [Math.cos(i) * 30, Math.sin(i) * 30, 0])));
+    }
+    hub.tick(); step(1000);
+    const cap = hub.info().cap, L = lists(sent), n = [...L.values()].map(l => l.length);
+    assert.ok(n.every(x => x <= cap) && n.reduce((a, b) => a + b) >= 0.9 * cap * n.length, `lists of ${cap} (${n.join(' ')})`);
+    for (const [k, l] of L) for (const e of l) assert.ok(L.get(`${e.vip}:47210`).some(x => `${x.vip}:47210` === k), 'both ends');
+    const open = [...L].filter(([, l]) => l.length < cap);
+    for (const [a, la] of open) for (const [b] of open) if (a !== b) assert.ok(la.some(x => `${x.vip}:47210` === b), 'two with room left: linked');
+    caps.push(cap);
+  };
+  for (let s = 0; s < 30; s++) second();
+  assert.deepEqual([caps[0], caps[4], caps[5], caps[10], caps[15], caps[20], caps[29]], [24, 24, 18, 13, 9, 8, 8], caps.join(' '));
+  busy = 0.7;
+  for (let s = 0; s < 30; s++) second();
+  assert.ok(caps.slice(30).every(c => c === 8), 'between busyLow and busyHigh: as it is');
+  busy = 0.2;
+  for (let s = 0; s < 31; s++) second();
+  assert.deepEqual([caps[60], caps[74], caps[75], caps[90]], [10, 10, 12, 14], caps.slice(60).join(' '));
+  assert.equal(lines.length, 8);
+  assert.match(lines[0], /95 % busy: at most 24 links a player \(was 32\)/);
+  assert.equal(hub.info().capCuts, 5);
 });
 
 // a room larger than exactRoom: the grid's links against every pair's, for the same players (a city, a district and

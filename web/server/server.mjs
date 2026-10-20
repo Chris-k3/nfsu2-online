@@ -763,7 +763,8 @@ const online = ONLINE === 'on' ? new OnlineHost({ tap: trace ? f => trace.frame(
   log: (line, key) => key == null ? console.log(line) : logLimited('online', 'Online lines', key, line, 30) }) : null;
 // the switch's addresses outlive a restart (by the hashes of their tokens, lan.mjs): the players come back to them
 const LAN_STORE = path.join(STATE, 'lan-addresses.json');
-const roamHub = ROAM_HUB === 'on' ? new RoamHub() : null;
+// (its lines: the cap on the players' links going down while the server is busy and back up, at most one every 5 s)
+const roamHub = ROAM_HUB === 'on' ? new RoamHub({ log: line => console.log(line) }) : null;
 const lan = new LanSwitch({ maxPeers: MAX_PEERS, impair: DEV ? LAN_IMPAIR : '', online, roam: roamHub, tap: trace ? f => trace.frame(f) : null, store: {
   load: () => JSON.parse(fs.readFileSync(LAN_STORE, 'utf8')),
   save: list => { fs.writeFileSync(LAN_STORE + '.tmp', JSON.stringify(list), { mode: 0o600 }); fs.renameSync(LAN_STORE + '.tmp', LAN_STORE); },
