@@ -128,9 +128,10 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
     the manifest): runs of up to 8 blocks as one answer, compressed with zstd, br or gzip as Content-Encoding, which
     the browser undoes itself; a run whose first 64 KB does not compress goes as it is. An older server: byte ranges
     of `/data/`. The data but the movies crosses the network in 69 % of its size (1.37 of 1.98 GB; tracks about 40 %).
-    "Download the game data" (Game data on this PC, at the bottom of the start page) fills the cache with all but the
-    movies ahead of play from its own worker (`predownload-worker.ts`, 4 runs at once). It runs only while no game
-    runs in the tab: Play pauses it, and the game's end resumes it.
+    Game data on this PC (at the bottom of the start page) shows how much of it the cache holds. Its "Download the
+    game data" button, which filled the cache with all but the movies ahead of play, is off with the reason under it:
+    at about 110 players the live server's 1 Gbit uplink was full. The worker that did it is gone (git history:
+    `predownload-worker.ts`).
   - Offline mode: a service worker (`web/src/sw.ts`, registered once the module has loaded) keeps the start page,
     its scripts, the module, `game.json` and the manifest in Cache Storage, network first: the server's answer when
     there is one (the copy replaced when its ETag changes; after each start page from the server the workers and the
@@ -231,11 +232,9 @@ struct VOut { @builtin(position) pos: vec4f; @location(0) col0: vec4f; @location
   - `cd web && node --test test/*.test.mjs`: the unit tests (the LAN backend `lan_unit.c`, free roam, the C ns* key
     driver against the page's key path, `settings.ts` against `bundle.m`, the alias guard and test, the server,
     deployment, the security and privacy audit's regressions: `audit.test.mjs`, `page-audit.test.mjs`). They build their wasm programs with wasi-sdk from `deps/`.
-- `node web/tools/predownload-test.mjs` checks "Download the game data" in Chrome against its own server and a
-  made-up game folder: byte-exact cache, no movies, zstd where the bytes compress, stop and resume, retries, a refused
-  file, Play pausing it, a second tab. `web/test/data-blocks.test.mjs` checks the server's `/data-blocks/`.
+- `web/test/data-blocks.test.mjs` checks the server's `/data-blocks/`.
 - `node web/tools/offline-test.mjs` checks offline mode with the real game folder and a server it starts and stops:
-  the copies kept, Play to the title screen with the server gone, behind a proxy answering 502, and with a server
+  the copies kept and the data of one online start to the title screen, Play to the title screen with the server gone, behind a proxy answering 502, and with a server
   that never answers, then online again.
 - `node web/tools/run-page.mjs <url> <ms>` drives Chrome 155 (`channel: 'chrome'`, headless, WebGPU works) and streams
   the console.

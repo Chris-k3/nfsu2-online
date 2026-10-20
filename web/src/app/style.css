@@ -212,7 +212,6 @@ summary:hover { color: var(--text); }
 #saves .hint + .row { margin-top: 12px; }
 #saves h3 + .hint { margin-bottom: 0; }
 #cache-info { font-variant-numeric: tabular-nums; }
-#data-bar { margin: 0 0 16px; }
 .msg { font-size: 14px; line-height: 20px; margin-top: 12px; }
 .msg:empty { display: none; }
 .msg.warn { color: var(--warn); }

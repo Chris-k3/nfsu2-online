@@ -8,7 +8,7 @@
 //          1 MiB blocks (compressed from a server that offers it, else
 //          HTTP range requests), kept in memory, and
 //          persisted in OPFS ("cache/", datacache.ts) so the next launch reads
-//          locally ("Download all game data" fills all of it ahead).
+//          locally.
 //   /save  the save overlay: OPFS directory, read/write (saves, registry,
 //          settings.ini, logs).  Closing a file the game wrote there tells
 //          the page ({ t: 'saved', path }: "Progress saved", F9's last save).

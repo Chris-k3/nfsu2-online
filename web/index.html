@@ -147,13 +147,11 @@
     <section class="panel" id="game-data" aria-labelledby="game-data-title">
       <h2 id="game-data-title">Game data on this PC</h2>
       <p class="hint" id="cache-info">Counting…</p>
-      <div class="bar" id="data-bar" role="progressbar" aria-label="Game data download" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
-        <div class="bar-fill"></div>
-      </div>
       <div class="row">
-        <button type="button" class="btn" id="fetch-all" hidden>Download the game data</button>
+        <button type="button" class="btn" id="fetch-all" disabled aria-describedby="fetch-off" hidden>Download the game data</button>
         <button type="button" class="btn" id="clear-cache">Delete the downloaded game data</button>
       </div>
+      <p class="msg" id="fetch-off" hidden>Downloading all of it ahead is off for now: the server's bandwidth cannot keep up with every player doing it. The game still streams what it needs as it plays, and keeps it here.</p>
       <p class="msg" id="data-msg" role="status"></p>
     </section>
   </div>

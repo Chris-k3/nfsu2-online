@@ -451,7 +451,7 @@ async function sendFile(q, s, root, file, { type, cache = 'store', extra = {}, f
 // /data-blocks/<path>?b=<first>&n=<count>: blocks first .. first+count-1 of a game file (BLOCK bytes each, the
 // last one shorter; BLOCKS_MAX at most) as one 200 answer, compressed with what the client takes (zstd, br or
 // gzip as Content-Encoding, which the browser undoes by itself).  The game data then crosses the network in
-// about 70 % of its size, the tracks in about 40 %.  The page's I/O and predownload workers ask for these when
+// about 70 % of its size, the tracks in about 40 %.  The page's I/O worker asks for these when
 // the manifest names them (its "blocks"), and for byte ranges of /data/ otherwise.  The compressor streams, so a
 // client that stops reading holds no more than its buffers.  Sent as they are, never queued or refused: a run
 // whose first PROBE bytes do not compress (the movies' VP6 video, most car textures; judged per run, not per

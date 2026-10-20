@@ -129,8 +129,8 @@ traffic a month.
 - Each new player downloads the 7 MB module and then the game data they play (about 70 MB for a quick race, up to
   the whole 3 GB over a career), once: the browser keeps it. The data is compressed on the way (zstd, or br through
   Cloudflare): all but the movies is 1.37 GB on the network for 1.98 GB, the tracks about 40 %; the movies' video
-  does not compress and goes as it is. "Download the game data" on the start page fetches all but the movies at
-  once, 4 requests at a time, so a player on a slow line never waits on a loading screen.
+  does not compress and goes as it is. The start page's "Download the game data" (all but the movies at once) is
+  off: at about 110 players the 1 Gbit uplink was full.
 - Compressing costs the server about 5 s of one core per player for that whole download (zstd; br about 1.5 times
   that). At most 128 answers are compressed at once (8 per player, about 200 MB of memory); past that they go as
   they are, never held up. The image gives Node 8 helper threads for the compressing and the file reads
