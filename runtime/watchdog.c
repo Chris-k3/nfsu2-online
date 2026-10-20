@@ -7,8 +7,12 @@
  *   NFSU2_WATCHDOG=<s>   seconds without a Present before the report
  *                        (default 15; 0 turns the watchdog off).  While the
  *                        game is loading (GameFlow [0x8654a4] other than
- *                        3 = front end and 6 = in game) the limit is
- *                        4x that, at least 60 s.
+ *                        3 = front end and 6 = in game) the limit is at
+ *                        least 20 s.  It used to be 60 s, and players stuck
+ *                        on a loading screen reloaded before the report
+ *                        came; a first load that waits on the network for
+ *                        its data may now get a report it did not need
+ *                        (only log lines).
  *
  * The report gives, per guest thread: its state (running, waiting for the
  * GIL, waiting on a kernel object, in a contended critical section,
@@ -99,7 +103,7 @@ static void *wd_main(void *arg){
             reported = 0; continue; }
         double stalled = (wd_now_us() - last) / 1e6;
         uint32_t flow = mem_is_committed(0x8654a4u) ? MR32(0x8654a4u) : 0u;
-        double l = (flow == 3u || flow == 6u) ? lim : (lim * 4.0 > 60.0 ? lim * 4.0 : 60.0);
+        double l = (flow == 3u || flow == 6u) ? lim : (lim > 20.0 ? lim : 20.0);
         if (stalled < l){ reported = 0; continue; }
         if (!reported){ reported = 1; wd_report(stalled, flow); }
     }

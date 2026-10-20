@@ -185,8 +185,9 @@ export const TEMPLATE = `# NFSU2 settings, read at every launch.
 # over.  [NFSU2_SEED_REGISTRY]
 #seed_registry = on
 
-# Seconds without a new frame (outside loading screens) before the log gets
-# a report of what every game thread is doing, once per stall; 0 = off.
+# Seconds without a new frame (on a loading screen at least 20) before the
+# log gets a report of what every game thread is doing, once per stall;
+# 0 = off.
 # [NFSU2_WATCHDOG]
 #watchdog = 15
 
