@@ -73,6 +73,8 @@ function hubFor(opts = {}) {
   return { hub, sent, at: ms => { t = ms; }, now: () => t, step: ms => { t += ms; } };
 }
 const V = i => ip(`10.77.0.${10 + i}`);
+// the links of a room: every pair weighed (a room of at most exactRoom players), or the grid's nearest (a larger one)
+const WAYS = [['every pair', {}], ['the grid', { exactRoom: 1 }]];
 
 test('the hub\'s address is net_proto.h\'s and proto.ts\'s NET_ROAM_HUB', () => {
   const h = fs.readFileSync(path.join(REPO, 'runtime/web/net_proto.h'), 'utf8'), ts = fs.readFileSync(path.join(REPO, 'web/src/net/proto.ts'), 'utf8');
@@ -101,8 +103,8 @@ test('the wire: what roam_core sends the hub reads, and its PEERS lists decode i
   assert.equal(run('peers', encodePeers(0xB0B, 10, []).toString('hex')), 'ok 0', 'an empty list (the hub is there)');
 });
 
-test('links of players of core version 1: the nearest, both ends, at most 7 a player, only in free roam lately, rooms apart', () => {
-  const { hub, sent, step } = hubFor();
+for (const [how, opts] of WAYS) test(`links of players of core version 1 (${how}): the nearest, both ends, at most 7 a player, only in free roam lately, rooms apart`, () => {
+  const { hub, sent, step } = hubFor(opts);
   // 20 players on a line 10 m apart, one far away, two in another room, one with no position yet
   for (let i = 0; i < 20; i++) { hub.frame(V(i), frame(V(i), hello(100 + i))); hub.frame(V(i), frame(V(i), snap(100 + i, [i * 10, 0, 0]))); }
   hub.frame(V(20), frame(V(20), hello(120))); hub.frame(V(20), frame(V(20), snap(120, [5000, 0, 0])));
@@ -136,8 +138,8 @@ test('links of players of core version 1: the nearest, both ends, at most 7 a pl
   assert.equal(lists(sent).get(`${V(0)}:47210`).length, 0, '61 s without a SNAP: no links');
 });
 
-test('links of players of core version 2: at most 32 a player, 7 for one of version 1 among them', () => {
-  const { hub, sent } = hubFor();
+for (const [how, opts] of WAYS) test(`links of players of core version 2 (${how}): at most 32 a player, 7 for one of version 1 among them`, () => {
+  const { hub, sent } = hubFor(opts);
   // 50 players on a line 10 m apart, player 15 of core version 1
   for (let i = 0; i < 50; i++) {
     hub.frame(V(i), frame(V(i), hello(100 + i, { core: i === 15 ? 1 : 2 })));
@@ -156,8 +158,8 @@ test('links of players of core version 2: at most 32 a player, 7 for one of vers
   assert.ok(of(25).length > 16, `more than 16 for a player of version 2 (${of(25).length})`);
 });
 
-test('links stay put at the edge, players come and go', () => {
-  const { hub, sent, step } = hubFor({ degree: 1 });
+for (const [how, opts] of WAYS) test(`links stay put at the edge, players come and go (${how})`, () => {
+  const { hub, sent, step } = hubFor({ degree: 1, ...opts });
   // A at 0, B at 100: linked; C comes 10 m from A: a link stays its first 5 s
   const at = (i, x) => { hub.frame(V(i), frame(V(i), hello(200 + i))); hub.frame(V(i), frame(V(i), snap(200 + i, [x, 0, 0]))); };
   at(0, 0); at(1, 100); hub.tick();
@@ -206,6 +208,43 @@ for (const core of [1, 2]) test(`64 players of core version ${core} in one place
   assert.ok(n.every(x => x <= most) && n.filter(x => x === most).length >= 60, `lists of ${most} (${n.join(' ')})`);
   console.log(`64 players of core version ${core}: ${hub.info().links} links, tick at most ${hub.info().tickMsMax.toFixed(2)} ms`);
   assert.ok(hub.info().tickMsMax < 50);
+});
+
+// a room larger than exactRoom: the grid's links against every pair's, for the same players (a city, a district and
+// a crowd; some of core version 1; two rooms; a few far out): the same rules (at most the degree, both ends, no two
+// with room left unlinked) and about the same distances
+for (const [where, w] of [['a city', 8000], ['a district', 1500], ['a crowd', 100]]) test(`600 players in ${w} m: the grid links as every pair does`, () => {
+  let seed = 12345;
+  const rnd = () => (seed = (Math.imul(seed, 1103515245) + 12345) >>> 0) / 2 ** 32;
+  const players = Array.from({ length: 600 }, (_, i) => ({ v: ip(`10.77.${i & 7}.${2 + (i >> 3)}`), id: 700 + i, core: i % 50 === 7 ? 1 : 2,
+    room: i % 10 === 3 ? fnv1a('red') : 0, p: i % 97 === 5 ? [15000 - i, -15000, 0] : [rnd() * w - w / 2, rnd() * w - w / 2, rnd() * 20] }));
+  const run = opts => {
+    const { hub, sent, step } = hubFor(opts);
+    for (let k = 0; k < 3; k++) {
+      sent.length = 0;
+      for (const q of players) { hub.frame(q.v, frame(q.v, hello(q.id, { core: q.core, room: q.room }))); hub.frame(q.v, frame(q.v, snap(q.id, q.p))); }
+      hub.tick(); step(1000);
+    }
+    return { L: lists(sent), ms: hub.info().tickMsMax };
+  };
+  const all = run({ exactRoom: 1000 }), grid = run({});
+  const at = new Map(players.map(q => [q.v, q])), d = (a, b) => Math.hypot(a.p[0] - b.p[0], a.p[1] - b.p[1], a.p[2] - b.p[2]);
+  const sum = ({ L }) => {
+    let n = 0, m = 0;
+    for (const q of players) {
+      const l = L.get(`${q.v}:47210`), most = q.core === 1 ? 7 : 32;
+      assert.ok(l.length <= most, `at most ${most} (${l.length})`);
+      for (const e of l) { assert.ok(L.get(`${e.vip}:47210`).some(x => x.vip === q.v), 'both ends'); assert.equal(at.get(e.vip).room, q.room, 'one room'); n++; m += d(q, at.get(e.vip)); }
+    }
+    const open = players.filter(q => L.get(`${q.v}:47210`).length < (q.core === 1 ? 7 : 32));
+    for (const a of open) for (const b of open)
+      if (a !== b && a.room === b.room) assert.ok(L.get(`${a.v}:47210`).some(e => e.vip === b.v), 'two with room are linked');
+    return { links: n / 2, mean: m / n };
+  };
+  const A = sum(all), G = sum(grid);
+  console.log(`600 players in ${w} m: every pair ${A.links} links of ${A.mean.toFixed(1)} m (${all.ms.toFixed(0)} ms), the grid ${G.links} of ${G.mean.toFixed(1)} m (${grid.ms.toFixed(0)} ms)`);
+  assert.ok(Math.abs(G.links - A.links) <= A.links * 0.01, 'as many links');
+  assert.ok(G.mean <= A.mean * 1.03, 'as near');
 });
 
 // ---- on the switch ---------------------------------------------------------------------------------------------

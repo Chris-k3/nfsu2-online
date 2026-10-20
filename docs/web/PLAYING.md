@@ -152,7 +152,7 @@ Free roam is shared with **everyone** on the server who turns it on. Use a Room 
 
 Good to know:
 
-- **How many:** up to 1000 players on a server set up as VPS.md describes, 128 on one started by hand (its owner can
+- **How many:** up to 2000 players on a server set up as VPS.md describes, 128 on one started by hand (its owner can
   change that). Only free roam and the LAN and Online screens take a place; single-player takes none. When it is full,
   the game says so and lets you in by itself when a place frees up. The server pairs each player with the 32 players
   nearest to them, and your game shows all 32 of their cars at once. Their names show over the cars within 100 m, and

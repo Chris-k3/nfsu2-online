@@ -16,7 +16,7 @@
  * sockets, as a real host's IP stack would.  The rules are vlanhub.py's (the
  * tested reference): Windows bind semantics (a second binder of a port needs
  * SO_REUSEADDR), ephemeral ports 49152-65534, UDP unicast by address and
- * port, broadcast (255.255.255.255 or the subnet's, 10.77.3.255) to every
+ * port, broadcast (255.255.255.255 or the subnet's, 10.77.7.255) to every
  * socket bound to that port on every browser *including the sender* (Windows
  * loops its own broadcasts back), a "port unreachable" notice for a unicast
  * nobody listens to, delivered to the socket that sent it (a connected UDP

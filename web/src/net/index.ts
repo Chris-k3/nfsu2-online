@@ -204,7 +204,7 @@ class Link implements NetLink {
     const i32 = new Int32Array(buf, r.ptr, P.NET_V2_HDR_BYTES / 4);
     const magic = i32[P.W_MAGIC] >>> 0, ver = i32[P.W_VERSION];
     const size = ver === 2 ? P.NET_V2_MAILBOX_BYTES : P.NET_MAILBOX_BYTES, hdr = ver === 2 ? P.NET_V2_HDR_BYTES : P.NET_HDR_BYTES;
-    if (magic !== P.NET_MAGIC || (ver !== P.NET_VERSION && ver !== 2) || r.size !== size || i32[P.W_HDR_BYTES] !== hdr ||
+    if (magic !== P.NET_MAGIC || (ver !== P.NET_VERSION && ver !== 3 && ver !== 2) || r.size !== size || i32[P.W_HDR_BYTES] !== hdr ||
         i32[P.W_SLOT_BYTES] !== P.NET_SLOT_BYTES || i32[P.W_TX_SLOTS] !== P.NET_TX_SLOTS || i32[P.W_RX_SLOTS] !== P.NET_RX_SLOTS) {
       this.log(`${name} mailbox does not match this page (magic ${magic.toString(16)}, version ${ver}, ${r.size} bytes): no ${name === 'lan' ? 'LAN play' : 'free roam'}`);
       return;
@@ -231,8 +231,9 @@ class Link implements NetLink {
   }
   private publishPeers(ep: Endpoint) {
     // bit h: the host h of our network (a module of before: the address's last byte, so 10.77.1.5 sets 10.77.0.5's
-    // bit too; it then only waits for an answer where it could have known at once that nobody is there)
-    const words = ep.ver === 2 ? 8 : P.NET_PEER_BITS / 32, bits = new Uint32Array(words);
+    // bit too; it then only waits for an answer where it could have known at once that nobody is there; one of
+    // version 3 has bits for a /22, and waits the same way for a host past them)
+    const words = ep.ver === 2 ? 8 : ep.ver === 3 ? P.NET_V3_PEER_BITS / 32 : P.NET_PEER_BITS / 32, bits = new Uint32Array(words);
     for (const v of this.peerVips) {
       if (this.vipNum && ((v ^ this.vipNum) & this.netmask) !== 0) continue;
       const h = ep.ver === 2 ? v & 255 : (v & ~this.netmask) >>> 0;

@@ -35,7 +35,8 @@ const LAN_HDR = 8, F_DATA = 16;
 /** the most data one TCP frame carries (net_proto.h NET_MAX_PAYLOAD - NET_LAN_HDR) */
 export const TCP_CHUNK = 1472 - LAN_HDR;
 
-export const VHOST_DEFAULTS = Object.freeze({ maxConns: 2000, perVip: 8 });
+// maxConns: a player in the lobby holds two (the lobby and EA Messenger), so 1000 lobby sessions take 2000
+export const VHOST_DEFAULTS = Object.freeze({ maxConns: 4000, perVip: 8 });
 
 export function vipStr(v) { return [v >>> 24, (v >>> 16) & 255, (v >>> 8) & 255, v & 255].join('.'); }
 

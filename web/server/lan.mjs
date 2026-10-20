@@ -1,11 +1,12 @@
 // The virtual LAN switch.  Every browser that joins gets a virtual IPv4
-// address on 10.77.0.0/22: 250 in each of 10.77.0-3.x (host bytes 2-251, so
-// none ends in .0 or .255 and 10.77.0.1 and .253 stay the server's own), 1000
-// in all, handed out in turn across the four (10.77.0.2, 10.77.1.2,
-// 10.77.2.2, 10.77.3.2, 10.77.0.3, ...), so two players are rarely in the
-// same /24 and anything that still takes the network for a /24 shows at once,
-// not only past 250 players.  Binary frames carry the game's network traffic;
-// the switch only routes them and never looks inside:
+// address on 10.77.0.0/21: 250 in each of 10.77.0-7.x (host bytes 2-251, so
+// none ends in .0 or .255 and 10.77.0.1 and .253 stay the server's own), 2000
+// in all, handed out in turn across the eight (10.77.0.2, 10.77.1.2, ...,
+// 10.77.7.2, 10.77.0.3, ...), so two players are rarely in the same /24 and
+// anything that still takes the network for a /24 (or for the /22 it was
+// before) shows at once, not only past 250 (or 1000) players.  Binary frames
+// carry the game's network traffic; the switch only routes them and never
+// looks inside:
 //   [0]     u8  kind (opaque to the switch: datagram, stream open/data/close, ...)
 //   [1..3]  reserved
 //   [4..7]  u32 source vip      (rewritten here to the sender's own address)
@@ -21,7 +22,7 @@
 //      to the browsers that have LAN play open (the game's LAN or Online
 //      screens: "lan":1 in the hello, then {"t":"lan","on":0|1}; a page of
 //      before says nothing and gets them all): the others drop them anyway,
-//      and on a full switch each one would reach 1000 browsers
+//      and on a full switch each one would reach 2000 browsers
 // Text frames are JSON control messages: {"t":"hello","name":...,"deltas":1,"lan":0|1},
 // {"t":"lan","on":0|1} and {"t":"ping","id":n} from a client; {"t":"welcome","vip":...,"token":...},
 // {"t":"peers",...}, {"t":"delta",...} and {"t":"pong","id":n} from the switch.
@@ -178,10 +179,10 @@ import crypto from 'node:crypto';
 import { blockedName } from './names.mjs';
 
 const BASE = (10 << 24) | (77 << 16);
-const ADDRS = 1000;             // 10.77.0.0/22: host bytes 2-251 in each of its four /24s
-const MASK = '255.255.252.0';
-/** the i-th address in the order they are handed out: round the four /24s */
-const vipAt = i => (BASE | ((i & 3) << 8) | ((i >> 2) + 2)) >>> 0;
+const ADDRS = 2000;             // 10.77.0.0/21: host bytes 2-251 in each of its eight /24s
+const MASK = '255.255.248.0';
+/** the i-th address in the order they are handed out: round the eight /24s */
+const vipAt = i => (BASE | ((i & 7) << 8) | ((i >> 3) + 2)) >>> 0;
 const BROADCAST = 0xFFFFFFFF;
 const KIND_UDP = 1;             // free roam's datagrams (and LAN play's broadcasts): dropped first (roamQueue)
 const KIND_STREAM = 4;          // LAN play's TCP segments: never dropped
@@ -640,5 +641,5 @@ function vipNum(s) {
   const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(s);
   if (!m || m.slice(1).some(x => +x > 255)) return 0;
   const v = ((+m[1] << 24) | (+m[2] << 16) | (+m[3] << 8) | +m[4]) >>> 0;
-  return ((v & 0xfffffc00) >>> 0) === BASE && (v & 255) >= 2 && (v & 255) <= 251 ? v : 0;
+  return ((v & 0xfffff800) >>> 0) === BASE && (v & 255) >= 2 && (v & 255) <= 251 ? v : 0;
 }

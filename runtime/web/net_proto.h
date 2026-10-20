@@ -42,7 +42,8 @@
 #include <stddef.h>
 
 #define NET_MAGIC        0x314E544Eu        /* "NTN1" little-endian */
-#define NET_VERSION      3u                 /* 2: peer_bits, the LAN mailbox; 3: want, peer_bits for a /22 */
+#define NET_VERSION      4u                 /* 2: peer_bits, the LAN mailbox; 3: want, peer_bits for a /22;
+                                               4: peer_bits for a /21 */
 #define NET_HDR_BYTES    512u
 #define NET_SLOT_BYTES   1536u
 #define NET_SLOT_HDR     32u
@@ -94,8 +95,8 @@
 #define NET_PAGE_IDLE        4u /* no mailbox wants the switch (want 0 for a while): the page let it go, so
                                    the place is free for another player; it connects again on want */
 
-/* peer_bits: one bit per host of the switch's network (at most a /22) */
-#define NET_PEER_BITS     1024u
+/* peer_bits: one bit per host of the switch's network (at most a /21) */
+#define NET_PEER_BITS     2048u
 
 typedef struct {
     /* fixed, written by C before it registers the mailbox */
@@ -117,7 +118,7 @@ typedef struct {
     uint32_t tx_wait_n, page_pad1;                             /* 136 */
     uint32_t peer_bits[NET_PEER_BITS / 32];                    /* 144: page: bit h set = the host h of our
                                                                   network (vip & ~netmask) is on the switch (us too) */
-    uint32_t pad[60];                                          /* 272 .. 511 */
+    uint32_t pad[28];                                          /* 400 .. 511 */
 } net_mailbox;
 
 typedef struct {

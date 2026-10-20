@@ -33,8 +33,12 @@ const MSG = { HELLO: 1, PEERS: 2, SNAP: 3, BYE: 8 };
 const HDR = 16, CRC = 4;
 const DEGREE_V1 = 7;                            // roam_core.h RC_PEERS_V1: what a core of version 1 reads
 
+// exactRoom: a room of at most this many players sorts every pair of them; a larger one takes the pairs in the same
+// order but only as far as it needs them: each player's nearest one after another (a grid) until it has its links
+// (every pair of 2000 players in one room took the hub 1.5-4.5 s a tick, 1000 players 0.5 s)
 export const ROAM_HUB_DEFAULTS = Object.freeze({ degree: 32, tickMs: 1000, staleMs: 60_000, goneMs: 6_000, keep: 0.5, holdMs: 5_000,
-  maxPerVip: 2, maxPlayers: 1024 });
+  maxPerVip: 2, maxPlayers: 2048, exactRoom: 256 });
+const PER_CELL = 8, MIN_CELL = 5;               // the grid: cells (x and y) for about 8 players each, 5 m at least
 
 /** one free-roam datagram, or null: the fields the hub needs (HELLO, SNAP, BYE), checked as roam_core.c's decoder does */
 export function decodeRoam(d) {
@@ -71,6 +75,87 @@ export function encodePeers(sender, seq, list) {
   list.forEach((e, i) => { const o = 17 + 10 * i; b.writeUInt32BE(e.vip >>> 0, o); b.writeUInt16LE(e.port, o + 4); b.writeUInt32LE(e.id >>> 0, o + 6); });
   b.writeUInt32LE(crc32(b.subarray(0, len - CRC)), len - CRC);
   return b;
+}
+
+/** pairs in their order into the links: both ends with room */
+function link(pairs, links) {
+  pairs.sort((x, y) => x.d - y.d);
+  for (const { a, b, da, db, since } of pairs) {
+    const la = links.get(a), lb = links.get(b);
+    if (la.size < da && lb.size < db) { la.set(b, since); lb.set(a, since); }
+  }
+}
+/** the players members (indices into list) by their cell in x and y (sized for PER_CELL players over the area they
+ *  span), and the cells they span (positions are within 20 km: at most 8000 cells a side) */
+const cellKey = (x, y) => (x + 8192) * 16384 + (y + 8192);
+function grid(list, members) {
+  let w1 = Infinity, w2 = -Infinity, h1 = Infinity, h2 = -Infinity;
+  for (const i of members) { const p = list[i].p; w1 = Math.min(w1, p[0]); w2 = Math.max(w2, p[0]); h1 = Math.min(h1, p[1]); h2 = Math.max(h2, p[1]); }
+  const cell = Math.max(MIN_CELL, Math.sqrt(Math.max(1, w2 - w1) * Math.max(1, h2 - h1) * PER_CELL / members.length));
+  const cells = new Map(), g = { cell, cells, x1: Math.floor(w1 / cell), x2: Math.floor(w2 / cell), y1: Math.floor(h1 / cell), y2: Math.floor(h2 / cell) };
+  for (const i of members) {
+    const k = cellKey(Math.floor(list[i].p[0] / cell), Math.floor(list[i].p[1] / cell));
+    let c = cells.get(k); if (!c) cells.set(k, c = []);
+    c.push(i);
+  }
+  return g;
+}
+/** list[i]'s others in grid g, nearest first (next() gives [distance, j], or null after the last; at one distance
+ *  the lowest j first): ring after ring of cells around its own; one found is the nearest left once the next ring is
+ *  farther (a cell r rings away is at least r - 1 cells off) */
+class Near {
+  constructor(g, list, i) {
+    const a = list[i].p;
+    this.g = g; this.list = list; this.i = i; this.a = a; this.x0 = Math.floor(a[0] / g.cell); this.y0 = Math.floor(a[1] / g.cell);
+    this.last = Math.max(this.x0 - g.x1, g.x2 - this.x0, this.y0 - g.y1, g.y2 - this.y0); this.r = 0;
+    this.found = [];                            // found and not given yet, the nearest last
+  }
+  next() {
+    const f = this.found;
+    while (this.r <= this.last && (!f.length || f[f.length - 1][0] > (this.r - 1) * this.g.cell)) {
+      const n = f.length;
+      this.ring(this.r++);
+      if (f.length > n) f.sort((x, y) => y[0] - x[0] || y[1] - x[1]);
+    }
+    return f.pop() ?? null;
+  }
+  ring(r) {
+    const { x0, y0 } = this;
+    if (r === 0) return this.cell(x0, y0);
+    for (let x = x0 - r; x <= x0 + r; x++) { this.cell(x, y0 - r); this.cell(x, y0 + r); }
+    for (let y = y0 - r + 1; y <= y0 + r - 1; y++) { this.cell(x0 - r, y); this.cell(x0 + r, y); }
+  }
+  cell(x, y) {
+    const c = this.g.cells.get(cellKey(x, y)), a = this.a;
+    if (c) for (const j of c) if (j !== this.i) { const b = this.list[j].p; this.found.push([Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]), j]); }
+  }
+}
+/** a binary heap of arrays, the least by [0], then [1], then [2] on top */
+const before = (x, y) => x[0] < y[0] || (x[0] === y[0] && (x[1] < y[1] || (x[1] === y[1] && x[2] < y[2])));
+class Heap {
+  constructor() { this.a = []; }
+  get size() { return this.a.length; }
+  push(e) {
+    const a = this.a;
+    let k = a.push(e) - 1;
+    while (k > 0) { const up = (k - 1) >> 1; if (!before(e, a[up])) break; a[k] = a[up]; k = up; }
+    a[k] = e;
+  }
+  pop() {
+    const a = this.a, top = a[0], e = a.pop();
+    if (a.length) {
+      let k = 0;
+      for (;;) {
+        let c = 2 * k + 1;
+        if (c >= a.length) break;
+        if (c + 1 < a.length && before(a[c + 1], a[c])) c++;
+        if (!before(a[c], e)) break;
+        a[k] = a[c]; k = c;
+      }
+      a[k] = e;
+    }
+    return top;
+  }
 }
 
 export class RoamHub {
@@ -139,18 +224,10 @@ export class RoamHub {
     const links = new Map();                                // key -> Map of keys -> since when
     for (const p of this.players.values()) links.set(p.key, new Map());
     for (const list of rooms.values()) {
+      if (list.length > o.exactRoom) { this.linkMany(list, links, now); continue; }
       const pairs = [];
-      for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
-        const a = list[i], b = list[j], since = a.links.get(b.key);
-        const d = since === undefined ? Math.hypot(a.p[0] - b.p[0], a.p[1] - b.p[1], a.p[2] - b.p[2])
-          : now - since < o.holdMs ? -1 : Math.hypot(a.p[0] - b.p[0], a.p[1] - b.p[1], a.p[2] - b.p[2]) * o.keep;
-        pairs.push({ d, a: a.key, b: b.key, da: a.degree, db: b.degree, since: since ?? now });
-      }
-      pairs.sort((x, y) => x.d - y.d);
-      for (const { a, b, da, db, since } of pairs) {
-        const la = links.get(a), lb = links.get(b);
-        if (la.size < da && lb.size < db) { la.set(b, since); lb.set(a, since); }
-      }
+      for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) pairs.push(this.pair(list[i], list[j], now));
+      link(pairs, links);
     }
     for (const p of this.players.values()) {
       p.links = links.get(p.key);
@@ -164,6 +241,39 @@ export class RoamHub {
     }
     const ms = performance.now() - t0;
     this.st.ticks++; if (ms > this.st.tickMsMax) this.st.tickMsMax = ms;
+  }
+  /** a pair of players and its place in the order: a link younger than holdMs first, an older one at keep its distance */
+  pair(a, b, now) {
+    const since = a.links.get(b.key);
+    const d = since === undefined ? Math.hypot(a.p[0] - b.p[0], a.p[1] - b.p[1], a.p[2] - b.p[2])
+      : now - since < this.o.holdMs ? -1 : Math.hypot(a.p[0] - b.p[0], a.p[1] - b.p[1], a.p[2] - b.p[2]) * this.o.keep;
+    return { d, a: a.key, b: b.key, da: a.degree, db: b.degree, since: since ?? now };
+  }
+  /** the links of a room larger than exactRoom, as link() makes them from every pair sorted (at one place in the
+   *  order the pair of the lower index first), without sorting them all: the last tick's links at their own place,
+   *  and each player's nearest one after another (Near) while it has room, merged in that order (a Heap) */
+  linkMany(list, links, now) {
+    const at = new Map(list.map((p, i) => [p.key, i])), mine = list.map(p => links.get(p.key));
+    const room = i => mine[i].size < list[i].degree, old = (i, j) => list[i].links.has(list[j].key) || list[j].links.has(list[i].key);
+    const g = grid(list, list.map((_, i) => i)), heap = new Heap(), near = [];
+    const put = (d, i, j, since, nearest) => heap.push([d, Math.min(i, j), Math.max(i, j), i, j, since, nearest]);
+    const ahead = i => { const c = near[i].next(); if (c) put(c[0], i, c[1], now, true); };
+    for (let i = 0; i < list.length; i++) {
+      for (const k of list[i].links.keys()) {
+        const j = at.get(k);
+        if (j !== undefined && (i < j || !list[j].links.has(list[i].key))) { const q = this.pair(list[i], list[j], now); put(q.d, i, j, q.since, false); }
+      }
+      near.push(new Near(g, list, i));
+      ahead(i);
+    }
+    while (heap.size) {
+      const [, , , i, j, since, nearest] = heap.pop();
+      if (nearest) {
+        if (room(i)) ahead(i);
+        if (old(i, j)) continue;                    // a link of the last tick: in the heap at its own place
+      }
+      if (room(i) && room(j) && !mine[i].has(list[j].key)) { mine[i].set(list[j].key, since); mine[j].set(list[i].key, since); }
+    }
   }
   /** for the tests and the server's console: counts only, never a position */
   /** the browsers in free roam now (a HELLO within goneMs) */

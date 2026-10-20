@@ -120,8 +120,12 @@ The rest of this guide is reference.
 
 ## Sizing
 
-For up to 1000 players at once (the image's limit): 4 vCPU, 8 GB of memory (the compose file's limit), 40 GB of
+For up to 2000 players at once (the image's limit): 8 vCPU, 8 GB of memory (the compose file's limit), 40 GB of
 disk and a 1 Gbit/s port with a few TB of traffic a month.
+
+- Measured on a live server behind a Cloudflare Tunnel (16 vCPU, 2026-10-20): 636 players, 303 of them in the
+  game's Online mode, took the server 0.6 of a core and 200 MB, and cloudflared about 2 cores. 2000 players at once
+  are **UNVERIFIED**.
 
 - The server relays and serves files. It used about 110 MB of memory here, plus up to 10 MB queued towards each
   player who falls behind (8 MB on the connection, 2 MB more of LAN-race data in the switch's own queue).
@@ -138,7 +142,7 @@ disk and a 1 Gbit/s port with a few TB of traffic a month.
   they are, never held up. The image gives Node 8 helper threads for the compressing and the file reads
   (`UV_THREADPOOL_SIZE`, 4 by default).
 - Free roam is at most about 25 KB/s each way per player: the server's free-roam hub pairs each player with the 7
-  nearest, and snapshots go between those only. 1000 players roaming at once are about 200 Mbit/s each way through
+  nearest, and snapshots go between those only. 2000 players roaming at once are about 400 Mbit/s each way through
   the VPS. Measured with 62 simulated players and 2 real pages on one server (`web/tools/roam-crowd.mjs`, a Ryzen 9
   5900X): about 9,500 datagrams a second each way through the switch, the server at 11 % of one core. More players
   than that, and a real VPS's CPU, are **UNVERIFIED**.
@@ -226,8 +230,8 @@ disk and a 1 Gbit/s port with a few TB of traffic a month.
     restarts);
   - closes, without an answer, a connection that asks for another name (the bare address, a scanner's made-up
     name), on 80 and on 443; a TLS handshake without your name fails, so the certificate is not shown;
-  - opens at most 7900 connections to the server (one per request in progress; with 1000 players the server takes
-    8000);
+  - opens at most 15900 connections to the server (one per request in progress; with 2000 players the server takes
+    16000);
   - has its admin API off: nothing reconfigures it while it runs, and a changed `.env` takes `docker compose up -d`.
 - **NFSU2_HOST is one name.** For a second name, or a wildcard, edit the Caddyfile in `compose.yml` and the
   server's `NFSU2_HOST` (a comma list; `*.example.com` for one label under it). A wildcard certificate needs Let's
@@ -384,7 +388,7 @@ With Caddy or nginx already on the VPS, run the server alone on the VPS's networ
 ```sh
 docker run -d --name nfsu2-web --restart unless-stopped --network host \
   --read-only --cap-drop ALL --security-opt no-new-privileges \
-  --memory 8g --memory-swap 8g --ulimit nofile=16384 --log-driver local \
+  --memory 8g --memory-swap 8g --ulimit nofile=32768 --log-driver local \
   -e NFSU2_HOST=game.example.com \
   -v /srv/nfsu2/game:/game:ro -v /srv/nfsu2/module:/module:ro -v nfsu2-state:/state \
   ghcr.io/th0mk/nfsu2-web
@@ -408,6 +412,9 @@ paths to the VPS, so pick a VPS location between you.
     300 m and 2 past 1 km. 32 players in one spot: about 60 KB/s each way per player, and the switch relays about
     2 MB/s (measured with 32 `web/tools/roam-crowd.mjs` players: 22,000 datagrams a second each way, 10 % of one core
     for the server).
+  - **Its own cost:** in a Room of more than 256 players the hub finds each player's nearest through a grid of the
+    map instead of weighing every pair, with the same links. Measured on a Ryzen 9 5900X: 1000 players in one Room
+    took about 30 ms a second (every pair took 0.5 s), 2000 about 70 ms, spread over the city or all in one spot.
 - **Free roam** draws another player's car where it is now (solid cars, the default: the newest snapshot carried on
   by half the round trip), or with Solid cars off `roam_delay` milliseconds (100 by default) behind its newest
   snapshot. That delay hides the 50 ms between snapshots, jitter and the odd lost snapshot. Network delay comes on
@@ -425,8 +432,8 @@ paths to the VPS, so pick a VPS location between you.
 - **Keepalive:** the switch pings every connection every 25 s. Proxies and Cloudflare then never cut a quiet player,
   and the switch finds players whose connection died.
 - **Limits:**
-  - 1000 players on the switch with the image (`NFSU2_MAX_PEERS=1000`; the server's own default is 128, and 1000 is
-    the most its virtual network, 10.77.0.0/22, has addresses for). A game the switch refuses as full shows "The
+  - 2000 players on the switch with the image (`NFSU2_MAX_PEERS=2000`; the server's own default is 128, and 2000 is
+    the most its virtual network, 10.77.0.0/21, has addresses for). A game the switch refuses as full shows "The
     server is full" in the game and tries again every 5 s; it says so again when it gets a place, and the start
     page says the server is full;
   - a player holds a place only while a network feature needs it: free roam while it is on, LAN play and Online
@@ -471,8 +478,8 @@ paths to the VPS, so pick a VPS location between you.
     Online mode (logged in, or in an online race; `null` with `--online off`), and whether a game that connects
     now gets "LAN full". Nothing else: no names, addresses or times, never cached. The
     game's own lobby shows its players to anyone who logs in anyway.
-  - **Limits:** 300 lobby sessions, 3 per browser, 8 per client address, 32 per IPv6 /48, and the last quarter
-    only for a client that holds none; 100 games of at most 4, 2 open and 2 started per browser (4 and 8 per client
+  - **Limits:** 1000 lobby sessions, 3 per browser, 8 per client address, 32 per IPv6 /48, and the last quarter
+    only for a client that holds none; 300 games of at most 6, 2 open and 2 started per browser (4 and 8 per client
     address), one browser one player of a race; 20 lobby messages a second per session (a flood ends the session);
     games created one every 2 s (a burst of 3), games joined, rooms entered and car descriptions published one a
     second (a burst of 4; a car description over that is not passed on); chat 1 a second with a burst of 5 (then

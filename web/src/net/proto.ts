@@ -5,7 +5,7 @@
 // only, so Node can load this file as it is.
 
 export const NET_MAGIC = 0x314e544e;          // "NTN1"
-export const NET_VERSION = 3;                 // 2: peer_bits, the LAN mailbox; 3: want, peer_bits for a /22
+export const NET_VERSION = 4;                 // 2: peer_bits, the LAN mailbox; 3: want, peer_bits for a /22; 4: for a /21
 export const NET_HDR_BYTES = 512;
 export const NET_SLOT_BYTES = 1536;
 export const NET_SLOT_HDR = 32;
@@ -17,6 +17,8 @@ export const NET_MAILBOX_BYTES = NET_HDR_BYTES + (NET_TX_SLOTS + NET_RX_SLOTS) *
 // by the address's last byte.  This page still serves it, so the page and the module need not change at once.
 export const NET_V2_HDR_BYTES = 256;
 export const NET_V2_MAILBOX_BYTES = NET_V2_HDR_BYTES + (NET_TX_SLOTS + NET_RX_SLOTS) * NET_SLOT_BYTES;
+// a module of version 3: this layout with peer bits for a /22 (32 words); a host past them it asks itself
+export const NET_V3_PEER_BITS = 1024;
 
 // frame kinds (byte 0 of a binary frame on the switch)
 export const NET_KIND_UDP = 1;                // a UDP datagram between virtual addresses
@@ -48,7 +50,7 @@ export const NET_PAGE_ONLINE = 2;
 export const NET_PAGE_OFFLINE = 3;
 export const NET_PAGE_IDLE = 4;               // nothing wanted the switch for a while: the page let it go
 
-export const NET_PEER_BITS = 1024;            // peer_bits: one bit per host of the switch's network (at most a /22)
+export const NET_PEER_BITS = 2048;            // peer_bits: one bit per host of the switch's network (at most a /21)
 
 // header words: u32 index = byte offset / 4
 export const W_MAGIC = 0, W_VERSION = 1, W_HDR_BYTES = 2, W_SLOT_BYTES = 3;

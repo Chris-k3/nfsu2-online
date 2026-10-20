@@ -10,7 +10,7 @@
 // messages, a broadcast charged per receiver, limits shared by one client
 // address, a flood never getting a slower receiver cut: the audit's F2),
 // WebSocket keepalive and idle close, the page's notices when the switch is
-// full (web/src/net/index.ts), the 1000 addresses of 10.77.0.0/22, LAN play's
+// full (web/src/net/index.ts), the 2000 addresses of 10.77.0.0/21, LAN play's
 // broadcasts only to the browsers with it open, a page that lets go freeing its
 // address at once, the page holding a place only while a mailbox wants it (and
 // a module of before always), and (against the real server, when the game
@@ -37,8 +37,8 @@ const { LanSwitch, LAN_WSS_OPTIONS } = await import(process.env.NFSU2_TEST_LAN ?
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ip = (s) => s.split('.').reduce((a, b) => ((a << 8) | +b) >>> 0, 0);
 const ipStr = (v) => [v >>> 24, (v >>> 16) & 255, (v >>> 8) & 255, v & 255].join('.');
-// every address the switch hands out: host bytes 2-251 in each /24 of 10.77.0.0/22
-const ALL_VIPS = [0, 1, 2, 3].flatMap(b => Array.from({ length: 250 }, (_, i) => ((10 << 24) | (77 << 16) | (b << 8) | (i + 2)) >>> 0));
+// every address the switch hands out: host bytes 2-251 in each /24 of 10.77.0.0/21
+const ALL_VIPS = [0, 1, 2, 3, 4, 5, 6, 7].flatMap(b => Array.from({ length: 250 }, (_, i) => ((10 << 24) | (77 << 16) | (b << 8) | (i + 2)) >>> 0));
 
 // a switch on an ephemeral port, wired as server.mjs wires it (?g=<id> and ?s=<id>: the group and site ids the
 // server would derive from the client's address; ?vip= is what the switch before the audit took as a request)
@@ -112,9 +112,9 @@ test('addresses, peer lists, unicast, broadcast, ping, disconnect, reconnect', a
   try {
     const a = new Client(sw.port, 'Alice'), b = new Client(sw.port, 'Bob'), c = new Client(sw.port, 'Carol');
     const wa = await a.welcome(), wb = await b.welcome(), wc = await c.welcome();
-    // addresses: round the four /24s of 10.77.0.0/22 in order of arrival; mask /22
+    // addresses: round the eight /24s of 10.77.0.0/21 in order of arrival; mask /21
     assert.equal(wa.vipStr, '10.77.0.2'); assert.equal(wb.vipStr, '10.77.1.2'); assert.equal(wc.vipStr, '10.77.2.2');
-    assert.equal(ipStr(wa.vip), '10.77.0.2'); assert.equal(wa.mask, '255.255.252.0');
+    assert.equal(ipStr(wa.vip), '10.77.0.2'); assert.equal(wa.mask, '255.255.248.0');
     // everyone's peer list ends with all three names
     for (const x of [a, b, c])
       await x.until(() => { const p = x.lastPeers(); return p && p.length === 3 && ['Alice', 'Bob', 'Carol'].every(n => p.some(q => q.name === n)); });
@@ -277,7 +277,7 @@ test('what a peer learns about the others: virtual addresses and cleaned names, 
       if (m.t === 'peers' || m.t === 'delta') for (const p of m.peers) assert.deepEqual(Object.keys(p).sort(), ['name', 'vip']);
       if (m.t === 'delta') assert.ok(m.gone.every(v => Number.isInteger(v)), 'gone: addresses only');
       for (const [, ip4] of JSON.stringify(m).matchAll(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/g))
-        assert.ok(/^10\.77\.[0-3]\./.test(ip4) || ip4 === '255.255.252.0', `only virtual addresses (${ip4})`);
+        assert.ok(/^10\.77\.[0-7]\./.test(ip4) || ip4 === '255.255.248.0', `only virtual addresses (${ip4})`);
       assert.ok(!JSON.stringify(m).includes('127.0.0.1') && !/::1|::ffff/.test(JSON.stringify(m)), 'no real address');
     }
     // a peer's token reaches that peer only
@@ -626,14 +626,14 @@ test('a resume replaces the same client\'s older connection (one that died witho
 });
 
 test('reservations: never handed to another client, not even when every address is held or reserved (LAN full instead); a silent ?resume times out to a fresh one', async () => {
-  const sw = await startSwitch({ maxPeers: 1000, resumeWaitMs: 300 });
+  const sw = await startSwitch({ maxPeers: 2000, resumeWaitMs: 300 });
   try {
     const now = Date.now();
     ALL_VIPS.forEach((v, i) => sw.lan.reserved.set(v, { hash: crypto.randomBytes(32), until: now + 60_000 + i, group: 'others' }));
     const c = new Client(sw.port, 'C', '?g=newcomer');
     const code = await new Promise(r => c.ws.on('close', (k, why) => r(`${k} ${why}`)));
     assert.equal(code, '1013 LAN full', 'a newcomer waits for an address to free; nobody\'s reservation is given away');
-    assert.equal(sw.lan.info().reserved, 1000, 'every reservation kept');
+    assert.equal(sw.lan.info().reserved, ALL_VIPS.length, 'every reservation kept');
     sw.lan.reserved.clear();
     const t0 = performance.now();
     const silent = new WebSocket(`ws://127.0.0.1:${sw.port}/lan?resume`);
@@ -647,7 +647,7 @@ test('reservations: never handed to another client, not even when every address 
 // the review of F1: with every address held or reserved, opening and closing connections fast enough made the
 // switch hand out the oldest reservation, a dropped player's address, within 60 ms
 test('churning connections never takes a dropped player\'s address; each client keeps only its own share of reservations', async () => {
-  const sw = await startSwitch({ maxPeers: 1000, groupReserve: 8, siteReserve: 16 });
+  const sw = await startSwitch({ maxPeers: 2000, groupReserve: 8, siteReserve: 16 });
   try {
     const alice = new Client(sw.port, 'Alice', '?g=alice'), bob = new Client(sw.port, 'Bob', '?g=bob');
     await alice.welcome(); const wb = await bob.welcome();
@@ -683,7 +683,7 @@ test('churning connections never takes a dropped player\'s address; each client 
     assert.equal(sw.lan.full, false, 'not full once the kept addresses run out');
   } finally { await sw.close(); }
   // a client that drops many connections keeps groupReserve reservations (its own oldest go), a site siteReserve
-  const sw2 = await startSwitch({ maxPeers: 1000, groupReserve: 3, siteReserve: 5 });
+  const sw2 = await startSwitch({ maxPeers: 2000, groupReserve: 3, siteReserve: 5 });
   try {
     const leave = async (q, n) => { const cs = Array.from({ length: n }, () => new Client(sw2.port, 'x', q)); const v = []; for (const c of cs) v.push((await c.welcome()).vip >>> 0); for (const c of cs) await c.close(); await sleep(20); return v; };
     const first = await leave('?g=one', 6);
@@ -977,7 +977,7 @@ test('the page: a notice when the switch is full, and one when a place frees up'
       assert.equal(nb.length, 1, 'said once while it keeps trying');
       assert.equal(b.state === 'online', false);
       a.close();
-      assert.match(await b.online, /^10\.77\.[0-3]\.\d+$/);
+      assert.match(await b.online, /^10\.77\.[0-7]\.\d+$/);
       await until(() => nb.length === 2);
       assert.equal(nb[1], 'A place on the server freed up: you can play with others now');
       assert.deepEqual(na, [], 'the first game heard nothing');
@@ -985,18 +985,19 @@ test('the page: a notice when the switch is full, and one when a place frees up'
   } finally { a.close(); await sw.close(); }
 });
 
-test('addresses: 1000 on 10.77.0.0/22, handed out round its four /24s; never .0, .1 or .252 and up; full past them', async () => {
-  const lan = new LanSwitch({ maxPeers: 1000 });
+test('addresses: 2000 on 10.77.0.0/21, handed out round its eight /24s; never .0, .1 or .252 and up; full past them', async () => {
+  const lan = new LanSwitch({ maxPeers: 2000 });
   try {
     const got = [];
-    for (let i = 0; i < 1000; i++) {
+    for (let i = 0; i < 2000; i++) {
       const v = lan.allocate();
       assert.ok(v, `address ${i}`);
       got.push(v);
       lan.reserved.set(v, { hash: crypto.randomBytes(32), until: Date.now() + 60_000, group: `g${i}` });
     }
-    assert.deepEqual(got.slice(0, 6).map(ipStr), ['10.77.0.2', '10.77.1.2', '10.77.2.2', '10.77.3.2', '10.77.0.3', '10.77.1.3']);
-    assert.equal(new Set(got).size, 1000, 'all distinct');
+    assert.deepEqual(got.slice(0, 10).map(ipStr), ['10.77.0.2', '10.77.1.2', '10.77.2.2', '10.77.3.2', '10.77.4.2', '10.77.5.2',
+      '10.77.6.2', '10.77.7.2', '10.77.0.3', '10.77.1.3']);
+    assert.equal(new Set(got).size, 2000, 'all distinct');
     assert.deepEqual([...got].sort((x, y) => x - y), [...ALL_VIPS].sort((x, y) => x - y), 'every one of them');
     assert.equal(lan.allocate(), 0, 'none left');
     assert.equal(lan.full, true);
@@ -1092,11 +1093,14 @@ test('the page: the switch let go when no mailbox wants it, taken again when one
     assert.notEqual(v2, v1, 'a new address (the old one went back)');
     want(lanMb, 0); await sleep(100); want(lanMb, 1); await sleep(500);
     assert.equal(sw.lan.peers.size, 1); assert.equal(sw.lan.info().released, 1, 'a short break keeps the place');
-    // peer bits: one bit per host of the /22 (a peer in another /24 has its own bit)
-    const other = new Client(sw.port, 'O'); await other.welcome();
-    const h = (other.vip & 0x3ff) >>> 0;
-    await until(() => (Atomics.load(lanMb.w, P.W_PEER_BITS + (h >>> 5)) >>> (h & 31)) & 1);
-    await other.close();
+    // peer bits: one bit per host of the /21 (a peer in another /24 has its own bit; the third lands in
+    // 10.77.4.x, past a /22)
+    const others = [new Client(sw.port, 'O1'), new Client(sw.port, 'O2'), new Client(sw.port, 'O3')];
+    for (const o of others) await o.welcome();
+    const hs = others.map(o => (o.vip & 0x7ff) >>> 0);
+    assert.ok(hs.some(h => h >= 1024), `a host past the /22 (${hs.map(h => h.toString(16))})`);
+    for (const h of hs) await until(() => (Atomics.load(lanMb.w, P.W_PEER_BITS + (h >>> 5)) >>> (h & 31)) & 1);
+    for (const o of others) await o.close();
     assert.ok(logs.some(l => /goes back/.test(l)), 'the console says why it let go');
   } finally { link.close(); await sw.close(); }
   // a module of before: version 2, no want word, always connected
@@ -1116,6 +1120,23 @@ test('the page: the switch let go when no mailbox wants it, taken again when one
       await c.close();
     } finally { l2.close(); }
   } finally { await sw2.close(); }
+  // a module of version 3: bits for a /22 (32 words), nothing written past them (its header's padding)
+  const sw3 = await startSwitch();
+  try {
+    const mem3 = new WebAssembly.Memory({ initial: 10, maximum: 10, shared: true }), v3 = mailbox(mem3, 0, 3);
+    want(v3, 1);
+    const l3 = attachNet(fakeGame(mem3, { 7: v3 }), { url: `ws://127.0.0.1:${sw3.port}/lan`, name: 'V3', pingMs: 60_000, idleMs: 60_000 });
+    try {
+      await l3.online;
+      const cs = [1, 2, 3, 4, 5].map(i => new Client(sw3.port, `C${i}`));
+      for (const c of cs) await c.welcome();
+      const hs = cs.map(c => (c.vip & 0x7ff) >>> 0), low = hs.filter(h => h < 1024);
+      assert.ok(low.length && low.length < hs.length, `hosts on both sides of 1024 (${hs.map(h => h.toString(16))})`);
+      for (const h of low) await until(() => (Atomics.load(v3.w, P.W_PEER_BITS + (h >>> 5)) >>> (h & 31)) & 1);
+      for (let i = P.NET_V3_PEER_BITS / 32; i < P.NET_PEER_BITS / 32; i++) assert.equal(Atomics.load(v3.w, P.W_PEER_BITS + i), 0, `word ${i} untouched`);
+      for (const c of cs) await c.close();
+    } finally { l3.close(); }
+  } finally { await sw3.close(); }
 });
 
 // an away player (the app's check, web/src/app/away.ts) gives the place back although the game still wants it,

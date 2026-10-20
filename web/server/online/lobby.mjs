@@ -58,7 +58,7 @@ import { Stats, RACE_TYPES, decodeResult } from './stats.mjs';
 import { blockedName } from '../names.mjs';
 
 export const LOBBY_LIMITS = Object.freeze({
-  sessions: 300,            // lobby sessions at once
+  sessions: 1000,           // lobby sessions at once
   perVip: 3,                // lobby sessions from one browser (a reconnect overlaps the old one briefly)
   perGroup: 8,              // from one client (one address: a household's browsers)
   perSite: 32,              // from one site (an IPv6 /48)
@@ -71,7 +71,7 @@ export const LOBBY_LIMITS = Object.freeze({
   actRate: 1,               // games joined, rooms entered and car descriptions published a second (burst 4)
   announceMs: 1000,         // a game's record to the game list, a room's population: at most this often
   personas: 4,              // per session (the game shows four)
-  games: 100,               // games at once
+  games: 300,               // games at once
   openPerVip: 2,            // open games (not started) with a creator in one browser
   openPerGroup: 4,          // in one client
   startedPerVip: 2,         // started games (until they end) with a creator in one browser

@@ -516,7 +516,7 @@ int main(void){
     check("after the last WSACleanup: WSANOTINITIALISED", r == 0xFFFFFFFFu && err() == WSANOTINITIALISED, "err %u", err());
     check("... and no network session: the mailbox no longer wants the switch", MB->want == 0, "want %u", MB->want);
 
-    printf("the page letting go of the switch, and a /22\n");
+    printf("the page letting go of the switch, and a /21\n");
     fflush(stdout); fprintf(stderr, "lan_unit: the page lets go\n");
     MB->page_state = NET_PAGE_IDLE; vlan_test_pump();
     { uint32_t bell = MB->tx_bell;
@@ -528,34 +528,37 @@ int main(void){
     r = WS("WSAStartup", 2, 0x0202u, GA(g_wsa));
     check("WSAStartup while the page is still connecting again, 5 s: fails, no session on the old address",
           r != 0 && MB->want == 0, "r=%u want %u", r, MB->want);
-    /* the page is back with another address, on 10.77.0.0/22 */
-    MB->vip = 0x0A4D0211u; MB->netmask = 0xFFFFFC00u; MB->generation = 3;              /* 10.77.2.17 */
+    /* the page is back with another address, on 10.77.0.0/21 */
+    MB->vip = 0x0A4D0611u; MB->netmask = 0xFFFFF800u; MB->generation = 3;              /* 10.77.6.17 */
     memset(MB->peer_bits, 0, sizeof MB->peer_bits);
-    MB->peer_bits[0x211 >> 5] |= 1u << (0x211 & 31); MB->peer_bits[0x309 >> 5] |= 1u << (0x309 & 31);   /* us, 10.77.3.9 */
+    MB->peer_bits[0x611 >> 5] |= 1u << (0x611 & 31); MB->peer_bits[0x709 >> 5] |= 1u << (0x709 & 31);   /* us, 10.77.7.9 */
     MB->page_state = NET_PAGE_ONLINE; vlan_test_pump();
     r = WS("WSAStartup", 2, 0x0202u, GA(g_wsa));
     check("WSAStartup with the page back: the new address taken, the switch wanted", r == 0 && MB->want == 1, "r=%u want %u", r, MB->want);
     r = WS("gethostname", 2, GA(g_buf), 64u);
-    check("gethostname = VLAN-529, the host number on the /22 (10.77.2.17)", r == 0 && !strcmp((char *)g_buf, "VLAN-529"), "\"%s\"", g_buf);
+    check("gethostname = VLAN-1553, the host number on the /21 (10.77.6.17)", r == 0 && !strcmp((char *)g_buf, "VLAN-1553"), "\"%s\"", g_buf);
     { uint32_t c = WS("socket", 3, 2u, 1u, 0u); nb(c); tx_drain();
-      WS("connect", 3, c, sa(g_sa, ipn(10, 77, 3, 9), 5000), 16u);
+      WS("connect", 3, c, sa(g_sa, ipn(10, 77, 7, 9), 5000), 16u);
       Frame g; int got2 = tx_take(&g);
-      check("connect to 10.77.3.9 (its bit set, another /24): a SYN goes out", got2 && g.op == NET_LAN_TCP_SYN && g.dst == 0x0A4D0309u, "dst %08x", g.dst);
+      check("connect to 10.77.7.9 (its bit set, another /24, past a /22): a SYN goes out", got2 && g.op == NET_LAN_TCP_SYN && g.dst == 0x0A4D0709u, "dst %08x", g.dst);
       uint32_t c2 = WS("socket", 3, 2u, 1u, 0u); nb(c2); tx_drain();
       WS("connect", 3, c2, sa(g_sa, ipn(10, 77, 1, 9), 5000), 16u);
       check("connect to 10.77.1.9 (no bit): nobody there, nothing sent", tx_count() == 0, "%d frames", tx_count());
-      WS("closesocket", 1, c); WS("closesocket", 1, c2); tx_drain(); }
+      uint32_t c3 = WS("socket", 3, 2u, 1u, 0u); nb(c3); tx_drain();
+      WS("connect", 3, c3, sa(g_sa, ipn(10, 77, 5, 9), 5000), 16u);
+      check("connect to 10.77.5.9 (no bit, past a /22): nobody there, nothing sent", tx_count() == 0, "%d frames", tx_count());
+      WS("closesocket", 1, c); WS("closesocket", 1, c2); WS("closesocket", 1, c3); tx_drain(); }
     { uint32_t u = WS("socket", 3, 2u, 2u, 0u); nb(u);
       WS("setsockopt", 5, u, 0xFFFFu, 0x20u, one(1), 4u);
       WS("bind", 3, u, sa(g_sa, 0, 9999), 16u); tx_drain();
       memcpy(g_buf, "bcast", 5);
-      WS("sendto", 6, u, GA(g_buf), 5u, 0u, sa(g_sa, ipn(10, 77, 3, 255), 9999), 16u);
+      WS("sendto", 6, u, GA(g_buf), 5u, 0u, sa(g_sa, ipn(10, 77, 7, 255), 9999), 16u);
       Frame g; int got2 = tx_take(&g);
-      check("sendto 10.77.3.255, the /22's broadcast: a broadcast", got2 && g.dst == NET_BROADCAST, "dst %08x", g.dst);
+      check("sendto 10.77.7.255, the /21's broadcast: a broadcast", got2 && g.dst == NET_BROADCAST, "dst %08x", g.dst);
       tx_drain();
-      WS("sendto", 6, u, GA(g_buf), 5u, 0u, sa(g_sa, ipn(10, 77, 0, 255), 9999), 16u);
+      WS("sendto", 6, u, GA(g_buf), 5u, 0u, sa(g_sa, ipn(10, 77, 3, 255), 9999), 16u);
       got2 = tx_take(&g);
-      check("sendto 10.77.0.255: a host of the /22, so unicast", got2 && g.dst == 0x0A4D00FFu, "dst %08x", g.dst);
+      check("sendto 10.77.3.255: a host of the /21 (the /22's broadcast), so unicast", got2 && g.dst == 0x0A4D03FFu, "dst %08x", g.dst);
       WS("closesocket", 1, u); tx_drain(); }
     r = WS("WSACleanup", 0, 0u);
     check("the last WSACleanup again: the switch no longer wanted", r == 0 && MB->want == 0, "want %u", MB->want);
