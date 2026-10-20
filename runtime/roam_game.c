@@ -274,6 +274,7 @@ typedef struct {
     char     carname[RC_CFG_TYPE_NAME + 1];
     /* statistics */
     uint32_t loads, remode, pose_frames, wakes;   /* wakes: the game's wake-ups refused (roam_game_inert) */
+    uint32_t moded, wheelfix;                 /* other physics modes the game set (roam_game_inert); frames the wheels were put back (wheels_pose) */
 } Slot;
 static Slot g_sl[NSLOT];
 static uint32_t g_world_seen;
@@ -1003,10 +1004,19 @@ static void sincos_pi(float a, float *sn, float *cs){
 }
 /* The wheels.  The renderer draws each wheel with its matrix in the car,
  * +0x130 + 0x40 k for front left, front right, rear right, rear left (rows:
- * forward, left, up, then the wheel's place, which is left alone), and the
- * front brake calipers with +0x230 / +0x270; the game's physics writes them
- * (the spin about the axle and the steering of the front wheels), and in
- * physics mode 0 they stand still.  Spin: the wheel's angle goes down by
+ * forward, left, up, then the wheel's place), and its brake with +0x230 +
+ * 0x40 k (0x5F6820 hands both to the car's render, 0x620AE0).  In physics
+ * mode 0 the game builds them again every frame, before our hook (the mode's
+ * update 0x5EB920 -> 0x5921B0 for each wheel): no spin and no steering, and
+ * the place the ride's wheel position (RidePhysicsInfo +0x10 + 0x30 k)
+ * raised by the wheel's suspension offset (CAR_SUSP).  Only the physics
+ * modes write that offset (0x59CB90): a friend's car that the game put into
+ * physics for a moment (apply_pose puts it back to mode 0) kept whatever they
+ * left there, and with a NaN every later frame's wheels were NaN, the tires
+ * gone for good (reported in play, mostly after a crash; with the offsets
+ * poked to NaN the wheels vanish, at 0.8 they float over the car).  So here
+ * the offsets go back to 0 and the places are written every frame, and the
+ * first times that was needed are logged.  Spin: the wheel's angle goes down by
  * speed / tyre radius (RidePhysicsInfo +0x20 + 0x30 k) as the car goes
  * forward.  Steering: the friend's own, the controls' +0x1e0 that goes on the
  * wire as steer.  It is the angle the game's physics turns the front wheels
@@ -1016,8 +1026,10 @@ static void sincos_pi(float a, float *sn, float *cs){
  * for the keys' full lock standing still); so whatever the friend steers
  * shows, counter-steer and standing still too.  Smoothed over 80 ms, at most
  * 0.8 rad. */
+#define CAR_SUSP        0x380u        /* float[4]: each wheel's suspension offset (m, up), 0 at rest */
 static void wheels_pose(Slot *s, const rc_pose *P, float dt){
     uint32_t car = s->car, ph = MR32(car + 0x20u);
+    int phok = ok(ph, 0xc0);
     if (!(dt > 0.f)) dt = 0.f;
     if (dt > 0.1f) dt = 0.1f;
     float v = P->speed, want = P->steer * 3.14159265f;
@@ -1027,8 +1039,17 @@ static void wheels_pose(Slot *s, const rc_pose *P, float dt){
     s->steer += (want - s->steer) * (k < 1.f ? k : 1.f);
     if (!__builtin_isfinite(s->steer)) s->steer = 0.f;
     float ss, cs; sincos_pi(s->steer, &ss, &cs);
+    float susp[4]; int moved = 0;
     for (uint32_t w = 0; w < 4; w++){
-        float r = ok(ph, 0xc0) ? MRF32(ph + 0x20u + 0x30u * w) : 0.f;
+        susp[w] = MRF32(car + CAR_SUSP + 4u * w);
+        moved |= susp[w] != 0.f;                                     /* a NaN too */
+        MRF32(car + CAR_SUSP + 4u * w) = 0.f;
+    }
+    if (moved && s->wheelfix++ < 3)
+        rlog("[roam] f=%ld slot %d: %s's car had its wheels moved (suspension %g %g %g %g, put back into physics mode 0 %u times): put back\n",
+                rh_frame(), (int)(s - g_sl), s->name, (double)susp[0], (double)susp[1], (double)susp[2], (double)susp[3], s->remode);
+    for (uint32_t w = 0; w < 4; w++){
+        float r = phok ? MRF32(ph + 0x20u + 0x30u * w) : 0.f;
         if (!(r > 0.05f && r < 2.f)) r = 0.33f;
         float d = v / r * dt;                                        /* at most 100 m/s: a few turns per frame */
         if (!__builtin_isfinite(d) || d > 32.f || d < -32.f) d = 0.f;
@@ -1038,14 +1059,20 @@ static void wheels_pose(Slot *s, const rc_pose *P, float dt){
         s->spin[w] = a;
         float sa, ca; sincos_pi(a, &sa, &ca);
         float sy = w < 2 ? ss : 0.f, cy = w < 2 ? cs : 1.f;
-        uint32_t m = car + 0x130u + 0x40u * w;
+        uint32_t m = car + 0x130u + 0x40u * w, b = car + 0x230u + 0x40u * w;
         MRF32(m + 0x00u) = ca * cy;  MRF32(m + 0x04u) = ca * sy;  MRF32(m + 0x08u) = sa;
         MRF32(m + 0x10u) = -sy;      MRF32(m + 0x14u) = cy;       MRF32(m + 0x18u) = 0.f;
         MRF32(m + 0x20u) = -sa * cy; MRF32(m + 0x24u) = -sa * sy; MRF32(m + 0x28u) = ca;
         if (w < 2){
-            uint32_t b = car + 0x230u + 0x40u * w;
             MRF32(b + 0x00u) = cy;  MRF32(b + 0x04u) = sy;
             MRF32(b + 0x10u) = -sy; MRF32(b + 0x14u) = cy;
+        }
+        /* the wheel's and the brake's place, at rest (0x5921B0's with offset 0) */
+        float x = phok ? MRF32(ph + 0x10u + 0x30u * w) : 0.f, y = phok ? MRF32(ph + 0x14u + 0x30u * w) : 0.f,
+              z = phok ? MRF32(ph + 0x18u + 0x30u * w) : 0.f;
+        if (phok && __builtin_fabsf(x) < 4.f && __builtin_fabsf(y) < 2.f && __builtin_fabsf(z) < 2.f){
+            MRF32(m + 0x30u) = x; MRF32(m + 0x34u) = y; MRF32(m + 0x38u) = z;
+            MRF32(b + 0x30u) = x; MRF32(b + 0x34u) = y; MRF32(b + 0x38u) = z;
         }
     }
 }
@@ -2624,6 +2651,22 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
         if (tmo && f - *wait_start >= tmo){ rlog("[roam] f=%ld mp waitoutrun %s TIMEOUT (%s)\n", f, a1, st[g_du.st]); *wait_start = -1; return 1; }
         return 0;
     }
+    if (!strcasecmp(sub, "carpoke") || !strcasecmp(sub, "carpeek")){
+        /* "mp carpoke K OFF VALUE [N]": N floats (VALUE may be nan) into slot
+         * K's car at +OFF (hex), the way the game's physics could leave them;
+         * "mp carpeek K OFF [N]" logs them */
+        char a3[32] = {0}, a4[32] = {0}; sscanf(args + used, "%*s %*s %31s %31s", a3, a4);
+        int k = atoi(a1); uint32_t off = (uint32_t)strtoul(a2, 0, 16);
+        if (k < 0 || k >= NSLOT || !ok(g_sl[k].car, 0x9e0) || off >= 0x9e0u){ rlog("[roam] f=%ld mp %s: no car in slot %d\n", f, sub, k); return 1; }
+        int poke = !strcasecmp(sub, "carpoke"), n = atoi(poke ? a4 : a3); if (n < 1) n = 1;
+        float v = poke ? (float)atof(a3) : 0.f;
+        for (int i = 0; i < n && off + 4u * (uint32_t)i < 0x9e0u; i++){
+            uint32_t a = g_sl[k].car + off + 4u * (uint32_t)i;
+            if (poke) MRF32(a) = v;
+            rlog("[roam] f=%ld mp %s slot %d +0x%x = %g (0x%08x)\n", f, sub, k, off + 4u * (uint32_t)i, (double)MRF32(a), MR32(a));
+        }
+        return 1;
+    }
     if (!strcasecmp(sub, "cfgdump") || !strcasecmp(sub, "cfgtest")){
         if (g_njob == NJOB){ rlog("[roam] f=%ld mp %s: busy\n", f, sub); return 1; }
         snprintf(g_job[g_njob++], sizeof g_job[0], "%s", args);
@@ -2686,13 +2729,21 @@ static void run_job(CPU *c, const char *job){
  * not); for a friend's car that physics then ran on
  * a ride built without its physics pass (build_ride), drove the car for the
  * rest of the timestep and left its wheel and suspension state in the car
- * (+0x340..+0x38C), which nothing of ours puts back.  Kept in mode 0 the car
- * is still solid: a car that hits it is pushed in its owner's game as before.
- * Other callers (Car::Activate, SetRideInfo) are not refused: make_inert puts
- * their mode back to 0, as it always did.  1: refused. */
+ * (+0x340..+0x38C; wheels_pose puts the suspension offsets back).  Kept in
+ * mode 0 the car is still solid: a car that hits it is pushed in its owner's
+ * game as before.  Other callers (Car::Activate, SetRideInfo) are not
+ * refused: make_inert puts their mode back to 0, as it always did; the first
+ * one to do it to a friend's car that is shown is logged (what moves the
+ * wheels, wheels_pose).  1: refused. */
 int roam_game_inert(uint32_t car, uint32_t mode, uint32_t from){
-    if (!mode || !car || (from != 0x004048b6u && from != 0x004048c0u)) return 0;
+    if (!mode || !car) return 0;
+    int wake = from == 0x004048b6u || from == 0x004048c0u;
     for (int k = 0; k < NSLOT; k++) if (g_sl[k].car == car && (g_sl[k].st == SL_ACTIVE || g_sl[k].st == SL_LOADING)){
+        if (!wake){
+            if (g_sl[k].st == SL_ACTIVE && !g_sl[k].hidden && !g_sl[k].moded++)
+                rlog("[roam] f=%ld slot %d: %s's car put into physics mode %u from 0x%08x\n", rh_frame(), k, g_sl[k].name, mode, from);
+            return 0;
+        }
         if (!g_sl[k].wakes++) rlog("[roam] f=%ld slot %d: %s's car stays without physics when a car comes near\n", rh_frame(), k, g_sl[k].name);
         return 1;
     }
