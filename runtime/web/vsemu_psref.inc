@@ -6,9 +6,10 @@
  * ps_to_msl_ex2 gives it (and therefore the WGSL backend must give it):
  * register masks (r & 15, v & 1, t & 3, c & 31), def constants, source
  * modifiers, destination shift then _sat then write mask, tex/texld coordinate
- * rules with the projective divide, the ps_2_0 t# registers left at 0,
- * skipped unsupported ops, result r0 or oC, alpha test ">= aref" and vertex
- * fog.  Texture sampling goes through a callback so the test can use the same
+ * rules with the projective divide, skipped unsupported ops, result r0 or oC,
+ * alpha test ">= aref" and vertex fog.  One exception: the ps_2_0 t#
+ * registers hold the coordinates, as in D3D (the Mac leaves them at 0).
+ * Texture sampling goes through a callback so the test can use the same
  * analytic "texture" on both sides. */
 /* PSRefIn, PSRefPar and PSRefTex are declared in wgsl.h. */
 typedef struct {
@@ -72,6 +73,12 @@ int ps_ref_run(const VSProg *p, const PSRefPar *P, const PSRefIn *in, PSRefTex t
         float d = m == 2 ? in->uv[k][3] : (m == 1 ? in->uv[k][2] : 1.f);
         tc[k][0] = in->uv[k][0] / d; tc[k][1] = in->uv[k][1] / d;
     }
+    /* ps_2_0: the `dcl tN` coordinate registers hold uvN, as in D3D (the
+     * emitter's PS20_TEXCOORD default) */
+    if (p->version >= 0x0200)
+        for (unsigned q = 0; q < p->n; q++)
+            if (p->ins[q].op == O_DCL && RT(p->ins[q].dst) == R_ADDR)
+                memcpy(e.t[RN(p->ins[q].dst) & 3], in->uv[RN(p->ins[q].dst) & 3], 16);
     for (unsigned q = 0; q < p->n; q++){
         const VSIns *x = &p->ins[q];
         float s[3][4], d[4] = { 0, 0, 0, 0 };

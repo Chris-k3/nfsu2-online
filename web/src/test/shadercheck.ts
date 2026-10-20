@@ -340,7 +340,7 @@ async function main() {
     for (const ps of psNames) {
       await pipeline('vs_0', ps, { ALPHA_FUNC: ALPHA_GREATEREQUAL });
       await pipeline('vs_0', ps, { ALPHA_FUNC: ALPHA_ALWAYS });
-      await pipeline('vs_0', ps, { ALPHA_FUNC: ALPHA_GREATEREQUAL, PS20_TEXCOORD: 1 });
+      await pipeline('vs_0', ps, { ALPHA_FUNC: ALPHA_GREATEREQUAL, PS20_TEXCOORD: 0 });
     }
   // &cross: the game's own VS modules (ids below 1000; the --pairs extras are left out) x every game PS
   if (q.has('cross'))

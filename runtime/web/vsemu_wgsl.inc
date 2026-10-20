@@ -93,7 +93,7 @@ static const char W_PSPAR[] =
     "struct PSPar { aref: f32, usec: f32, pad0: f32, pad1: f32, proj: vec4f, c: array<vec4f, 32>, fog: vec4f }\n"
     "@group(0) @binding(2) var<uniform> P: PSPar;\n"
     "override ALPHA_FUNC: u32 = 7u;\n"
-    "override PS20_TEXCOORD: bool = false;\n"
+    "override PS20_TEXCOORD: bool = true;\n"
     /* D3DCMP against P.aref; 7 is spelled !(a < r) so a NaN alpha passes, as
      * the Mac's "if (a < aref) discard" does. */
     "fn alpha_pass(a: f32, r: f32) -> bool {\n"
@@ -279,9 +279,11 @@ int ps_to_wgsl_ex2(const VSProg *p, int id, char *out, size_t cap, unsigned cube
     int rc = 0;
     if (!ex || !s0 || !s1 || !s2 || !val) goto done;
 
-    /* ps_2_0: `dcl tN` coordinate registers.  The Mac never loads them (they
-     * read 0, gfx-d3d9.md section 9 #1); PS20_TEXCOORD = true loads them as
-     * D3D does.  Default false = Mac parity. */
+    /* ps_2_0: `dcl tN` coordinate registers, loaded as D3D does.  The Mac
+     * never loads them (they read 0, gfx-d3d9.md section 9 #1): then depth
+     * of field (the scenes before and after a race) samples one texel and
+     * leaves only the light glows on a flat colour.  PS20_TEXCOORD = false
+     * gives the Mac's look (A/B). */
     if (p->version >= 0x0200){
         for (unsigned q = 0; q < p->n; q++){
             const VSIns *y = &p->ins[q];

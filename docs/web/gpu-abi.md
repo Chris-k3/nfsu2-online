@@ -139,7 +139,7 @@ struct PSPar {                     // 560 bytes, uniform (= the Mac's PSPar)
 | Name | Type, default | Meaning |
 |---|---|---|
 | `ALPHA_FUNC` | `u32`, `7` | Alpha test of the final colour against `P.aref`, D3DCMP numbering: 1 NEVER, 2 LESS, 3 EQUAL, 4 LESSEQUAL, 5 GREATER, 6 NOTEQUAL, 7 GREATEREQUAL, **8 ALWAYS = no test, no `discard` in the pipeline** |
-| `PS20_TEXCOORD` | `bool`, `false` | ps_2_0 only: `false` = Mac parity (the `t#` coordinate registers read 0, §8); `true` = D3D behaviour (`t#` = `uv#`). Opt-in for an A/B; the original (Mac) look is the default |
+| `PS20_TEXCOORD` | `bool`, `true` | ps_2_0 only: `true` = D3D behaviour (`t#` = `uv#`), the default; `false` = the Mac's look (the `t#` coordinate registers read 0, §8), for an A/B |
 
 - **Mac parity:** `ALPHA_FUNC = 7` when `MDraw.alpha_ref > 0`, else `8`. The second is the Mac's no-discard twin
   (`g_psfn_nd`), chosen for the same reason: `discard` disables hidden-surface removal on Apple GPUs. The comparison for
@@ -181,7 +181,6 @@ struct PSPar {                     // 560 bytes, uniform (= the Mac's PSPar)
 
 | Quirk | Mac source | Note |
 |---|---|---|
-| ps_2_0 `t#` coordinate registers are never loaded (read 0) | `vsemu.c` ps_to_msl_ex2 | DOF and rain-drop sample at (0,0). Opt-in fix: `PS20_TEXCOORD = true` |
 | No half-pixel offset; oD0/oD1 not clamped | `vs_to_msl` epilogue | |
 | `mov a0.x, r` truncates toward zero; `mova` rounds half away from zero | MSL implicit conversion / `round()` | WGSL `round` is half-to-even, so the emitter writes the Mac's rounding explicitly |
 | ps_1_x unsupported texture ops (`texreg2ar/gb`, `texbem`, `texm3x*`, `bem`) and `phase` are skipped | `default: continue` | Only the SCREENFILTER fallback technique has them (two ps_1_1 shaders the game creates but never selects, because the device reports PS 2.0) |
@@ -190,15 +189,14 @@ struct PSPar {                     // 560 bytes, uniform (= the Mac's PSPar)
 | ps_1_4 `texcrd rN, tM` writes `t[N] = uvN`; co-issued pairs run sequentially | `ps_to_msl_ex2` | NFSU2 has no `texcrd`; its 15 co-issued instructions are safe sequentially (`gfx-d3d9.md` §3.5) |
 | Alpha test is "≥ aref" only (from `com.c`) | `com.c:719` | §5 allows the full set later |
 
-**Open question for the user: the ps_2_0 `t#` quirk.** The default `PS20_TEXCOORD = false` keeps the Mac port's
-behaviour: depth of field (`ps_30`) and rain drops (`ps_31`) sample their textures at (0,0). The D3D9 rules
-and the PC game say the coordinates must be
-loaded, which is what `PS20_TEXCOORD = true` does. "The original look by default" can mean either the PC game (then
-the default should be `true`) or the Mac port this translator is a port of (then `false`, as now). Kept at Mac parity
-until the user decides (phase-1 review `phase1-gpu-shaders.md` #4). Impact so far: none in the tested scenes; a draw
-census over a whole quick race never drew `ps_30` or `ps_31` (depth of field and rain scenes were not tested). Whoever
-flips it: check that `t#` = `oT#` ignores TEXCOORDINDEX for ps_2_0 (as emitted, `uvK` already has TEXCOORDINDEX
-applied in the vertex epilogue).
+**Not kept: the ps_2_0 `t#` registers.** The Mac never loads them (`vsemu.c` ps_to_msl_ex2): they read 0, so depth of
+field (`ps_30`) and rain drops (`ps_31`) sampled their textures at (0,0). Depth of field runs in some of the camera
+scenes before and after a race. There every pixel took the top-left texel, the black letterbox bar, which the tint
+passes after it turned into a flat colour, and only the light glows (added later) showed. The game's random choices
+decide whether a race intro is one of those: 5 of 18 quick-race runs (2026-10-20). The rain drops on the lens did
+not show at all. Since then `PS20_TEXCOORD` defaults to `true` (D3D: `t#` = `uv#`), `false` gives the Mac's look,
+and `ps_ref_run` loads them too. `uvK` has TEXCOORDINDEX applied in the vertex epilogue; for both shaders' draws that
+is the identity (`tsel` 0x03020100), as D3D requires with a vertex shader.
 
 Deliberate differences from the Mac's **text** (not its semantics), both toward the Mac's CPU reference path (`vs_run`,
 `decl_fetch`): `def` constants are printed with 9 significant digits (`%.9g`, exact for f32) instead of `%g` (6 digits),
@@ -230,13 +228,14 @@ early gives a smaller dump and fails (`--script` and `--env` run another scene f
 3. **Check** (`/test/shadercheck.html`, `web/src/test/shadercheck.ts`):
    - every module: `createShaderModule` + `getCompilationInfo` (+ a validation error scope): **0 errors**;
    - render pipelines with the explicit layouts of §2 (`web/src/gpu/shader-abi.ts`): each game VS with `ps_0`; `vs_0`
-     with every PS and cube twin at `ALPHA_FUNC` 7, 8 and with `PS20_TEXCOORD`; `&cross` adds every VS × every PS;
+     with every PS and cube twin at `ALPHA_FUNC` 7, 8 and with `PS20_TEXCOORD` off; `&cross` adds every VS × every PS;
    - vertex pulling: `pulltest.wgsl` decodes all 13 declaration types at byte offsets 0..7 from 8 bases and must equal
      the CPU decoder (`decl_fetch` semantics) **bit for bit**;
    - vertex shaders: each WGSL vertex function runs as a compute function on random vertices and constants and is
      compared with `vs_run` (the Mac's CPU interpreter) on the same bytes;
    - pixel shaders: each fragment function runs as a compute function (analytic texture, `discard` as a flag) and is
-     compared with `ps_ref_run`, a reference interpreter of the Mac's pixel shader semantics. Colours within 1e-3
+     compared with `ps_ref_run`, a reference interpreter of the Mac's pixel shader semantics (but the ps_2_0 `t#`
+     registers, §8). Colours within 1e-3
      relative; kill flags equal, except an alpha-test decision that flips because both alphas are within that
      tolerance of `aref` (counted as `edgeFlips`; SwiftShader/Vulkan has one, Metal none).
 
