@@ -201,7 +201,8 @@ files in the state volume, so either server takes over the other's.
 
 - **From GitHub's registry:** `.github/workflows/image-rs.yml` builds `ghcr.io/th0mk/nfsu2-web-rs` for amd64 and
   arm64 on the same pushes and with the same tags as the Node image (`latest`, `sha-<commit>`, the versions): about
-  7 MB to download. It is a package of its own: make it public too, or log in ([The image](#the-image)).
+  7 MB to download. It is a package of its own, public from its first build (the repository is): the VPS pulls it
+  without logging in.
 - **Switching:** one line in `/srv/nfsu2/.env`, then `cd /srv/nfsu2 && docker compose pull && docker compose up -d`.
 
   ```sh
