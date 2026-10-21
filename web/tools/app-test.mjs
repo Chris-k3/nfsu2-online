@@ -37,8 +37,9 @@
 //             Chrome with --js-flags=--expose-gc), so is every AudioContext and GPU device, and
 //             measureUserAgentSpecificMemory comes back to where it was before the first Play
 //   cache     page -> Ready and Play -> title screen, first time and again (persistent profile)
-//   roamask   a player's first Play (no test settings in the address) asks about free roam: without a name
-//             no name line, Esc is Not now (roam = off), not asked again; with one, the name to change (a
+//   roamask   a player's first Play (no test settings in the address) asks about free roam: not while the
+//             server says free roam is busy (/players roamBusy: nothing written, asked at the next Play); without
+//             a name no name line, Esc is Not now (roam = off), not asked again; with one, the name to change (a
 //             refused one keeps the question open), Enter in it turns free roam on with the new name
 //   page      what the page shows and asks for: no /server-info, /setup or /ca.crt (all 404), every
 //             setting has a name and a description, the controls sheet is on the page and in F9's dialog
@@ -761,6 +762,18 @@ try {
       await r.evaluate(() => window.__nfsu2.session.terminate());
       await waitPhase(r, ['exited'], 30000);
     };
+    // free roam busy on the server (the hub gives fewer than 24 links a player): not asked, nothing written
+    const playersUrl = u => u.pathname === '/players';
+    await r.route(playersUrl, route => route.fulfill({ contentType: 'application/json', body: '{"players":700,"online":40,"full":false,"roamBusy":true}' }));
+    await r.goto(`${BASE}/`);
+    await waitPhase(r, ['ready', 'error'], 60000);
+    await r.waitForFunction(() => /700 players/.test(document.querySelector('#online')?.textContent ?? ''), null, { timeout: 10000 });
+    await r.click('#play');
+    const busyAsked = await r.waitForSelector('#confirm[open]', { timeout: 4000 }).then(() => true, () => false);
+    await waitPhase(r, ['playing', 'exited'], 60000);
+    const busy = { asked: busyAsked, ini: roamLines(await ini()), log: (await r.evaluate(() => window.__nfsu2.log.tail(400))).filter(l => /free roam with others/.test(l)) };
+    await stop();
+    await r.unroute(playersUrl);
     await r.goto(`${BASE}/`);
     await waitPhase(r, ['ready', 'error'], 60000);
     // a new player: no name line; Esc is Not now
@@ -790,15 +803,18 @@ try {
     const refused = await r.evaluate(() => ({ open: document.querySelector('#confirm').open, why: document.querySelector('#roam-ask-name').validationMessage }));
     await r.fill('#roam-ask-name', 'New Racer');
     await r.press('#roam-ask-name', 'Enter');
+    // the phase is still the last game's 'exited' until the answer is written and this game starts
+    await r.waitForFunction(() => window.__nfsu2.phase !== 'exited', null, { timeout: 10000 });
     await waitPhase(r, ['playing', 'exited'], 60000);
     const afterOn = roamLines(await ini());
     const env = await r.evaluate(() => window.__nfsu2.env());
     await stop();
     await c5.close();
-    report('roamask', first.title === 'Free roam with others?' && first.field === null && first.ok === 'Turn on' && first.okClass === 'btn selected' &&
+    report('roamask', !busy.asked && busy.ini.length === 0 && busy.log.length === 1 && /not asked, the server's free roam is busy/.test(busy.log[0]) &&
+      first.title === 'Free roam with others?' && first.field === null && first.ok === 'Turn on' && first.okClass === 'btn selected' &&
       first.cancel === 'Not now' && first.focus === 'confirm-ok' && afterEsc.join() === 'roam = off' && !again && named.field === 'Racer' &&
       refused.open && /not a name/.test(refused.why) && [...afterOn].sort().join() === 'roam = on,roam_name = New Racer' && env.NFSU2_ROAM === '1' && env.NFSU2_ROAM_NAME === 'New Racer',
-      { first, afterEsc, askedAgain: again, named, refused, afterOn, env: { NFSU2_ROAM: env.NFSU2_ROAM, NFSU2_ROAM_NAME: env.NFSU2_ROAM_NAME } });
+      { busy, first, afterEsc, askedAgain: again, named, refused, afterOn, env: { NFSU2_ROAM: env.NFSU2_ROAM, NFSU2_ROAM_NAME: env.NFSU2_ROAM_NAME } });
   }
 
   // ------------------------------------------------------------- page --

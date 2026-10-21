@@ -215,7 +215,7 @@ for (const core of [1, 2]) test(`64 players of core version ${core} in one place
 for (const [way, opts] of WAYS) test(`a busy server: every player gets fewer links, and more again once it has room (${way})`, () => {
   let busy = 0.95;
   const lines = [], { hub, sent, step } = hubFor({ ...opts, busy: () => busy, log: l => lines.push(l) });
-  const caps = [];
+  const caps = [], crowded = [];
   const second = () => {
     sent.length = 0;
     for (let i = 0; i < 40; i++) {
@@ -228,7 +228,7 @@ for (const [way, opts] of WAYS) test(`a busy server: every player gets fewer lin
     for (const [k, l] of L) for (const e of l) assert.ok(L.get(`${e.vip}:47210`).some(x => `${x.vip}:47210` === k), 'both ends');
     const open = [...L].filter(([, l]) => l.length < cap);
     for (const [a, la] of open) for (const [b] of open) if (a !== b) assert.ok(la.some(x => `${x.vip}:47210` === b), 'two with room left: linked');
-    caps.push(cap);
+    caps.push(cap); crowded.push(hub.crowded());
   };
   for (let s = 0; s < 30; s++) second();
   assert.deepEqual([caps[0], caps[4], caps[5], caps[10], caps[15], caps[20], caps[29]], [24, 24, 18, 13, 9, 8, 8], caps.join(' '));
@@ -241,6 +241,11 @@ for (const [way, opts] of WAYS) test(`a busy server: every player gets fewer lin
   assert.equal(lines.length, 8);
   assert.match(lines[0], /95 % busy: at most 24 links a player \(was 32\)/);
   assert.equal(hub.info().capCuts, 5);
+  // busy for the start page's question (/players roamBusy) while the cap is under 24: from 18 down, until it is 24 again
+  for (let s = 0; s < 90; s++) second();
+  assert.ok(caps.at(-1) > 24, caps.slice(91).join(' '));
+  assert.ok(crowded.every((c, i) => c === caps[i] < 24), crowded.map((c, i) => `${caps[i]}${c ? '*' : ''}`).join(' '));
+  assert.deepEqual([crowded[4], crowded[5], crowded.lastIndexOf(true) + 1 === caps.indexOf(24, 60)], [false, true, true]);
 });
 
 // a room larger than exactRoom: the grid's links against every pair's, for the same players (a city, a district and

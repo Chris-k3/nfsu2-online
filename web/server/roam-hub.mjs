@@ -26,7 +26,9 @@
 // stutter for everyone (nfsu2.xyz at 855 players, 2026-10-20: 180-600 ms for a /players answer).  While the thread
 // worked more than busyHigh of the last tick (performance.eventLoopUtilization) the cap on the links goes down by a
 // quarter, at most every capDownMs, to minDegree at the least; once it has room again (under busyLow) the cap goes
-// back up by 2 every capUpMs.  The nearest links stay.
+// back up by 2 every capUpMs.  The nearest links stay.  While the cap is under askCap (24) free roam counts as busy
+// (server.mjs /players roamBusy): the start page does not ask its question (Free roam with others?) at a Play then,
+// so fewer new players join a crowd that already gets fewer cars; it asks at a later Play once the cap is back.
 //
 // What the hub keeps, in memory only: per player endpoint its virtual address, port, id, room hash, status, name
 // (for info()) and last position; gone goneMs after its last message, when it says BYE, or when it leaves the
@@ -45,7 +47,7 @@ const DEGREE_V1 = 7;                            // roam_core.h RC_PEERS_V1: what
 // order but only as far as it needs them: each player's nearest one after another (a grid) until it has its links
 // (every pair of 2000 players in one room took the hub 1.5-4.5 s a tick, 1000 players 0.5 s)
 export const ROAM_HUB_DEFAULTS = Object.freeze({ degree: 32, tickMs: 1000, staleMs: 60_000, goneMs: 6_000, keep: 0.5, holdMs: 5_000,
-  maxPerVip: 2, maxPlayers: 2048, exactRoom: 256, minDegree: 8, busyHigh: 0.85, busyLow: 0.65, capDownMs: 5_000, capUpMs: 15_000 });
+  maxPerVip: 2, maxPlayers: 2048, exactRoom: 256, minDegree: 8, busyHigh: 0.85, busyLow: 0.65, capDownMs: 5_000, capUpMs: 15_000, askCap: 24 });
 const PER_CELL = 8, MIN_CELL = 5;               // the grid: cells (x and y) for about 8 players each, 5 m at least
 
 /** one free-roam datagram, or null: the fields the hub needs (HELLO, SNAP, BYE), checked as roam_core.c's decoder does */
@@ -266,6 +268,8 @@ export class RoamHub {
     if (this.cap < was) this.st.capCuts++;
     this.log(`[roam] the server's thread was ${this.st.busy} % busy: at most ${this.cap} links a player (was ${was})`);
   }
+  /** free roam is busy: the cap is under askCap (the start page does not ask new players then) */
+  crowded() { return this.cap < this.o.askCap; }
   /** a player's links at most: its degree, under the cap */
   degreeOf(p) { return Math.min(p.degree, this.cap); }
   /** a pair of players and its place in the order: a link younger than holdMs first, an older one at keep its distance */

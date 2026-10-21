@@ -144,8 +144,10 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
 Free roam is shared with **everyone** on the server who turns it on. Use a Room to keep to a group.
 
 1. Each player turns on **Online, Free roam with others** on the start page. The first Play asks too (Turn on or
-   Not now, and Esc is Not now); it asks once, and the switch changes the answer later. **Online, Your name** is
-   the name the others see (empty: your profile name); the question shows it once there is one, to change.
+   Not now, and Esc is Not now); it asks once, and the switch changes the answer later. While the server's free
+   roam is busy (it gives each player fewer than 24 cars) it doesn't ask, and asks at a later Play instead.
+   **Online, Your name** is the name the others see (empty: your profile name); the question shows it once there
+   is one, to change.
 2. Everyone plays from the same server's address.
 3. Each player starts or loads a career and drives in free roam. Players find each other by themselves, and their
    cars appear in your city with their names over them, as in the game's own LAN races.

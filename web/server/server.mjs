@@ -671,11 +671,13 @@ async function handler(q, s) {
     return s.end(q.method === 'HEAD' ? undefined : body);
   }
   if (p === '/players') {
-    // how many play on this server now (the start page's Multiplayer settings): two counts and whether it is
-    // full, nothing else, no names, addresses or times; online: in the game's Online mode (logged in, or racing
-    // an online race), null with --online off; full: a game that connects now gets "LAN full"
+    // how many play on this server now (the start page's Multiplayer settings): two counts, whether it is full
+    // and whether free roam is busy, nothing else, no names, addresses or times; online: in the game's Online mode
+    // (logged in, or racing an online race), null with --online off; full: a game that connects now gets "LAN
+    // full"; roamBusy: the hub gives fewer than askCap links a player (roam-hub.mjs), so the page does not ask
+    // the free-roam question now (false with --roam-hub off)
     const o = online?.info(), players = lan.peers.size;
-    const body = JSON.stringify({ players, online: o ? Math.min(players, o.personas + o.racing) : null, full: lan.full });
+    const body = JSON.stringify({ players, online: o ? Math.min(players, o.personas + o.racing) : null, full: lan.full, roamBusy: !!roamHub?.crowded() });
     s.writeHead(200, headers(q, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) }));
     return s.end(q.method === 'HEAD' ? undefined : body);
   }

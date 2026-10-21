@@ -27,7 +27,7 @@ import { checkSetting, HOST_FIXED, pageOnly, resolveEnv, settingsUpgrade, TEMPLA
 import { exists, filesOf, listProfiles, PROFILES_DIR, readText, removeSaveDir, writeFile } from './savefs';
 import { turnOnAutosave } from './profile';
 import { putKey, SettingsPanel } from './settings-ui';
-import { serverAnswers, watchPlayers } from './players';
+import { serverAnswers, watchPlayers, type PlayerCounts } from './players';
 import { SavesPanel } from './saves-ui';
 import { FpsOverlay, FPS_MODES, type FpsMode } from './overlay';
 import { GameSession } from './game';
@@ -85,7 +85,7 @@ let starting = false;                    // Play pressed, the session not there 
 let fatal: string | null = null;         // why the running game had to be stopped
 let fps: FpsOverlay;
 let settings: SettingsPanel;
-let players: { now(): void } | null = null;
+let players: { now(): void; last(): PlayerCounts | null } | null = null;
 let saves: SavesPanel;
 let download: Predownload;
 /** the server does not answer: the page and the module came from this browser's copies (sw.ts), and a game
@@ -202,12 +202,15 @@ let untrack: (() => void) | null = null;
  * once; Not now and Esc are off.  Not asked when the file or the page address sets it already, on a test page
  * (the address's test settings), offline or with network = off.  The name shows only when there is one (Your
  * name, else the newest career profile's): a new player has none yet, the game asks for it before free roam.
+ * While the server's free roam is busy (its newest /players says roamBusy: fewer links a player) it is not asked
+ * and nothing is written, so a later Play asks once free roam has room again.
  * ASK_ROAM false: never asked, and free roam stays off until the player turns it on under Online.
  */
 const ASK_ROAM = true;
 async function askRoam() {
   const r = resolved();
   if (!ASK_ROAM || r.source.NFSU2_ROAM || TEST_PARAMS.some(k => q.has(k)) || offline || /^(off|0|none)$/i.test(r.env.NFSU2_NET?.trim() ?? '')) return;
+  if (players?.last()?.roamBusy === true) { log.add('[app] free roam with others: not asked, the server\'s free roam is busy (asked at a later Play)'); return; }
   const name = (r.source.NFSU2_ROAM_NAME === 'settings.ini' ? r.env.NFSU2_ROAM_NAME : '') || (await newestProfile())?.name || '';
   const p = (text: string) => Object.assign(document.createElement('p'), { textContent: text });
   const body = document.createElement('div');
