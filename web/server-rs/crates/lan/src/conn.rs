@@ -1,5 +1,5 @@
 //! A connection: its queue (what the switch sends it, taken by its writer all at once), its writer, the bundle clock,
-//! and the ws library's states and close rules (lan.mjs's `ws`).
+//! and the ws library's states and close rules (the WebSocket library of the Node server: the crate doc's last part).
 
 use std::sync::atomic::{
     AtomicBool, AtomicU8, AtomicU64, AtomicUsize,
@@ -61,7 +61,7 @@ fn header_len(len: usize) -> usize {
 
 impl Out {
     /// the bytes it puts on the wire, as `buffered` counts them (ws's bufferedAmount counts the frame's header too);
-    /// a datagram for a bundle counts in `dgram` instead (4 + its length: lan.mjs `outBytes`)
+    /// a datagram for a bundle counts in `dgram` instead (4 + its length, its entry in the bundle)
     fn wire_len(&self) -> usize {
         match self {
             Out::Text(b) | Out::Raw(b) | Out::Pong(b) | Out::Close(b) => header_len(b.len()) + b.len(),
@@ -75,9 +75,9 @@ impl Out {
 /// What the switch has queued for one connection.
 pub(crate) struct OutQueue {
     pub(crate) q: Mutex<Vec<Out>>,
-    /// bytes handed to the writer and not yet taken by the kernel (Node's `ws.bufferedAmount`)
+    /// bytes handed to the writer and not yet taken by the kernel (the ws library's `bufferedAmount`)
     buffered: AtomicUsize,
-    /// datagrams waiting for the bundle clock (Node's `p.outBytes`)
+    /// datagrams waiting for the bundle clock (their bytes as bundle entries)
     dgram: AtomicUsize,
     wake: Notify,
     /// on the bundle clock's list for its next tick
@@ -188,7 +188,7 @@ impl Conn {
     }
 
     /// a datagram for a peer that takes bundles: it waits for the bundle clock (or goes at once without one); a
-    /// bundle's worth (BUNDLE_OUT) wakes the writer at once, as lan.mjs flushed a full bundle
+    /// bundle's worth (BUNDLE_OUT) wakes the writer at once: a full bundle does not wait for the tick
     pub(crate) fn push_dgram(self: &Arc<Self>, data: Bytes, src: u32, dst: u32, clock: Option<&Clock>) {
         if !self.open() {
             return;
@@ -391,8 +391,7 @@ struct Encoded {
     end: bool,
 }
 
-/// the items into `buf`: the datagrams first, as bundles (lan.mjs `flushOut`), then the rest in order; nothing after
-/// a close frame
+/// the items into `buf`: the datagrams first, as bundles, then the rest in order; nothing after a close frame
 fn encode(stats: &Stats, items: &[Out], buf: &mut Vec<u8>, close_sent: &mut bool) -> Encoded {
     let mut e = Encoded::default();
     if !*close_sent {
@@ -450,7 +449,7 @@ fn bundle(stats: &Stats, items: &[Out], buf: &mut Vec<u8>) {
     let Some(mut next) = dgrams.next() else { return };
     let mut chunk: smallvec::SmallVec<[(&Bytes, u32, u32); 32]> = smallvec::SmallVec::new();
     loop {
-        // a bundle takes datagrams while it stays within BUNDLE_OUT (lan.mjs flushed it before one that would not fit)
+        // a bundle takes datagrams while it stays within BUNDLE_OUT (the one that would not fit begins the next)
         chunk.clear();
         let mut sum = 0;
         let mut rest = None;

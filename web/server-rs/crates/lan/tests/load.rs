@@ -1,10 +1,10 @@
 //! The switch under free roam's load (ignored by default; in release, with the output):
 //!   cargo test -p nfsu2-lan --release --test load -- --ignored --nocapture
 //! N players in free roam on pages that take bundles, each sending 20 bundles a second, a snapshot of 94 bytes to its
-//! 32 friends in each (free roam's most common case, lan.mjs's comment), for N = 120, 480 and 1000.  It reports the
-//! datagrams delivered a second (N x 640 when nothing is lost), the messages they came in, and the CPU: the switch's
-//! threads (their own runtime, "lan-switch"), the fake players' ("lan-players"), the whole process.  The target
-//! (lan.rs's crate doc): 1500 players in free roam, ~1,000,000 deliveries a second, on all of a 16-core box.
+//! 32 friends in each (free roam's most common case), for N = 120, 480 and 1000.  It reports the datagrams delivered a
+//! second (N x 640 when nothing is lost), the messages they came in, and the CPU: the switch's threads (their own
+//! runtime, "lan-switch"), the fake players' ("lan-players"), the whole process.  The target (lan.rs's crate doc): 1500
+//! players in free roam, ~1,000,000 deliveries a second, on all of a 16-core box.
 
 mod harness;
 

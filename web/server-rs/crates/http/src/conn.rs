@@ -1,7 +1,8 @@
 //! One connection: what Node's http server did per socket (`connectionListenerInternal`, `parserOnIncoming`,
-//! `resOnFinish`, `checkConnections`, `socketOnTimeout`) with server.mjs's rules on it (onReq's pipelining count,
-//! `mustFlow`, `onClientError`).  One task: it answers the requests in turn and, while the service answers one, goes
-//! on reading and parsing what comes after it (Node did), so the pipelining cut and the timers see what Node saw.
+//! `resOnFinish`, `checkConnections`, `socketOnTimeout`) with the server's rules on it (the pipelining cut, the
+//! progress rule, the refusals of what it cannot read).  One task: it answers the requests in turn and, while the
+//! service answers one, goes on reading and parsing what comes after it (Node did), so the pipelining cut and the
+//! timers see what Node saw.
 //!
 //! The order of things follows Node's: a request is handed to the service as soon as its head is in, and the service
 //! runs (until it waits on something) before the parser reads on, as Node's request handler ran inside the parser's
@@ -33,7 +34,7 @@ const READ_CHUNK: usize = 16 << 10;
 /// Node 24 keeps an idle keep-alive connection a second longer than it advertises
 /// (HTTP_SERVER_KEEP_ALIVE_TIMEOUT_BUFFER: a client that reuses it at the advertised time finds it open)
 const KEEP_ALIVE_BUFFER: Duration = Duration::from_secs(1);
-/// server.mjs refuseSocket: the raw answer, then the connection goes once the client closed, or after 1 s
+/// a refusal: the raw answer, then the connection goes once the client closed, or after 1 s
 const LINGER: Duration = Duration::from_secs(1);
 /// body chunks waiting for the service (16 KiB each at most): then the connection reads no more until it takes them
 const BODY_QUEUE: usize = 4;
@@ -49,7 +50,7 @@ enum Kind {
     Plain,
     /// Expect: 100-continue: "100 Continue", then the request
     Continue,
-    /// any other Expect on HTTP/1.1 (Node's checkExpectation; server.mjs's onReq never saw these)
+    /// any other Expect on HTTP/1.1 (Node's checkExpectation: the service's `expectation`, never its `request`)
     Expectation,
 }
 
@@ -72,7 +73,7 @@ enum Item {
 enum Stop {
     /// at once, without a byte more (Node's socket.destroy())
     Destroy,
-    /// with server.mjs's raw answer for this
+    /// with the service's raw answer for this (`Service::client_error`)
     Refuse(ClientError),
 }
 
@@ -94,7 +95,7 @@ enum Ev {
     Moved,
 }
 
-/// server.mjs mustFlow for the answer under way
+/// the progress rule (`progress`) for the answer under way
 struct Prog {
     t0: Instant,
     mark: u64,
@@ -110,7 +111,7 @@ pub(crate) struct Conn {
     read_cap: usize,
     parser: Parser,
     queue: VecDeque<Item>,
-    /// requests read whose answers are not complete (server.mjs's kQueued)
+    /// requests read whose answers are not complete (what the pipelining cut counts)
     counted: usize,
     /// the answer under way counts in `counted` (Node's checkExpectation answers never did)
     in_flight_counted: bool,
@@ -373,9 +374,9 @@ impl Conn {
 
     /// What the parser has read and the answers have not taken yet is bounded too: `pipelined` items, then the next
     /// request is read only as they are taken (the one being read is read to its end, its timers as Node's).  (The
-    /// pipelining cut counts the requests server.mjs's onReq saw; Node's checkExpectation answers never counted, so
-    /// behind an answer under way a client could queue those without end, each a whole Request in memory.)  A client
-    /// within the cut never meets this: it is cut first.
+    /// pipelining cut counts the requests the service's `request` sees; Node's checkExpectation answers never counted,
+    /// so behind an answer under way a client could queue those without end, each a whole Request in memory.)  A
+    /// client within the cut never meets this: it is cut first.
     fn queue_full(&self) -> bool {
         self.queue.len() >= self.limits.pipelined.max(1) && self.parser.between()
     }
@@ -495,8 +496,9 @@ impl Conn {
             _ => Kind::Plain,
         };
         if kind != Kind::Expectation {
-            // server.mjs onReq: requests on one connection without a finished answer; past `pipelined` the
-            // connection goes (each queued answer may hold an open file and its first buffer)
+            // requests on one connection without a finished answer; past `pipelined` the connection goes (each queued
+            // answer may hold an open file and its first buffer: a client that queued thousands made the Node server
+            // hold gigabytes and as many open files)
             self.counted += 1;
             if self.counted > self.limits.pipelined {
                 return Err(Stop::Destroy);
@@ -553,8 +555,8 @@ impl Conn {
         }
     }
 
-    /// A request that cannot be read (server.mjs onClientError): it is refused after the answers before it, or
-    /// at once if the answer being written has nothing on the wire yet.
+    /// A request that cannot be read: it is refused after the answers before it, or at once if the answer being
+    /// written has nothing on the wire yet.
     fn fail(&mut self, e: ClientError, drive: Option<bool>) -> Result<(), Stop> {
         self.parser.stop();
         self.msg_start = None;
@@ -637,9 +639,11 @@ impl Conn {
         })
     }
 
-    /// server.mjs mustFlow: an answer under way must move at least progress_bytes in every `progress` and may take
+    /// The progress rule: an answer under way must move at least progress_bytes in every `progress` and may take
     /// response_max in all, or the connection goes (a client that stops reading, or reads a trickle, would keep its
-    /// download and the connection for good: Node's socket timeout does not fire while a write waits).
+    /// download and the connection for good: Node's socket timeout does not fire while a write waits, and a trickle
+    /// of 1 KB every 30 s resets it).  Together with the per-client budgets this keeps one client from holding the
+    /// server's connections.
     fn progress(&mut self, now: Instant) -> Result<(), Stop> {
         let Some(t0) = self.flow.under_way().map(Instant::from_std) else {
             self.prog = None;
@@ -788,8 +792,8 @@ async fn close(res: &mut Response) {
     }
 }
 
-/// server.mjs refuseSocket: the raw answer, the write side closed, then the connection goes once the client closed
-/// its side, or after a second (what the client sends meanwhile is read and dropped).
+/// A refusal: the raw answer, the write side closed, then the connection goes once the client closed its side, or
+/// after a second (what the client sends meanwhile is read and dropped).
 pub(crate) async fn refuse_io(r: &mut ReadHalf, w: &mut WriteHalf, answer: &[u8]) {
     let deadline = Instant::now() + LINGER;
     let wrote = tokio::time::timeout_at(deadline, async {

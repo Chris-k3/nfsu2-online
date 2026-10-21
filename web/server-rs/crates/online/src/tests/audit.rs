@@ -1,6 +1,5 @@
-//! web/test/online-audit.test.mjs, its cases at the level of the online host (the Online audit's ONL-1 to ONL-13).
-//! The parts that need the LAN switch (ONL-2's "what the host sends for a client is charged to it", the slow
-//! receiver) are the integration's.
+//! The Online audit's cases (ONL-1 to ONL-13) at the level of the online host.  The parts that need the LAN switch
+//! (ONL-2's "what the host sends for a client is charged to it", the slow receiver) are the integration's.
 
 use std::sync::Arc;
 
@@ -63,7 +62,7 @@ fn login(w: &mut World, vip: u32, name: &str) -> C {
     w.login(vip, name)
 }
 
-// 'ONL-1: EA Messenger: a message rate, the lists and the search rated, presence only when it changed'
+// ONL-1: EA Messenger: a message rate, the lists and the search rated, presence only when it changed
 #[test]
 fn onl1_messenger_rates() {
     let mut w = world();
@@ -110,8 +109,8 @@ fn onl1_messenger_rates() {
     assert!(found <= 4, "10 searches: {found} done");
 }
 
-// 'ONL-2: the lobby: game records to the game list only, at most once a second a game; populations the same; a
-// gset that changes nothing goes nowhere'
+// ONL-2: the lobby: game records to the game list only, at most once a second a game; populations the same; a
+// gset that changes nothing goes nowhere
 #[test]
 fn onl2_lobby_announcements() {
     let mut w = world();
@@ -184,8 +183,8 @@ fn onl2_slow_receiver_loses_its_stream() {
     assert!(!w.c(b).reset);
 }
 
-// 'ONL-3: EA Messenger memory: a friend taken off is gone, only adding a friend makes a list, lists are capped, a
-// second login is refused'
+// ONL-3: EA Messenger memory: a friend taken off is gone, only adding a friend makes a list, lists are capped, a
+// second login is refused
 #[test]
 fn onl3_messenger_memory() {
     let mut w = World::new(Opts { buddy: BuddyLimits { lists: 10.0, list_rate: 5.0, ..Default::default() }, ..Default::default() });
@@ -238,7 +237,7 @@ fn onl3_messenger_memory() {
     assert!(w.core.buddies.lists.len() <= 10, "{} lists kept (the cap is 10)", w.core.buddies.lists.len());
 }
 
-// 'ONL-4: a Messenger connection that logged in twice and closed breaks nobody's Messenger'
+// ONL-4: a Messenger connection that logged in twice and closed breaks nobody's Messenger
 #[test]
 fn onl4_double_login() {
     let mut w = world();
@@ -272,8 +271,8 @@ fn onl4_double_login() {
     assert!(w.core.errors.is_empty(), "no handler failed: {:?}", w.core.errors);
 }
 
-// 'ONL-5: one browser is one player of a race; a browser keeps few open games; a race whose players left the server
-// ends'
+// ONL-5: one browser is one player of a race; a browser keeps few open games; a race whose players left the server
+// ends
 #[test]
 fn onl5_races_and_browsers() {
     let mut w = world();
@@ -313,7 +312,7 @@ fn onl5_races_and_browsers() {
     assert!(names.contains(&"stays".to_string()), "the race of browsers still here goes on");
 }
 
-// 'ONL-6: a blocked list is the session's own: the next holder of the name sees none, none is stored'
+// ONL-6: a blocked list is the session's own: the next holder of the name sees none, none is stored
 #[test]
 fn onl6_blocked_list_is_the_sessions() {
     let tmp = tempfile::tempdir().unwrap();
@@ -356,8 +355,8 @@ fn board(w: &mut World, kind: u32) -> Vec<String> {
     b
 }
 
-// 'ONL-7: results: one report or reports that differ decide nothing; ranked needs three; a race too short is not
-// taken'
+// ONL-7: results: one report or reports that differ decide nothing; ranked needs three; a race too short is not
+// taken
 #[test]
 fn onl7_results() {
     let mut w = world();
@@ -404,7 +403,7 @@ fn onl7_results() {
     assert!(!board(&mut w, 0).iter().any(|r| r.starts_with("Quick")), "a 3-second circuit race is not taken");
 }
 
-// 'results: race types by the game's numbers (drag 2, drift 3); its seventh (6) is a result that counts nowhere'
+// results: race types by the game's numbers (drag 2, drift 3); its seventh (6) is a result that counts nowhere
 #[test]
 fn race_types() {
     let mut w = world();
@@ -452,7 +451,7 @@ fn race_types() {
     assert_eq!(w.core.lobby.games.len(), 0, "every race is over");
 }
 
-// 'ONL-7: the results store: ... the rankings built once for many asks' (the store's other parts: stats.rs)
+// ONL-7: the results store: the rankings built once for many asks (the store's other parts: stats.rs)
 #[test]
 fn onl7_rankings_built_once() {
     let mut w = world();
@@ -466,7 +465,7 @@ fn onl7_rankings_built_once() {
     assert!(n <= 2, "the board was built {n} times for 30 asks");
 }
 
-// 'ONL-8: no line per friend added; the lines a client causes carry its key'
+// ONL-8: no line per friend added; the lines a client causes carry its key
 #[test]
 fn onl8_lines_and_keys() {
     let mut w = world();
@@ -479,10 +478,10 @@ fn onl8_lines_and_keys() {
     }
     assert!(!w.logged("added a friend"));
     let key = w.lines.borrow().iter().find(|(s, _)| s.contains("logged in as \"Flooder\"")).and_then(|(_, k)| k.clone());
-    assert_eq!(key.as_deref(), Some("G8"), "a client's line carries its key (server.mjs: a few a minute per key)");
+    assert_eq!(key.as_deref(), Some("G8"), "a client's line carries its key (logged a few a minute per key)");
 }
 
-// 'ONL-9: one client holds only its share of the lobby; the last quarter is for clients that hold none'
+// ONL-9: one client holds only its share of the lobby; the last quarter is for clients that hold none
 #[test]
 fn onl9_share_of_the_lobby() {
     let mut w = World::new(Opts { limits: Limits { sessions: 12.0, ..Default::default() }, ..Default::default() });
@@ -506,7 +505,7 @@ fn onl9_share_of_the_lobby() {
     assert!(!w.c(fresh).reset, "a client that holds none gets one");
 }
 
-// 'ONL-12: the trace file is 0600, shows no LKEY, and follows a bounded number of streams'
+// ONL-12: the trace file is 0600, shows no LKEY, and follows a bounded number of streams
 #[test]
 fn onl12_trace() {
     let ip = super::world::ip;
@@ -549,7 +548,7 @@ fn onl12_trace() {
     let _: Arc<LobbyTrace> = tr;
 }
 
-// 'ONL-13: the online folder is 0700; a Messenger login key works only from its own browser'
+// ONL-13: the online folder is 0700; a Messenger login key works only from its own browser
 #[test]
 fn onl13_folder_and_key() {
     let tmp = tempfile::tempdir().unwrap();

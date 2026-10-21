@@ -1,5 +1,5 @@
-//! The free-roam hub: the port of web/server/roam-hub.mjs, rule for rule, and the same links (the same pairs in the
-//! same order, the grid and heap of a large room included).
+//! The free-roam hub.  Its links are the ones the Node server's hub made before it: the same pairs in the same order,
+//! the grid and heap of a large room included.
 //!
 //! The hub is the server's host on the switch at 10.77.0.253 (runtime/web/net_proto.h NET_ROAM_HUB, an address the
 //! switch never hands out) that tells each free-roam player which players are near it.  Without it every player
@@ -16,35 +16,38 @@
 //!   of 230): the other players of its room in free roam, past its links, nearest first, map_max (512) of them at
 //!   most, each its place (x, y in whole metres) and heading (a byte), which the game marks on the map.
 //!
-//! The links, in each room: the pairs of players with a position younger than staleMs (60 s: one in a shop or a race
-//! keeps its links for a while), nearest first, each player at most its degree of them.  "Nearest" looks ahead: a
-//! pair counts at the nearer of its distance now and its distance once both cars went on look_ms (3 s) at the speeds
+//! The links, in each room: the pairs of players with a position younger than `stale_ms` (60 s: one in a shop or a
+//! race keeps its links for a while), nearest first, each player at most its degree of them.  "Nearest" looks ahead: a
+//! pair counts at the nearer of its distance now and its distance once both cars went on `look_ms` (3 s) at the speeds
 //! their last SNAPs gave, so a car a player heads for is linked (and its car loaded) before it is near, and one left
 //! behind gives way first; parked players count as before.  Both ends of a link list
-//! each other (roam_core takes a player only when both hear each other).  A link stays at least holdMs (5 s), and
+//! each other (roam_core takes a player only when both hear each other).  A link stays at least `hold_ms` (5 s), and
 //! after that counts as `keep` (half) its distance: a new link costs a handshake, the car's record and maybe a car
 //! swapped on the screen, so it has to be much nearer to take the place of one (62 simulated players circling within
-//! 240 m changed links 28 times a second with 20 % instead).
+//! 240 m changed links 28 times a second with 20 % instead).  The game shows a car for each of a player's links
+//! (runtime/roam_game.c).
 //!
 //! A busy server gives every player fewer links: each link is two players' snapshots to each other, 20 a second each
-//! way, so a crowd costs its players times their links (nfsu2.xyz at 855 players, 2026-10-20: 180-600 ms for a
-//! /players answer on Node's one thread).  While the server worked more than busyHigh of the last tick the cap on the
-//! links goes down by a quarter, at most every capDownMs, to minDegree at the least; once it has room again (under
-//! busyLow) the cap goes back up by 2 every capUpMs.  The nearest links stay.  While the cap is under askCap (24) free
-//! roam counts as busy (the server's /players roamBusy): the start page does not ask its question (Free roam with
-//! others?) at a Play then, so fewer new players join a crowd that already gets fewer cars; it asks at a later Play
-//! once the cap is back.
+//! way (fewer for far ones), so a crowd costs its players times their links, all through the switch; a switch that
+//! cannot keep up delays every snapshot, and the cars stutter for everyone (nfsu2.xyz at 855 players, 2026-10-20:
+//! 180-600 ms for a /players answer on Node's one thread).  While the server worked more than `busy_high` of the last
+//! tick the cap on the links goes down by a quarter, at most every `cap_down_ms`, to `min_degree` at the least; once
+//! it has room again (under `busy_low`) the cap goes back up by 2 every `cap_up_ms`.  The nearest links stay.  While
+//! the cap is under `ask_cap` (24) free roam counts as busy (the server's /players roamBusy): the start page does not
+//! ask its question (Free roam with others?) at a Play then, so fewer new players join a crowd that already gets fewer
+//! cars; it asks at a later Play once the cap is back.
 //!
 //! What the hub keeps, in memory only: per player endpoint its virtual address, port, id, room hash, status, name and
-//! last position; gone goneMs after its last message, when it says BYE, or when it leaves the switch.  At most
-//! maxPerVip endpoints per virtual address (a browser has one), and maxPlayers in all.
+//! last position; gone `gone_ms` after its last message, when it says BYE, or when it leaves the switch.  Reading
+//! positions is what choosing by distance costs: the switch itself never looks inside a frame.  At most `max_per_vip`
+//! endpoints per virtual address (a browser has one), and `max_players` in all.
 //!
 //! - [`Hub`]: the hub's logic, single-threaded, with the clock, the busy measure and the sending given to it (the
-//!   tests drive it as roam-hub.test.mjs drives the JS: `frame()`, `tick()`, `info()`)
+//!   tests drive it by its `frame()`, `tick()` and `info()`)
 //! - [`RoamHub`]: the hub on a thread of its own, a `nfsu2_util::Host` for the switch: frames are posted to it in
 //!   order, it ticks every `tick_ms`, and sends its lists through the switch.  Its "busy" is the share of their time
 //!   the runtime's workers, which run the switch, spent working (nfsu2_util::cpu::WorkersBusy): Node read its one
-//!   thread's event-loop use.  (The process's CPU time over every core, which it was, never passed busyHigh once
+//!   thread's event-loop use.  (The process's CPU time over every core, which it was, never passed `busy_high` once
 //!   the workers were half the cores: all of them busy was 50 %.)
 
 mod hub;
@@ -69,10 +72,10 @@ pub use wire::{decode_roam, encode_peers};
 /// 10.77.0.253, runtime/web/net_proto.h NET_ROAM_HUB
 pub const ROAM_HUB_VIP: u32 = 0x0A4D_00FD;
 
-/// roam-hub.mjs `ROAM_HUB_DEFAULTS`.  exact_room: a room of at most this many players sorts every pair of them; a
-/// larger one takes the pairs in the same order but only as far as it needs them: each player's nearest one after
-/// another (a grid) until it has its links (every pair of 2000 players in one room took the Node hub 1.5-4.5 s a
-/// tick, 1000 players 0.5 s).  A value that is not a positive number keeps its default.
+/// The hub's options.  exact_room: a room of at most this many players sorts every pair of them; a larger one takes
+/// the pairs in the same order but only as far as it needs them: each player's nearest one after another (a grid)
+/// until it has its links (every pair of 2000 players in one room took the Node hub 1.5-4.5 s a tick, 1000 players
+/// 0.5 s).  A value that is not a positive number keeps its default.
 #[derive(Clone, Debug)]
 pub struct RoamOptions {
     pub degree: usize,
@@ -127,7 +130,7 @@ impl Default for RoamOptions {
     }
 }
 
-/// roam-hub.mjs `decodeRoam(d)`: the fields the hub reads of one free-roam datagram
+/// The fields the hub reads of one free-roam datagram (`decode_roam`)
 #[derive(Clone, Debug, PartialEq)]
 pub enum RoamMsg {
     Hello { sender: u32, core: u16, status: u8, room: u32, name: String },
@@ -136,7 +139,8 @@ pub enum RoamMsg {
     Other { kind: u8, sender: u32 },
 }
 
-/// `Math.hypot(x, y, z)` as V8 computes it: the hub's distances (public for the cross-check against node)
+/// `Math.hypot(x, y, z)` as V8 computes it: the hub's distances (public for tests/hypot.rs, which checks it against
+/// node's own)
 pub fn hypot(x: f64, y: f64, z: f64) -> f64 {
     links::hypot3(x, y, z)
 }
@@ -192,10 +196,10 @@ impl RoamHub {
             }
         };
         let waiting = pending.clone();
-        // random and never 0, as the JS's `(Math.random() * 0xfffffffe + 1) >>> 0`
+        // random and never 0 (roam_core.c's decoder, as `wire::decode`, drops a datagram from sender 0)
         let id = nfsu2_util::rand::int(1, 0xFFFF_FFFF) as u32;
         let hub = Hub::new(o, Box::new(|| nfsu2_util::now_ms() as f64), busy, Box::new(move |l| log(l)), Box::new(|_, _| false), id);
-        // (made here, not on its thread: until its first tick crowded() is what the hub begins with, as the JS's)
+        // (made here, not on its thread: until its first tick crowded() is what the hub begins with)
         let crowded = Arc::new(AtomicBool::new(hub.crowded()));
         let busy_now = crowded.clone();
         std::thread::Builder::new()
@@ -205,7 +209,7 @@ impl RoamHub {
         Arc::new(RoamHub { tx, pending, crowded })
     }
 
-    /// roam-hub.mjs `crowded()`: free roam is busy, the cap is under askCap (as of the hub's last tick)
+    /// the hub's `crowded()`: free roam is busy, the cap is under `ask_cap` (as of the hub's last tick)
     pub fn crowded(&self) -> bool {
         self.crowded.load(Ordering::Relaxed)
     }
@@ -222,8 +226,8 @@ fn guard(f: impl FnOnce()) {
     let _ = catch_unwind(AssertUnwindSafe(f));
 }
 
-/// The hub's thread: what the switch posts, in order, and a tick every tick_ms (as setInterval: the next one a
-/// tick_ms after this one began).  It ends once the RoamHub is gone.
+/// The hub's thread: what the switch posts, in order, and a tick every tick_ms (the next one a tick_ms after this
+/// one began).  It ends once the RoamHub is gone.
 fn run(mut hub: Hub, rx: mpsc::Receiver<Cmd>, pending: &AtomicUsize, crowded: &AtomicBool) {
     let every = Duration::from_millis(hub.options().tick_ms);
     let mut next = Some(Instant::now() + every);
@@ -314,7 +318,7 @@ impl Host for RoamHub {
 mod tests {
     use super::*;
 
-    // (the port's own) a hub whose thread is stuck holds MAX_PENDING frames and leaves out the rest; each may keep
+    // a hub whose thread is stuck holds MAX_PENDING frames and leaves out the rest; each may keep
     // its reader's block of 16 KiB alive, 128 MiB at most
     #[test]
     fn a_stuck_hub_holds_few_frames() {
@@ -330,7 +334,7 @@ mod tests {
     }
 
     // /players reads the hub's crowded() without its thread: as of the hub's last tick, and before the first one as
-    // the hub begins (a hub of fewer links than askCap is busy from the start, as the JS's crowded() said at once)
+    // the hub begins (a hub of fewer links than `ask_cap` is busy from the start)
     #[test]
     fn what_players_reads_is_the_hubs_crowded() {
         let few = RoamHub::spawn(RoamOptions { degree: 16, ..RoamOptions::default() }, Arc::new(|_: &str| {}));

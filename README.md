@@ -12,8 +12,9 @@ Web Audio. You bring your own copy of the game.
 
 - **The game:** your own PC copy, patched to v1.2 (North America), with this exact `SPEED2.EXE` (other versions
   will not work): 4,800,512 bytes, SHA-256 `f9dd86c054878ce6276beb07c1fd61874f7a1e4bf1f241b084c65b73e24168a7`.
-- **To build:** an Apple Silicon Mac (the tested setup) or Linux, Python 3, Node.js 20 or newer, and
-  [wasi-sdk](https://github.com/WebAssembly/wasi-sdk/releases) 34 for that system unpacked into `deps/`. On Windows,
+- **To build:** an Apple Silicon Mac (the tested setup) or Linux, Python 3, Node.js 20 or newer, Rust
+  ([rustup](https://rustup.rs)), and [wasi-sdk](https://github.com/WebAssembly/wasi-sdk/releases) 34 for that system
+  unpacked into `deps/`. On Windows,
   build in WSL 2 with the clone in the Linux file system (`~/nfsu2-web`): under `/mnt/c` it builds much slower.
 - **To play:** the latest Google Chrome, or Firefox where it has WebGPU (Windows, macOS).
 
@@ -47,7 +48,8 @@ Everyone who plays from the same server can meet in free roam.
   parts.
 - **`web/src/`:** the page. It runs the game's threads as workers on one shared memory, draws with WebGPU and plays
   sound through an AudioWorklet.
-- **`web/server/`:** serves the page, the module and your game folder, and connects players for multiplayer.
+- **`web/server-rs/`:** the server, in Rust: serves the page, the module and your game folder, and connects players
+  for multiplayer.
 
 More in [docs/web/DESIGN.md](docs/web/DESIGN.md). The same tree still builds the native macOS version
 (`./gen.sh`, `./build.sh && ./link.sh`, `./run.sh`).

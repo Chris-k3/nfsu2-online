@@ -1,4 +1,5 @@
-//! Names, addresses, tokens and the JSON of the control messages, the way lan.mjs's JavaScript reads them.
+//! Names, addresses, tokens and the JSON of the control messages, read the way JavaScript reads them (as the Node
+//! server did: a client's hello means to the switch what it meant there).
 
 use nfsu2_util::js;
 use serde_json::Value;
@@ -8,10 +9,11 @@ use unicode_normalization::UnicodeNormalization;
 
 use crate::BASE;
 
-/// lan.mjs `cleanName(s)`: a display name, printable, no bidi or zero-width tricks (control and format characters
-/// removed), at most 32 characters, none that reads as a slur (names.mjs): "player" then
+/// a display name: printable, no bidi or zero-width tricks (control and format characters removed), at most 32
+/// characters, none that reads as a slur (nfsu2-names, the rules of web/src/app/names.mjs): "player" then
 pub fn clean_name(s: &str) -> String {
-    // s.normalize('NFC').replace(/\s+/g, ' ').replace(/[\p{Cc}\p{Cf}]/gu, '').replace(/ +/g, ' ').trim()
+    // NFC; each run of white space (JavaScript's \s) one space; control and format characters (Cc, Cf) out; each run
+    // of spaces one space; trimmed
     let nfc = nfc_as_node(s);
     let spaced = js::collapse_space(&nfc, " ");
     let mut t = String::with_capacity(spaced.len());
@@ -30,17 +32,17 @@ pub fn clean_name(s: &str) -> String {
             space = false;
         }
     }
-    // [...t].slice(0, 32).join('').trim(): 32 code points
+    // at most 32 code points (not UTF-16 units), trimmed again
     let first: String = js::trim(&t).chars().take(32).collect();
     let n = js::trim(&first);
     if !n.is_empty() && !nfsu2_names::blocked_name(n) { n.to_string() } else { "player".to_string() }
 }
 
-/// `s.normalize('NFC')` as Node 24 does it.  Its ICU is Unicode 16.0, unicode-normalization's tables are newer: a
+/// NFC as Node 24 did it for the Node server.  Its ICU is Unicode 16.0, unicode-normalization's tables are newer: a
 /// character unassigned in 16.0 (unicode-general-category's version, which matches Node's) is to Node a starter that
 /// decomposes into nothing and composes with nothing, so it stays where it is and the text on either side is
 /// normalized on its own (no reordering or composing reaches across such a starter).  Without this, combining marks
-/// of Unicode 17 were moved in front of older ones (names.mjs's reading has the same hold-back).
+/// of Unicode 17 were moved in front of older ones (nfsu2-names reads names with the same hold-back).
 fn nfc_as_node(s: &str) -> String {
     if s.is_ascii() {
         return s.to_string();
@@ -59,7 +61,7 @@ fn nfc_as_node(s: &str) -> String {
     out
 }
 
-/// lan.mjs `vipNum(s)`: an address the switch hands out ("10.77.x.y", host byte 2-251), else 0
+/// an address the switch hands out ("10.77.x.y" in 10.77.0.0/21, host byte 2-251), else 0
 pub fn vip_num(s: &str) -> u32 {
     // /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/, each part at most 255
     let mut v: u32 = 0;
@@ -144,8 +146,8 @@ pub(crate) fn token_hash(t: &str) -> [u8; 32] {
     Sha256::digest(t.as_bytes()).into()
 }
 
-/// lan.mjs `tokenFits(token, hash)`: token (from a client) matches hash (of the token the switch gave), compared in
-/// constant time
+/// token (from a client) matches hash (of the token the switch gave), compared in constant time; one longer than 64
+/// (UTF-16 units) never does
 pub(crate) fn token_fits(token: &str, hash: &[u8; 32]) -> bool {
     if js::utf16_len(token) > 64 {
         return false;
@@ -221,6 +223,50 @@ fn lone_surrogates(s: &str) -> Option<String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    // the answers of the Node server's cleanName for the same names
+    #[test]
+    fn names_as_the_switch_shows_them() {
+        let y40 = "y".repeat(40);
+        let a31 = "a".repeat(31);
+        let a31b = format!("{a31}  b");
+        for (name, shown) in [
+            // a name that reads as a slur is "player" (nfsu2-names); one that only looks like one stays
+            ("  N1gg4  ", "player"),
+            ("Mustafa GS", "Mustafa GS"),
+            // nothing left: "player"
+            ("", "player"),
+            ("   ", "player"),
+            ("\u{AD}", "player"),
+            // white space (JavaScript's \s) one space, trimmed
+            ("  Bob  ", "Bob"),
+            ("a\t\n b", "a b"),
+            ("\u{3000}x\u{A0}y\u{FEFF}", "x y"),
+            // control and format characters (Cc, Cf) out: zero-width, bidi, tags
+            ("a\u{0}\u{7}b\u{7F}", "ab"),
+            ("a\u{85}b", "ab"),
+            ("a\u{200B}b\u{2060}c", "abc"),
+            ("\u{202E}evil\u{202C}", "evil"),
+            ("x\u{180E}y", "xy"),
+            ("\u{E0041}tag", "tag"),
+            // NFC
+            ("e\u{301}", "\u{E9}"),
+            ("A\u{30A}", "\u{C5}"),
+            ("\u{212B}", "\u{C5}"),
+            ("a\u{316}\u{301}", "\u{E1}\u{316}"),
+            // a mark newer than Node's Unicode (16.0) stays where it is: nothing reordered or composed across it
+            ("e\u{301}\u{1E6E3}\u{316}", "\u{E9}\u{1E6E3}\u{316}"),
+            ("e\u{301}\u{10EF5}\u{316}", "\u{E9}\u{10EF5}\u{316}"),
+            ("\u{1E6E3}\u{301}x", "\u{1E6E3}\u{301}x"),
+            // emoji stay
+            ("\u{1F600}\u{1F1E6}\u{1F1E8}", "\u{1F600}\u{1F1E6}\u{1F1E8}"),
+            // at most 32 code points, trimmed again
+            (y40.as_str(), &y40[..32]),
+            (a31b.as_str(), a31.as_str()),
+        ] {
+            assert_eq!(clean_name(name), shown, "{name:?}");
+        }
+    }
 
     #[test]
     fn addresses_as_vip_num_reads_them() {

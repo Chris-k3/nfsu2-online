@@ -497,7 +497,6 @@ dependencies = [
  "base64",
  "nfsu2-util",
  "parking_lot",
- "serde_json",
  "sha2",
 ]
 

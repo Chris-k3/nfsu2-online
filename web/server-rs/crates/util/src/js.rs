@@ -1,5 +1,5 @@
-//! Text and numbers the way the Node server's JavaScript makes them, so that what the two servers print, store and
-//! send is the same byte for byte.
+//! Text and numbers the way JavaScript makes them, so that what the server prints, stores and sends is byte for byte
+//! what the Node server it replaced did (the state files it left, the pages and tools that read the answers).
 
 /// JS `\s` and what `String#trim()` removes: WhiteSpace and LineTerminator (ECMA-262), which is not Rust's
 /// `char::is_whitespace` (that has U+0085 and not U+FEFF).
@@ -40,8 +40,9 @@ pub fn utf16_len(s: &str) -> usize {
     s.chars().map(char::len_utf16).sum()
 }
 
-/// server.mjs `printable(x, n)`: `String(x).replace(/[^\x20-\x7e]/g, '?').slice(0, n)`, over UTF-16 code units (a
-/// character outside the BMP is two code units, so two '?').
+/// Text for a console line: every character outside printable ASCII a '?', at most `n` of them (JS
+/// `String(x).replace(/[^\x20-\x7e]/g, '?').slice(0, n)`, over UTF-16 code units: a character outside the BMP is two
+/// code units, so two '?').
 pub fn printable(s: &str, n: usize) -> String {
     let mut out = String::with_capacity(s.len().min(n));
     for c in s.chars() {

@@ -1,8 +1,8 @@
 //! What the integration tests share: a switch (nfsu2-lan) on an ephemeral port of 127.0.0.1 with the Online host
-//! (nfsu2-online) and the free-roam hub (nfsu2-roam) attached as src/app/run.rs wires them (the JS tests'
-//! `startSwitch`), fake browsers on its WebSocket (tokio-tungstenite), and what they send: lan.mjs's frames,
-//! vhost.mjs's `lanFrame`, roam_core.c's datagrams, the lobby's messages (aries.mjs `encodeFrame`, `FrameReader`,
-//! `fieldMap`).
+//! (nfsu2-online) and the free-roam hub (nfsu2-roam) attached as src/app/run.rs wires them, fake browsers on its
+//! WebSocket (tokio-tungstenite), and what they send: the switch's frames, the virtual host's (nfsu2-online
+//! `vhost::lan_frame`), roam_core.c's datagrams, the lobby's messages (as nfsu2-online's `aries` writes and reads
+//! them: `encode_frame`, `FrameReader`, `FieldMap`).
 #![allow(dead_code)]
 
 use std::collections::HashMap;
@@ -144,7 +144,7 @@ pub async fn start_with(o: LanOptions, online: Option<Arc<dyn Host>>, roam: Opti
     Switch { lan, port, accept }
 }
 
-/// the upgrade, answered as server.mjs answers it, and the connection attached to the switch
+/// the upgrade to /lan, answered as the server answers it (src/app/lan.rs), and the connection attached to the switch
 async fn serve(lan: Arc<LanSwitch>, mut s: TcpStream) {
     let mut buf = Vec::new();
     let mut tmp = [0u8; 4096];
@@ -188,7 +188,7 @@ async fn serve(lan: Arc<LanSwitch>, mut s: TcpStream) {
 }
 
 impl Switch {
-    /// the JS `close()`: the switch stops (its hosts too), its connections end
+    /// the switch stops (its hosts too), its connections end
     pub async fn close(self) {
         self.lan.stop();
         self.lan.terminate_all();
@@ -213,8 +213,7 @@ impl Switch {
 
 // ---- frames ---------------------------------------------------------------------------------------------------
 
-/// vhost.mjs `lanFrame(kind, src, dst, sport, dport, op, cid, data)`: a frame of the virtual host's TCP (kind 4),
-/// UDP (3) or ICMP (5)
+/// a frame of the virtual host's TCP (kind 4), UDP (3) or ICMP (5), as nfsu2-online's `vhost::lan_frame` makes one
 #[allow(clippy::too_many_arguments)]
 pub fn lan_frame(kind: u8, src: u32, dst: u32, sport: u16, dport: u16, op: u8, cid: u32, data: &[u8]) -> Vec<u8> {
     let mut f = vec![0u8; 24 + data.len()];
@@ -241,7 +240,7 @@ pub fn udp(dst: u32, sport: u16, dport: u16, kind: u8, data: &[u8]) -> Vec<u8> {
     f
 }
 
-/// a bundle (lan.mjs kind 32) of frames, each to its own destination (entries of n = 0)
+/// a bundle (the switch's frame kind 32) of frames, each to its own destination (entries of n = 0)
 pub fn bundle_of(frames: &[Vec<u8>]) -> Vec<u8> {
     let mut b = vec![32, 0, 0, 0];
     for f in frames {
@@ -270,7 +269,7 @@ pub fn crc32(b: &[u8]) -> u32 {
     !c
 }
 
-/// roam-hub.test.mjs `dgram(type, sender, payload)`: a player's datagram as roam_core.c lays it out
+/// a player's datagram of this kind as roam_core.c lays it out: its header, the payload, its CRC
 pub fn dgram(kind: u8, sender: u32, payload: &[u8]) -> Vec<u8> {
     let len = 16 + payload.len() + 4;
     let mut b = vec![0u8; len];
@@ -286,7 +285,7 @@ pub fn dgram(kind: u8, sender: u32, payload: &[u8]) -> Vec<u8> {
     b
 }
 
-/// roam-hub.test.mjs `hello(sender)`: room 0, in free roam (status 2), named "p", core version 1
+/// a HELLO: room 0, in free roam (status 2), named "p", core version 1
 pub fn roam_hello(sender: u32) -> Vec<u8> {
     let name = b"p";
     let mut p = vec![0u8; 13 + name.len() + 1];
@@ -300,7 +299,7 @@ pub fn roam_hello(sender: u32) -> Vec<u8> {
     dgram(1, sender, &p)
 }
 
-/// roam-hub.test.mjs `snap(sender, pos)`
+/// a SNAP: the sender's car at `pos`
 pub fn roam_snap(sender: u32, pos: [f32; 3]) -> Vec<u8> {
     let mut p = vec![0u8; 6 + 52];
     p[0] = 2;
@@ -313,14 +312,15 @@ pub fn roam_snap(sender: u32, pos: [f32; 3]) -> Vec<u8> {
     dgram(3, sender, &p)
 }
 
-/// roam-hub.test.mjs `browser(...).send(d)`: a datagram to the hub, from port 47210 to 47210
+/// a datagram to the hub, from port 47210 to 47210
 pub fn to_hub(d: &[u8]) -> Vec<u8> {
     udp(ROAM_HUB_VIP, 47210, 47210, 1, d)
 }
 
-// ---- the lobby's messages (aries.mjs) -------------------------------------------------------------------------
+// ---- the lobby's messages (as nfsu2-online's aries writes them) -----------------------------------------------
 
-/// aries.mjs `encodeValue(v)`: every byte below 0x20, 0x7F and = " : % ^ as %xx, in quotes when it has a space
+/// a field's value as the lobby writes it (nfsu2-online `aries::encode_value`): every byte below 0x20, 0x7F and
+/// = " : % ^ as %xx, in quotes when it has a space
 pub fn encode_value(v: &str) -> String {
     let mut s = String::new();
     for c in v.bytes() {
@@ -333,7 +333,7 @@ pub fn encode_value(v: &str) -> String {
     if v.as_bytes().contains(&0x20) { format!("\"{s}\"") } else { s }
 }
 
-/// aries.mjs `encodeFrame(kind, 0, fields)`
+/// a lobby message with no code (nfsu2-online `aries::encode_frame`): kind, code, length, the fields, a NUL
 pub fn encode_frame(kind: &str, fields: &[(&str, String)]) -> Vec<u8> {
     let mut body = String::new();
     for (k, v) in fields {
@@ -348,7 +348,7 @@ pub fn encode_frame(kind: &str, fields: &[(&str, String)]) -> Vec<u8> {
     f
 }
 
-/// one lobby message: its kind, its code (an error tag, "" for success) and its fields (aries.mjs `fieldMap`)
+/// one lobby message: its kind, its code (an error tag, "" for success) and its fields (nfsu2-online `aries::FieldMap`)
 #[derive(Clone, Debug)]
 pub struct Msg {
     pub kind: String,
@@ -383,7 +383,7 @@ fn unescape(s: &[u8]) -> String {
     out
 }
 
-/// aries.mjs `parseFields(body, [])`
+/// a message body's fields, none of them kept back as secret (nfsu2-online `aries::parse_fields`)
 pub fn parse_fields(body: &[u8]) -> Vec<(String, String)> {
     let end = body.iter().position(|&c| c == 0).unwrap_or(body.len());
     let b = &body[..end];
@@ -429,7 +429,7 @@ pub fn parse_fields(body: &[u8]) -> Vec<(String, String)> {
     out
 }
 
-/// aries.mjs `FrameReader(1 << 16)`: the messages in a byte stream
+/// the messages in a byte stream, each at most 64 KiB (nfsu2-online `aries::FrameReader`)
 #[derive(Default)]
 pub struct AriesReader {
     buf: Vec<u8>,
@@ -685,7 +685,7 @@ impl Browser {
         self.st.lock().unwrap()
     }
 
-    /// waits until f says yes (2 s at most, as the JS until's default)
+    /// waits until f says yes (2 s at most)
     pub async fn until<T>(&self, f: impl FnMut(&Got) -> Option<T>) -> T {
         self.until_ms(2000, f).await
     }
@@ -782,7 +782,7 @@ impl Browser {
         f(&self.got().tcp[&c.port])
     }
 
-    /// online-audit.test.mjs `Browser.connect(dport)`: a connection the virtual host accepted
+    /// a connection to the virtual host's port `dport`, accepted
     pub async fn open_tcp(&self, dport: u16) -> Conn {
         self.try_open_tcp(dport).await.expect("the virtual host accepted the connection")
     }
@@ -794,7 +794,7 @@ impl Browser {
         open.unwrap_or(false).then_some(c)
     }
 
-    /// online-audit.test.mjs `Browser.login(name)`: a lobby session up to a persona
+    /// a lobby session up to a persona
     pub async fn login(&self, name: &str) -> Conn {
         let c = self.try_login(name).await;
         assert!(c.is_some(), "{name} logged in");

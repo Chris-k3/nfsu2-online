@@ -1,5 +1,5 @@
-//! What the hub's tests share (roam-hub.test.mjs's helpers): a player's datagrams as roam_core.c lays them out, the
-//! switch's frame around them, the lists out of the hub's frames, and a hub with a clock of its own.
+//! What the hub's tests share: a player's datagrams as roam_core.c lays them out, the switch's frame around them, the
+//! lists out of the hub's frames, and a hub with a clock of its own.
 #![allow(dead_code)]
 
 use std::collections::HashMap;

@@ -8,8 +8,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::testkit::{Kit, data, data_bits, eventually, reset};
 
-// server.mjs refreshManifest: one walk of the game folder for everyone who asks meanwhile (manifestBuilding), and
-// its manifest kept whoever is still there to take it.  A request that went (a reset) took the walk's result with it:
+// ManifestCell::refresh: one walk of the game folder for everyone who asks meanwhile, and its manifest kept whoever
+// is still there to take it.  A request that went (a reset) took the walk's result with it:
 // the next ?refresh walked again, and a client that asked and reset at once kept as many walks going as it liked.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_manifest_walk_is_kept_when_its_asker_goes() {

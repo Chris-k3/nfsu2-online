@@ -1,6 +1,6 @@
-//! The engine against Node 24's own http server with server.mjs's settings (tests/node/ref_server.mjs): the same raw
-//! requests to both, the same bytes back (Date values aside) and the same connection state.  The cases are the edge
-//! cases of llhttp's strictness, Node's header joining, its answer heads, pipelining and upgrades, and a few
+//! The engine against Node 24's own http server with the Node server's settings (tests/node/ref_server.mjs): the
+//! same raw requests to both, the same bytes back (Date values aside) and the same connection state.  The cases are
+//! the edge cases of llhttp's strictness, Node's header joining, its answer heads, pipelining and upgrades, and a few
 //! thousand mutations of valid requests (a fixed seed).  Skipped (with a message) where `node` is missing.
 //!
 //! Left out on purpose (the engine differs, tests/engine.rs has them): a client that ends its side while an answer

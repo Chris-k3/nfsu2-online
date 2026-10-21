@@ -301,7 +301,7 @@ typedef struct {
      * older ones stand in for a SNAP lost on the way.  A link that loses
      * none (the browser's WebSocket to the server's switch) sends 1 */
     int      snap_states;
-    /* a free-roam hub (the browser's server, web/server/roam-hub.mjs), or 0:
+    /* a free-roam hub (the browser's server, web/server-rs/crates/roam), or 0:
      * it gets a HELLO every second and a SNAP twice a second, and answers
      * every second with a PEERS list of the players near us.  While it
      * answers, that list is who our peers are: nobody else is taken, a peer

@@ -1,4 +1,4 @@
-//! The server's own host on the virtual LAN (vhost.mjs): 10.77.0.1, the address the switch never hands to a browser.
+//! The server's own host on the virtual LAN: 10.77.0.1, the address the switch never hands to a browser.
 //! The game's online mode connects here (the runtime resolves pcnfs05.ea.com to it, winsock.c), so this is the one
 //! place where the server itself speaks the browsers' virtual-LAN frames instead of routing them:
 //!
@@ -16,12 +16,11 @@
 //! the switch wrote, so a browser can only ever speak for itself.  Limits: `max_conns` streams at once in all,
 //! `per_vip` per browser (more SYNs are refused with RST).  A connection also knows the opaque group and site ids of
 //! the client that opened it (the switch's: one client address, one IPv6 /48), for the services' per-client limits.
-//! What the switch will not take (its receiver is too far behind) ends the connection: a stream with a hole in it is
-//! no use to the game.
+//! What the switch will not take (its receiver is too far behind: nfsu2-lan `online_queue`) ends the connection: a
+//! stream with a hole in it is no use to the game.
 //!
-//! The JS VConn's callbacks (ondata, onend, onclose) are here a dispatch by the service that owns the connection
-//! ([`Svc`]); a connection that is gone is no longer in the map, so whatever a service does with it after that
-//! (write, end, destroy) does nothing, as on a VConn that is not `open`.
+//! A connection's data, its end and its close go to the service that owns it ([`Svc`]); a connection that is gone
+//! is no longer in the map, so whatever a service does with it after that (write, end, destroy) does nothing.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -50,7 +49,7 @@ const F_DATA: usize = 16;
 /// the most data one TCP frame carries (net_proto.h NET_MAX_PAYLOAD - NET_LAN_HDR)
 pub const TCP_CHUNK: usize = 1472 - LAN_HDR;
 
-/// vhost.mjs VHOST_DEFAULTS.  max_conns: a player in the lobby holds two (the lobby and EA Messenger), so 1000 lobby
+/// The virtual host's limits.  max_conns: a player in the lobby holds two (the lobby and EA Messenger), so 1000 lobby
 /// sessions take 2000
 #[derive(Clone, Copy, Debug)]
 pub struct VhostLimits {
@@ -91,7 +90,7 @@ pub enum Svc {
     Probe,
 }
 
-/// one stream between a browser and a port of the virtual host (vhost.mjs `VConn`)
+/// one stream between a browser and a port of the virtual host
 pub struct VConn {
     pub vip: u32,
     pub rport: u16,
@@ -114,7 +113,7 @@ impl VConn {
     }
 }
 
-/// vhost.mjs `stats`
+/// the virtual host's counts (the server's info: core.rs `Core::info`)
 #[derive(Clone, Copy, Debug, Default)]
 pub struct VhStats {
     pub syn_in: u64,
@@ -130,7 +129,7 @@ pub struct VhStats {
     pub overrun: u64,
 }
 
-/// the redirector's state of one connection (lobby.mjs `redirector`)
+/// the redirector's state of one connection (lobby.rs `redirector_connect`)
 pub struct Redir {
     pub reader: crate::aries::FrameReader,
     pub timer: Option<crate::timers::TimerId>,
@@ -139,7 +138,7 @@ pub struct Redir {
 pub struct VHost {
     pub o: VhostLimits,
     pub listeners: HashMap<u16, Listener>,
-    /// the open connections, in the order they were opened (the JS Map's)
+    /// the open connections, in the order they were opened (a browser that left has its streams closed in that order)
     pub conns: BTreeMap<ConnId, VConn>,
     by_key: HashMap<(u32, u16, u32), ConnId>,
     per_vip: HashMap<u32, usize>,
@@ -168,7 +167,7 @@ impl VHost {
     }
 }
 
-/// one switch frame of a LAN kind (vhost.mjs `lanFrame`)
+/// one switch frame of a LAN kind
 #[allow(clippy::too_many_arguments)]
 pub fn lan_frame(kind: u8, src: u32, dst: u32, sport: u16, dport: u16, op: u8, cid: u32, data: &[u8]) -> Vec<u8> {
     let mut f = vec![0u8; F_DATA + LAN_HDR + data.len()];
@@ -212,7 +211,7 @@ fn le32(d: &[u8], at: usize) -> u32 {
 }
 
 impl Core {
-    /// vhost.mjs `out(vip, frame)`: to one browser through the switch (the tap sees it first)
+    /// a frame to one browser through the switch (the tap sees it first)
     pub fn out(&mut self, vip: u32, frame: Vec<u8>) -> SendResult {
         self.vh.stats.frames_out += 1;
         if let Some(t) = &self.tap {
@@ -220,7 +219,7 @@ impl Core {
         }
         match &self.send {
             Some(send) => send(vip, frame.into(), self.cause.as_deref()),
-            // the JS's `send = () => false` until the switch is attached
+            // until the switch is attached, nothing is taken (as by a browser too far behind)
             None => SendResult::Full,
         }
     }
@@ -341,7 +340,7 @@ impl Core {
         }
     }
 
-    /// VConn `write(buf)`: bytes to the browser, in frames of at most TCP_CHUNK; one the switch does not take ends
+    /// bytes to the browser, in frames of at most TCP_CHUNK; one the switch does not take ends
     /// the connection (Full: the browser is too far behind; Gone: it left the switch)
     pub fn conn_write(&mut self, id: ConnId, buf: &[u8]) -> bool {
         let Some(c) = self.vh.conns.get(&id) else { return false };
@@ -365,7 +364,7 @@ impl Core {
         true
     }
 
-    /// VConn `end()`: graceful close of our side (FIN); the connection goes once both sides closed
+    /// graceful close of our side (FIN); the connection goes once both sides closed
     pub fn conn_end(&mut self, id: ConnId) {
         let Some(c) = self.vh.conns.get_mut(&id) else { return };
         if c.tx_fin {
@@ -379,7 +378,7 @@ impl Core {
         }
     }
 
-    /// VConn `destroy(why)`: abortive close (RST)
+    /// abortive close (RST)
     pub fn conn_destroy(&mut self, id: ConnId, why: &str) {
         let Some(c) = self.vh.conns.get(&id) else { return };
         let (vip, lport, rport, cid) = (c.vip, c.lport, c.rport, c.cid);
@@ -387,7 +386,7 @@ impl Core {
         self.conn_drop(id, why);
     }
 
-    /// vhost.mjs `drop(conn, why)`: the connection is gone; its service hears why
+    /// the connection is gone; its service hears why
     pub fn conn_drop(&mut self, id: ConnId, why: &str) {
         let Some(c) = self.vh.conns.remove(&id) else { return };
         self.vh.by_key.remove(&(c.vip, c.rport, c.cid));
@@ -401,7 +400,7 @@ impl Core {
     }
 
     /// what this host sent because of frame `data` from `from` was more than that client's budgets: the stream it
-    /// came on goes (lan.mjs)
+    /// came on goes (the budgets are the switch's: nfsu2-lan)
     pub fn overrun(&mut self, from: u32, data: &[u8]) {
         if data.len() < F_DATA + LAN_HDR || data[0] != K_TCP {
             return;
@@ -412,7 +411,7 @@ impl Core {
         }
     }
 
-    /// a handler failed on this frame (a panic: the JS's exception): the stream it came on goes
+    /// a handler failed on this frame (it panicked): the stream it came on goes
     pub fn fail_stream(&mut self, from: u32, data: &[u8]) {
         if data.len() < F_DATA + LAN_HDR || data[0] != K_TCP {
             return;
@@ -516,7 +515,7 @@ impl Core {
         self.vh.conns.get(&id).map(|c| (c.vip, c.peer(), c.group.clone(), c.site.clone()))
     }
 
-    /// `conn.open`
+    /// the connection is still there (not closed, reset or gone with its browser)
     pub fn conn_open(&self, id: ConnId) -> bool {
         self.vh.conns.contains_key(&id)
     }

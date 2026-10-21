@@ -48,7 +48,7 @@ pub const GAME_ENTRIES: [&str; 16] = [
 pub const BLOCK: u64 = 1 << 20;
 pub const BLOCKS_MAX: u64 = 8;
 
-/// `gameEntry(name)`: a top-level name of the game's (JS toLowerCase, as the JS compared)
+/// a top-level name of the game's, compared in lower case (Unicode's, as JS's toLowerCase: the Kelvin sign is "k")
 pub fn game_entry(name: &str) -> bool {
     let n = name.to_lowercase();
     GAME_ENTRIES.contains(&n.as_str())
@@ -60,7 +60,7 @@ pub struct Manifest {
     pub etag: String,
     /// entries (folders and files)
     pub count: usize,
-    /// when it was made (Date.now())
+    /// when it was made (ms since the epoch)
     pub at: i64,
 }
 
@@ -117,8 +117,8 @@ fn walk(dir: &str, rel: &str, real_state: &str, out: &mut String, count: &mut us
 
 type Walk = Shared<BoxFuture<'static, Result<Arc<Manifest>, String>>>;
 
-/// The manifest made last, and the walk under way (server.mjs `manifest`, `manifestBuilding`): one walk at a time for
-/// everyone who asks meanwhile, on a task of its own, so that its manifest is kept whoever is still there to take it.
+/// The manifest made last, and the walk under way: one walk at a time for everyone who asks meanwhile, on a task of
+/// its own, so that its manifest is kept whoever is still there to take it.
 /// (A walk that was the request's own went with a request that reset: the next ?refresh walked again, and a client
 /// that asked and reset at once kept as many walks going as it liked.)
 #[derive(Default)]
@@ -132,7 +132,7 @@ impl ManifestCell {
         self.cur.lock().clone()
     }
 
-    /// `refreshManifest()`: the walk under way, or a new one (on the runtime: the walk is a task of its own)
+    /// the walk under way, or a new one (on the runtime: the walk is a task of its own)
     pub fn refresh(self: &Arc<Self>, data: &str, real_state: &str, key: &[u8]) -> Walk {
         let mut walk = self.walk.lock();
         if let Some(w) = walk.as_ref() {
@@ -158,7 +158,7 @@ impl ManifestCell {
     }
 }
 
-/// `buildManifest()` (blocking: on a blocking thread)
+/// the manifest of the install folder (blocking: on a blocking thread)
 pub fn build(data: &str, real_state: &str, key: &[u8]) -> io::Result<Manifest> {
     let mut body = String::from("{\"v\":1,\"files\":[");
     let mut count = 0;
@@ -247,7 +247,7 @@ mod tests {
         assert!(!String::from_utf8_lossy(&m2.body).contains("TRACKS"));
     }
 
-    // the same folder walked by server.mjs's own code (buildManifest, copied as it is): the same bytes
+    // the same folder walked by the Node server's own buildManifest (copied here as it was): the same bytes
     #[test]
     fn the_same_body_as_the_node_servers() {
         let d = folder();

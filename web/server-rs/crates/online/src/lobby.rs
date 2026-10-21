@@ -1,5 +1,5 @@
-//! The lobby of the online host (lobby.mjs): what EA's servers did for NFS Underground 2's Online mode, for the
-//! players of this one server.
+//! The lobby of the online host: what EA's servers did for NFS Underground 2's Online mode, for the players of this
+//! one server.
 //!
 //! Message shapes: those of EA's own lobby code, recorded from server.dll (the LAN server, which runs inside a
 //! hosting browser) with the dev trace (trace.rs), plus the online-only parts (the config blob, rooms, personas, the
@@ -44,9 +44,8 @@
 //! needs three players for its points.
 //!
 //! Sessions and games are kept by id.  A session that left (and a game that ended) stays readable until the event
-//! that ended it is over (the graveyard), as the JS objects stay with the code that still holds them: what that
-//! code does with them afterwards (a send to a gone session does nothing; the others may still hear of it) is the
-//! JS's.
+//! that ended it is over (the graveyard), so the code still handling that event goes on with it: a send to a gone
+//! session does nothing, and the others may still hear of it.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
@@ -67,7 +66,7 @@ use crate::{PORT_BUDDY, PORT_LOBBY};
 pub type SessId = u64;
 pub type GameId = u64;
 
-/// lobby.mjs LOBBY_LIMITS (numbers, as the JS takes them)
+/// The lobby's limits (all f64: the rules compare them with counts, rates and times alike)
 #[derive(Clone, Copy, Debug)]
 pub struct Limits {
     /// lobby sessions at once
@@ -202,7 +201,7 @@ const REPORT_TYPES: [&str; 7] = ["circuit", "sprint", "drag", "drift", "streetx"
 /// shortest (one lap of the shortest track; a quarter-mile drag)
 const MIN_RACE_S: [f64; 7] = [20.0, 20.0, 5.0, 20.0, 20.0, 20.0, 20.0];
 
-/// lobby.mjs `Bucket`: `rate` a second, at most `burst`, full at the start (on the lobby's clock)
+/// A token bucket: `rate` a second, at most `burst`, full at the start (on the lobby's clock)
 #[derive(Clone, Copy, Debug)]
 pub struct LBucket {
     pub rate: f64,
@@ -253,8 +252,8 @@ pub struct Session {
     pub gone: bool,
 }
 
-/// one player of a game.  `s`: its session, or None once a started race went on without its lobby link (the JS's
-/// `{ gone: true, persona }` in its place)
+/// one player of a game.  `s`: its session, or None once a started race went on without its lobby link (the player
+/// counts as gone; its name, address and report stay)
 #[derive(Clone, Debug)]
 pub struct Player {
     pub s: Option<SessId>,
@@ -297,7 +296,8 @@ pub struct Room {
     pub users: IndexSet<SessId>,
 }
 
-/// lobby.mjs `later`'s `{ at, timer, fn }`: `pending` is "fn is set" (what it does follows from its key)
+/// what `later` keeps for one record: when it last went (`at`), its timer, and whether one waits to go (`pending`;
+/// what goes follows from its key)
 #[derive(Clone, Copy, Debug)]
 pub struct Later {
     at: f64,
@@ -325,7 +325,7 @@ pub enum LaterKey {
     Pop(u32),
 }
 
-/// lobby.mjs `stats`
+/// the lobby's counts (the server's info: core.rs `Core::info`)
 #[derive(Clone, Copy, Debug, Default)]
 pub struct LobbyStats {
     pub logins: u64,
@@ -343,9 +343,9 @@ pub struct Lobby {
     /// every session object still held: the live ones and those that left during the current event
     pub sess: HashMap<SessId, Session>,
     /// the live sessions of each browser (in the order they came), and how many each client and site holds: what a
-    /// new lobby connection is counted against, and where a Messenger login looks for its key.  (The JS goes through
-    /// every session for both: with 1000 of them a connection refused, or a login with a key of nobody's, cost this
-    /// thread 15-20 us, a frame no login is needed for.)
+    /// new lobby connection is counted against, and where a Messenger login looks for its key.  (Going through every
+    /// session for both, as the Node server did, cost this thread 15-20 us with 1000 of them for a connection refused
+    /// or a login with a key of nobody's: frames anyone can send, with no login.)
     by_vip: HashMap<u32, Vec<SessId>>,
     by_group: HashMap<Arc<str>, usize>,
     by_site: HashMap<Arc<str>, usize>,
@@ -357,7 +357,9 @@ pub struct Lobby {
     pub games: BTreeMap<GameId, Game>,
     /// games that ended, while something still holds them (the current event, a game record not sent yet)
     dead: HashMap<GameId, Game>,
+    /// game id -> its record to the game list, at most every announce_ms
     agm: IndexMap<GameId, Agm>,
+    /// room id -> the same for its population
     pop: IndexMap<u32, Later>,
     /// a browser's address -> when it left the switch (not back since)
     gone_vips: HashMap<u32, f64>,
@@ -505,7 +507,8 @@ impl Lobby {
         out
     }
 
-    /// lobby.mjs `info(here)` (the fields after the virtual host's; core.rs puts them together)
+    /// the lobby's counts for the server's info: sessions, personas, racing, games (core.rs `Core::info` puts them
+    /// after the virtual host's)
     pub fn info(&self, here: &HashSet<u32>) -> (usize, usize, usize, usize) {
         (self.sessions.len(), self.by_persona.len(), self.racers(here).len(), self.games.len())
     }
@@ -577,7 +580,7 @@ impl Lobby {
     }
 }
 
-/// `/^[!-~]{4}$/`
+/// a message kind: four printable ASCII characters, no space
 pub fn four_printable(k: &str) -> bool {
     k.len() == 4 && k.bytes().all(|b| (b'!'..=b'~').contains(&b))
 }
@@ -598,19 +601,19 @@ fn fit(fields: Fields, max: usize, drop: &[&str]) -> Fields {
     f
 }
 
-/// lobby.mjs `fmtTime`: "3:06.82"
+/// a race time in a console line: "3:06.82"
 pub(crate) fn fmt_time(t: f64) -> String {
     let m = (t / 60.0).floor();
     let s = js::to_fixed(t % 60.0, 2);
     format!("{}:{:0>5}", js::number_to_string(m), s)
 }
 
-/// `(v >>> 0).toString(16)`
+/// a ranking's number in lowercase hex, as a u32 (`jsx::to_uint32`)
 fn h(v: f64) -> String {
     format!("{:x}", jsx::to_uint32(v))
 }
 
-/// `${s.persona}` in a template: "null" when there is none
+/// a session's persona as the console lines write it: "null" when there is none
 fn tpl(s: &Option<String>) -> &str {
     s.as_deref().unwrap_or("null")
 }
@@ -777,7 +780,7 @@ impl Core {
         }
     }
 
-    /// lobby.mjs `drop(s, why)`
+    /// a session dropped: counted, on the console, its link reset (it leaves when the reset closes it)
     pub fn ldrop(&mut self, s: SessId, why: &str) {
         self.lobby.stats.dropped += 1;
         self.llog(&format!("[online] {}: dropped: {why}", self.who(s)), s);
@@ -1203,7 +1206,7 @@ impl Core {
         }
     }
 
-    /// lobby.mjs `later(a, ms, fn)`: fn now, or (only the latest fn) once ms have passed since the last one
+    /// a record out now, or (only the latest) once announce_ms has passed since the last one
     fn later(&mut self, k: LaterKey) {
         let (ms, now) = (self.lobby.l.announce_ms, self.now());
         let Some(a) = self.lobby.later_mut(k) else { return };
@@ -1221,7 +1224,7 @@ impl Core {
         }
     }
 
-    /// lobby.mjs `fire(a)`
+    /// a `later` record goes now (when one waits), and its timer ends
     pub fn fire(&mut self, k: LaterKey) {
         let now = self.now();
         let Some(a) = self.lobby.later_mut(k) else { return };
@@ -1495,7 +1498,7 @@ impl Core {
         let start = 0i32.max(jsx::to_int32(f.num("START", 0.0)));
         let range = 100i32.min(0i32.max(jsx::to_int32(f.num("RANGE", 0.0))));
         let monthly = chan >= 18;
-        // (in 64 bits: the JS's numbers do not overflow at -2^31 - 6, and its % keeps the sign as Rust's does)
+        // (in 64 bits: CHAN - 6 does not overflow for a CHAN near -2^31; % keeps the sign, and only 6..29 has a board)
         let kind = (chan as i64 - 6) % 6;
         let own = (chan as i64 - 6) % 12 >= 6;
         let find = f.get("FIND").map(str::to_string);
@@ -1879,7 +1882,8 @@ impl Core {
                         changed = true;
                     }
                 }
-                // (the JS: a TypeError on the missing player, the session dropped as a server error)
+                // a session its game does not list: dropped as a server error, with the console line the Node server
+                // wrote for it
                 None => {
                     let line = format!(
                         "[online] {}: \"gset\" failed: TypeError: Cannot read properties of undefined (reading 'flags')",
@@ -2150,7 +2154,7 @@ impl Core {
 
     /// the server stops: the timers end, every session's link goes, the results are written
     pub fn lobby_stop(&mut self) {
-        // (the JS clears the timers but keeps their handles: a later() after this waits for none of them)
+        // (the timers end, but each record keeps its timer's id: a `later` after this sends nothing)
         let keys: Vec<LaterKey> =
             self.lobby.agm.keys().map(|g| LaterKey::Agm(*g)).chain(self.lobby.pop.keys().map(|r| LaterKey::Pop(*r))).collect();
         for k in keys {

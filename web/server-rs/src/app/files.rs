@@ -1,5 +1,5 @@
-//! Files: which file a URL path names (resolveInside, resolveGame), whether it is still inside its folder once
-//! symbolic links are followed and outside the state folder (locate), and sending it (sendFile: one byte range, 416,
+//! Files: which file a URL path names (resolve_inside, resolve_game), whether it is still inside its folder once
+//! symbolic links are followed and outside the state folder (locate), and sending it (send_file: one byte range, 416,
 //! 304, HEAD).  Every file system call is on a blocking thread, never on a runtime worker.
 
 use std::collections::HashMap;
@@ -20,8 +20,8 @@ use crate::paths;
 /// a file sent in pieces of this many bytes (the size Node's read streams read)
 const PIECE: usize = 64 << 10;
 
-/// `resolveInside(root, urlPath)`: the file under root that a URL path names; None for anything with a dot segment
-/// (.., ., .git, .DS_Store, ...) or outside root
+/// the file under root that a URL path names; None for anything with a dot segment (.., ., .git, .DS_Store, ...) or
+/// outside root
 pub fn resolve_inside(root: &str, url_path: &str) -> Option<String> {
     if url_path.split('/').any(|seg| seg.starts_with('.')) {
         return None;
@@ -30,14 +30,14 @@ pub fn resolve_inside(root: &str, url_path: &str) -> Option<String> {
     (p == root || p.starts_with(&format!("{root}/"))).then_some(p)
 }
 
-/// `resolveGame(urlPath)`: a file of the game (GAME_ENTRIES) under the install folder, or None
+/// the file of the game (GAME_ENTRIES) under the install folder that a URL path names, or None
 pub fn resolve_game(data: &str, url_path: &str) -> Option<String> {
     let first = url_path.split('/').find(|s| !s.is_empty())?;
     if game_entry(first) { resolve_inside(data, url_path) } else { None }
 }
 
-/// `devOnly(p)`: a test page, test script or source map, by its name as a case-insensitive disk folds it (NFKC folds
-/// "ſ" to "s", "K" to "k")
+/// a test page, test script or source map, by its name as a case-insensitive disk folds it (NFKC folds "ſ" to "s",
+/// "K" to "k")
 pub fn dev_only(p: &str) -> bool {
     let n: String = p.nfkc().collect::<String>().to_lowercase();
     let tests = n.strip_prefix("/tests").or_else(|| n.strip_prefix("/test"));
@@ -50,7 +50,7 @@ pub struct Found {
     pub md: std::fs::Metadata,
 }
 
-/// sendFile's options: the type (else by the real file's extension), the cache rule, more headers, the file when the
+/// send_file's options: the type (else by the real file's extension), the cache rule, more headers, the file when the
 /// caller located it already, and whether search engines are told to keep out
 pub struct FileOpts {
     pub type_: Option<&'static str>,
@@ -66,8 +66,8 @@ impl Default for FileOpts {
     }
 }
 
-/// `realInside(root, p)`: the real path of p if it is still inside root once symbolic links are followed (root's
-/// own real path is looked up once)
+/// the real path of p if it is still inside root once symbolic links are followed (root's own real path is looked up
+/// once)
 fn real_inside(roots: &Mutex<HashMap<String, String>>, root: &str, p: &str) -> Option<String> {
     let cached = roots.lock().get(root).cloned();
     let rr = match cached {
@@ -82,7 +82,7 @@ fn real_inside(roots: &Mutex<HashMap<String, String>>, root: &str, p: &str) -> O
     rp.starts_with(&format!("{rr}/")).then_some(rp)
 }
 
-/// `locate(root, file)` (blocking)
+/// `App::locate`, blocking
 pub fn locate_sync(roots: &Mutex<HashMap<String, String>>, real_state: &str, root: &str, file: &str) -> Option<Found> {
     let real = real_inside(roots, root, file)?;
     if within(&real, real_state) {
@@ -133,7 +133,8 @@ impl App {
         tokio::task::spawn_blocking(move || locate_sync(&roots, &state, &root, &file)).await.ok().flatten()
     }
 
-    /// `sendFile(q, s, root, file, opts)`
+    /// A file under root (or the one `o.found` names; none: 404): its ETag (304), one byte range (206, 416), HEAD,
+    /// and the bytes
     pub async fn send_file(&self, q: &Request, s: &mut Response, root: &str, file: Option<String>, o: FileOpts) -> Res {
         let f = match o.found {
             Some(f) => Some(f),
@@ -227,7 +228,7 @@ fn parse_range(r: &str) -> Option<(&str, &str)> {
 }
 
 /// bytes start..end of an open file, piece by piece as the client takes them; a read that fails or comes up short
-/// (the file shrank) ends the connection, as a broken read stream did
+/// (the file shrank) ends the connection (the answer cannot be finished)
 pub async fn stream_range(s: &mut Response, file: Arc<std::fs::File>, start: u64, end: u64) -> Res {
     let mut off = start;
     let mut buf = vec![0u8; PIECE.min((end - start) as usize)];

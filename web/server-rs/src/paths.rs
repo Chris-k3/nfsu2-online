@@ -1,6 +1,6 @@
 //! Node's `path` (posix) on the strings the server keeps its paths in: `resolve`, `join`, `dirname`, `basename`,
-//! `extname`, all lexical (no file system), as server.mjs used them.  Paths are strings here because they were in
-//! the JS: they go into console lines, die messages and ETags as Node wrote them.
+//! `extname`, all lexical (no file system), as the Node server used them.  Paths are strings here: they go into
+//! console lines, die messages and ETags (a file's ETag hashes its real path) as the Node server wrote them.
 
 /// `path.posix.normalize` of an absolute path: "." and ".." resolved, repeated and trailing slashes gone ("/" stays)
 pub fn normalize_abs(p: &str) -> String {

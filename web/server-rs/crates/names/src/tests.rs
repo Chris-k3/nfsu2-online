@@ -1,6 +1,7 @@
-//! The names.mjs cases of web/test/names.test.mjs.  Its other tests are not this crate's: lan.mjs cleanName (the
-//! switch shows "player") is nfsu2-lan's, online/stats.mjs dropping the results kept under one is nfsu2-online's,
-//! and runtime/names.h (its lists, its answers for 25,000 names) is the game's C, checked against names.mjs there.
+//! The names.mjs cases of web/test/names.test.mjs (its first test).  What else reads names with this crate is tested
+//! where it is: the switch's "player" for such a name in nfsu2-lan (text.rs's tests), the Online results dropping the
+//! ones kept under one in nfsu2-online (stats.rs's tests).  runtime/names.h (its lists, its answers for 25,000 names)
+//! is the game's C, checked against names.mjs by names.test.mjs's other two tests.
 
 use super::*;
 
@@ -64,7 +65,7 @@ pub(crate) const UNICODE: &[&str] = &[
     "f\u{430}g",
 ];
 /// other words with those letters in them, the player names this server sees most (Turkish) among them; then a
-/// name and a number: a year, two digits, the digits the Online mode adds to a taken name (lobby.mjs freeVariant)
+/// name and a number: a year, two digits, the digits the Online mode adds to a taken name (nfsu2-online `free_variant`)
 pub(crate) const ALLOWED: &[&str] = &[
     "Mustafa69",
     "MustafaGS",
@@ -137,7 +138,7 @@ fn lists_ways_round_and_other_words() {
     assert!(!blocked_name("xfagx") && blocked_name("x_fag_x") && blocked_name("xFagX"));
 }
 
-// not in the JS test: the pieces on their own
+// not in names.test.mjs: the pieces on their own
 
 #[test]
 fn letters_as_the_js_reads_them() {

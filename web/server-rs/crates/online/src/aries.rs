@@ -1,5 +1,5 @@
-//! The lobby protocol's framing (aries.mjs; EA DirtySock "ProtoAries", as SPEED2.EXE's lobby client and EA's
-//! server.dll speak it):
+//! The lobby protocol's framing (EA DirtySock "ProtoAries", as SPEED2.EXE's lobby client and EA's server.dll speak
+//! it):
 //!
 //! - `[0..3]` kind: four ASCII characters ("auth", "+rom", "@dir", ...)
 //! - `[4..7]` code: four bytes; 0 in a request and in a reply that succeeded, an error tag ("imst", "pass", ...)
@@ -31,8 +31,8 @@ pub const HDR: usize = 12;
 /// the client's receive buffer is 0x8000 bytes; nothing it sends or needs is near this
 pub const MAX_FRAME: usize = 8192;
 
-/// a field's value as the JS passed it to `encodeFields`: a string, a number (written as JS writes it), or nothing
-/// (undefined or null: the field is left out)
+/// a field's value: a string, a number (written as JavaScript writes one: `js::number_to_string`), or nothing (the
+/// field is left out)
 #[derive(Clone, Debug, PartialEq)]
 pub enum V {
     S(String),
@@ -75,10 +75,10 @@ macro_rules! v_num {
 }
 v_num!(f64, i64, u64, i32, u32, u16, usize);
 
-/// a body as `encodeFields` takes it: [[key, value], ...] in order
+/// a body's fields: (key, value), in order
 pub type Fields = Vec<(Cow<'static, str>, V)>;
 
-/// `[[k, v], ...]` for [`Fields`] (a Vec: most are sent as they are, some grow)
+/// `fields![(k, v), ...]`: a [`Fields`] (a Vec: most are sent as they are, some grow)
 macro_rules! fields {
     ($(($k:expr, $v:expr)),* $(,)?) => {{
         #[allow(clippy::useless_vec)]
@@ -93,7 +93,7 @@ fn special(c: u8) -> bool {
     matches!(c, 0x3d | 0x22 | 0x3a | 0x25 | 0x5e | 0x7f)
 }
 
-/// aries.mjs `encodeValue`: a value as the client writes one (latin1 bytes)
+/// a value as the client writes one (latin1 bytes)
 pub fn encode_value(v: &V, out: &mut Vec<u8>) {
     let mut b = Vec::new();
     match v {
@@ -122,8 +122,7 @@ fn good_key(k: &str) -> bool {
     (1..=32).contains(&k.len()) && k.bytes().all(|b| b.is_ascii_alphanumeric() || b"_+@$~".contains(&b))
 }
 
-/// aries.mjs `encodeFields`: "K=V<sep>K=V<sep>" (no NUL), as latin1 bytes; a field name that is not one is an error
-/// (the JS throws)
+/// a body: "K=V<sep>K=V<sep>" (no NUL), as latin1 bytes; a field name that is not one (`good_key`) is an error
 pub fn encode_fields(fields: &[(Cow<'static, str>, V)], sep: u8) -> Result<Vec<u8>, String> {
     let mut out = Vec::with_capacity(16 * fields.len());
     encode_fields_into(fields, sep, &mut out)?;
@@ -148,7 +147,7 @@ fn encode_fields_into(fields: &[(Cow<'static, str>, V)], sep: u8, out: &mut Vec<
     Ok(())
 }
 
-/// aries.mjs `tag4`: a 4-character kind or code ("" for 0), padded with NULs
+/// a 4-character kind or code ("" for 0), padded with NULs
 fn tag4(t: &str, what: &str, out: &mut Vec<u8>) -> Result<(), String> {
     let mut b = Vec::with_capacity(4);
     jsx::latin1_encode(t, &mut b);
@@ -162,13 +161,13 @@ fn tag4(t: &str, what: &str, out: &mut Vec<u8>) -> Result<(), String> {
     Ok(())
 }
 
-/// aries.mjs `encodeFrame(kind, code, fields)`: one message (code "" = 0, success), fields separated by newlines
+/// one message (code "" = 0, success), fields separated by newlines
 pub fn encode_frame(kind: &str, code: &str, fields: &[(Cow<'static, str>, V)]) -> Result<Vec<u8>, String> {
     encode_frame_sep(kind, code, fields, b'\n')
 }
 
-/// `encodeFrame(kind, code, fields, sep)` (the fields are checked first, then the kind, then the code, as the JS
-/// throws)
+/// one message, fields separated by `sep` (the fields are checked first, then the kind, then the code: the error is
+/// the first one's)
 pub fn encode_frame_sep(kind: &str, code: &str, fields: &[(Cow<'static, str>, V)], sep: u8) -> Result<Vec<u8>, String> {
     let mut f = Vec::with_capacity(HDR + 24 * fields.len() + 1);
     f.extend_from_slice(&[0; HDR]);
@@ -183,7 +182,7 @@ pub fn encode_frame_sep(kind: &str, code: &str, fields: &[(Cow<'static, str>, V)
     Ok(f)
 }
 
-/// `encodeFrame(kind, code, text)`: a ready body (latin1 text, without its NUL)
+/// one message of a ready body (latin1 text, without its NUL)
 #[cfg(test)]
 pub fn encode_frame_text(kind: &str, code: &str, text: &str) -> Result<Vec<u8>, String> {
     let mut f = Vec::with_capacity(HDR + text.len() + 1);
@@ -197,7 +196,7 @@ pub fn encode_frame_text(kind: &str, code: &str, text: &str) -> Result<Vec<u8>, 
     Ok(f)
 }
 
-/// aries.mjs `tagText`: a 4-byte tag as text: printable characters kept, NULs dropped, anything else as \xNN
+/// a 4-byte tag as text: printable characters kept, NULs dropped, anything else as \xNN
 pub fn tag_text(b: &[u8]) -> String {
     let mut s = String::with_capacity(4);
     for &c in b {
@@ -223,7 +222,7 @@ pub struct Msg {
     pub body: Vec<u8>,
 }
 
-/// aries.mjs `FrameReader`: the messages in a byte stream.  `push` returns the complete messages so far; a length
+/// The messages in a byte stream.  `push` returns the complete messages so far; a length
 /// below 12 or above `max` makes the stream bad (`error` set, nothing more is returned: the caller drops the
 /// connection).
 #[derive(Debug)]
@@ -278,7 +277,7 @@ impl FrameReader {
     }
 }
 
-/// `s.replace(/%([0-9a-fA-F]{2})/g, ...)`: each %xx as the character xx
+/// each %xx (two hex digits, either case) as the character xx; any other % stays
 fn unescape(b: &[u8]) -> String {
     let mut s = String::with_capacity(b.len());
     let mut i = 0;
@@ -297,7 +296,7 @@ fn unescape(b: &[u8]) -> String {
     s
 }
 
-/// aries.mjs `parseFields(body, skip)`: the fields of a body, in order, keys upper-cased; a key `skip` says yes to is
+/// The fields of a body, in order, keys upper-cased; a key `skip` says yes to is
 /// passed over without its value being decoded (it appears with the value None, so a caller can tell that one
 /// was sent).  Text after the first NUL is ignored.
 pub fn parse_fields(b: &[u8], skip: impl Fn(&str) -> bool) -> Vec<(String, Option<String>)> {
@@ -353,13 +352,13 @@ pub fn is_secret(k: &str) -> bool {
     SECRET_KEYS.contains(&k)
 }
 
-/// aries.mjs `fieldMap`: parseFields as a map (the first of a repeated key wins, as the client's own search finds the
-/// first), in the order the keys came
+/// [`parse_fields`] as a map (the first of a repeated key wins, as the client's own search finds the first), in the
+/// order the keys came
 #[derive(Clone, Debug, Default)]
 pub struct FieldMap(pub IndexMap<String, Option<String>>);
 
 impl FieldMap {
-    /// `fieldMap(body)` (SECRET_KEYS skipped)
+    /// a body's fields ([`SECRET_KEYS`] skipped)
     pub fn parse(body: &[u8]) -> FieldMap {
         Self::parse_with(body, is_secret)
     }
@@ -370,23 +369,23 @@ impl FieldMap {
         }
         FieldMap(m)
     }
-    /// `f.get(k)` as a string: None when the field is missing or was skipped (null)
+    /// a field's value: None when the field is missing or was skipped
     pub fn get(&self, k: &str) -> Option<&str> {
         self.0.get(k).and_then(|v| v.as_deref())
     }
-    /// `f.has(k)`
+    /// the field was sent (a skipped one too)
     pub fn has(&self, k: &str) -> bool {
         self.0.contains_key(k)
     }
-    /// `String(f.get(k) ?? '')`
+    /// a field's value, "" when the field is missing or was skipped
     pub fn str(&self, k: &str) -> &str {
         self.get(k).unwrap_or("")
     }
-    /// `Number(f.get(k) ?? def)`: the field's number, else `def`
+    /// a field's number (as `jsx::to_number` reads its text), `def` when the field is missing
     pub fn num(&self, k: &str, def: f64) -> f64 {
         match self.0.get(k) {
             Some(Some(v)) => jsx::to_number(v),
-            // `Number(null)` is 0 (a skipped field; the lobby never asks for one)
+            // a skipped field's number is 0 (the lobby never asks for one)
             Some(None) => 0.0,
             None => def,
         }
@@ -400,7 +399,7 @@ fn redacted(k: &str) -> bool {
         || k.strip_prefix("PASS").is_some_and(|r| r.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'))
 }
 
-/// aries.mjs `redactBody`: a body as one printable line for the dev-only trace, every secret replaced
+/// a body as one printable line for the dev-only trace, every secret replaced
 pub fn redact_body(body: &[u8]) -> String {
     let mut s = String::new();
     for (i, (k, v)) in parse_fields(body, redacted).into_iter().enumerate() {
@@ -425,7 +424,7 @@ mod tests {
         jsx::latin1_decode(b)
     }
 
-    // online-aries.test.mjs 'header: kind, code, big-endian length with the NUL-terminated body'
+    // header: kind, code, big-endian length with the NUL-terminated body
     #[test]
     fn header() {
         let f = encode_frame("auth", "", &fields![("NAME", "Bob"), ("ADDR", "10.77.0.3")]).unwrap();
@@ -441,7 +440,7 @@ mod tests {
         assert!(encode_fields(&fields![("BAD KEY", 1)], b'\n').is_err());
     }
 
-    // 'values as the game writes them'
+    // values as the game writes them
     #[test]
     fn values() {
         let ev = |v: V| {
@@ -460,7 +459,7 @@ mod tests {
         assert_eq!(ev("\u{c4}".into()), "\u{c4}");
     }
 
-    // 'round trip through the reader, both separators, quotes, escapes'
+    // round trip through the reader, both separators, quotes, escapes
     #[test]
     fn round_trip() {
         let fields = fields![("NAME", "two words"), ("TEXT", "hi = \"you\": 100% ^^"), ("N", "7"), ("EMPTY", "")];
@@ -493,7 +492,7 @@ mod tests {
         assert_eq!(m.get("NAME"), Some("a"));
     }
 
-    // 'stream: split and packed messages, the size limit'
+    // stream: split and packed messages, the size limit
     #[test]
     fn stream() {
         let a = encode_frame("addr", "", &fields![("ADDR", "10.77.0.5"), ("PORT", "50000")]).unwrap();
@@ -521,7 +520,7 @@ mod tests {
         assert!(r2.error.is_some());
     }
 
-    // 'secrets: never decoded, never in the trace'
+    // secrets: never decoded, never in the trace
     #[test]
     fn secrets() {
         let pw = "CANARY-PASSWORD-123";

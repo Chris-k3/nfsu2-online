@@ -1,5 +1,5 @@
-//! A connection's reader: its messages, as lan.mjs's handlers took them (`attach`'s resume wait, `admit`'s
-//! 'message', 'ping' and 'pong'), each frame routed here, on the reader's own core.
+//! A connection's reader: a resume's wait for its hello, then its messages (text, binary, ping, pong, close), each
+//! frame routed here, on the reader's own core.
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering::Relaxed;
@@ -21,7 +21,7 @@ where
     R: AsyncRead + Unpin + Send,
 {
     let mut peer = conn.peer.lock().clone();
-    // a resume: the hello first (the welcome follows it), within resumeWaitMs
+    // a resume: the hello first (the welcome follows it), within `resume_wait_ms`
     let mut wait = (ctx.resume && peer.is_none()).then(|| Instant::now() + Duration::from_millis(sw.o.resume_wait_ms));
     let mut ws = WsReader::new(&mut r, pre, sw.o.max_payload);
     // one wait for the kill token for the connection's life (a new one each message registered with the token and
@@ -45,6 +45,7 @@ where
                 }
             }
         };
+        // (a connection that was cut is no longer open: what it sent last goes nowhere)
         match m {
             Ok(Message::Text(b)) => {
                 if wait.take().is_some() {
@@ -74,7 +75,9 @@ where
                 }
             }
             Ok(Message::Ping(d)) => {
-                // answered here (the library's own answer is off), under the rate and while the queue has room
+                // answered here, under the rate and while the queue has room (nfsu2-ws answers none itself): an answer
+                // to every ping queues pongs without a limit for a client that never reads (the phase-2 deploy
+                // review's finding 1, of the ws library's own answer: gigabytes in seconds)
                 if peer.as_ref().filter(|_| conn.open()).is_some_and(|p| !sw.flood(p) && sw.room(p, Cut::Slow)) {
                     conn.push(Out::Pong(d));
                 }
@@ -136,7 +139,7 @@ fn first_hello(sw: &LanSwitch, b: &Bytes) -> Option<Map<String, Value>> {
 }
 
 impl LanSwitch {
-    /// lan.mjs `flood()`: a control frame over ctlRate cuts the connection (no browser sends any)
+    /// a control frame over `ctl_rate` cuts the connection (no browser sends any)
     pub(crate) fn flood(&self, p: &Peer) -> bool {
         if p.ctl.lock().ctl.take_at(mono_ms(), 1.0) {
             return false;
@@ -145,7 +148,8 @@ impl LanSwitch {
         true
     }
 
-    /// lan.mjs's 'message' handler of an admitted connection
+    /// a message of an admitted connection: a control message (`text_rate`, `max_text`), a bundle (`max_bundle`) or
+    /// a frame (`max_frame`)
     fn on_message(&self, peer: &Arc<Peer>, text: bool, data: Bytes) {
         peer.alive.store(true, Relaxed);
         peer.last_in.store(now_ms(), Relaxed);

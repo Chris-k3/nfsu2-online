@@ -1,6 +1,6 @@
 [package]
 name = "nfsu2-names"
-description = "A player's name that reads as a slur (web/server/names.mjs)"
+description = "A player's name that reads as a slur (the rules of web/src/app/names.mjs)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

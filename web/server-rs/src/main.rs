@@ -1,27 +1,31 @@
-//! NFSU2 web: the server, in Rust.  The port of web/server/server.mjs, with the same options, environment, console
-//! lines, files and answers; what it serves:
+//! NFSU2 web: the server, in Rust.  It replaced the Node server, with the same options, environment, console lines,
+//! files and answers.  What it serves, to Chrome on this machine, on the LAN, or (on a VPS) over the internet:
 //!
 //!   /                  the web app (web/dist)
 //!   /game.wasm         the game module (out/web/nfsu2.wasm), brotli on the wire
 //!   /game.json         what was built (size, memory layout, revision)
-//!   /data/<path>       the NFSU2 install folder, read-only, with byte ranges: only what the game reads, never the
-//!                      rest of the folder (an installer's log, saves, mod settings)
+//!   /data/<path>       the NFSU2 install folder, read-only, with byte ranges: only what the game reads
+//!                      (GAME_ENTRIES), never the rest of the folder (an installer's log, saves, mod settings)
 //!   /data-manifest     those files: path, size, mtime
 //!   /data-blocks/<path>?b=<first>&n=<count>
 //!                      a run of 1 MiB blocks of one of them, compressed (zstd, br or gzip, whichever the client takes)
 //!   /lan               WebSocket: the virtual LAN switch for multiplayer (nfsu2-lan), with the game's Online mode on
-//!                      its 10.77.0.1 (nfsu2-online; --online off: none) and free roam's hub on 10.77.0.253
-//!                      (nfsu2-roam; --roam-hub off: none, players find each other by broadcast)
-//!   /players           how many play on this server now: { players, online, full }, never cached
-//!   test aids, only with --dev: the test pages (/test/) and source maps from web/dist-dev, the repo's test scripts
-//!   (/tests/), PUT /artifacts/<name>.png (with --artifacts)
+//!                      its 10.77.0.1 (nfsu2-online; --online off: none, the game then cannot connect) and free
+//!                      roam's hub on 10.77.0.253 (nfsu2-roam: each player's peers are the players nearest to it;
+//!                      --roam-hub off: none, players find each other by broadcast)
+//!   /players           how many play on this server now: { players, online, full, roamBusy }, two counts, whether a
+//!                      newcomer gets "LAN full" and whether free roam is busy, nothing else (never cached)
+//!   test aids, only with --dev: the test pages (/test/) and source maps from web/dist-dev (web/build.mjs writes them
+//!   there, never into web/dist), the repo's test scripts (/tests/), PUT /artifacts/<name>.png (with --artifacts)
 //!
 //! Its own names (the Host a request may carry, and the Origin of a /lan page): localhost, 127.0.0.1 and [::1],
 //! always; with --tls-cert, the names in that certificate; the names given with --host (required with
-//! --behind-proxy).  Anything else gets 421.  HTTPS (Chrome allows WebGPU and SharedArrayBuffer only on secure
-//! origins; http://localhost is one) comes from --tls-cert/--tls-key (read again when the file changes or on
-//! SIGHUP), or a reverse proxy or tunnel on this machine (--behind-proxy: plain HTTP on 127.0.0.1:<http-port> only),
-//! or not at all (only this machine can play); plus plain HTTP on 127.0.0.1:<http-port> for this machine (0 = none).
+//! --behind-proxy: the proxy forwards the player's Host, and this server cannot know the public name).  Anything
+//! else gets 421.  HTTPS (Chrome allows WebGPU and SharedArrayBuffer only on secure origins; http://localhost is one)
+//! comes from --tls-cert/--tls-key (a certificate from Let's Encrypt, or a Cloudflare Origin CA certificate; read
+//! again when the file changes or on SIGHUP), or a reverse proxy or tunnel on this machine (Caddy, nginx,
+//! cloudflared; --behind-proxy: plain HTTP on 127.0.0.1:<http-port> only), or not at all (only this machine can
+//! play, over http://localhost:<http-port>); plus plain HTTP on 127.0.0.1:<http-port> for this machine (0 = none).
 //!
 //! The work runs on many cores: a tokio runtime with half the cores as workers, 2 to 8 (NFSU2_THREADS), the
 //! compression of the game data on a pool of its own (half the cores), the Online host and the free-roam hub on a
@@ -37,7 +41,7 @@ mod app;
 mod options;
 mod paths;
 
-/// `die(msg)`: the message on stderr, exit code 1
+/// the message on stderr, then exit code 1
 pub fn die(msg: &str) -> ! {
     nfsu2_util::log::error(msg);
     std::process::exit(1)

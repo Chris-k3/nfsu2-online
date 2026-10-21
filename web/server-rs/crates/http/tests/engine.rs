@@ -1,6 +1,7 @@
 //! The engine's rules over raw TCP, with short limits: the timers (Node's header and request times checked on its
-//! interval, the socket timeout, the keep-alive cut), server.mjs's pipelining cut and its rule that an answer must
-//! move, the connection limits, upgrades, and what a service may do (panic, destroy, close, forget to end).
+//! interval, the socket timeout, the keep-alive cut), the pipelining cut (`Limits::pipelined`) and the rule that an
+//! answer must move (`Limits::progress`), the connection limits, upgrades, and what a service may do (panic,
+//! destroy, close, forget to end).
 //! (tests/cross_node.rs compares the answers themselves with Node's, byte for byte.)
 
 mod common;
@@ -172,7 +173,7 @@ async fn the_socket_timeout_closes_without_an_answer() {
     assert!(text(&got).starts_with("HTTP/1.1 200 OK"), "{:?}", text(&got));
 }
 
-// ---- pipelining (server.mjs onReq) ----
+// ---- pipelining: at most `pipelined` requests on a connection without a finished answer ----
 
 #[tokio::test]
 async fn pipelined_requests_within_the_limit_are_answered_in_order() {
@@ -206,9 +207,9 @@ async fn thousands_queued_and_never_read_cut_the_connection_at_once() {
 
 #[tokio::test]
 async fn requests_the_pipelining_count_never_sees_cannot_pile_up_behind_an_answer() {
-    // (an Expect other than 100-continue goes to Node's checkExpectation, which server.mjs's onReq never saw: such
-    // requests do not count toward `pipelined`, and behind an answer that took its time the connection read and
-    // queued them without end, each a whole Request in memory)
+    // (an Expect other than 100-continue goes to Node's checkExpectation, which the Node server's request handler
+    // never saw: such requests do not count toward `pipelined`, and behind an answer that took its time the
+    // connection read and queued them without end, each a whole Request in memory)
     let (addr, _) = engine(short(), Duration::from_secs(65)).await;
     let s = TcpStream::connect(addr).await.unwrap();
     socket2::SockRef::from(&s).set_send_buffer_size(64 << 10).unwrap();
@@ -239,7 +240,7 @@ async fn requests_the_pipelining_count_never_sees_cannot_pile_up_behind_an_answe
     assert!(ok.text.starts_with("HTTP/1.1 200 OK"), "{ok:?}");
 }
 
-// ---- server.mjs mustFlow ----
+// ---- an answer must move: `progress_bytes` in every `progress` ----
 
 #[tokio::test]
 async fn an_answer_the_client_stops_reading_is_cut() {
@@ -377,7 +378,7 @@ async fn remote_address_as_node_gives_it() {
 }
 
 #[tokio::test]
-async fn bind_says_what_server_mjs_dies_with() {
+async fn bind_says_why_it_failed() {
     let (_held, port) = common::taken_port().await;
     let e = nfsu2_http::bind("127.0.0.1", port, None).await.err();
     assert_eq!(e.as_deref(), Some(format!("port {port} is in use").as_str()));

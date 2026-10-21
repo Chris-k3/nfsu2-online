@@ -20,9 +20,10 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
   `texture-compression-unaligned`, `clip-distances`, `dual-source-blending`, `timestamp-query`, `subgroups`; JSPI;
   `Atomics.waitAsync`; 4 GB shared wasm memory; tail calls; exnref exceptions.
 - **Hosting:** the player's own server, no public site.
-  - A Mac (or a VPS) runs `web/server/server.mjs`. It serves the app, the game module built on the Mac
-    (`out/web/nfsu2.wasm`) and the game's own files of the NFSU2 install folder (`SPEED2.EXE`, `server.dll`,
-    `server.cfg`, the data folders), read-only: never the rest of the folder (an installer's log, saves, mods).
+  - A Mac (or a VPS) runs the server (`web/server-rs`, built into `out/web/server-rs/nfsu2-server`). It serves the
+    app, the game module built on the Mac (`out/web/nfsu2.wasm`) and the game's own files of the NFSU2 install folder
+    (`SPEED2.EXE`, `server.dll`, `server.cfg`, the data folders), read-only: never the rest of the folder (an
+    installer's log, saves, mods).
   - This Mac uses `http://localhost:8080/`. Other PCs need HTTPS in front of the server (`--tls-cert`, or a reverse
     proxy or tunnel), because WebGPU and SharedArrayBuffer need a secure context; the server has no certificate of its own.
   - No file picking. Game data streams over the LAN on demand and each browser keeps an OPFS block cache.
@@ -273,7 +274,8 @@ struct VOut { @builtin(position) pos: vec4f; @location(0) col0: vec4f; @location
   - `&reg=/tests/web/seed/registry_perf4_native.txt` seeds the registry, as `run_suite.sh` does.
   - `&script=/tests/scripts/quickrace.txt` adds an input script.
   - Suite env: `NOMOVIES=1 SNDSYNC=1 GPUVS=1 NFSU2_FNG_LOG=1 NFSU2_STATUS_EVERY=600 NFSU2_DISCORD=0`.
-- The server: `node web/server/server.mjs --data "<game folder>" --http-port <http> --dev`.
+- The server: `out/web/server-rs/nfsu2-server --data "<game folder>" --http-port <http> --dev` (built by
+  `web/server-rs/build.sh`).
   `--dev` serves the test pages (`/test/`), the repo's test scripts (`/tests/`), source maps and, with `--artifacts`,
   frame dumps; without it the server serves only what a player needs.
 - **Logs are English:** the runtime's log lines, the lifter's trap reasons in the lifted C, the generator's and the

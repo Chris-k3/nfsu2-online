@@ -1,10 +1,11 @@
 //! What every part of the Rust server shares.
 //!
-//! - [`js`]: text and numbers the way the Node server's JavaScript makes them (its `\s`, `trim()`, `Number#toString`,
-//!   `printable()`), so that what the two servers print, store and send is the same byte for byte
+//! - [`js`]: text and numbers the way JavaScript makes them (its `\s`, `trim()`, `Number#toString`), and
+//!   `printable()`: what the server prints, stores and sends is byte for byte what the Node server it replaced did
 //! - [`json`]: `JSON.stringify` of a `serde_json::Value` (JS number formatting, insertion order)
-//! - [`log`]: the console, and `logLimited` (a few lines a minute per client and topic)
-//! - [`bucket`]: lan.mjs's token bucket (`Bucket`), server.mjs's `Budget` and `Rate`
+//! - [`log`]: the console, and `log::limited` (a few lines a minute per client and topic)
+//! - [`bucket`]: a token bucket (`Bucket`), what clients hold at once (`Budget`) and how often they may do something
+//!   (`Rate`)
 //! - [`counter`]: a counter many threads add to without sharing a cache line
 //! - [`clock`]: `performance.now()` and `Date.now()`
 //! - [`cpu`]: how busy the process is (the free-roam hub's cap on links)

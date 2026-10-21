@@ -1,8 +1,9 @@
-//! The online host's tests: the JS's (web/test/online-*.test.mjs) case for case, driving the single-threaded core
-//! with manual clocks, and cross-checks against the JS itself (cross.rs).
+//! The online host's tests, most of them driving the single-threaded core with manual clocks (world.rs): the
+//! services (lobby.rs), the virtual host (vhost.rs), the Online audit's cases (audit.rs), edge cases (edge.rs) and
+//! random sessions of the whole host (session.rs); the host on a thread of its own (thread.rs); a rough measure of
+//! its cost (load.rs, ignored by default).
 
 mod audit;
-mod cross;
 mod edge;
 mod load;
 mod lobby;

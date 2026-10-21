@@ -21,6 +21,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { serverCommand } from './server-cmd.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const arg = (n, d) => { const i = process.argv.indexOf(n); return i > 0 ? process.argv[i + 1] : d; };
@@ -59,8 +60,8 @@ const AHEAD = [...files.keys()].filter(f => !f.startsWith('MOVIES/'));
 const TOTAL = AHEAD.reduce((a, f) => a + fs.statSync(path.join(DATA, f)).size, 0);
 
 // ---- the server ----
-const server = spawn(process.execPath, [path.join(ROOT, 'web/server/server.mjs'), '--data', DATA, '--http-port', String(PORT), '--dev',
-  '--state', path.join(OUT, 'state'), '--wasm', WASM], { stdio: ['ignore', 'pipe', 'pipe'] });
+const server = spawn(...serverCommand(['--data', DATA, '--http-port', String(PORT), '--dev', '--state', path.join(OUT, 'state'), '--wasm', WASM]),
+  { stdio: ['ignore', 'pipe', 'pipe'] });
 let serverLog = '';
 server.stdout.on('data', d => { serverLog += d; }); server.stderr.on('data', d => { serverLog += d; });
 const stopServer = () => { try { server.kill(); } catch { /* gone */ } };

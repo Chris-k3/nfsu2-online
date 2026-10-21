@@ -7,7 +7,7 @@
 
 export const BLOCK = 1 << 20;
 export const CACHE_DIR = 'cache';
-/** where the server has the manifest and the install folder (web/server/server.mjs) */
+/** where the server has the manifest and the install folder (web/server-rs/src/app/manifest.rs) */
 export const MANIFEST_URL = '/data-manifest', DATA_BASE = '/data/';
 
 /** the server's /data-manifest: every file and folder of the install folder it serves, and where it serves runs

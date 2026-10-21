@@ -1,4 +1,4 @@
-/* roam_hubwire.c -- the C side of web/test/roam-hub.test.mjs: what
+/* roam_hubwire.c -- the C side of the hub's tests (web/server-rs/crates/roam/tests/roam_hub.rs, roam_ahead.rs): what
  * runtime/roam_core.c sends the server's free-roam hub, and what it makes of
  * the hub's answer.
  *   roam_hubwire hello|snap|bye   one datagram, as roam_core encodes it, in hex

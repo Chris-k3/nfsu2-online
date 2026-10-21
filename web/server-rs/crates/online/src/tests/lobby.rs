@@ -1,10 +1,10 @@
-//! web/test/online-lobby.test.mjs: the online host's services, driven by fake game clients that speak the switch's
-//! frames, as the browsers' runtime does.  The redirector (@dir to the lobby; no answer to @tic), the login (any
-//! name; the reply within the game's 122 bytes; PASS, REGKEY and PSES never kept), personas (one holder per name,
-//! the LKEY the buddy login gets), the config blob, rooms and chat (with the flood mute), the game list, a game from
-//! creation to the race start (+ses with every player's virtual address, the same AUTH for all), the countdown of a
-//! start before every player is ready and the kick of those still not ready, the lobby link closing at the start
-//! without ending the race, leaving and deleting, the buddy login, and the limits.
+//! The online host's services, driven by fake game clients that speak the switch's frames, as the browsers' runtime
+//! does.  The redirector (@dir to the lobby; no answer to @tic), the login (any name; the reply within the game's 122
+//! bytes; PASS, REGKEY and PSES never kept), personas (one holder per name, the LKEY the buddy login gets), the config
+//! blob, rooms and chat (with the flood mute), the game list, a game from creation to the race start (+ses with every
+//! player's virtual address, the same AUTH for all), the countdown of a start before every player is ready and the kick
+//! of those still not ready, the lobby link closing at the start without ending the race, leaving and deleting, the
+//! buddy login, and the limits.
 
 use super::world::{C, Opts, World, ip};
 use crate::aries::{Fields, V, encode_fields};
@@ -30,7 +30,7 @@ fn fields_len(m: &super::world::M) -> usize {
     encode_fields(&f, b'\n').unwrap().len()
 }
 
-// 'redirector: @dir points at the lobby, @tic gets no answer, then the link closes'
+// redirector: @dir points at the lobby, @tic gets no answer, then the link closes
 #[test]
 fn redirector() {
     let mut w = world();
@@ -50,7 +50,7 @@ fn redirector() {
     assert!(w.c(ssl).reset, "no SSL port: refused");
 }
 
-// 'login: config, any name, personas, LKEY, nothing secret kept'
+// login: config, any name, personas, LKEY, nothing secret kept
 #[test]
 fn login() {
     let mut w = world();
@@ -101,7 +101,7 @@ fn login() {
     assert_eq!(w.c(c).l("dper").g("RESULT"), "0");
 }
 
-// 'rooms and chat: the room hears it, a private message reaches one, a flood is muted'
+// rooms and chat: the room hears it, a private message reaches one, a flood is muted
 #[test]
 fn rooms_and_chat() {
     let mut w = world();
@@ -133,7 +133,7 @@ fn rooms_and_chat() {
     assert_eq!(w.c(a).l("+usr").g("T"), "1", "Bravo left the room");
 }
 
-// 'a game: create, list, join, ready, start; +ses names every player by virtual address'
+// a game: create, list, join, ready, start; +ses names every player by virtual address
 #[test]
 fn a_game() {
     let mut w = world();
@@ -197,7 +197,7 @@ fn a_game() {
     assert_eq!(w.core.lobby.games.len(), 0, "forgotten after raceMs");
 }
 
-// 'the game list: every open game but a private one, the Filter's games first'
+// the game list: every open game but a private one, the Filter's games first
 #[test]
 fn the_game_list() {
     let mut w = world();
@@ -238,7 +238,7 @@ fn the_game_list() {
     assert_eq!(w.c(e).l("gjoi").code, "");
 }
 
-// 'six players: a game asked for 8 takes 6, the seventh finds it full; +ses names all six'
+// six players: a game asked for 8 takes 6, the seventh finds it full; +ses names all six
 #[test]
 fn six_players() {
     let mut w = world();
@@ -264,8 +264,8 @@ fn six_players() {
     assert_eq!((s.g("COUNT"), s.g("OPPO5"), s.g("ADDR5")), ("6", "Foxtrot", "10.77.0.7"));
 }
 
-// 'Start Race before every player is ready: the room counts down, the players still not ready are kicked, the race
-// starts'
+// Start Race before every player is ready: the room counts down, the players still not ready are kicked, the race
+// starts
 #[test]
 fn start_race_countdown_kick() {
     const READY: u32 = 1 << 27;
@@ -323,7 +323,7 @@ fn start_race_countdown_kick() {
     assert!(w.c(c).last("+ses").is_none() && w.c(d).last("+ses").is_none());
 }
 
-// 'leaving: a joiner leaves, the creator leaves, the creator deletes; a browser that goes'
+// leaving: a joiner leaves, the creator leaves, the creator deletes; a browser that goes
 #[test]
 fn leaving() {
     let mut w = world();
@@ -352,7 +352,7 @@ fn leaving() {
     assert_eq!(w.core.lobby.sessions.len(), 2);
 }
 
-// 'limits: message flood, sessions per browser, frame size, silence'
+// limits: message flood, sessions per browser, frame size, silence
 #[test]
 fn limits() {
     let mut w = World::new(Opts { limits: Limits { per_vip: 2.0, ..Default::default() }, ..Default::default() });
@@ -408,7 +408,7 @@ fn stat_of(m: &super::world::M) -> Vec<u32> {
     m.g("STAT").split(',').take(38).map(|x| u32::from_str_radix(x, 16).unwrap()).collect()
 }
 
-// 'results: the race report counts once, is checked, and shows in the career and the rankings'
+// results: the race report counts once, is checked, and shows in the career and the rankings
 #[test]
 fn results() {
     let mut w = world();
@@ -473,8 +473,8 @@ fn results() {
     assert_eq!(w.c(a2).l("snap").g("COUNT"), "0", "no sprint races yet");
 }
 
-// 'names: a name another browser holds comes with four digits (the same for one client); its own browser takes it
-// back'
+// names: a name another browser holds comes with four digits (the same for one client); its own browser takes it
+// back
 #[test]
 fn names_digits() {
     let mut w = world();
@@ -534,7 +534,7 @@ fn names_digits() {
     assert!(digits4(w.c(p).l("pers").g("PERS"), "Player"), "{}", w.c(p).l("pers").g("PERS"));
 }
 
-// 'names: a racer keeps the name until back; another player under it gets digits and ends nothing'
+// names: a racer keeps the name until back; another player under it gets digits and ends nothing
 #[test]
 fn names_racer() {
     let mut w = world();
@@ -575,7 +575,7 @@ fn names_racer() {
     assert_eq!(w.core.lobby.games.len(), 0);
 }
 
-// 'web pages: the news and terms pages as web-offer scripts, nothing else'
+// web pages: the news and terms pages as web-offer scripts, nothing else
 #[test]
 fn web_pages() {
     let mut w = world();
@@ -598,7 +598,7 @@ fn web_pages() {
     }
 }
 
-// 'EA Messenger: the login by LKEY, friends, presence, messages, blocking, leaving'
+// EA Messenger: the login by LKEY, friends, presence, messages, blocking, leaving
 #[test]
 fn ea_messenger() {
     let mut w = world();
@@ -686,7 +686,7 @@ fn ea_messenger() {
     assert_eq!(w.c(x).l("RGET").code, "auth");
 }
 
-// 'the count of players in Online mode (the server's /players): logged in, or racing until back'
+// the count of players in Online mode (the server's /players): logged in, or racing until back
 #[test]
 fn count_of_players() {
     let mut w = world();

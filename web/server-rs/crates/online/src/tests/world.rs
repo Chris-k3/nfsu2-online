@@ -1,7 +1,6 @@
-//! The JS tests' `world()`: one online host and its browsers, frames out routed to fake games by address
-//! (online-lobby.test.mjs, online-audit.test.mjs).  Two manual clocks: `advance` moves the lobby's `now()` and runs
-//! its tick (the JS's `w.advance`), `sleep` moves the timer clock and runs what is due (the JS's `await sleep(ms)`,
-//! in which real timers fire and the test's `now` stays).
+//! The tests' `World`: one online host and its browsers, frames out routed to fake games by address (lobby.rs,
+//! audit.rs and the others).  Two manual clocks: `advance` moves the lobby's `now()` and runs its tick, `sleep` moves
+//! the timer clock and runs what is due (as real time passing would: the timers fire, the lobby's `now` stays).
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -95,8 +94,7 @@ pub struct World {
     /// every frame the host sent, and whether the switch refused it
     pub sent: Sent,
     pub clients: HashMap<u32, Client>,
-    /// the streams of a browser's fake game that a new one replaced: they keep what they got, and get no more (as
-    /// the JS's old `Game` object, no longer in its map)
+    /// the streams of a browser's fake game that a new one replaced: they keep what they got, and get no more
     orphans: HashMap<(u32, u16), Conn>,
     /// (the load measure) frames out are dropped, not read by the fake games
     pub mute: bool,
@@ -197,7 +195,7 @@ impl World {
         self.deliver();
     }
 
-    /// real time passes (the JS's `await sleep(ms)`): the timers due run
+    /// real time passes (on the timer clock): the timers due run
     pub fn sleep(&mut self, ms: f64) {
         let end = self.tt.get() + ms;
         // the clock stops at each timer's time (a timer set by one counts from then, as on a real clock)

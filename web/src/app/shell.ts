@@ -59,7 +59,7 @@ function takeParams(dev: boolean): string[] {
   return given;
 }
 /** a development server (--dev) serves the test pages' folder, and in it /test/dev.json; no other server does
- *  (server.mjs never serves /test/ without --dev).  At most 3 s: a server that does not answer is no dev server. */
+ *  (the server never serves /test/ without --dev).  At most 3 s: a server that does not answer is no dev server. */
 async function devServer(): Promise<boolean> {
   try {
     const r = await fetch('/test/dev.json', { cache: 'no-store', signal: AbortSignal.timeout(3000) });

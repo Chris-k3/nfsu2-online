@@ -1,4 +1,4 @@
-//! What every response of the server carries, and who the client is: the port of web/server/headers.mjs.
+//! What every response of the server carries, and who the client is.
 //!
 //! - [`security_headers`]: cross-origin isolation (COOP/COEP/CORP, which the game needs for SharedArrayBuffer), a
 //!   Content-Security-Policy, nosniff, no referrer, no framing, a Permissions-Policy with only what the game uses,
@@ -14,7 +14,8 @@
 //! There is no access control here on purpose: whoever can reach the server may play, and the firewall in front of
 //! it decides who that is.  The client address is used for the server's own console and its per-address limits
 //! only.  Pure functions over strings; a request is seen through [`Req`].  Addresses are read as Node reads them
-//! (`net.isIP`, its BlockList), host names as the WHATWG URL parser writes them.
+//! (`net.isIP`, its BlockList: the rules of the Node server this replaced), host names as the WHATWG URL parser
+//! writes them.
 
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -61,10 +62,10 @@ macro_rules! csp_tail {
     };
 }
 
-/// headers.mjs `CSP`: the policy without hashes (every response but a page with inline code of its own).
+/// The Content-Security-Policy without hashes (every response but a page with inline code of its own).
 pub const CSP: &str = concat!(csp_head!(), csp_mid!(), csp_tail!());
 
-/// headers.mjs `contentSecurityPolicy({ scriptHashes, styleHashes })`.  Everything comes from this origin.
+/// The policy with a page's own hashes in script-src and style-src.  Everything comes from this origin.
 /// WebAssembly needs 'wasm-unsafe-eval' (compiling the module, in the page and in its workers, whose scripts carry
 /// this header too).  'self' covers the module workers, the audio worklet and the /lan WebSocket (CSP 3: ws: and
 /// wss: to this host).  Images: the favicon is a data: URL; screenshots in the Saves panel may be blob: URLs.  No
@@ -86,13 +87,13 @@ pub fn content_security_policy(script_hashes: &[&str], style_hashes: &[&str]) ->
     s
 }
 
-/// headers.mjs `sha256Source(text)`: "sha256-<base64>", a CSP source for an inline script or style
+/// "sha256-<base64>" of the text: a CSP source for an inline script or style
 pub fn sha256_source(text: &str) -> String {
     let digest = Sha256::digest(text.as_bytes());
     format!("sha256-{}", base64::engine::general_purpose::STANDARD.encode(digest))
 }
 
-/// headers.mjs `PERMISSIONS_POLICY`.  Only what the game uses: game controllers, full screen, the keyboard layout
+/// The Permissions-Policy.  Only what the game uses: game controllers, full screen, the keyboard layout
 /// (key names in the settings; Keyboard Lock itself has no policy and needs full screen), and sound without a
 /// click first.  The rest is switched off for this page and anything it could embed.
 pub const PERMISSIONS_POLICY: &str = concat!(
@@ -103,23 +104,23 @@ pub const PERMISSIONS_POLICY: &str = concat!(
     "serial=(), usb=(), window-management=(), xr-spatial-tracking=()",
 );
 
-/// headers.mjs `PERMISSIONS_POLICY`
+/// [`PERMISSIONS_POLICY`]
 pub fn permissions_policy() -> &'static str {
     PERMISSIONS_POLICY
 }
 
-/// headers.mjs `ISOLATION`: what makes the page cross-origin isolated (SharedArrayBuffer), in its order
+/// What makes the page cross-origin isolated (SharedArrayBuffer), in the order they are sent
 pub const ISOLATION: [(&str, &str); 3] = [
     ("cross-origin-opener-policy", "same-origin"),
     ("cross-origin-embedder-policy", "require-corp"),
     ("cross-origin-resource-policy", "same-origin"),
 ];
 
-/// headers.mjs `HSTS`
+/// Strict-Transport-Security: a year, where the server asks for it (`hsts` of [`security_headers`])
 pub const HSTS: &str = "max-age=31536000";
 
-/// headers.mjs `securityHeaders({ hsts, noindex })` with the default CSP, in its order: the headers every response
-/// carries.
+/// The headers every response carries, with the default CSP, in the order they are sent; HSTS where `hsts`, and
+/// X-Robots-Tag "noindex, nofollow" where `noindex` ("index, follow" otherwise).
 pub fn security_headers(hsts: bool, noindex: bool) -> Vec<(&'static str, String)> {
     let mut h = Vec::with_capacity(10);
     h.extend(ISOLATION.iter().map(|&(k, v)| (k, v.to_string())));
@@ -142,26 +143,27 @@ macro_rules! edge_keep {
         "public, max-age=31536000, immutable"
     };
 }
-/// headers.mjs `EDGE_KEEP`: what every cache, the CDN's too, may keep for good
+/// what every cache, the CDN's too, may keep for good
 pub const EDGE_KEEP: &str = edge_keep!();
 
-/// headers.mjs `cacheHeaders(kind)`.  Shared caches keep nothing: 'private' says so to every cache, and
-/// CDN-Cache-Control / Cloudflare-CDN-Cache-Control speak to the CDN alone.  Two exceptions: a run of the game data
-/// whose address names the file's version may stay at the CDN for good (server.mjs sendBlocks, EDGE_KEEP), and so
-/// may the module at the address that names its content (`Immutable`).  no-transform: a proxy hands the bytes on
-/// as they are (the brotli module, the byte ranges of the game files).
+/// Who may keep a response, for [`cache_headers`].  Shared caches keep nothing: 'private' says so to every
+/// cache, and CDN-Cache-Control / Cloudflare-CDN-Cache-Control speak to the CDN alone.  Two exceptions: a run of the
+/// game data whose address names the file's version may stay at the CDN for good (the server's `send_blocks` sets
+/// EDGE_KEEP on its CDN headers), and so may the module at the address that names its content (`Immutable`).
+/// no-transform: a proxy hands the bytes on as they are (the brotli module, the byte ranges of the game files).
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Cache {
     /// the browser keeps nothing
     Store,
     /// the browser keeps a copy it must revalidate each time (the page's scripts, which 25 workers load)
     Revalidate,
-    /// an address that names its content (the game module's /game.wasm?v=<hash>): a start reads the 65 MB module
-    /// and Chrome's compiled code for it from the disk cache without asking, and a new build is a new address
+    /// an address that names its content (the game module's /game.wasm?v=<hash>), which every cache, the CDN's too,
+    /// keeps for good: a start reads the 65 MB module and Chrome's compiled code for it from the disk cache without
+    /// asking, and a new build is a new address
     Immutable,
 }
 
-/// headers.mjs `cacheHeaders(kind)`, in its order
+/// Cache-Control, CDN-Cache-Control and Cloudflare-CDN-Cache-Control for a [`Cache`], in that order
 pub fn cache_headers(kind: Cache) -> Vec<(&'static str, &'static str)> {
     match kind {
         Cache::Immutable => vec![
@@ -180,8 +182,8 @@ pub fn cache_headers(kind: Cache) -> Vec<(&'static str, &'static str)> {
     }
 }
 
-/// headers.mjs `pickEncoding(header, have)`: of the encodings the server has (in its order of preference), the
-/// first that an Accept-Encoding header takes (a q=0 refuses one; "*" is not read as taking any), or None.
+/// Of the encodings the server has (in its order of preference), the first that an Accept-Encoding header takes
+/// (a q=0 refuses one; "*" is not read as taking any), or None.
 pub fn pick_encoding<'a>(header: Option<&str>, have: &[&'a str]) -> Option<&'a str> {
     let lower = header.unwrap_or("").to_lowercase();
     let mut ok: Vec<&str> = Vec::new();
@@ -209,8 +211,7 @@ fn q_zero(param: &str) -> bool {
     }
 }
 
-/// headers.mjs `etagMatches(header, etag)`: If-None-Match against an ETag, as a browser or a proxy (which may make
-/// it weak) sends it
+/// If-None-Match against an ETag, as a browser or a proxy (which may make it weak) sends it
 pub fn etag_matches(header: Option<&str>, etag: &str) -> bool {
     let Some(header) = header.filter(|h| !h.is_empty()) else { return false };
     let bare = etag.strip_prefix("W/").unwrap_or(etag);
@@ -219,11 +220,11 @@ pub fn etag_matches(header: Option<&str>, etag: &str) -> bool {
 
 // ---- proxies -------------------------------------------------------------------
 
-/// web/server/cloudflare-ips.txt, as it was when this was built
-const CLOUDFLARE_IPS: &str = include_str!("../../../../server/cloudflare-ips.txt");
+/// cloudflare-ips.txt (next to this crate's Cargo.toml), as it was when this was built
+const CLOUDFLARE_IPS: &str = include_str!("../cloudflare-ips.txt");
 
-/// headers.mjs `cloudflareRanges()`: Cloudflare's published ranges, from web/server/cloudflare-ips.txt (built in;
-/// `file` reads another): a line each, '#' starts a comment.
+/// Cloudflare's published ranges, from cloudflare-ips.txt next to this crate's Cargo.toml (built in; `file` reads
+/// another): a line each, '#' starts a comment.
 pub fn cloudflare_ranges(file: Option<&Path>) -> std::io::Result<Vec<String>> {
     let text = match file {
         None => Cow::Borrowed(CLOUDFLARE_IPS),
@@ -232,7 +233,7 @@ pub fn cloudflare_ranges(file: Option<&Path>) -> std::io::Result<Vec<String>> {
     Ok(ranges_of(&text))
 }
 
-/// `text.split(/\r?\n/).map(l => l.replace(/#.*/, '').trim()).filter(Boolean)`
+/// The lines (split at `\r?\n`), each without `#.*` and trimmed (JS's `trim`), the empty ones left out
 fn ranges_of(text: &str) -> Vec<String> {
     let mut lines: Vec<&str> = text.split('\n').collect();
     let last = lines.len() - 1;
@@ -254,8 +255,8 @@ fn ranges_of(text: &str) -> Vec<String> {
 /// This machine: a proxy or tunnel here (Caddy, nginx, cloudflared) is always trusted.
 const LOOPBACK: [&str; 2] = ["127.0.0.0/8", "::1/128"];
 
-/// headers.mjs `bareIp(a)`: "::ffff:1.2.3.4" -> "1.2.3.4", "[::1]" -> "::1", "fe80::1%en0" -> "fe80::1"; "" if not
-/// an address
+/// An address in its plain form, lower case: "::ffff:1.2.3.4" -> "1.2.3.4", "[::1]" -> "::1", "fe80::1%en0" ->
+/// "fe80::1"; "" if not an address
 pub fn bare_ip(a: &str) -> String {
     ip::bare(a).map(|(s, _)| s.to_ascii_lowercase()).unwrap_or_default()
 }
@@ -275,9 +276,9 @@ pub fn is_ipv6(s: &str) -> bool {
     ip::is_v6(s)
 }
 
-/// headers.mjs `addressKey(ip)`: what the per-address limits count by: an IPv4 address, or an IPv6 address's /56
-/// (a home or a VPS gets a /64 at least and often a /56, so counting single IPv6 addresses, or /64s, would give one
-/// client 2^64, or 256, budgets).  "" when it is not an address.
+/// What the per-address limits count by: an IPv4 address, or an IPv6 address's /56 (a home or a VPS gets a /64 at
+/// least and often a /56, so counting single IPv6 addresses, or /64s, would give one client 2^64, or 256, budgets).
+/// "" when it is not an address.
 pub fn address_key(ip: &str) -> String {
     match ip::bare(ip) {
         None => String::new(),
@@ -286,9 +287,8 @@ pub fn address_key(ip: &str) -> String {
     }
 }
 
-/// headers.mjs `siteKey(ip)`: the wider group the limits also count by: an IPv6 address's /48 (one site, or one
-/// free tunnel-broker allocation: 256 /56s, which would otherwise be 256 budgets for one client); "" for IPv4 (an
-/// address is its own group).
+/// The wider group the limits also count by: an IPv6 address's /48 (one site, or one free tunnel-broker allocation:
+/// 256 /56s, which would otherwise be 256 budgets for one client); "" for IPv4 (an address is its own group).
 pub fn site_key(ip: &str) -> String {
     match ip::bare(ip) {
         Some((_, Ip::V6(g))) => format!("{:x}:{:x}:{:x}::/48", g[0], g[1], g[2]),
@@ -298,9 +298,9 @@ pub fn site_key(ip: &str) -> String {
 
 // ---- the server's own names ------------------------------------------------------
 
-/// headers.mjs `hostName(h)`: the host of a Host header or an Origin ("name", "name:port", "[v6]:port", an IPv4
-/// literal): lower case, without the port, brackets or a trailing dot; "" when it is none of these.  An IPv6 host
-/// is written as the URL parser writes it ("[::FFFF:1.2.3.4]" is "::ffff:102:304").
+/// The host of a Host header or an Origin ("name", "name:port", "[v6]:port", an IPv4 literal): lower case, without
+/// the port, brackets or a trailing dot; "" when it is none of these.  An IPv6 host is written as the URL parser
+/// writes it ("[::FFFF:1.2.3.4]" is "::ffff:102:304").
 pub fn host_name(h: &str) -> String {
     // JS's toLowerCase, Unicode's: the Kelvin sign is a 'k' after it
     let s = js::trim(h).to_lowercase();
@@ -354,8 +354,8 @@ fn is_loopback_name(n: &str) -> bool {
     n == "localhost" || n == "::1" || (ip::v4(n).is_some() && n.starts_with("127."))
 }
 
-/// headers.mjs `isLocalOrIp(hostHeader)`: localhost or an IP literal (with or without a port): HSTS means nothing
-/// (or harm) there.  As in the JS, a bare "::1" is not taken (its ":1" reads as a port).
+/// Localhost or an IP literal (with or without a port): HSTS means nothing (or harm) there.  A bare "::1" is not
+/// taken (its ":1" reads as a port); a Host header brackets an IPv6 literal.
 pub fn is_local_or_ip(host_header: Option<&str>) -> bool {
     let lower = js::trim(host_header.unwrap_or("")).to_lowercase();
     if lower.starts_with('[') {
@@ -374,10 +374,10 @@ pub fn is_local_or_ip(host_header: Option<&str>) -> bool {
     h == "localhost" || h.ends_with(".localhost") || ip::is_ip(h) != 0
 }
 
-/// headers.mjs `makeHostCheck(names)`: the names the server answers for.  `check(hostHeader)`: the host is one of
-/// the server's own names: this machine (localhost, 127.0.0.0/8, ::1) always, the given names (exact, or "*.zone"
-/// for one label under zone), and the names of its certificate (`set_cert_names`, replaced when the certificate
-/// is).  Thread-safe: the certificate's names may be replaced while requests are checked.
+/// The names the server answers for (Host, Origin).  [`HostCheck::check`]: the host is one of the server's own
+/// names: this machine (localhost, 127.0.0.0/8, ::1) always, the given names (exact, or "*.zone" for one label under
+/// zone), and the names of its certificate (`set_cert_names`, replaced when the certificate is).  Thread-safe: the
+/// certificate's names may be replaced while requests are checked.
 pub struct HostCheck {
     /// the given names, in lower case
     fixed: Vec<String>,
@@ -415,7 +415,7 @@ impl HostCheck {
         names
     }
 
-    /// `check(hostHeader)`
+    /// the host of a Host header (or an Origin) is one of the server's own names
     pub fn check(&self, host: Option<&str>) -> bool {
         let n = host_name(host.unwrap_or(""));
         if n.is_empty() {
@@ -429,24 +429,24 @@ impl HostCheck {
             || names.wild.iter().any(|w| n.len() > w.len() && n.ends_with(w.as_str()) && !n[..n.len() - w.len()].contains('.'))
     }
 
-    /// `check.setCertNames(list)`: the certificate's names, in place of the last certificate's
+    /// the certificate's names, in place of the last certificate's
     pub fn set_cert_names(&self, list: &[String]) {
         let cert: Vec<String> = list.iter().map(|n| n.to_lowercase()).collect();
         let names = Self::build(&self.fixed, &cert);
         *self.names.write() = names;
     }
 
-    /// `check.names()`: the exact names, then the wildcards ("*.zone")
+    /// the exact names, then the wildcards ("*.zone")
     pub fn names(&self) -> Vec<String> {
         let names = self.names.read();
         names.order.iter().cloned().chain(names.wild.iter().map(|w| format!("*{w}"))).collect()
     }
 }
 
-/// headers.mjs `makeProxyTrust(spec)`: which TCP peers are proxies whose forwarding headers are believed.  spec: a
-/// comma list of 'cloudflare' (Cloudflare's edge ranges, for a server that Cloudflare's proxy reaches directly), IP
-/// addresses and CIDR ranges.  This machine (loopback: a proxy or tunnel here, such as Caddy, nginx or cloudflared)
-/// is always trusted.
+/// Which TCP peers are proxies whose forwarding headers are believed (only those).  The spec (--trusted-proxies, for
+/// [`ProxyTrust::parse`]): a comma list of 'cloudflare' (Cloudflare's edge ranges, for a server that Cloudflare's
+/// proxy reaches directly), IP addresses and CIDR ranges.  This machine (loopback: a proxy or tunnel here, such as
+/// Caddy, nginx or cloudflared) is always trusted.
 pub struct ProxyTrust {
     /// the Cloudflare ranges are in
     pub cloudflare: bool,
@@ -479,7 +479,7 @@ impl Rule {
 }
 
 impl ProxyTrust {
-    /// Err: the message server.mjs dies with
+    /// Err: the message the server dies with at start-up
     pub fn parse(spec: &str) -> Result<Self, String> {
         let mut t = ProxyTrust { cloudflare: false, entries: Vec::new(), rules: Vec::new() };
         for it in LOOPBACK {
@@ -532,7 +532,7 @@ impl ProxyTrust {
         Ok(())
     }
 
-    /// `trust(peer)`
+    /// the TCP peer (in any form [`bare_ip`] reads) is this machine or a given proxy
     pub fn trusts(&self, peer: &str) -> bool {
         ip::bare(peer).is_some_and(|(_, ip)| self.trusts_ip(ip))
     }
@@ -543,11 +543,10 @@ impl ProxyTrust {
     }
 }
 
-/// headers.mjs `clientIp(q, trust, header)` (header: "x-forwarded-for" or "cf-connecting-ip"): the client's
-/// address: the TCP peer's, unless the peer is a trusted proxy.  Then the address it reports: header
-/// 'cf-connecting-ip' (Cloudflare's proxy and cloudflared set it and replace what a client sent), else the
-/// right-most X-Forwarded-For entry that is not itself a trusted proxy.  A header from a peer that is not trusted is
-/// never read.
+/// The client's address (header: "x-forwarded-for" or "cf-connecting-ip", the --real-ip-header): the TCP peer's,
+/// unless the peer is a trusted proxy.  Then the address it reports: header 'cf-connecting-ip' (Cloudflare's proxy
+/// and cloudflared set it and replace what a client sent), else the right-most X-Forwarded-For entry that is not
+/// itself a trusted proxy.  A header from a peer that is not trusted is never read.
 pub fn client_ip(q: &impl Req, trust: &ProxyTrust, header: &str) -> String {
     let Some((peer, peer_ip)) = ip::bare(q.peer()) else { return String::new() };
     if !trust.trusts_ip(peer_ip) {
@@ -569,8 +568,8 @@ pub fn client_ip(q: &impl Req, trust: &ProxyTrust, header: &str) -> String {
     peer.to_ascii_lowercase()
 }
 
-/// headers.mjs `viaHttps(q, trust)`: the browser reached us over https: directly, or through a trusted proxy that
-/// says so (X-Forwarded-Proto, else Cloudflare's CF-Visitor).
+/// The browser reached us over https: directly, or through a trusted proxy that says so (X-Forwarded-Proto, else
+/// Cloudflare's CF-Visitor).
 pub fn via_https(q: &impl Req, trust: &ProxyTrust) -> bool {
     if q.encrypted() {
         return true;
@@ -585,8 +584,7 @@ pub fn via_https(q: &impl Req, trust: &ProxyTrust) -> bool {
     visitor::scheme_is_https(q.header("cf-visitor").unwrap_or("{}"))
 }
 
-/// headers.mjs `forwardedHost(q, trust)`: the host the browser asked for, when a trusted proxy rewrote Host
-/// (X-Forwarded-Host).
+/// The host the browser asked for, when a trusted proxy rewrote Host (X-Forwarded-Host).
 pub fn forwarded_host(q: &impl Req, trust: &ProxyTrust) -> Option<String> {
     if !trust.trusts(q.peer()) {
         return None;

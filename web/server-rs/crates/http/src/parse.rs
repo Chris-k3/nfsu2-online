@@ -1,4 +1,4 @@
-//! The request parser: what llhttp 9.3 (Node 24's parser, strict: no lenient flags, server.mjs sets none) accepts
+//! The request parser: what llhttp 9.3 (Node 24's parser, strict: no lenient flags, the Node server set none) accepts
 //! and refuses, so that a request Node answered 400 is answered 400 here and one it served is read the same way.
 //! It reads the bytes as they come (a state per byte, nothing read twice), keeps what Node keeps (the URL, the header
 //! names and values) and counts toward `max_header_size` what Node counts: the URL, the names, and the values with

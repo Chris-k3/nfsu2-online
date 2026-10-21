@@ -1,5 +1,5 @@
-//! web/test/lan.test.mjs's four tests of the page (web/src/net/index.ts): the page's own code, bundled as the app
-//! bundles it, run in node (tests/page.mjs) against this switch.  Skipped (with a message) without node.
+//! Four tests of the page (web/src/net/index.ts): the page's own code, bundled as the app bundles it, run in node
+//! (tests/page.mjs) against this switch.  Skipped (with a message) without node.
 
 mod harness;
 
@@ -27,7 +27,7 @@ fn no_node() -> bool {
 
 // on a switch with room for one: the second game hears "the server is full" once while it keeps trying, and "a
 // place freed up" when the first leaves and it gets on
-// lan.test.mjs 'the page: a notice when the switch is full, and one when a place frees up'
+// the page: a notice when the switch is full, and one when a place frees up
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_page_a_notice_when_the_switch_is_full_and_one_when_a_place_frees_up() {
     let _s = serial().await;
@@ -42,7 +42,8 @@ async fn the_page_a_notice_when_the_switch_is_full_and_one_when_a_place_frees_up
 // the page holds a place only while a mailbox wants it (free roam while it runs, LAN play from the game's
 // WSAStartup to its last WSACleanup), and tells the switch whether LAN play is open; a module of before (a version
 // 2 mailbox, no want word) always wants it, as before
-// lan.test.mjs 'the page: the switch let go when no mailbox wants it, taken again when one does; LAN play open or not; a module of before'
+// the page: the switch let go when no mailbox wants it, taken again when one does; LAN play open or not; a module of
+// before
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_page_lets_the_switch_go_when_no_mailbox_wants_it() {
     let _s = serial().await;
@@ -58,7 +59,7 @@ async fn the_page_lets_the_switch_go_when_no_mailbox_wants_it() {
 
 // an away player (the app's check, web/src/app/away.ts) gives the place back although the game still wants it, and
 // takes one again when they are back
-// lan.test.mjs 'the page: away, the place goes back while the game wants it and stays free; back, it is taken again'
+// the page: away, the place goes back while the game wants it and stays free; back, it is taken again
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_page_away_gives_the_place_back() {
     let _s = serial().await;
@@ -70,7 +71,8 @@ async fn the_page_away_gives_the_place_back() {
     sw.close().await;
 }
 
-// lan.test.mjs 'the page: what C queued at once goes as one bundle, a snapshot to several friends once; bundles from the switch are taken apart in order'
+// the page: what C queued at once goes as one bundle, a snapshot to several friends once; bundles from the switch are
+// taken apart in order
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_page_sends_one_bundle_and_takes_bundles_apart_in_order() {
     let _s = serial().await;

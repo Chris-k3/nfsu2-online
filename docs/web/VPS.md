@@ -4,7 +4,7 @@ Status: **2026-10-19**, with Docker (the server's image and Caddy from one compo
 bundle and a systemd unit): [the last section](#without-docker).
 
 Use a VPS when other PCs should play: on the Mac at home the server serves only that Mac (`http://localhost`). The
-VPS runs the same server (`web/server/server.mjs`) in a container, with Caddy in front for HTTPS, so friends
+VPS runs the same server (`web/server-rs`) in a container, with Caddy in front for HTTPS, so friends
 anywhere open `https://<your name>/` in Chrome and play from there.
 
 ## Setup
@@ -16,9 +16,8 @@ anywhere open `https://<your name>/` in Chrome and play from there.
 - **A domain name** (or a subdomain) with an `A` record pointing at the VPS, and an `AAAA` record if it has IPv6.
 - **Your own NFS Underground 2 folder** (the one with `SPEED2.EXE`).
 - **The game module**, built on the Mac with `web/build.sh` (`out/web/nfsu2.wasm` and `out/web/nfsu2.json`).
-- **The image, public:** `ghcr.io/th0mk/nfsu2-web` is private, like the repository, so the VPS cannot pull it.
-  Make it public once: on GitHub, the package's settings, "Change visibility". It holds the server and the page,
-  never the game. To keep it private instead: [The image](#the-image).
+- **The image:** `ghcr.io/th0mk/nfsu2-web-rs`, public, so the VPS pulls it without logging in. It holds the server
+  and the page, never the game. Of a fork, or to build it yourself: [The image](#the-image).
 
 **1. On the VPS**, as root: Docker, the ports, two folders and your name.
 
@@ -87,7 +86,7 @@ ETag and download it once. The module and the image must come from the same comm
 | What you see | Why |
 |---|---|
 | `docker compose up` says `set NFSU2_HOST in .env` | `/srv/nfsu2/.env` is missing, or not next to `compose.yml` |
-| pulling the image says `unauthorized` | the image is private: make it public, or [log in](#the-image) |
+| pulling the image says `unauthorized` | the image (a fork's) is private: make it public, or [log in](#the-image) |
 | the server keeps `Restarting`, its log says `usage: ... (got: /game)` | `/srv/nfsu2/game` has no `SPEED2.EXE` |
 | the server stays `health: starting`, then `unhealthy` (after about 2½ minutes) | `/srv/nfsu2/module` has no `nfsu2.wasm` and `nfsu2.json` |
 | Caddy keeps `Restarting`, its log says `listen tcp :80: bind: address already in use` | something else has port 80: `compose.443.yml` (step 1) |
@@ -123,9 +122,10 @@ The rest of this guide is reference.
 For up to 2000 players at once (the image's limit): 8 vCPU, 8 GB of memory (the compose file's limit), 40 GB of
 disk and a 1 Gbit/s port with a few TB of traffic a month.
 
-- Measured on a live server behind a Cloudflare Tunnel (16 vCPU, 2026-10-20): 636 players, 303 of them in the
-  game's Online mode, took the server 0.6 of a core and 200 MB, and cloudflared about 2 cores. 2000 players at once
-  are **UNVERIFIED**.
+- Measured on a live server behind a Cloudflare Tunnel (16 vCPU, 2026-10-21): 1209 players, 165 of them in the
+  game's Online mode and most of the rest in free roam, took the server 0.7 of a core over its 8 workers and 340 MB,
+  and cloudflared 1.7 cores. 2000 players at once are **UNVERIFIED** there; on a Ryzen 9 5900X the server held 2000
+  simulated players in free roam, 32 friends each, on 4.5 of 6 cores (`web/server-rs/README.md`).
 
 - The server relays and serves files. It used about 110 MB of memory here, plus up to 10 MB queued towards each
   player who falls behind (8 MB on the connection, 2 MB more of LAN-race data in the switch's own queue).
@@ -139,8 +139,8 @@ disk and a 1 Gbit/s port with a few TB of traffic a month.
   request at the addresses the game's own reads use, so with the Cache Rule below Cloudflare serves both.
 - Compressing costs the server about 5 s of one core per player for that whole download (zstd; br about 1.5 times
   that). At most 128 answers are compressed at once (8 per player, about 200 MB of memory); past that they go as
-  they are, never held up. The image gives Node 8 helper threads for the compressing and the file reads
-  (`UV_THREADPOOL_SIZE`, 4 by default).
+  they are, never held up. The compressing runs on threads of its own (half the cores, at least two) at a lower
+  priority than the switch, so a burst of downloads takes only what the players' traffic leaves.
 - Free roam is at most about 25 KB/s each way per player: the server's free-roam hub pairs each player with the 7
   nearest, and snapshots go between those only. 2000 players roaming at once are about 400 Mbit/s each way through
   the VPS. Measured with 62 simulated players and 2 real pages on one server (`web/tools/roam-crowd.mjs`, a Ryzen 9
@@ -149,10 +149,10 @@ disk and a 1 Gbit/s port with a few TB of traffic a month.
 
 ## The image
 
-- **What it holds:** the server, its one dependency (`ws`) and the page: about 62 MB to download, on Node.js 24
-  (Alpine). **Never the game**, or anything made from it: the build sees only the server's and the page's sources
-  (`.dockerignore`, checked by `web/test/docker.test.mjs`), so a public image cannot carry the game. What it needs
-  is mounted when it runs:
+- **What it holds:** the server (one static binary) and the page: about 7 MB to download, on Alpine. **Never the
+  game**, or anything made from it: the build sees only the server's and the page's sources
+  (`web/server-rs/Dockerfile.dockerignore`, checked by `web/test/docker.test.mjs`), so a public image cannot carry
+  the game. What it needs is mounted when it runs:
 
   | In the container | What | On the VPS (default) | |
   |---|---|---|---|
@@ -160,9 +160,9 @@ disk and a 1 Gbit/s port with a few TB of traffic a month.
   | `/module` | `nfsu2.wasm` and `nfsu2.json` | `/srv/nfsu2/module` | read-only |
   | `/state` | the server's keys and the Online mode's records | the volume `nfsu2-web_state` | |
 
-- **From GitHub's registry:** `.github/workflows/image.yml` builds `ghcr.io/th0mk/nfsu2-web` for amd64 and arm64
-  on every push: `latest` from `main`, `sha-<commit>` from every push, and `<version>` and `<major>.<minor>` from a
-  `v*` tag. A package is private while its repository is, and then the VPS needs one of:
+- **From GitHub's registry:** `.github/workflows/image-rs.yml` builds `ghcr.io/th0mk/nfsu2-web-rs` for amd64 and
+  arm64 on every push: `latest` from `main`, `sha-<commit>` from every push, and `<version>` and `<major>.<minor>`
+  from a `v*` tag. It is public. A fork's package is private while its repository is, and then the VPS needs one of:
   - **public:** the package's settings on GitHub, "Change visibility";
   - **a login:** a GitHub token that may read packages (a classic personal access token with `read:packages`),
     once on the VPS: `docker login ghcr.io -u th0mk`, with the token as the password. Docker keeps it in
@@ -172,59 +172,50 @@ disk and a 1 Gbit/s port with a few TB of traffic a month.
   Docker over SSH.
 
   ```sh
-  docker build --platform linux/amd64 -t nfsu2-web .         # linux/arm64 for an Arm VPS
+  docker build -f web/server-rs/Dockerfile --platform linux/amd64 -t nfsu2-web .   # linux/arm64 for an Arm VPS
   docker save nfsu2-web | ssh root@<vps> docker load
   ssh root@<vps> 'echo NFSU2_IMAGE=nfsu2-web >> /srv/nfsu2/.env'
   ```
 
   It needs BuildKit (the buildx plugin; Docker Desktop has it). Building for the other architecture needs no
-  emulation: the image's own stage only copies. To update, build and load again, then `docker compose up -d`
-  (without `pull`: there is nothing to pull).
+  emulation: the server is cross-compiled (cargo-zigbuild, static musl), and the image's own stage only copies. The
+  first build takes a few minutes. To update, build and load again, then `docker compose up -d` (without `pull`:
+  there is nothing to pull).
 - **The module must come from the image's commit.** The page in the image and the module meet at the module's
   imports, and nothing checks that the two come from the same revision. `nfsu2.json`'s `rev` (the short commit,
   with `+` if the checkout had changes) and the image's tag `sha-<commit>` should name the same commit. On the VPS:
 
   ```sh
   grep -o '"rev":"[^"]*"' /srv/nfsu2/module/nfsu2.json
-  docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' ghcr.io/th0mk/nfsu2-web
+  docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' ghcr.io/th0mk/nfsu2-web-rs
   ```
 
   A self-built image has no revision label: build it and the module from the same checkout.
 
-## The server in Rust
+## From the Node server
 
-The Rust port of the server (`web/server-rs`, its `README.md`) spreads the work over the VPS's cores, where the Node
-server does everything on one thread, which about 600 players in free roam fill
-([Multiplayer over the internet](#multiplayer-over-the-internet)). Its image takes the Node image's place and nothing
-else changes: the same options and `NFSU2_*` environment, mounts, health check and user (uid 1000), and the same
-files in the state volume, so either server takes over the other's.
+Until 6076514 (2026-10-21) the server was a Node.js program (`web/server`, the image `ghcr.io/th0mk/nfsu2-web`),
+which did everything on one thread: about 600 players in free roam filled it
+([Multiplayer over the internet](#multiplayer-over-the-internet)). The Rust server took its place with the same
+options and `NFSU2_*` environment, mounts, health check and user (uid 1000), and the same files in the state volume.
+A VPS that still runs the Node image switches with one line in `/srv/nfsu2/.env`, then
+`cd /srv/nfsu2 && docker compose pull && docker compose up -d`:
 
-- **From GitHub's registry:** `.github/workflows/image-rs.yml` builds `ghcr.io/th0mk/nfsu2-web-rs` for amd64 and
-  arm64 on the same pushes and with the same tags as the Node image (`latest`, `sha-<commit>`, the versions): about
-  7 MB to download. It is a package of its own, public from its first build (the repository is): the VPS pulls it
-  without logging in.
-- **Switching:** one line in `/srv/nfsu2/.env`, then `cd /srv/nfsu2 && docker compose pull && docker compose up -d`.
+```sh
+NFSU2_IMAGE=ghcr.io/th0mk/nfsu2-web-rs:sha-<commit>
+```
 
-  ```sh
-  NFSU2_IMAGE=ghcr.io/th0mk/nfsu2-web-rs:sha-<commit>
-  ```
-
-  The compose files (and your `COMPOSE_FILE`: `compose.443.yml`, `compose.tunnel.yml`), the game folder, the module
+- The compose files (and your `COMPOSE_FILE`: `compose.443.yml`, `compose.tunnel.yml`), the game folder, the module
   and the state volume `nfsu2-web_state` stay as they are. The ETag key, the switch's addresses and the Online
   records carry over: no browser downloads the game data again, and the pages reconnect as after an update.
-- **The module must come from the image's commit**, as with the Node image: `nfsu2-web-rs:sha-<commit>` holds the
-  page of `nfsu2-web:sha-<commit>`.
-- **Switching back:** the old `NFSU2_IMAGE` line (`ghcr.io/th0mk/nfsu2-web:sha-<commit>`, or none for `latest`),
-  then `docker compose up -d`. The state volume serves either.
-- **Built yourself:** `docker build -f web/server-rs/Dockerfile --platform linux/amd64 -t nfsu2-web-rs .`, then
-  `docker save` and `NFSU2_IMAGE=nfsu2-web-rs` as in [The image](#the-image). The binary is cross-compiled, so arm64
-  needs no emulation either.
-- **What differs:** `UV_THREADPOOL_SIZE` means nothing to it; `NFSU2_THREADS` sets its worker threads (by default
-  half the cores, 2 to 8). Its console has the Node server's lines.
+- **Back to Node:** `NFSU2_IMAGE=ghcr.io/th0mk/nfsu2-web:sha-<commit>` of 6076514 or before, with the module of that
+  commit, then `docker compose up -d`. The state volume serves either.
+- `UV_THREADPOOL_SIZE` means nothing to the Rust server; `NFSU2_THREADS` sets its worker threads (by default half
+  the cores, 2 to 8). Its console has the Node server's lines.
 
 Tested 2026-10-21 on Docker Desktop (WSL), the images built from the checkout: amd64 and arm64 built; the amd64 one
 run as `compose.yml` runs the server (a read-only root, no capabilities, `no-new-privileges`) was `healthy` within
-6 s; the Node image, then this one, then the Node image again on one state volume kept the ETag key (the module's
+6 s; the Node image, then the Rust one, then the Node image again on one state volume kept the ETag key (the module's
 and the data manifest's ETags stayed the same).
 
 On a real VPS, 2026-10-21: nfsu2.xyz (16 vCPU, `compose.yml:compose.tunnel.yml`) went from the Node image to
@@ -280,8 +271,8 @@ players the evening before.
 - **NFSU2_HOST is one name.** For a second name, or a wildcard, edit the Caddyfile in `compose.yml` and the
   server's `NFSU2_HOST` (a comma list; `*.example.com` for one label under it). A wildcard certificate needs Let's
   Encrypt's DNS challenge, which the stock Caddy image cannot do.
-- **The server's container** runs as the user `node`, with a read-only root, no capabilities, `no-new-privileges`,
-  8 GB of memory without swap and 8192 open files. Those are the systemd unit's limits, as far as a container has
+- **The server's container** runs as uid 1000, with a read-only root, no capabilities, `no-new-privileges`,
+  8 GB of memory without swap and 32768 open files. Those are the systemd unit's limits, as far as a container has
   them, but for the memory: the unit's 3 GB was too little for 110 players (2.6 GB). It writes only to `/state`.
   At the memory limit the kernel stops the server and Docker starts it again.
 - **Keep the state volume.** It holds the ETag key (a new key makes every player's browser download the game data
@@ -350,7 +341,7 @@ The console names paths and addresses: it is yours.
    IPv6 (Cloudflare may connect to either).
 2. **The client's address:** add `NFSU2_REAL_IP_HEADER=cf-connecting-ip` to `.env` and run `docker compose up -d`.
    Caddy believes `CF-Connecting-IP` only from Cloudflare's addresses (`compose.yml` lists them, from
-   `web/server/cloudflare-ips.txt` as of 2026-10-18) and overwrites it otherwise, so a client that reaches the VPS
+   `web/server-rs/crates/headers/cloudflare-ips.txt` as of 2026-10-18) and overwrites it otherwise, so a client that reaches the VPS
    directly cannot choose the address the server logs and limits by.
 3. **Firewall:** let only Cloudflare's addresses reach 80 and 443, or anyone who finds the VPS's address bypasses
    Cloudflare. Instead of step 3 of the setup:
@@ -435,19 +426,19 @@ docker run -d --name nfsu2-web --restart unless-stopped --network host \
   --memory 8g --memory-swap 8g --ulimit nofile=32768 --log-driver local \
   -e NFSU2_HOST=game.example.com \
   -v /srv/nfsu2/game:/game:ro -v /srv/nfsu2/module:/module:ro -v nfsu2-state:/state \
-  ghcr.io/th0mk/nfsu2-web
+  ghcr.io/th0mk/nfsu2-web-rs
 ```
 
 The proxy must keep `Host`, pass WebSocket upgrades on, set `X-Forwarded-For` and `X-Forwarded-Proto`, and wait
 longer than the 25 s ping interval for an answer. The image's command is the server's options, `--behind-proxy` by
-default. Options with a value can also be set as `NFSU2_<OPTION>` (`web/server/server.mjs`).
+default. Options with a value can also be set as `NFSU2_<OPTION>` (`web/server-rs/src/options.rs`).
 
 ## Multiplayer over the internet
 
 The server's switch relays every packet: player → VPS → player. The delay between two players is the sum of both
 paths to the VPS, so pick a VPS location between you.
 
-- **Free roam's hub** (`web/server/roam-hub.mjs`, on 10.77.0.253 of the switch): every second it tells each player
+- **Free roam's hub** (`web/server-rs/crates/roam`, on 10.77.0.253 of the switch): every second it tells each player
   in free roam which players are nearest (32 at most, in the same Room; 7 for a game from before this change); the
   players then send their cars only to those, straight through the switch, and the game shows all of them. For that
   the hub reads where each player's car is; it keeps nothing on disk. `--roam-hub off` in the server's `command`:
@@ -458,9 +449,10 @@ paths to the VPS, so pick a VPS location between you.
     for the server).
   - **Bundles:** what the page sends at once (a snapshot to each friend, the same bytes) goes as one WebSocket
     message with the friends' addresses, and the switch sends each page what came for it in one turn as one message
-    (`web/server/lan.mjs`, frame kind 32; a page or switch of before keeps one message a datagram, and both sides
-    still work with it). The server's one thread pays per message, not per byte: on a live server with about 600
-    players in free roam it was at 100 % of a core, and its switch took 0.1-0.7 s to answer a ping. Measured with
+    (`web/server-rs/crates/lan`, frame kind 32; a page or switch of before keeps one message a datagram, and both
+    sides still work with it). The server and the tunnel pay per message, not per byte: on a live server with about
+    600 players in free roam the Node server it replaced was at 100 % of its one thread, and its switch took 0.1-0.7 s
+    to answer a ping. Measured with
     120 `roam-crowd.mjs` players in one spot (a Ryzen 9 5900X): one message a datagram took the server past one core
     (20,000 datagrams a second in, pings answered after 11 s, links falling apart); bundled, 44,000 datagrams a
     second in took 74 % of a core, pings 2.7 ms (p50), 7.5 ms (p90). Only a page loaded after the server has them
@@ -596,19 +588,22 @@ paths to the VPS, so pick a VPS location between you.
 
 ## Without Docker
 
-The same server from a bundle, as a systemd service, with Node.js and Caddy installed on the VPS. The behaviour,
-the limits and the firewall are the same as above.
+The same server from a bundle, as a systemd service, with Caddy installed on the VPS. The behaviour, the limits and
+the firewall are the same as above.
 
-**You need** Node.js 20 or newer on the VPS (the current LTS is 24; tested on 24.22.0 and 23.9.0), and the bundle,
-built on the Mac:
+**You need** nothing installed on the VPS for the server itself (it is one static binary), and the bundle, built on
+the Mac or any machine with Docker:
 
 ```sh
-web/build.sh            # the game module, if out/web/nfsu2.wasm is not there yet
-web/deploy/pack.sh      # -> out/web/deploy/nfsu2-web-<rev>.tar.gz (about 11 MB)
+web/build.sh                      # the game module, if out/web/nfsu2.wasm is not there yet
+web/deploy/pack.sh                # -> out/web/deploy/nfsu2-web-<rev>-amd64.tar.gz (about 12 MB)
+web/deploy/pack.sh --arch arm64   # for an Arm VPS
 ```
 
-- **What is in it:** the server and its one dependency (`ws`), the page without its test pages, the game module,
-  a systemd unit, example Caddy and cloudflared configurations, and a short README.
+- **What is in it:** the server (`nfsu2-server`, a static binary for Linux on that processor, built in Docker by
+  `web/server-rs/Dockerfile`'s `binary` stage, as the image's: the first build takes a few minutes; `--server <file>`
+  takes one you have), the page without its test pages, the game module, a systemd unit, example Caddy and
+  cloudflared configurations, and a short README.
 - **What is never in it: the game.** `pack.sh` refuses to build the bundle if any file in it has a game file's
   name, or the name and size of a file in your game folder. It also refuses if a file names this Mac (host name,
   home folder).
@@ -616,8 +611,8 @@ web/deploy/pack.sh      # -> out/web/deploy/nfsu2-web-<rev>.tar.gz (about 11 MB)
 **Install:**
 
 ```sh
-scp out/web/deploy/nfsu2-web-<rev>.tar.gz root@<vps>:
-ssh root@<vps> 'mkdir -p /opt /srv/nfsu2 && tar -C /opt -xzf nfsu2-web-<rev>.tar.gz'   # -> /opt/nfsu2-web
+scp out/web/deploy/nfsu2-web-<rev>-amd64.tar.gz root@<vps>:
+ssh root@<vps> 'mkdir -p /opt /srv/nfsu2 && tar -C /opt -xzf nfsu2-web-<rev>-amd64.tar.gz'   # -> /opt/nfsu2-web
 ```
 
 Then copy the game to `/srv/nfsu2/game/` as in step 2 of the setup (the module is in the bundle).
@@ -665,7 +660,7 @@ replace `game.example.com` with your name everywhere in it (and in the unit's `-
   `CF-Connecting-IP` only from Cloudflare's addresses) and a Cloudflare Origin CA certificate; the server needs
   `--real-ip-header cf-connecting-ip`;
 - with the server itself (B): the Origin CA certificate, plus `--trusted-proxies cloudflare`. Then only connections
-  from Cloudflare's published ranges (`web/server/cloudflare-ips.txt`) may say who the client is.
+  from Cloudflare's published ranges (`web/server-rs/crates/headers/cloudflare-ips.txt`) may say who the client is.
 
 **D: a Cloudflare Tunnel.** `cloudflared tunnel login`, `cloudflared tunnel create nfsu2`,
 `cloudflared tunnel route dns nfsu2 game.example.com`; copy `deploy/cloudflared.yml` to
@@ -712,8 +707,10 @@ The unit runs the server as a fresh unprivileged user (`DynamicUser`):
 - the journal takes at most 2000 of its lines per 30 s (`LogRateLimitBurst`), so it keeps the rest of the VPS's
   logs whatever a client does.
 
-The unit was run under systemd 257 (Debian trixie, Node 20) in a container, variants A, D and B: it starts, stays
-up (no restarts) and serves. `LoadCredential` could not be exercised in a container (**UNVERIFIED**; B ran with the
+The unit was run under systemd 257 (Debian trixie, with the Node server of then) in a container, variants A, D and
+B: it starts, stays up (no restarts) and serves. With the Rust server's bundle (2026-10-21): `pack.sh` built it in
+Docker, and the unpacked server, run as the unit runs it (`NFSU2_REPO=/opt/nfsu2-web`), served the page, the module
+and the game's files, and no test page; the unit itself under systemd with it: **UNVERIFIED**. `LoadCredential` could not be exercised in a container (**UNVERIFIED**; B ran with the
 certificate by path). Without `--tls-cert` or `--behind-proxy` the server listens on 127.0.0.1 only and says so on
 start: nothing outside the VPS can reach it.
 

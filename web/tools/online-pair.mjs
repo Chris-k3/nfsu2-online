@@ -1,6 +1,6 @@
 // The game's Online mode between browsers: one to six game instances in
 // headless Chrome pages (separate browser contexts, so separate OPFS) on one
-// local server, logging into the server's own online host (web/server/online/)
+// local server, logging into the server's own online host (web/server-rs/crates/online)
 // and meeting in its lobby: the online version of web/tools/lan-pair.mjs.
 // Instance 1 creates a game, the others find it, join and ready; the game's AI
 // drives every car (drag: the synthetic pad).  Scripts come from
@@ -36,7 +36,7 @@
 //                    Fails unless the game was told (app: deactivated) and still made frames there (its [status]
 //                    lines, the fps in summary.json), as the game does in a network race.
 //
-// Without --base it starts its own server (web/server/server.mjs --dev, the
+// Without --base it starts its own server (web/tools/server-cmd.mjs, --dev, the
 // game folder from --data or NFSU2_DATA; --online-trace <out>/trace.txt) and
 // stops it at the end.
 // Writes <out>/i<n>/log.txt (the game's output), <out>/i<n>/page.log (the
@@ -300,7 +300,7 @@ function url(i) {
 let server = null;
 const serverLog = fs.createWriteStream(path.join(OUT, 'server.log'), { flags: 'a' });
 async function startServer() {
-  const c = spawn(...serverCommand(path.join(REPO, 'web/server/server.mjs'), ['--data', DATA, '--http-port', String(HTTP_PORT), '--port', '0',
+  const c = spawn(...serverCommand(['--data', DATA, '--http-port', String(HTTP_PORT), '--port', '0',
     '--dev', '--artifacts', OUT, '--online-trace', path.join(OUT, 'trace.txt'), '--state', path.join(OUT, 'state'), ...opts('server-arg')]), { stdio: ['ignore', 'pipe', 'pipe'] });
   c.stdout.pipe(serverLog, { end: false }); c.stderr.pipe(serverLog, { end: false });
   await new Promise((res, rej) => {
@@ -483,7 +483,7 @@ if (argv.includes('--canary')) {
   if (summary.canary.passShown) summary.why.push('canary:PASS-not-redacted');
   if (realAddr.length) summary.why.push('canary:real-address-in-log');
 }
-// the server's view: every race's result was taken (lobby.mjs logs one line per race)
+// the server's view: every race's result was taken (the online host logs one line per race)
 const srvLog = fs.readFileSync(path.join(OUT, 'server.log'), 'utf8');
 summary.serverResults = srvLog.split('\n').filter(l => /^\[online\] ".*" \((circuit|sprint|drift|drag|streetx|url|type \d+), (un)?ranked\): /.test(l));
 if (flow && OWN && summary.serverResults.length < RACES) summary.why.push(`server:results-${summary.serverResults.length}-of-${RACES}`);

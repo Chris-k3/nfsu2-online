@@ -30,14 +30,14 @@
  *             NFSU2_VLAN): own 10.77.0.x address, MAC and host name per
  *             instance, broadcast, TCP, impairments, pcap.  runtime/net_vlan.c
  * In the browser (wasm) there are no BSD sockets: the only modes are off and
- * vlan, the virtual LAN of the local server's switch (web/server/lan.mjs),
+ * vlan, the virtual LAN of the local server's switch (web/server-rs/crates/lan),
  * whose backend is runtime/web/net_lan.c (the same vlan_* calls, and virtual
  * fds instead of AF_UNIX ones: runtime/web/lan_vfd.h).  NFSU2_NET unset, lan,
  * on or loopback all mean that virtual LAN there: a page can reach nothing but
  * the browsers on its own server.
  * Online (the game's Online menu, browser only): the server runs its own
  * stand-in for EA's long-gone servers at 10.77.0.1 on the virtual LAN
- * (web/server/online/).  NFSU2_ONLINE (default on in the browser, off on the
+ * (web/server-rs/crates/online).  NFSU2_ONLINE (default on in the browser, off on the
  * Mac, whose hub has no such host; 0/off turns it off): in vlan mode the guest
  * string "*pcnfs05.ea.com" at 0x7FBDBC becomes "pcnfs05.ea.com" in guest
  * memory (the '*' asks DirtySock for SSL 2.0 on port 20921, which the server
@@ -288,7 +288,7 @@ static int ws_harness(void){ return nfsu2_test_run(); }
 /* ---- online: the server's own stand-in at 10.77.0.1 (see the top) ---- */
 #define ONLINE_HOST_VA 0x7FBDBCu                  /* SPEED2.EXE v1.2 NA: LobbyConnect's host, 0x588630 */
 #define ONLINE_HOST    "pcnfs05.ea.com"
-#define ONLINE_LOBBY   20922u                     /* its lobby's port (web/server/online/index.mjs PORTS) */
+#define ONLINE_LOBBY   20922u                     /* its lobby's port (nfsu2-online PORT_LOBBY) */
 void online_lobby_read(uint32_t link, const uint8_t *p, int n);   /* online.c: the persona the server gave */
 static int g_online;
 static int env_off(const char *v){

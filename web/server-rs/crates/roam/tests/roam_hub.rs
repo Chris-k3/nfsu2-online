@@ -1,11 +1,11 @@
-//! Free roam's hub: which players it links, what it reads and sends (web/test/roam-hub.test.mjs, case for case).
+//! Free roam's hub: which players it links, what it reads and sends.
 //! 1. the wire: what runtime/roam_core.c sends the hub (HELLO, SNAP, BYE, encoded by the C core built for wasm,
 //!    web/test/roam_hubwire.c) is what the hub reads, and the hub's PEERS lists decode in the C core;
 //! 2. the links: nearest first, both ends of a link list each other, at most 32 per player (7 for a core of version
 //!    1), rooms apart, stale positions out, links kept at the edge, BYE and departures forgotten, the limits per
 //!    address;
-//! 3. the hub on its thread (the JS's "on the switch" without the switch: frames posted reach the hub, its lists go
-//!    out through the switch's send, a departure is forgotten; the switch's own part is nfsu2-lan's test).
+//! 3. the hub on its thread, without the switch: frames posted reach the hub, its lists go out through the switch's
+//!    send, a departure is forgotten (the hub on the switch itself is the server's tests/roam_switch.rs).
 
 mod kit;
 
@@ -30,7 +30,7 @@ fn have_node() -> bool {
     Command::new("node").arg("--version").output().is_ok_and(|o| o.status.success())
 }
 
-// 'the hub's address is net_proto.h's and proto.ts's NET_ROAM_HUB'
+// the hub's address is net_proto.h's and proto.ts's NET_ROAM_HUB
 #[test]
 fn the_hubs_address_is_net_proto_h_and_proto_ts_net_roam_hub() {
     let h = std::fs::read_to_string(repo().join("runtime/web/net_proto.h")).expect("net_proto.h");
@@ -54,7 +54,7 @@ fn unhex(s: &str) -> Vec<u8> {
     (0..s.len() / 2).map(|i| u8::from_str_radix(&s[2 * i..2 * i + 2], 16).expect("hex")).collect()
 }
 
-// 'the wire: what roam_core sends the hub reads, and its PEERS lists decode in roam_core'
+// the wire: what roam_core sends the hub reads, and its PEERS lists decode in roam_core
 #[test]
 fn the_wire_what_roam_core_sends_the_hub_reads_and_its_peers_lists_decode_in_roam_core() {
     let deps = repo().join("deps");
@@ -137,8 +137,8 @@ impl Lists {
     }
 }
 
-// 'links of players of core version 1 (every pair | the grid): the nearest, both ends, at most 7 a player, only in
-// free roam lately, rooms apart'
+// links of players of core version 1 (every pair | the grid): the nearest, both ends, at most 7 a player, only in
+// free roam lately, rooms apart
 #[test]
 fn links_of_players_of_core_version_1_the_nearest_both_ends_at_most_7_only_in_free_roam_lately_rooms_apart() {
     for (how, o) in ways() {
@@ -201,7 +201,7 @@ fn links_of_players_of_core_version_1_the_nearest_both_ends_at_most_7_only_in_fr
     }
 }
 
-// 'links of players of core version 2 (every pair | the grid): at most 32 a player, 7 for one of version 1 among them'
+// links of players of core version 2 (every pair | the grid): at most 32 a player, 7 for one of version 1 among them
 #[test]
 fn links_of_players_of_core_version_2_at_most_32_a_player_7_for_one_of_version_1_among_them() {
     for (how, o) in ways() {
@@ -230,7 +230,7 @@ fn links_of_players_of_core_version_2_at_most_32_a_player_7_for_one_of_version_1
     }
 }
 
-// 'links stay put at the edge, players come and go (every pair | the grid)'
+// links stay put at the edge, players come and go (every pair | the grid)
 #[test]
 fn links_stay_put_at_the_edge_players_come_and_go() {
     for (how, o) in ways() {
@@ -281,7 +281,7 @@ fn links_stay_put_at_the_edge_players_come_and_go() {
     }
 }
 
-// 'limits: two endpoints a browser, a player starts with its HELLO, bad datagrams counted'
+// limits: two endpoints a browser, a player starts with its HELLO, bad datagrams counted
 #[test]
 fn limits_two_endpoints_a_browser_a_player_starts_with_its_hello_bad_datagrams_counted() {
     let mut k = Kit::new(RoamOptions::default());
@@ -303,9 +303,9 @@ fn limits_two_endpoints_a_browser_a_player_starts_with_its_hello_bad_datagrams_c
     assert_eq!(k.info("bad"), 3.0, "a position out of the map: refused");
 }
 
-// (the port's own) a player that comes and goes, HELLO and BYE over and over (a client may send the hub 2500 frames a
-// second), costs the hub little: a player gone is taken out of the others' links once in a while, for many at once,
-// not with every BYE (each walked every player's links: 2000 players' 64,000)
+// a player that comes and goes, HELLO and BYE over and over (a client may send the hub 2500 frames a second), costs the
+// hub little: a player gone is taken out of the others' links once in a while, for many at once, not with every BYE
+// (each walked every player's links: 2000 players' 64,000)
 #[test]
 fn a_player_that_comes_and_goes_costs_the_hub_little() {
     let mut k = Kit::new(RoamOptions::default());
@@ -351,7 +351,7 @@ fn a_player_that_comes_and_goes_costs_the_hub_little() {
     assert!(k.info("links") > 30_000.0);
 }
 
-// '64 players of core version 1|2 in one place: each list at most 7|32, the tick stays cheap'
+// 64 players of core version 1|2 in one place: each list at most 7|32, the tick stays cheap
 #[test]
 fn sixty_four_players_in_one_place_each_list_at_most_its_degree_the_tick_stays_cheap() {
     for core in [1u16, 2] {
@@ -374,8 +374,8 @@ fn sixty_four_players_in_one_place_each_list_at_most_its_degree_the_tick_stays_c
     }
 }
 
-// (the port's own) a panic in a tick (a bug: here the switch's send, halfway through the lists) leaves a hub that
-// goes on: its thread catches the panic, and the next ticks link everyone and send every list
+// a panic in a tick (a bug: here the switch's send, halfway through the lists) leaves a hub that goes on: its thread
+// catches the panic, and the next ticks link everyone and send every list
 #[test]
 fn a_panic_in_a_tick_leaves_a_hub_that_goes_on() {
     // the last tick's lists of a hub whose send panics at its `panic_at`-th list (none: never)
@@ -427,9 +427,8 @@ fn a_panic_in_a_tick_leaves_a_hub_that_goes_on() {
     }
 }
 
-// (the port's own) a list waiting in a slow player's queue keeps a block of 4 KiB at most (its own 357 bytes and its
-// neighbours'), not every list of its tick (2000 players' lists were one buffer of 700 KB, kept whole for as long as
-// any of them waited)
+// a list waiting in a slow player's queue keeps a block of 4 KiB at most (its own 357 bytes and its neighbours'), not
+// every list of its tick (2000 players' lists were one buffer of 700 KB, kept whole for as long as any of them waited)
 #[test]
 fn a_list_waiting_holds_little() {
     let mut k = Kit::new(RoamOptions::default());
@@ -448,7 +447,7 @@ fn a_list_waiting_holds_little() {
     assert!(mine.capacity() <= 4096, "it keeps {} bytes for a list of {len}", mine.capacity());
 }
 
-// 'a busy server: every player gets fewer links, and more again once it has room (every pair | the grid)': the cap on
+// a busy server: every player gets fewer links, and more again once it has room (every pair | the grid): the cap on
 // the links a quarter down at most every 5 s to 8, nothing between 60 and 85 %, 2 up every 15 s
 #[test]
 fn a_busy_server_every_player_gets_fewer_links_and_more_again_once_it_has_room() {
@@ -516,7 +515,7 @@ fn a_busy_server_every_player_gets_fewer_links_and_more_again_once_it_has_room()
     }
 }
 
-// '600 players in a city | a district | a crowd: the grid links as every pair does': a room larger than exactRoom,
+// 600 players in a city | a district | a crowd: the grid links as every pair does: a room larger than `exact_room`,
 // the grid's links against every pair's, for the same players (some of core version 1; two rooms; a few far out):
 // the same rules (at most the degree, both ends, no two with room left unlinked) and about the same distances
 #[test]
@@ -661,9 +660,9 @@ fn on_its_thread_frames_reach_the_hub_its_lists_go_out_through_the_switch_a_depa
     assert!(lines.lock().is_empty(), "an idle server keeps its cap: {:?}", lines.lock());
 }
 
-// (the port's own) on its thread in the server's runtime, the hub's busy measure is the runtime's workers' (they run
-// the switch): with all of them busy the cap on the links comes down, few of the machine's cores as they may be (the
-// process's CPU time over every core read 2 busy workers of 24 cores as 8 %, and the cap never moved)
+// on its thread in the server's runtime, the hub's busy measure is the runtime's workers' (they run the switch): with
+// all of them busy the cap on the links comes down, few of the machine's cores as they may be (the process's CPU time
+// over every core read 2 busy workers of 24 cores as 8 %, and the cap never moved)
 #[test]
 fn on_its_thread_busy_workers_cut_the_links() {
     let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().expect("a runtime");

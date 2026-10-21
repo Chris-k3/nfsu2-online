@@ -1,7 +1,8 @@
 //! TLS: the certificate only for the names it covers (the audit's F4), for handshakes without a name only when it
-//! names an address; its names as server.mjs reads them; the key formats; a renewed certificate taken without a
-//! restart; a handshake that never finishes; HTTP over it.  Certificates are made with the openssl CLI as
-//! web/test/cf-sim.mjs makeTestCerts and audit.test.mjs make them; skipped (with a message) without openssl.
+//! names an address; its names (DNS names in lower case, addresses in their plain form); refused handshakes as
+//! Node's https server refuses them; the key formats; a renewed certificate taken without a restart; a handshake that
+//! never finishes; HTTP over it.  Certificates are made with the openssl CLI as web/test/cf-sim.mjs makeTestCerts and
+//! audit.test.mjs make them; skipped (with a message) without openssl.
 
 mod common;
 
@@ -205,7 +206,7 @@ const HANDSHAKE_FAILURE: [u8; 7] = [0x15, 0x03, 0x03, 0x00, 0x02, 0x02, 0x28];
 
 #[tokio::test]
 async fn refused_handshakes_look_as_nodes_do() {
-    // Node (OpenSSL) has no certificate for a handshake without a name (server.mjs gives it none): a fatal
+    // Node (OpenSSL) has no certificate for a handshake without a name (tls_server.mjs gives it none): a fatal
     // handshake_failure alert; for a name its SNI callback refuses, the socket is destroyed: closed without a byte.
     // (rustls sent access_denied for both.)  No certificate either way.
     let c = certs_or_skip!();
@@ -262,44 +263,6 @@ async fn names_as_node_prints_them() {
     // Node: "IP Address:0:0:0:0:0:0:0:1" (bareIp: lower case), DNS names in lower case
     assert_eq!(names.ips, vec!["0:0:0:0:0:0:0:1"]);
     assert_eq!(names.dns, vec!["upper.test"]);
-}
-
-/// server.mjs certNames itself (Node's X509Certificate, headers.mjs bareIp) on the same files
-#[tokio::test]
-async fn names_as_server_mjs_reads_them() {
-    let c = certs_or_skip!();
-    let pairs = [("c.pem", "k.pem"), ("chain.crt", "server.key"), ("v6.crt", "v6.key"), ("rsa.crt", "rsa1.key"), ("c2.pem", "k2.pem")];
-    let headers_mjs = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../server/headers.mjs");
-    let script = format!(
-        r#"import crypto from 'node:crypto'; import fs from 'node:fs';
-        import {{ bareIp }} from '{headers_mjs}';
-        function certNames(pem) {{
-          const x = new crypto.X509Certificate(pem);
-          const dns = [], ips = [];
-          for (const part of String(x.subjectAltName ?? '').split(/,\s*/)) {{
-            if (part.startsWith('DNS:')) dns.push(part.slice(4).toLowerCase());
-            else if (part.startsWith('IP Address:')) {{ const ip = bareIp(part.slice(11)); if (ip) ips.push(ip); }}
-          }}
-          return {{ dns, ips }};
-        }}
-        process.stdout.write(JSON.stringify(process.argv.slice(1).map(f => certNames(fs.readFileSync(f)))));"#
-    );
-    let mut cmd = Command::new("node");
-    cmd.args(["--input-type=module", "-e", &script]);
-    for (cert, _) in pairs {
-        cmd.arg(c.p(cert));
-    }
-    let Ok(out) = cmd.output() else {
-        eprintln!("skipped: no node to compare with");
-        return;
-    };
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    let want: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout).expect("json");
-    assert_eq!(want.len(), pairs.len());
-    for ((cert, key), want) in pairs.iter().zip(want) {
-        let (_, names) = TlsState::load(&c.p(cert), &c.p(key)).expect("load");
-        assert_eq!(serde_json::json!({ "dns": names.dns, "ips": names.ips }), want, "{cert}");
-    }
 }
 
 #[tokio::test]

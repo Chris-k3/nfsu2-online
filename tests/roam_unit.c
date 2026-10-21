@@ -271,7 +271,7 @@ static uint16_t node_port(int i){ return (uint16_t)(50000 + i); }
 static int node_of(uint32_t ip, uint16_t port){ if (ip != 0x7f000001u) return -1; for (int i = 0; i < NN; i++) if (node_port(i) == port) return i; return -1; }
 static int g_bcast_calls;
 static int g_cfg_tx[NN];                    /* CFG datagrams each node sent */
-/* a stand-in for the server's free-roam hub (web/server/roam-hub.mjs): it
+/* a stand-in for the server's free-roam hub (web/server-rs/crates/roam): it
  * counts what each node sends it and, while on, lists g_hub_link[i] for node
  * i every second */
 #define HUB_IP   0x7f0000FDu

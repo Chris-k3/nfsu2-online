@@ -1,6 +1,7 @@
-// A player's name that reads as a slur.  The server refuses one for the Online mode (online/lobby.mjs: an
-// account or persona; online/stats.mjs drops the results kept under one) and the switch's peer list shows
-// "player" for one (lan.mjs cleanName); the page's settings refuse one as "Your name" (web/src/app/settings.ts).
+// A player's name that reads as a slur.  The server (web/server-rs/crates/names, the same rules) refuses one for
+// the Online mode (an account or persona; its results drop the ones kept under one) and the switch's peer list
+// shows "player" for one (nfsu2-lan clean_name); the page's settings refuse one as "Your name"
+// (web/src/app/settings.ts).
 // runtime/names.h is the same lists and the same matching for the game (the names over the cars in free roam,
 // and the Mac's settings); web/test/names.test.mjs checks that the two agree.
 //

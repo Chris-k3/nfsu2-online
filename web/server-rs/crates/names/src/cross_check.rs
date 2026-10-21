@@ -1,4 +1,4 @@
-//! names.mjs itself, under node, against this port: the same answer for every name of a corpus (the JS test's
+//! names.mjs itself, under node, against this port: the same answer for every name of a corpus (names.test.mjs's
 //! names, near misses, made-up names from a fixed seed, ASCII and Unicode, and every code point of Unicode's planes
 //! in use in a few places of a name), the same lists and the same lookalikes.  Skipped (with a message) where there
 //! is no node.
@@ -154,7 +154,7 @@ fn alternatives() -> HashMap<char, Vec<char>> {
     alts
 }
 
-/// the near misses of the JS's comments, and the same with other case, spacing and numbers
+/// the near misses of names.mjs's comments, and the same with other case, spacing and numbers
 const NEAR: &[&str] = &[
     "Niger",
     "Nigeria",
@@ -242,7 +242,7 @@ fn swap(ch: char) -> &'static [char] {
     }
 }
 
-/// names of the JS test's generator (web/test/names.test.mjs, its 20,000 for names.h): the pieces with digits and
+/// names of names.test.mjs's generator (web/test/names.test.mjs, its 20,000 for names.h): the pieces with digits and
 /// signs for letters, capitals, doubled letters, separators, a number at the end; then plain ASCII noise
 fn ascii_names(r: &mut Rnd, pieces: &[&str], names: &mut Vec<String>) {
     for _ in 0..20_000 {
@@ -329,7 +329,7 @@ fn unicode_names(r: &mut Rnd, pieces: &[&str], names: &mut Vec<String>) {
     }
 }
 
-/// Names longer than the 255 letters the JS reads, a word of the lists somewhere in them.
+/// Names longer than the 255 letters names.mjs reads, a word of the lists somewhere in them.
 fn long_names(r: &mut Rnd, pieces: &[&str], names: &mut Vec<String>) {
     for _ in 0..2_000 {
         let mut n: String = (0..240 + r.next(40)).map(|_| *r.pick(&['x', 'y', 'X', ' ', '_', '4'])).collect();
@@ -422,7 +422,7 @@ fn strings(v: &serde_json::Value) -> Vec<&str> {
 
 #[test]
 fn answers_as_names_mjs() {
-    let names_mjs = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../server/names.mjs");
+    let names_mjs = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../src/app/names.mjs");
     assert!(names_mjs.exists(), "no {}", names_mjs.display());
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
     let dir = TempDir(std::env::temp_dir().join(format!("nfsu2-names-{}-{nanos}", std::process::id())));

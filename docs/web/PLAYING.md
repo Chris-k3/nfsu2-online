@@ -10,8 +10,9 @@ on a VPS ([VPS.md](VPS.md)). Nothing is installed on the players' PCs, and no fi
 web/start.sh            # or: cd web && npm start
 ```
 
-- The first start takes longer: it installs the page's tools and builds what is missing. Later starts go straight
-  to the server, unless the code changed.
+- The first start takes longer: it installs the page's tools and builds what is missing (the game module, the page
+  and the server; the server needs Rust, from https://rustup.rs). Later starts go straight to the server, unless
+  the code changed.
 - It looks for the game in `~/projects/nsfu2/Need for Speed - Underground 2`. If the game is somewhere else, start
   once with `web/start.sh --data "/path/to/the folder with SPEED2.EXE"`. The folder is remembered.
 - The game folder is only read, never changed.

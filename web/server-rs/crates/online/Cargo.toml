@@ -1,6 +1,6 @@
 [package]
 name = "nfsu2-online"
-description = "The game's Online mode at 10.77.0.1 (web/server/online/): the virtual host, the redirector, the lobby, EA Messenger, the race results, the news pages, the dev trace"
+description = "The game's Online mode at 10.77.0.1: the virtual host, the redirector, the lobby, EA Messenger, the race results, the news pages, the dev trace"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

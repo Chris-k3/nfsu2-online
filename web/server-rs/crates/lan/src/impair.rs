@@ -1,6 +1,7 @@
 //! --lan-impair (a test aid, only with the server's --dev): LAN play's frames (kinds 3-5) between browsers get
 //! tools/vlanhub.py's impairments: UDP and ICMP are delayed by delay +- jitter ms, lost with loss %, reordered with
-//! reorder % (2 x delay + 5 ms more); TCP (kind 4) is only delayed, in order.  Free roam's frames are never touched.
+//! reorder % (2 x delay + 5 ms more); TCP (kind 4) is only delayed, in order.  Free roam's frames are never touched
+//! (free roam has its own knob in the runtime).
 
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
@@ -22,7 +23,7 @@ pub(crate) struct Impair {
     loss: f64,
     reorder: f64,
     seed: f64,
-    /// lan.mjs's xorshift32
+    /// the random numbers: a xorshift32 from `seed` (0 is 1)
     x: Mutex<u32>,
     /// when the last TCP segment from one browser to another goes out (they stay in order)
     tcp_last: Mutex<HashMap<(u32, u32), f64>>,
@@ -39,7 +40,7 @@ struct Delayed {
     dst: u32,
 }
 
-/// JS `x >>> 0`
+/// a number as an unsigned 32-bit integer: its whole part modulo 2^32 (0 for one that is not finite)
 fn to_uint32(x: f64) -> u32 {
     if !x.is_finite() {
         return 0;
@@ -48,7 +49,7 @@ fn to_uint32(x: f64) -> u32 {
 }
 
 impl Impair {
-    /// lan.mjs `parseImpair(spec)`: "delay=80,jitter=0,loss=100,seed=3"; unknown keys and non-numbers are ignored
+    /// the --lan-impair spec: "delay=80,jitter=0,loss=100,seed=3"; unknown keys and non-numbers are ignored
     pub(crate) fn parse(spec: &str) -> Option<Impair> {
         if spec.is_empty() {
             return None;
@@ -103,7 +104,7 @@ impl Impair {
         *x as f64 / 4_294_967_296.0
     }
 
-    /// lan.mjs `deliver`'s impaired path: lost, or delivered later (through the queue rules then)
+    /// a frame of LAN play's between browsers: lost, or delivered later (through the queue rules then)
     pub(crate) fn deliver(&self, stats: &Stats, from: &Arc<Peer>, p: &Arc<Peer>, data: &Bytes, dst: u32) {
         let mut d = self.delay;
         if data[0] == KIND_STREAM {
@@ -125,7 +126,7 @@ impl Impair {
                 d += 2.0 * self.delay + 5.0;
             }
         }
-        // Node's setTimeout: under 1 ms is 1 ms
+        // under 1 ms is 1 ms (as the Node server's timers had it)
         let at = Instant::now() + Duration::from_secs_f64(d.max(1.0) / 1000.0);
         let _ = self.tx.send(Delayed { at, seq: 0, from: from.clone(), to: p.clone(), data: data.clone(), dst });
     }
@@ -135,7 +136,7 @@ impl Impair {
         self.tcp_last.lock().retain(|k, _| k.0 != vip && k.1 != vip);
     }
 
-    /// the delayed frames go out in the order of their times (equal times in the order they came, as Node's timers)
+    /// the delayed frames go out in the order of their times (equal times in the order they came)
     pub(crate) fn start(&self, sw: Weak<LanSwitch>) {
         let Some(mut rx) = self.rx.lock().take() else { return };
         tokio::spawn(async move {
@@ -183,10 +184,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn spec_and_random_numbers_as_lan_mjs() {
+    fn spec_and_random_numbers() {
         let im = Impair::parse("delay=80,jitter=0,loss=100,seed=3,bogus=1,reorder=x").unwrap();
         assert_eq!(nfsu2_util::json::stringify(&im.spec_json()), r#"{"delay":80,"jitter":0,"loss":100,"reorder":0,"seed":3}"#);
-        // x = 3: x ^= x << 13; x ^= x >>> 17; x ^= x << 5 (lan.mjs this.rand)
+        // x = 3: the xorshift32's first step, by hand
         let mut x: u32 = 3;
         x ^= x << 13;
         x ^= x >> 17;

@@ -1,8 +1,7 @@
-//! The host's own timers: every `setTimeout` and `setInterval` of the JS, as a queue on the host's thread.  A JS
-//! closure becomes an [`Action`] naming what to do and for which session or connection (by id: the handler checks
-//! that it still exists when the timer fires).  Times are on the timer clock (`Clocks::timer`: monotonic in the
-//! server, a test's own in the tests), not on the lobby's `now()`, as Node's timers run on real time whatever a
-//! test's `now` says.
+//! The host's own timers, as a queue on the host's thread.  Each is an [`Action`] naming what to do and for which
+//! session or connection (by id: the handler checks that it still exists when the timer fires).  Times are on the
+//! timer clock (`Clocks::timer`: monotonic in the server, a test's own in the tests), not on the lobby's `now()`,
+//! the wall clock its rules read: the timers run on real time whatever `now` says, and a test moves each on its own.
 
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
@@ -15,9 +14,9 @@ pub type TimerId = u64;
 
 /// what a timer does when it fires
 pub enum Action {
-    /// the lobby's `setInterval(tick, 5000)`
+    /// the lobby's tick, every 5 s
     LobbyTick,
-    /// a game's record to the game list, or a room's population (lobby.mjs `later`)
+    /// a game's record to the game list, or a room's population (lobby.rs `later`)
     Later(LaterKey),
     /// the redirector's 30 s for its request
     RedirectorIdle(ConnId),
@@ -61,7 +60,7 @@ pub struct Timers {
 }
 
 impl Timers {
-    /// `setTimeout`: `a` at time `at`; timers of the same time fire in the order they were set
+    /// a timer: `a` at time `at`; timers of the same time fire in the order they were set
     pub fn set(&mut self, at: f64, a: Action) -> TimerId {
         self.next += 1;
         let id = self.next;
@@ -70,7 +69,7 @@ impl Timers {
         self.live.insert(id, a);
         id
     }
-    /// `clearTimeout`.  A cleared timer's place in the queue goes once the queue is mostly such places: a client that
+    /// a timer ends.  A cleared timer's place in the queue goes once the queue is mostly such places: a client that
     /// opens and resets streams as fast as its budget lets it leaves one a stream (the Messenger's 60 s for a login,
     /// the redirector's 30 s), each until its time.  (Each compaction follows as many clears as there are live
     /// timers: O(1) a clear, all told.)

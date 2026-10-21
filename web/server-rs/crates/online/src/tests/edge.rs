@@ -1,10 +1,11 @@
-//! What a client can send, and what can happen to the host, that the JS's own tests do not try: numbers at the ends
-//! of their range, and the like (each found where the Rust port could differ from the JS: a panic, a resource held).
+//! What a client can send, and what can happen to the host, that the other tests do not try: numbers at the ends of
+//! their range, and the like (each found where the Rust host could differ from the Node server: a panic, a resource
+//! held).
 
 use super::world::{Opts, World};
 
-// a ranking asked for on the channel of the lowest 32-bit number (CHAN=2147483648 is -2^31 for `| 0`): the JS answers
-// with an empty ranking; here `chan - 6` overflowed (a panic in a build with overflow checks: the stream went as a
+// a ranking asked for on the channel of the lowest 32-bit number (CHAN=2147483648 is -2^31 for `| 0`): the answer is
+// an empty ranking; `chan - 6` overflowed here once (a panic in a build with overflow checks: the stream went as a
 // "service error")
 #[test]
 fn snap_on_the_channel_at_the_end_of_the_range() {
@@ -18,7 +19,7 @@ fn snap_on_the_channel_at_the_end_of_the_range() {
         w.send(a, "snap", fields![("INDEX", 1), ("CHAN", chan), ("FIND", "$")]);
         assert_eq!(w.c(a).l("snap").g("COUNT"), "0", "CHAN={chan} FIND=$");
     }
-    assert_eq!(w.c(a).l("snap").g("CHAN"), "-1", "the channel as the JS's `| 0` makes it");
+    assert_eq!(w.c(a).l("snap").g("CHAN"), "-1", "the channel as JavaScript's `| 0` makes it");
     assert!(!w.c(a).reset, "the session stays");
 }
 

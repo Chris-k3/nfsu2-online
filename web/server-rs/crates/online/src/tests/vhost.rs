@@ -1,7 +1,7 @@
-//! web/test/online-vhost.test.mjs: the server's own host on the virtual LAN, 10.77.0.1.  TCP as runtime/web/net_lan.c
-//! speaks it (SYN -> SYNACK or RST, DATA in frames of at most 1464 bytes, FIN both ways, RST, a browser that leaves),
-//! the per-browser connection limit, ICMP echo answered with a correct checksum, UDP answered with "port
-//! unreachable".  (Its last case, the switch carrying the online host, needs nfsu2-lan: the integration's.)
+//! The server's own host on the virtual LAN, 10.77.0.1.  TCP as runtime/web/net_lan.c speaks it (SYN -> SYNACK or RST,
+//! DATA in frames of at most 1464 bytes, FIN both ways, RST, a browser that leaves), the per-browser connection limit,
+//! ICMP echo answered with a correct checksum, UDP answered with "port unreachable".  (The switch carrying the online
+//! host needs nfsu2-lan: the integration's.)
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -68,7 +68,7 @@ fn frame(h: &mut Core, from: u32, f: &[u8]) {
     h.frame(from, f, &FrameCtx { group: format!("vip {from}").into(), site: None, cause: None, slot: None });
 }
 
-// 'TCP: refused, accepted, data both ways, FIN, RST, a browser that leaves'
+// TCP: refused, accepted, data both ways, FIN, RST, a browser that leaves
 #[test]
 fn tcp() {
     let (a, b) = (ip("10.77.0.2"), ip("10.77.0.3"));
@@ -112,7 +112,7 @@ fn tcp() {
     assert_eq!(h.info()["conns"], 0);
 }
 
-// 'TCP: at most perVip connections per browser'
+// TCP: at most `per_vip` connections per browser
 #[test]
 fn per_vip() {
     let (a, b) = (ip("10.77.0.2"), ip("10.77.0.3"));
@@ -126,7 +126,7 @@ fn per_vip() {
     assert_eq!(out.lock().last().unwrap().op, SYNACK, "another browser has its own budget");
 }
 
-// 'ICMP echo and UDP'
+// ICMP echo and UDP
 #[test]
 fn icmp_and_udp() {
     let a = ip("10.77.0.2");

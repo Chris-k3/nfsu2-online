@@ -1,6 +1,6 @@
-//! server.mjs's options: the command line, NFSU2_<OPTION> from the environment, and the checks it dies with (the same
-//! messages, in the same order, so either server can be started with the other's command line: tools, tests, the
-//! systemd unit, the container).
+//! The options: the command line, NFSU2_<OPTION> from the environment, and the checks the server dies with (the
+//! Node server's messages, in its order: the tools, the tests, the systemd unit and the container start this server
+//! with the command lines they started that one with).
 //!
 //!   nfsu2-server --data "<NFSU2 folder>" [--http-port 8080]
 //!        [--tls-cert <pem> --tls-key <pem> [--port 8443] [--bind <address>] | --behind-proxy --host <name>[,<name>...]]
@@ -63,7 +63,7 @@ pub struct Options {
     pub access_log: bool,
     pub artifacts: String,
     pub max_peers: usize,
-    /// the public names (a domain); '*.' covers one label
+    /// the public names (a domain), comma-separated; '*.' covers one label
     pub hosts: Vec<String>,
     /// a test aid of the LAN-play tests (delay, loss, reordering on the switch; nfsu2-lan implements it)
     pub lan_impair: String,
@@ -71,10 +71,12 @@ pub struct Options {
     pub online: bool,
     /// free roam's hub (nfsu2-roam): each player's peers are the players nearest to it; on unless --roam-hub off
     pub roam_hub: bool,
-    /// a test aid: the lobby protocol's messages, decoded and with every secret redacted, into a file
+    /// a test aid: the lobby protocol's messages, decoded and with every secret redacted, into a file (nfsu2-online's
+    /// LobbyTrace)
     pub online_trace: String,
     pub tls: Tls,
-    /// where the TLS port listens: "::" (IPv6 and IPv4, so AAAA records work), unless --bind was given
+    /// where the TLS port listens: "::" (IPv6 and IPv4, dual stack, so AAAA records work; IPv4 alone where the
+    /// machine has no IPv6), unless --bind was given
     pub bind: String,
     pub bind_set: bool,
     pub trust: ProxyTrust,
@@ -83,7 +85,7 @@ pub struct Options {
     pub hsts_ok: bool,
 }
 
-/// `'NFSU2_' + name.slice(2).toUpperCase().replace(/-/g, '_')`
+/// an option's name in the environment: --http-port is NFSU2_HTTP_PORT
 pub fn env_name(name: &str) -> String {
     format!("NFSU2_{}", name[2..].to_uppercase().replace('-', "_"))
 }
@@ -161,9 +163,9 @@ pub fn js_to_number(s: &str) -> f64 {
 
 /// The file system checks the options need (a trait so that the tests can say what exists).
 pub trait Fs {
-    /// `fs.existsSync(p)`
+    /// whether p is there
     fn exists(&self, p: &str) -> bool;
-    /// `fs.realpathSync(p)`, None where it throws
+    /// p's real path (symbolic links followed), None where there is none
     fn realpath(&self, p: &str) -> Option<String>;
 }
 
@@ -179,7 +181,7 @@ impl Fs for RealFs {
     }
 }
 
-/// `realOrPlanned(p)`: the real path of p, or of the nearest folder above it that exists with the rest appended
+/// the real path of p, or of the nearest folder above it that exists with the rest appended
 pub fn real_or_planned(fs: &dyn Fs, p: &str) -> String {
     match fs.realpath(p) {
         Some(r) => r,
@@ -193,15 +195,16 @@ pub fn real_or_planned(fs: &dyn Fs, p: &str) -> String {
     }
 }
 
-/// `within(a, b)`: a is b or inside it, compared case-insensitively (the Mac's disk)
+/// a is b or inside it, compared case-insensitively (the Mac's disk)
 pub fn within(a: &str, b: &str) -> bool {
     let x = a.to_lowercase();
     let y = b.to_lowercase();
     x == y || x.starts_with(&if y.ends_with('/') { y.clone() } else { format!("{y}/") })
 }
 
-/// The options from the command line (without the program's name) and the environment; Err: the message server.mjs
-/// dies with.  `repo`: the repository the defaults are in; `cwd`: what relative paths are resolved against.
+/// The options from the command line (without the program's name) and the environment; Err: the message the server
+/// dies with (main's `die`).  `repo`: the repository the defaults are in; `cwd`: what relative paths are resolved
+/// against.
 pub fn parse(argv: &[String], env: &dyn Fn(&str) -> Option<String>, repo: &str, cwd: &str, fs: &dyn Fs) -> Result<Options, String> {
     let mut i = 0;
     while i < argv.len() {
@@ -217,8 +220,8 @@ pub fn parse(argv: &[String], env: &dyn Fn(&str) -> Option<String>, repo: &str, 
         }
         i += 1;
     }
-    // the first occurrence of the name on the command line (its value is the next argument: JS's undefined, None,
-    // when there is none), else NFSU2_<OPTION>, else the default
+    // the first occurrence of the name on the command line (its value is the next argument; None when there is none,
+    // the Node server's undefined), else NFSU2_<OPTION>, else the default
     let arg = |name: &str, def: &str| -> Option<String> {
         match argv.iter().position(|a| a == name) {
             Some(i) => argv.get(i + 1).cloned(),
@@ -227,7 +230,7 @@ pub fn parse(argv: &[String], env: &dyn Fn(&str) -> Option<String>, repo: &str, 
     };
     let truthy = |v: &Option<String>| v.as_deref().is_some_and(|s| !s.is_empty());
     let string = |v: Option<String>| v.unwrap_or_else(|| "undefined".into());
-    // path.resolve(undefined) throws
+    // a path without a value: the message Node's path.resolve(undefined) threw
     let resolve = |v: Option<String>| -> Result<String, String> {
         match v {
             Some(p) => Ok(paths::resolve(cwd, &p)),
@@ -487,7 +490,8 @@ mod tests {
         assert!(!within("/a", "/a/b"));
     }
 
-    // deploy.test.mjs '--dev gating and start-up refusals': each refusal's message, in the order server.mjs checks
+    // web/test/deploy.test.mjs '--dev gating and start-up refusals': each refusal's message, in the order parse()
+    // checks them
     #[test]
     fn the_refusals_before_the_proxies() {
         let s = Setup::new();

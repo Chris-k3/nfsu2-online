@@ -8,9 +8,7 @@
 
 mod common;
 
-use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader};
-use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -298,28 +296,18 @@ impl Player {
     }
 }
 
-/// a race between the two players (online-audit.test.mjs `race`: the first creates the game, the other joins, it
-/// starts), then race reports with its AUTH, random results and names, and now and then the game's other messages
-async fn race(ps: &[Player], r: &Rng, i: usize, lockstep: bool) {
+/// a race between the two players (the first creates the game, the other joins, it starts), then race reports with
+/// its AUTH, random results and names, and now and then the game's other messages
+async fn race(ps: &[Player], r: &Rng, i: usize) {
     let (h, o) = if r.chance(50) { (&ps[0], &ps[1]) } else { (&ps[1], &ps[0]) };
     let name = format!("g{}", i % 7);
     let track = if r.chance(80) { "TRACK=4014".to_string() } else { value(r, &["Fuzz1"]) };
     h.b.send_msg(h.lobby, "gcre", &[("NAME", name.clone()), ("PARAMS", track), ("MAXSIZE", value(r, &["Fuzz1"]))]);
-    if lockstep {
-        h.b.echo().await;
-    }
     o.b.send_msg(o.lobby, "gjoi", &[("NAME", name.clone())]);
-    if lockstep {
-        o.b.echo().await;
-    }
     h.b.send_msg(h.lobby, "gsta", &[("NAME", name.clone())]);
     // (the AUTH of this race when it started in time, else of one before, else any)
-    let auth = if lockstep {
-        h.b.echo().await;
-        h.b.got().tcp.get(&h.lobby.port).and_then(|t| t.last("+ses")).and_then(|m| m.get("AUTH")).map(str::to_string)
-    } else {
-        h.b.try_until(50, |g| g.tcp.get(&h.lobby.port).and_then(|t| t.last("+ses")).and_then(|m| m.get("AUTH")).map(str::to_string)).await
-    };
+    let auth =
+        h.b.try_until(50, |g| g.tcp.get(&h.lobby.port).and_then(|t| t.last("+ses")).and_then(|m| m.get("AUTH")).map(str::to_string)).await;
     let auth = auth.unwrap_or_else(|| value(r, &["Fuzz1"]));
     for p in [h, o] {
         let mut f = vec![("AUTH", auth.clone()), ("RESU", resu(r))];
@@ -328,9 +316,6 @@ async fn race(ps: &[Player], r: &Rng, i: usize, lockstep: bool) {
             f.push((n, r.pick(&[&p.name[..], "Fuzz1", "Fuzz2", "Nobody", ""]).to_string()));
         }
         p.b.send_msg(p.lobby, "rank", &f);
-        if lockstep {
-            p.b.echo().await;
-        }
     }
     if r.chance(30) {
         let kind = *r.pick(&["gdel", "glea", "gset", "snap", "gsea"]);
@@ -338,12 +323,10 @@ async fn race(ps: &[Player], r: &Rng, i: usize, lockstep: bool) {
     }
 }
 
-/// What one server did under the fuzz
+/// What the server did under the fuzz
 struct FuzzRun {
     /// its console, from the start-up lines on
     lines: Vec<String>,
-    /// what the players' games got from the lobby and Messenger: (kind, code) and how often
-    got: BTreeMap<(String, String), usize>,
     /// /players after the fuzz and once a newcomer logged in
     players: Vec<String>,
     exit: Option<i32>,
@@ -352,26 +335,16 @@ struct FuzzRun {
     files: Vec<(String, String)>,
 }
 
-/// the fuzz against one server (the Rust binary, or "node": web/server/server.mjs).  lockstep: each action waits
-/// until the host took it (an echo through it, `Browser::echo`), at one action every 3 ms, so that two servers see
-/// the same frames in the same order at about the same times
-async fn fuzz(which: &str, seed: u64, frames: usize, lockstep: bool) -> FuzzRun {
+/// the fuzz against the server
+async fn fuzz(seed: u64, frames: usize) -> FuzzRun {
     let tmp = tempfile::tempdir().unwrap();
     let data = tmp.path().join("game");
     std::fs::create_dir_all(&data).unwrap();
     std::fs::write(data.join("SPEED2.EXE"), "MZ").unwrap();
     let state = tmp.path().join("state");
     let port = free_port();
-    let mut cmd = if which == "node" {
-        let mut c = Command::new("node");
-        c.arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../server/server.mjs"));
-        c
-    } else {
-        let mut c = Command::new(env!("CARGO_BIN_EXE_nfsu2-server"));
-        c.env("NFSU2_THREADS", "2");
-        c
-    };
-    let mut child = cmd
+    let mut child = Command::new(env!("CARGO_BIN_EXE_nfsu2-server"))
+        .env("NFSU2_THREADS", "2")
         .arg("--data")
         .arg(&data)
         .args(["--http-port", &port.to_string(), "--state"])
@@ -405,11 +378,7 @@ async fn fuzz(which: &str, seed: u64, frames: usize, lockstep: bool) -> FuzzRun 
     let others: Vec<u32> = ps.iter().map(|p| p.b.vip).chain([raw.vip]).collect();
     let r = Rng(std::cell::Cell::new(seed | 1));
     let mut logins = 0;
-    let mut pace = tokio::time::interval(Duration::from_millis(3));
     for i in 0..frames {
-        if lockstep {
-            pace.tick().await;
-        }
         let p = &ps[r.below(2) as usize];
         let action = r.below(40);
         match action {
@@ -433,21 +402,9 @@ async fn fuzz(which: &str, seed: u64, frames: usize, lockstep: bool) -> FuzzRun 
                 p.b.tcp_out(c, DATA, &m);
             }
             26..=29 => p.b.binary(udp(ROAM_HUB_VIP, 47210, *r.pick(&[47210u16, 47211, 47212, 1]), 1, &roam(&r))),
-            30 => race(&ps, &r, i, lockstep).await,
+            30 => race(&ps, &r, i).await,
             31..=34 => raw.binary(raw_frame(&r, &others)),
             _ => raw.binary(bundle(&r, &others)),
-        }
-        if lockstep {
-            // (the hub's frames are the hub's: the echo waits for the Online host only)
-            if action >= 31 {
-                raw.echo().await;
-            } else {
-                p.b.echo().await;
-            }
-            for p in ps.iter_mut() {
-                logins += p.again_if_closed().await as usize;
-            }
-            continue;
         }
         // about 1000 frames a second in all: within the budgets of one client address (5000 frames, 512 KiB)
         if i % 20 == 19 {
@@ -463,15 +420,7 @@ async fn fuzz(which: &str, seed: u64, frames: usize, lockstep: bool) -> FuzzRun 
     for p in ps.iter_mut() {
         logins += p.again_if_closed().await as usize;
     }
-    assert!(ps.iter().all(|p| p.b.is_open()) && raw.is_open(), "{which}: the fuzzing browsers are still on the switch");
-    let mut got = BTreeMap::new();
-    for p in &ps {
-        for t in p.b.got().tcp.values() {
-            for m in &t.msgs {
-                *got.entry((m.kind.clone(), m.code.clone())).or_insert(0) += 1;
-            }
-        }
-    }
+    assert!(ps.iter().all(|p| p.b.is_open()) && raw.is_open(), "the fuzzing browsers are still on the switch");
     // the server goes on
     let mut players = vec![http_body(&self::players(port).await)];
     let c = Browser::open_at(&format!("localhost:{port}"), port, "", None).await;
@@ -498,7 +447,7 @@ async fn fuzz(which: &str, seed: u64, frames: usize, lockstep: bool) -> FuzzRun 
         .filter_map(|f| std::fs::read_to_string(state.join(f)).ok().map(|s| (f.to_string(), s)))
         .collect();
     let lines = out.lock().unwrap().clone();
-    FuzzRun { lines, got, players, exit, logins, files }
+    FuzzRun { lines, players, exit, logins, files }
 }
 
 fn http_body(r: &str) -> String {
@@ -510,7 +459,7 @@ async fn random_frames_to_the_hosts_panic_nothing_and_the_server_goes_on() {
     let seed: u64 = std::env::var("NFSU2_FUZZ_SEED").ok().and_then(|v| v.parse().ok()).unwrap_or(0x5EED_2026);
     let frames: usize = std::env::var("NFSU2_FUZZ_FRAMES").ok().and_then(|v| v.parse().ok()).unwrap_or(6000);
     let t0 = Instant::now();
-    let run = fuzz("rust", seed, frames, false).await;
+    let run = fuzz(seed, frames).await;
     println!("{frames} frames in {:.1} s, {} logins again", t0.elapsed().as_secs_f64(), run.logins);
     println!("what the console said ({} lines):\n{}", run.lines.len(), run.lines.join("\n"));
     let bad: Vec<&String> = run.lines.iter().filter(|l| l.contains("panicked") || l.contains("a service failed")).collect();
@@ -523,69 +472,5 @@ async fn random_frames_to_the_hosts_panic_nothing_and_the_server_goes_on() {
     assert_eq!(run.exit, Some(0), "SIGTERM: exit code 0");
     for (f, s) in &run.files {
         assert!(serde_json::from_str::<serde_json::Value>(s).is_ok(), "{f}: {s}");
-    }
-}
-
-/// a console line with what varies from run to run taken out (numbers, quoted text)
-fn template(l: &str) -> String {
-    let mut s = String::new();
-    let mut quoted = false;
-    for c in l.chars() {
-        match c {
-            '"' => {
-                quoted = !quoted;
-                s.push('"');
-            }
-            _ if quoted => {}
-            '0'..='9' => {
-                if !s.ends_with('#') {
-                    s.push('#');
-                }
-            }
-            '.' if s.ends_with('#') => {}
-            _ => s.push(c),
-        }
-    }
-    s
-}
-
-// (a measurement, not a JS case: cargo test --test fuzz -- --ignored --nocapture) The same fuzz against Node's
-// server and the Rust one: the kinds of console lines each printed and the lobby's answers by kind and code, side by
-// side.  Their rate limits read the clock, so the counts differ a little from run to run; a kind of line or answer
-// only one of them has is worth a look.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore]
-async fn measure_the_fuzz_against_node_and_rust() {
-    let seed: u64 = std::env::var("NFSU2_FUZZ_SEED").ok().and_then(|v| v.parse().ok()).unwrap_or(0x5EED_2026);
-    let frames: usize = std::env::var("NFSU2_FUZZ_FRAMES").ok().and_then(|v| v.parse().ok()).unwrap_or(6000);
-    let node = fuzz("node", seed, frames, true).await;
-    let rust = fuzz("rust", seed, frames, true).await;
-    let kinds = |r: &FuzzRun| {
-        let mut m = BTreeMap::new();
-        for l in r.lines.iter().skip_while(|l| !l.starts_with("  access    :")).skip(1) {
-            *m.entry(template(l)).or_insert(0usize) += 1;
-        }
-        m
-    };
-    let (kn, kr) = (kinds(&node), kinds(&rust));
-    for (who, r) in [("node", &node), ("rust", &rust)] {
-        for l in r.lines.iter().skip_while(|l| !l.starts_with("  access    :")).skip(1) {
-            println!("{who}| {l}");
-        }
-    }
-    println!("  node   rust");
-    for k in kn.keys().chain(kr.keys()).collect::<std::collections::BTreeSet<_>>() {
-        println!("{:6} {:6}  {k}", kn.get(k).copied().unwrap_or(0), kr.get(k).copied().unwrap_or(0));
-    }
-    println!("---- the lobby's answers (node, rust)");
-    for k in node.got.keys().chain(rust.got.keys()).collect::<std::collections::BTreeSet<_>>() {
-        println!("{:6} {:6}  {}/{}", node.got.get(k).copied().unwrap_or(0), rust.got.get(k).copied().unwrap_or(0), k.0, k.1);
-    }
-    println!(
-        "---- /players: {:?} {:?}; exit {:?} {:?}; logins {} {}",
-        node.players, rust.players, node.exit, rust.exit, node.logins, rust.logins
-    );
-    for (f, s) in node.files.iter().chain(rust.files.iter()) {
-        println!("{f}: {}", &s[..s.len().min(600)]);
     }
 }

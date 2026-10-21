@@ -1,10 +1,9 @@
-//! The hub's logic (roam-hub.mjs `RoamHub` without its timer): the players, the links, the cap.
+//! The hub's logic, without its timer (`RoamHub` gives it one): the players, the links, the cap.
 //!
-//! The order of the players, and of each player's links, is the order they came in, as the JS's Maps keep it: it
-//! decides between pairs at one distance, and so the links.  The players live in slots (a link names the slot of
-//! the player it is to: a player that goes is taken out of every link before its slot is used again, at the next
-//! tick or once many have gone, and until then links to it count for nothing) and `order` lists the slots in the
-//! order the players came.
+//! The order of the players, and of each player's links, is the order they came in: it decides between pairs at one
+//! distance, and so the links.  The players live in slots (a link names the slot of the player it is to: a player
+//! that goes is taken out of every link before its slot is used again, at the next tick or once many have gone, and
+//! until then links to it count for nothing) and `order` lists the slots in the order the players came.
 
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
@@ -37,7 +36,7 @@ struct Player {
     hub_port: u16,
     id: u32,
     room: u32,
-    /// kept as roam-hub.mjs keeps them; nothing reads them yet
+    /// kept as the player last sent them; nothing reads them yet
     #[allow(dead_code)]
     status: u8,
     #[allow(dead_code)]
@@ -63,18 +62,18 @@ impl Player {
     }
 }
 
-/// the JS's `${vip}:${port}`
+/// a player's endpoint, its virtual address and port, in one number
 fn key(vip: u32, port: u16) -> u64 {
     (vip as u64) << 16 | port as u64
 }
 
-/// JS `Math.round(x)` (V8's: the nearest integer, a half up)
+/// the nearest integer, a half up (to +infinity, where `f64::round` takes it away from 0)
 fn js_round(x: f64) -> f64 {
     let c = x.ceil();
     if c - 0.5 <= x { c } else { c - 1.0 }
 }
 
-/// roam-hub.mjs's options: a value that is not a positive number keeps its default
+/// the options: a value that is not a positive number keeps its default
 fn sanitize(o: RoamOptions) -> RoamOptions {
     let d = RoamOptions::default();
     let n = |v: usize, d: usize| if v > 0 { v } else { d };
@@ -115,7 +114,7 @@ struct Stats {
     cap_cuts: u64,
 }
 
-/// one pair of a room weighed (every pair of a room of at most exactRoom players): since when it is linked; a and b
+/// one pair of a room weighed (every pair of a room of at most `exact_room` players): since when it is linked; a and b
 /// are places in the room's list, a < b (its place in the order is in `Scratch::order`)
 struct Pair {
     since: f64,
@@ -178,7 +177,7 @@ fn apart(pos: &[[f64; 3]], ahead: &[[f64; 3]], i: usize, j: usize) -> f64 {
     distance(&pos[i], &pos[j]).min(distance(&ahead[i], &ahead[j]))
 }
 
-/// The hub's logic (roam-hub.mjs `RoamHub` without its timer).
+/// The hub's logic, without its timer (`RoamHub` gives it one).
 pub struct Hub {
     o: RoamOptions,
     now: Box<dyn Fn() -> f64 + Send>,
@@ -200,15 +199,15 @@ pub struct Hub {
     order: Vec<u32>,
     holes: usize,
     by_key: HashMap<u64, u32>,
-    /// the endpoints of each virtual address (maxPerVip)
+    /// the endpoints of each virtual address (`max_per_vip`)
     per_vip: HashMap<u32, u32>,
     s: Scratch,
 }
 
 impl Hub {
-    /// `now`: the clock in ms (Date.now() in the server); `busy`: 0 to 1, how busy the server was since the last
-    /// tick; `log`: a console line; `send(vip, frame)`: through the switch (true: it went); `id`: the hub's own
-    /// sender id (random in the server)
+    /// `now`: the clock in ms (nfsu2_util::now_ms() in the server); `busy`: 0 to 1, how busy the server was since
+    /// the last tick; `log`: a console line; `send(vip, frame)`: through the switch (true: it went); `id`: the hub's
+    /// own sender id (random in the server)
     pub fn new(
         o: RoamOptions,
         now: Box<dyn Fn() -> f64 + Send>,
@@ -241,7 +240,7 @@ impl Hub {
         }
     }
 
-    /// the switch's way to its browsers (roam-hub.mjs `attachSwitch(send)`)
+    /// the switch's way to its browsers
     pub fn attach_switch(&mut self, send: Box<dyn Fn(u32, Bytes) -> bool + Send>) {
         self.send = send;
     }
@@ -302,7 +301,7 @@ impl Hub {
         true
     }
 
-    /// a player gone: out of the players and out of every link (roam-hub.mjs `drop(key)`)
+    /// a player gone: out of the players and out of every link
     fn drop_key(&mut self, k: u64) {
         let Some(&slot) = self.by_key.get(&k) else { return };
         self.drop_slots(&[slot]);
@@ -498,7 +497,7 @@ impl Hub {
         // every player gone since the last tick out of the links the tick weighs
         self.purge();
 
-        // the rooms: the players with a position younger than staleMs, in the order they came
+        // the rooms: the players with a position younger than `stale_ms`, in the order they came
         let s = &mut self.s;
         s.room_of.clear();
         let mut rooms = 0;
@@ -608,17 +607,17 @@ impl Hub {
         ));
     }
 
-    /// free roam is busy: the cap is under askCap (the start page does not ask new players then)
+    /// free roam is busy: the cap is under `ask_cap` (the start page does not ask new players then)
     pub fn crowded(&self) -> bool {
         self.cap < self.o.ask_cap
     }
 
-    /// the browsers in free roam now (a HELLO within goneMs)
+    /// the browsers in free roam now (a HELLO within `gone_ms`)
     pub fn vips(&self) -> HashSet<u32> {
         self.players().map(|p| p.vip).collect()
     }
 
-    /// roam-hub.mjs `info()`: counts only, never a position
+    /// for the tests and the switch's `info()` (the server's console): counts only, never a position
     pub fn info(&self) -> Value {
         let (mut linked, mut links) = (0u64, 0u64);
         for p in self.players() {
@@ -645,7 +644,7 @@ impl Hub {
         })
     }
 
-    /// each player's links now, by `vip:port`, for the tests (the JS reads `hub.players`)
+    /// each player's links now, by `vip:port`, for the tests
     pub fn links(&self) -> Vec<(String, Vec<String>)> {
         let name = |p: &Player| format!("{}:{}", p.vip, p.port);
         let to = |l: &Link| self.live(l).then(|| self.player(l.slot)).flatten();
@@ -684,9 +683,8 @@ fn join(fresh: &mut [Vec<Link>], a: u32, b: u32, since: f64) {
     fresh[b as usize].push(Link { slot: a, since });
 }
 
-/// The links of a room of at most exactRoom players: every pair of them, nearest first (a link younger than holdMs
-/// before them all, an older one at keep its distance), into the links while both ends have room (roam-hub.mjs
-/// `pair()` and `link()`).
+/// The links of a room of at most `exact_room` players: every pair of them, nearest first (a link younger than
+/// `hold_ms` before them all, an older one at `keep` its distance), into the links while both ends have room.
 fn link_every_pair(slots: &[Option<Player>], list: &[u32], w: &Weigh, s: &mut Scratch) {
     let m = list.len();
     let Scratch { pos, ahead, deg, mark, since, pairs, order, sorting, local: at, fresh, .. } = s;
@@ -718,7 +716,7 @@ fn link_every_pair(slots: &[Option<Player>], list: &[u32], w: &Weigh, s: &mut Sc
             pairs.push(Pair { since: if linked { since[j] } else { w.now }, a: i as u32, b: j as u32 });
         }
     }
-    // the JS's stable sort by d
+    // a stable sort by d: at one d, the pairs in the order they were weighed
     sort_stable(order, sorting);
     // a link takes two with room: once fewer than two have it, the rest of the pairs make none
     let mut open = deg.iter().filter(|&&d| d > 0).count();
@@ -742,14 +740,14 @@ fn has_place(places: &[u32], j: u32) -> bool {
     places.iter().fold(false, |found, &x| found | (x == j))
 }
 
-/// The links of a room larger than exactRoom, as `link_every_pair` makes them from every pair sorted (at one place in
-/// the order the pair of the lower index first), without sorting them all: the last tick's links at their own place,
+/// The links of a room larger than `exact_room`, as `link_every_pair` makes them from every pair sorted (at one
+/// place in the order the pair of the lower index first), without sorting them all: the last tick's links at their own place,
 /// and each player's nearest one after another (Near) while it has room, merged in that order.  A player walks twice,
 /// by the places now and by the places ahead (`apart` is the nearer of the two): a pair comes first at the nearer of
 /// its two distances, as the order has it, and when it comes again, from the other walk, it is linked already or
 /// cannot be (the same as an entry of one pair coming twice, below).
 ///
-/// The JS keeps both in one heap.  Here the last tick's links (32,000 of 2000 players) are sorted once, and only the
+/// One heap could hold both.  Here the last tick's links (32,000 of 2000 players) are sorted once, and only the
 /// nearest ones (one a player) are in the heap, which stays small; the two are merged.  The links come out the same:
 /// the pairs are taken in the same order (by distance, then the lower place, then the higher), and of entries at one
 /// place in it, which are entries of one pair, the order makes no difference (at most one of them links the pair, the
@@ -782,7 +780,7 @@ fn link_many(slots: &[Option<Player>], list: &[u32], w: &Weigh, s: &mut Scratch)
                 olinks.push(j as u32);
                 // each link once: by its lower end, or by the only end that lists it (j's links are in already)
                 if i < j || !has_place(&olinks[ostart[j] as usize..ostart[j + 1] as usize], i as u32) {
-                    // roam-hub.mjs `pair()` of a link: younger than holdMs first, older at keep its distance
+                    // a link's place in the order: younger than `hold_ms` first, older at `keep` its distance
                     let d = if w.now - l.since < w.hold_ms { -1.0 } else { apart(pos, ahead, i, j) * w.keep };
                     olds.push(cand(d, i, j, false));
                 }

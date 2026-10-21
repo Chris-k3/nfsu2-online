@@ -8,10 +8,10 @@ this is the short version.
 It holds the server, the page and the game module. **It does not hold the game.**
 You copy your own NFS Underground 2 folder to the VPS yourself.
 
-1. **Node.js.** Install the current Node.js LTS (20 or newer): your distribution's
-   package, NodeSource, or nodejs.org.
+1. **Nothing to install first.** The server is one static binary, `nfsu2-server`, for
+   the VPS's processor: the bundle's name ends in amd64 (Intel, AMD) or arm64.
 2. **The bundle.**
-   `sudo mkdir -p /opt && sudo tar -C /opt -xzf nfsu2-web-<rev>.tar.gz`
+   `sudo mkdir -p /opt && sudo tar -C /opt -xzf nfsu2-web-<rev>-<arch>.tar.gz`
    This gives `/opt/nfsu2-web`.
 3. **The game folder.** This is the one with `SPEED2.EXE`. From your own computer, inside that folder, copy
    only the game's own files (the server serves nothing else), then make them readable on the VPS:

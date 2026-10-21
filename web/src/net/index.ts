@@ -1,5 +1,5 @@
 // The virtual LAN on the page: one WebSocket to the server's switch
-// (web/server/lan.mjs, /lan on this page's origin) and the net mailboxes the C
+// (web/server-rs/crates/lan, /lan on this page's origin) and the net mailboxes the C
 // runtime publishes (runtime/web/net_proto.h, one layout):
 //   HostKind.Net  free roam (runtime/web/roam_web.c): frame kinds 1 and 2
 //   HostKind.Lan  LAN play, the Winsock HLE's virtual LAN (runtime/web/net_lan.c):
@@ -19,7 +19,7 @@
 // writes the switch's peer list as a bitmap into the mailboxes, tells the LAN
 // side when a browser left (its TCP connections are reset), and pings the
 // switch for its round-trip time.  The server's own online host (the game's
-// Online mode, web/server/online/) is on the peer list as server: true: in the
+// Online mode, web/server-rs/crates/online) is on the peer list as server: true: in the
 // bitmap, never among the players.  Nothing connects until the runtime
 // registers a mailbox, which it does only when a network feature is used (free
 // roam: roam = on; LAN play: the game's first WSAStartup, its LAN screens).
@@ -36,7 +36,7 @@
 // and tells C NET_PAGE_IDLE (Online and LAN play lose their connections, free
 // roam its friends), and nothing connects until setAway(false).
 //
-// With a switch that takes bundles (its welcome's "bundle":1, lan.mjs) what C
+// With a switch that takes bundles (its welcome's "bundle":1, nfsu2-lan) what C
 // queued at once goes as one message: free roam's snapshot to each friend, the
 // same bytes, once with the friends' addresses (TxBundle); and the switch sends
 // this page its datagrams as bundles too (the hello's "bundle":1).
@@ -115,7 +115,7 @@ class AutoBucket {
   }
 }
 
-/** What one drain of a TX ring sends, as bundles (kind 32, lan.mjs): a free-roam datagram (kind 1) of the same
+/** What one drain of a TX ring sends, as bundles (kind 32, nfsu2-lan): a free-roam datagram (kind 1) of the same
  *  bytes as one before it goes in that one's entry with its destination added (when nothing for that destination
  *  came between, so each destination gets its frames in order), everything else in an entry of its own, in the
  *  order C queued it */
@@ -375,7 +375,7 @@ class Link implements NetLink {
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
     ws.onopen = () => {
-      // deltas: the switch sends what changed on the peer list, not the whole list each time (lan.mjs); lan: LAN
+      // deltas: the switch sends what changed on the peer list, not the whole list each time (nfsu2-lan); lan: LAN
       // play is open, so it takes LAN broadcasts; bundle: this page takes bundles
       this.lanSent = this.lanOpen();
       ws.send(JSON.stringify({ t: 'hello', name: this.o.name ?? 'player', deltas: 1, lan: this.lanSent ? 1 : 0, bundle: 1,

@@ -10,7 +10,7 @@
 #   NFSU2_HOST=game.example.com      the name players open (one name); its DNS record points at this VPS
 #   NFSU2_DATA=/srv/nfsu2/game       your NFS Underground 2 folder (default ./game), readable by everyone
 #   NFSU2_MODULE=/srv/nfsu2/module   nfsu2.wasm and nfsu2.json from web/build.sh (default ./module)
-#   NFSU2_IMAGE=<image>              the server's image (default ghcr.io/th0mk/nfsu2-web:latest)
+#   NFSU2_IMAGE=<image>              the server's image (default ghcr.io/th0mk/nfsu2-web-rs:latest)
 #   NFSU2_HTTP_PORT=8080             the server's port on 127.0.0.1, if 8080 is taken on the VPS
 #   NFSU2_REAL_IP_HEADER=cf-connecting-ip    only with Cloudflare's proxy (orange cloud) in front of Caddy
 # then:  docker compose up -d && docker compose logs -f server
@@ -26,7 +26,7 @@ services:
     volumes: [caddy-data:/data, caddy-config:/config]
     logging: { driver: local }
   server:
-    image: ${NFSU2_IMAGE:-ghcr.io/th0mk/nfsu2-web:latest}
+    image: ${NFSU2_IMAGE:-ghcr.io/th0mk/nfsu2-web-rs:latest}
     restart: unless-stopped
     network_mode: host
     command: ["--behind-proxy"]
@@ -55,9 +55,9 @@ configs:
     # redirects and errors), closes a connection for any other name (the bare address, a scanner's made-up name)
     # without an answer, and opens at most 15900 connections to the server (it takes 16000 with 2000 players).
     # Behind Cloudflare's proxy it believes CF-Connecting-IP only from Cloudflare's addresses
-    # (web/server/cloudflare-ips.txt, as of 2026-10-18) and hands the server the address it decided on, so a
-    # client that reaches the VPS directly cannot claim another; the server reads that header only with
-    # NFSU2_REAL_IP_HEADER=cf-connecting-ip.  The admin API (127.0.0.1:2019) stays off: nothing reconfigures
+    # (web/server-rs/crates/headers/cloudflare-ips.txt, as of 2026-10-18) and hands the server the address it
+    # decided on, so a client that reaches the VPS directly cannot claim another; the server reads that header only
+    # with NFSU2_REAL_IP_HEADER=cf-connecting-ip.  The admin API (127.0.0.1:2019) stays off: nothing reconfigures
     # Caddy while it runs.
     content: |
       {

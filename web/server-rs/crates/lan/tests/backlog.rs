@@ -1,7 +1,7 @@
-//! (the port's own) The Online host behind: what a client sends it waits in that client's socket once the host's
-//! backlog passes 4096 frames (nfsu2_util::Backlog), as Node's one busy thread stopped reading; nobody else waits, and
-//! once the host catches up the rest comes in order.  (Before, the switch's readers posted to the host's queue without
-//! end: memory grew while its thread was behind, and the lobby lagged by the whole backlog.)
+//! The Online host behind: what a client sends it waits in that client's socket once the host's backlog passes 4096
+//! frames (nfsu2_util::Backlog), as Node's one busy thread stopped reading; nobody else waits, and once the host
+//! catches up the rest comes in order.  (Before, the switch's readers posted to the host's queue without end: memory
+//! grew while its thread was behind, and the lobby lagged by the whole backlog.)
 
 mod harness;
 

@@ -1,5 +1,4 @@
-//! The rules of headers.mjs, case by case from its comments (there is no headers.test.mjs; data-blocks.test.mjs
-//! has the Accept-Encoding cases).  tests/node_cross.rs compares all of it with the JS itself.
+//! The rules of this crate, case by case from its comments.
 
 use std::collections::HashMap;
 
@@ -96,7 +95,7 @@ fn cache_headers_by_kind() {
     );
 }
 
-// data-blocks.test.mjs: "Accept-Encoding: the first of the server's encodings the client takes"
+// Accept-Encoding: the first of the server's encodings the client takes
 #[test]
 fn accept_encoding_first_the_client_takes() {
     let have = ["zstd", "br", "gzip"];
@@ -212,7 +211,7 @@ fn local_or_ip() {
     for yes in ["localhost:8080", "LOCALHOST.", "a.localhost:80", "[::1]:80", "[anything", "1.2.3.4:443", "fe80::1%eth0", "2001:db8::abc"] {
         assert!(is_local_or_ip(Some(yes)), "{yes}");
     }
-    // as in the JS, a bare IPv6 address that ends in digits loses them as a "port"
+    // a bare IPv6 address that ends in digits loses them as a "port" (a Host header brackets one)
     for no in ["example.com", "::1", "2001:db8::1", "", "localhost.example"] {
         assert!(!is_local_or_ip(Some(no)), "{no}");
     }

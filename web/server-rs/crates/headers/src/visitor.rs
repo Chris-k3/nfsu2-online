@@ -1,8 +1,8 @@
-//! headers.mjs reads Cloudflare's `cf-visitor` header as `JSON.parse(h).scheme === 'https'`, false where the
-//! parse throws.  This answers the same without building a value: the text is checked against JSON.parse's grammar
-//! (ECMA-404, any depth, lone surrogates in \u escapes allowed, as V8 takes them; serde_json refuses those and
-//! more than 128 levels), and only the top-level object's last "scheme" member (JSON.parse keeps the last of
-//! duplicate keys) is decoded.
+//! Cloudflare's `cf-visitor` header as the Node server this replaced read it: `JSON.parse(h).scheme === 'https'`,
+//! false where the parse throws.  This answers the same without building a value: the text is checked against
+//! JSON.parse's grammar (ECMA-404, any depth, lone surrogates in \u escapes allowed, as V8 takes them; serde_json
+//! refuses those and more than 128 levels), and only the top-level object's last "scheme" member (JSON.parse keeps
+//! the last of duplicate keys) is decoded.
 
 /// `JSON.parse(text).scheme === 'https'`, false where JSON.parse throws (or the value has no properties: null)
 pub(crate) fn scheme_is_https(text: &str) -> bool {

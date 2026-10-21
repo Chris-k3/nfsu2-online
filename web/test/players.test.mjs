@@ -3,7 +3,7 @@
 //   node --test web/test/players.test.mjs
 // Against the real server when the game folder is there: the two counts, whether it is full and whether free roam
 // is busy, nothing else in the body, never cached, the Host check of every route, null with --online off, full with --max-peers 1.  The online count itself (logged in, or racing
-// an online race) is in online-lobby.test.mjs.
+// an online race) is in the online crate's tests (web/server-rs/crates/online/src/tests/lobby.rs).
 // Ports: NFSU2_TEST_PLAYERS_PORT1 (8530), NFSU2_TEST_PLAYERS_PORT2 (8630).
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -25,7 +25,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function server(port, extra = []) {
   const st = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'nfsu2-players-test-'));
-  const srv = spawn(...serverCommand(path.join(HERE, '../server/server.mjs'), ['--data', DATA, '--http-port', String(port), '--state', st, ...extra]),
+  const srv = spawn(...serverCommand(['--data', DATA, '--http-port', String(port), '--state', st, ...extra]),
     { stdio: ['ignore', 'pipe', 'pipe'] });
   await new Promise((res, rej) => {
     let out = '';

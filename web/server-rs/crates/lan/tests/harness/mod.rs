@@ -1,6 +1,6 @@
-//! lan.test.mjs's harness for the Rust switch: `startSwitch` (a listener on 127.0.0.1:0 that answers the upgrade as
-//! server.mjs does and attaches with ?resume, ?g= and ?s=), the fake browser `Client` (tokio-tungstenite), `rawWs` and
-//! `rawPeer` (plain sockets that read only when told to), `frameOf`, `bundleOf`, `throttle`.  The listener also
+//! The switch's test harness: `start` and `start_full` (a switch behind a listener on 127.0.0.1:0 that answers the
+//! upgrade to /lan and attaches with ?resume, ?g= and ?s=), the fake browser `Client` (tokio-tungstenite), `raw_ws`
+//! and `raw_peer` (plain sockets that read only when told to), `frame_of`, `bundle_of`, `throttle`.  The listener also
 //! answers GET /state with what the page tests read of the switch (they run in node: tests/page.mjs).
 #![allow(dead_code)]
 
@@ -46,7 +46,7 @@ pub fn all_vips() -> Vec<u32> {
     (0..8u32).flat_map(|b| (0..250u32).map(move |i| (10 << 24) | (77 << 16) | (b << 8) | (i + 2))).collect()
 }
 
-/// the options of the JS harness: its WebSocketServer took messages up to 1 MiB (the switch's own limits decide)
+/// the tests' options: WebSocket messages of up to 1 MiB taken (max_payload), so that the switch's own limits decide
 pub fn opts() -> LanOptions {
     LanOptions { max_payload: 1 << 20, ..LanOptions::default() }
 }
@@ -61,8 +61,9 @@ pub async fn start(o: LanOptions) -> Switch {
     start_full(o, "", None, None, None).await
 }
 
-/// a switch on an ephemeral port, wired as server.mjs wires it (?g=<id> and ?s=<id>: the group and site ids the
-/// server would derive from the client's address); SO_SNDBUF on its sockets as the server sets it (send_buffer_os)
+/// a switch on an ephemeral port, attached as the server's /lan attaches (src/app/lan.rs), with the group and site ids
+/// the server derives from the client's address taken from ?g=<id> and ?s=<id> instead; SO_SNDBUF on its sockets as
+/// the server sets it (send_buffer_os)
 pub async fn start_full(
     o: LanOptions,
     impair: &str,
@@ -149,7 +150,7 @@ async fn state(lan: &LanSwitch) -> Value {
 }
 
 impl Switch {
-    /// the JS `close()`: the switch stops, its connections end
+    /// the switch stops, its connections end
     pub async fn close(self) {
         self.lan.stop();
         self.lan.terminate_all();
@@ -193,7 +194,7 @@ pub fn frame_of(dst: u32, data: &[u8], kind: u8, sport: u16, dport: u16) -> Vec<
     f
 }
 
-/// a bundle (lan.mjs kind 32) of entries (a frame, its destinations: none for the frame's own)
+/// a bundle (kind 32, nfsu2_lan's KIND_BUNDLE) of entries (a frame, its destinations: none for the frame's own)
 pub fn bundle_of(entries: &[(Vec<u8>, Vec<u32>)]) -> Vec<u8> {
     let mut b = vec![32, 0, 0, 0];
     for (f, to) in entries {
@@ -439,7 +440,7 @@ impl Client {
         self.st.lock().unwrap()
     }
 
-    /// waits until f says yes (2 s at most, as the JS until's default)
+    /// waits until f says yes (2 s at most)
     pub async fn until<T>(&self, f: impl FnMut(&Got) -> Option<T>) -> T {
         self.until_ms(2000, f).await
     }
@@ -655,7 +656,7 @@ pub fn drain(mut s: TcpStream) -> JoinHandle<()> {
     })
 }
 
-/// a host on the switch for the tests (lan.test.mjs's breakdown: { vip, name, vips() })
+/// a host on the switch for the tests (the breakdown's: its address, name and vips())
 pub struct FakeHost {
     pub vip: u32,
     pub name: String,
@@ -688,13 +689,13 @@ impl Host for FakeHost {
     fn stop(&self) {}
 }
 
-/// node, when it is there (the page tests and the cross-checks skip without it)
+/// node, when it is there (the page tests skip without it)
 pub fn node() -> Option<std::path::PathBuf> {
     let out = std::process::Command::new("node").arg("--version").output().ok()?;
     out.status.success().then(|| "node".into())
 }
 
-/// web/ (the JS server, its tests and node_modules)
+/// web/ (the page's sources and node_modules)
 pub fn web_dir() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..").canonicalize().unwrap()
 }

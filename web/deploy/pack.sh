@@ -1,17 +1,18 @@
 #!/bin/bash
 # Builds the bundle that runs the server on a VPS without Docker (docs/web/VPS.md, "Without Docker"):
 #
-#   web/deploy/pack.sh [--out <dir>] [--no-build] [--data "<game folder>"]
+#   web/deploy/pack.sh [--out <dir>] [--no-build] [--data "<game folder>"] [--arch amd64|arm64] [--server <binary>]
 #
-# out/web/deploy/nfsu2-web-<rev>.tar.gz holds nfsu2-web/ with
-#   web/server/       the server (server.mjs, headers.mjs, lan.mjs, roam-hub.mjs: free roam's hub,
-#                     names.mjs: names that read as a slur, cloudflare-ips.txt, online/*.mjs: the game's Online mode)
-#   web/node_modules/ its one dependency (ws), copied from this checkout; web/package.json
+# out/web/deploy/nfsu2-web-<rev>-<arch>.tar.gz holds nfsu2-web/ with
+#   nfsu2-server      the server: one static binary for Linux on --arch (default amd64), built in Docker by
+#                     web/server-rs/Dockerfile's binary stage (as the image's, cross-compiled: no emulation), or
+#                     --server's (a Linux binary of your own, such as /app/nfsu2-server out of the image)
 #   web/dist/         the page (the test pages and source maps are in web/dist-dev, never copied)
 #   out/web/          the game module (nfsu2.wasm, nfsu2.json), built here with web/build.sh
 #   deploy/           nfsu2-web.service (systemd), Caddyfile (an example), cloudflared.yml (an example)
 #   README.md         the short version of docs/web/VPS.md
-# and NEVER the game folder or anything from it: the files are copied from a
+# The server finds the page and the module in the folder NFSU2_REPO names (the unit sets /opt/nfsu2-web).
+# The bundle NEVER holds the game folder or anything from it: the files are copied from a
 # fixed list, and the bundle is refused if any file in it has the name and size
 # of a file in the game folder (--data, else $NFSU2_DATA, when it is there),
 # carries the game's file names, or names this machine (host name, home folder).
@@ -19,35 +20,41 @@
 # --no-build: use web/dist as it is (default: rebuild it with node build.mjs).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-OUT="$ROOT/out/web/deploy" BUILD=1 DATA="${NFSU2_DATA:-}"
+OUT="$ROOT/out/web/deploy" BUILD=1 DATA="${NFSU2_DATA:-}" ARCH=amd64 SERVER=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --out) OUT="$2"; shift 2 ;;
     --no-build) BUILD=0; shift ;;
     --data) DATA="$2"; shift 2 ;;
-    -h|--help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --arch) ARCH="$2"; shift 2 ;;
+    --server) SERVER="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"; shift 2 ;;
+    -h|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "pack.sh: unknown option $1"; exit 2 ;;
   esac
 done
+case "$ARCH" in amd64|arm64) ;; *) echo "pack.sh: --arch amd64 or arm64, not $ARCH"; exit 2 ;; esac
 [ -z "$DATA" ] && [ -d "$HOME/projects/nsfu2/Need for Speed - Underground 2" ] && DATA="$HOME/projects/nsfu2/Need for Speed - Underground 2"
 cd "$ROOT"
-REV="$(git rev-parse --short HEAD)$(git diff --quiet HEAD -- web/server web/src web/index.html 2>/dev/null || echo +)"
+REV="$(git rev-parse --short HEAD)$(git diff --quiet HEAD -- web/server-rs web/src web/index.html 2>/dev/null || echo +)"
 [ -f out/web/nfsu2.wasm ] && [ -f out/web/nfsu2.json ] || { echo "no game module: build it first (web/build.sh)"; exit 1; }
-[ -f web/node_modules/ws/package.json ] || { echo "no web/node_modules/ws: cd web && npm ci"; exit 1; }
 if [ "$BUILD" = 1 ]; then (cd web && node build.mjs >/dev/null 2>&1) || { echo "the page did not build (cd web && node build.mjs)"; exit 1; }; fi
 
 STAGE="$OUT/stage"
 rm -rf "$STAGE"; mkdir -p "$STAGE/nfsu2-web"
 B="$STAGE/nfsu2-web"
-mkdir -p "$B/web/server/online" "$B/web/node_modules" "$B/out/web" "$B/deploy"
+mkdir -p "$B/out/web" "$B/deploy"
+# ---- the server ----
+if [ -n "$SERVER" ]; then
+  cp "$SERVER" "$B/nfsu2-server"
+else
+  command -v docker >/dev/null || { echo "no docker to build the server in: install it, or give one with --server"; exit 1; }
+  echo "building the server for linux/$ARCH (docker build --target binary; the first build takes a few minutes)"
+  docker build -q -f web/server-rs/Dockerfile --platform "linux/$ARCH" --target binary --output "type=local,dest=$STAGE/bin" . >/dev/null \
+    || { echo "the server did not build (docker build -f web/server-rs/Dockerfile --target binary)"; exit 1; }
+  mv "$STAGE/bin/nfsu2-server" "$B/nfsu2-server"; rm -rf "$STAGE/bin"
+fi
+[ "$(head -c 4 "$B/nfsu2-server" | od -An -c | tr -d ' ')" = '177ELF' ] || { echo "pack.sh: the server (${SERVER:-from docker build}) is no Linux binary"; exit 1; }
 # ---- the fixed list ----
-cp web/server/server.mjs web/server/headers.mjs web/server/lan.mjs web/server/roam-hub.mjs web/server/names.mjs web/server/cloudflare-ips.txt "$B/web/server/"
-cp web/server/online/*.mjs "$B/web/server/online/"
-cp -R web/node_modules/ws "$B/web/node_modules/ws"
-WS_VERSION="$(node -p "require('./web/node_modules/ws/package.json').version")"
-cat > "$B/web/package.json" <<JSON
-{ "name": "nfsu2-web-server", "private": true, "type": "module", "dependencies": { "ws": "$WS_VERSION" } }
-JSON
 # the page: everything web/dist has (node build.mjs puts the test pages and source maps in web/dist-dev;
 # they are left out here too, should an older build have left them in web/dist)
 (cd web/dist && find . -type f ! -path './test/*' ! -name '*.map' -print) | while read -r f; do
@@ -73,13 +80,14 @@ if [ -n "$DATA" ] && [ -d "$DATA" ]; then
     const hit = walk(process.argv[2]).filter(p => game.has(path.basename(p).toLowerCase() + ":" + fs.statSync(p).size));
     if (hit.length) { console.log(hit.join("\n")); process.exit(1); }' "$DATA" "$B" || fail "files that match the game folder"
   echo "checked against the game folder: no file of it is in the bundle"
-  # what the server leaves out of the game folder (server.mjs GAME_ENTRIES): copy only the rest to the VPS
+  # what the server leaves out of the game folder (GAME_ENTRIES, web/server-rs/src/app/manifest.rs): copy only the
+  # rest to the VPS
   others="$(node -e '
     const fs = require("fs");
-    const m = /const GAME_ENTRIES = \[([^\]]*)\]/.exec(fs.readFileSync(process.argv[2], "utf8"));
+    const m = /const GAME_ENTRIES: \[&str; \d+\] = \[([^\]]*)\]/.exec(fs.readFileSync(process.argv[2], "utf8"));
     if (!m) process.exit(0);
-    const keep = new Set([...m[1].matchAll(/'"'"'([^'"'"']+)'"'"'/g)].map(x => x[1]));
-    console.log(fs.readdirSync(process.argv[1]).filter(n => !n.startsWith(".") && !keep.has(n.toLowerCase())).join(", "));' "$DATA" web/server/server.mjs)"
+    const keep = new Set([...m[1].matchAll(/"([^"]+)"/g)].map(x => x[1]));
+    console.log(fs.readdirSync(process.argv[1]).filter(n => !n.startsWith(".") && !keep.has(n.toLowerCase())).join(", "));' "$DATA" web/server-rs/src/app/manifest.rs)"
   [ -z "$others" ] || echo "NOTE: the server serves only the game's own files; these of your game folder it never serves (leave them off the VPS): $others"
 fi
 HOSTNAME_SHORT="$(hostname | sed 's/\.local$//')"
@@ -91,9 +99,9 @@ SIZE_MB=$(( $(du -sk "$B" | cut -f1) / 1024 ))
 [ "$SIZE_MB" -lt 200 ] || fail "$SIZE_MB MB: more than the server, the page and the module"
 
 # ---- the archive ----
-find "$B" -type d -exec chmod 755 {} +; find "$B" -type f -exec chmod 644 {} +
+find "$B" -type d -exec chmod 755 {} +; find "$B" -type f -exec chmod 644 {} +; chmod 755 "$B/nfsu2-server"
 mkdir -p "$OUT"
-TGZ="$OUT/nfsu2-web-$REV.tar.gz"
+TGZ="$OUT/nfsu2-web-$REV-$ARCH.tar.gz"
 # owner root, no extended attributes: bsdtar (macOS) and GNU tar (Linux, WSL) spell it differently
 if tar --version 2>/dev/null | grep -q bsdtar; then
   TAR_OWNER=(--no-mac-metadata --no-xattrs --uid 0 --gid 0 --uname root --gname root)

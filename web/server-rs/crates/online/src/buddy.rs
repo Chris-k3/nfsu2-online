@@ -1,4 +1,4 @@
-//! EA Messenger (buddy.mjs; the game's "buddy server", port 13505 of the online host): friends lists, who is online
+//! EA Messenger (the game's "buddy server", port 13505 of the online host): friends lists, who is online
 //! and what they do, messages, and game invites, between the personas logged in to this server's lobby.
 //!
 //! The game's buddy client (SPEED2.EXE BuddyApi, 0x74BC50-0x74F5F0) speaks the lobby's framing with upper-case
@@ -42,8 +42,9 @@
 //! closed (the Online audit's ONL-1, ONL-3); chat messages 2 a second (burst 5) and 500 characters; a blocked
 //! persona's messages and invites never arrive.
 //!
-//! A buddy connection's state (the JS `b`) stays readable until the event that closed it is over, as the JS object
-//! stays with the code that holds it (a handler whose own answer failed goes on with `b.persona` null).
+//! A buddy connection's state stays readable until the event that closed it is over, so the code still handling that
+//! event goes on with it (a handler whose own answer closed the connection goes on with no persona, and fails where
+//! it needs one: `null_persona`).
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -64,7 +65,9 @@ use crate::vhost::{ConnId, Svc};
 const MAX_LIST: usize = 50;
 const TITL: &str = "Need for Speed Underground 2 [PC]";
 
-/// buddy.mjs BUDDY_LIMITS
+/// EA Messenger's limits (see the module's text): `lists` friends lists kept, `list_rate` new ones an hour per
+/// client, `msg_rate` messages a second (burst 3 x), `heavy_rate` lists and searches a second (burst 4),
+/// `presence_ms` the least time between two presences of one persona
 #[derive(Clone, Copy, Debug)]
 pub struct BuddyLimits {
     pub lists: f64,
@@ -80,15 +83,15 @@ impl Default for BuddyLimits {
     }
 }
 
-/// a persona's friends list: its name, the friends (lower case -> the name as given; the JS's Set `B` and its Map
-/// `names`, which change together), the month it was last seen
+/// a persona's friends list: its name, the friends (lower case -> the name as given; `B` in buddies.json), the month
+/// it was last seen
 pub struct FriendsList {
     pub name: String,
     pub b: IndexMap<String, String>,
     pub seen: String,
 }
 
-/// one EA Messenger connection (the JS `b`)
+/// one EA Messenger connection
 pub struct Buddy {
     pub conn: ConnId,
     vip: u32,
@@ -122,8 +125,7 @@ pub struct Buddies {
     /// lower-case persona -> buddy connection
     online: OrderedMap<String, u64>,
     /// lower-case persona -> the lists (their owners, lower case) that have it as a friend, and the connections that
-    /// met it: who hears of its presence (the JS goes through every online persona for each presence; these keep it
-    /// to the ones that hear)
+    /// met it: who hears of its presence (so a presence goes to the ones that hear, not through every online persona)
     fans: HashMap<String, HashSet<String>>,
     met_by: HashMap<String, HashSet<u64>>,
     /// "from>to" (lower case) -> when: friend requests waiting for an answer
@@ -201,7 +203,7 @@ impl Buddies {
                 self.lists.insert(lower(&name), l);
             }
         }
-        // (a name twice in the file: the later list in the earlier one's place, as JS's Map.set)
+        // (a name twice in the file: the later list, in the earlier one's place)
         let owners: Vec<(String, Vec<String>)> = self.lists.iter().map(|(o, l)| (o.clone(), l.b.keys().cloned().collect())).collect();
         for (owner, friends) in owners {
             for k in friends {
@@ -245,7 +247,7 @@ impl Buddies {
         }
     }
 
-    /// buddies.json as the JS writes it
+    /// buddies.json's text: version 2, the lists that have friends, names only (byte for byte the Node server's)
     pub fn serialize(&self) -> String {
         let mut s = String::from("{\"v\":2,\"note\":\"NFSU2 online friends lists (persona names only)\",\"personas\":[");
         let mut first = true;
@@ -291,6 +293,7 @@ impl Buddies {
     }
 }
 
+/// a persona's presence as its friends see it
 fn presence(b: &Buddy) -> Fields {
     fields![
         ("USER", &b.persona),
@@ -303,18 +306,19 @@ fn presence(b: &Buddy) -> Fields {
     ]
 }
 
+/// the presence of a persona that is not online
 fn offline(name: &str) -> Fields {
     fields![("USER", name), ("SHOW", "DISC"), ("STAT", ""), ("PROD", ""), ("TITL", TITL), ("EXTR", "NFS-CONSOLE-2005"), ("ATTR", "D")]
 }
 
-/// what the JS throws where it reads `b.persona.toLowerCase()` once the connection's persona is gone
+/// the error of a handler that needs the connection's persona once it is gone (the console line the Node server
+/// wrote for it)
 fn null_persona() -> String {
     "TypeError: Cannot read properties of null (reading 'toLowerCase')".into()
 }
 
 impl Core {
-    /// `b.send(kind, fields, code)`: the connection's words to the game (an error: a field name that is not one,
-    /// which the JS throws)
+    /// the connection's words to the game (an error: a field name that is not one)
     fn bsend(&mut self, b: u64, kind: &str, fields: &[(std::borrow::Cow<'static, str>, V)], code: &str) -> Result<(), String> {
         let f = encode_frame(kind, code, fields)?;
         if let Some(conn) = self.buddies.conns.get(&b).map(|x| x.conn) {
@@ -375,7 +379,7 @@ impl Core {
         }
     }
 
-    /// the connection closed (onclose): its login timer ends, it is gone
+    /// the connection closed (reset, ended or gone with its browser): its login timer ends, it is gone
     pub fn buddy_closed(&mut self, b: u64) {
         if let Some(t) = self.buddies.conns.get_mut(&b).and_then(|x| x.login_timer.take()) {
             self.timers.clear(t);
@@ -401,7 +405,7 @@ impl Core {
             }
             let f = FieldMap::parse(&m.body);
             if let Err(e) = self.buddy_message(b, &m.kind, &f) {
-                // the first line of the JS's e.stack (its frames are not written)
+                // the error as "<name>: <message>" (a TypeError names itself, the others are an Error)
                 let e = if e.starts_with("TypeError") { e } else { format!("Error: {e}") };
                 self.console_error(&format!("[online] buddy \"{}\" failed: {e}", m.kind));
                 return self.conn_destroy(conn, "server error");
@@ -412,7 +416,7 @@ impl Core {
         }
     }
 
-    /// buddy.mjs `gone(b)`
+    /// the connection's persona goes offline: its held-back presence dropped, off `online`, its friends told
     pub fn buddy_gone(&mut self, b: u64) {
         let Some(x) = self.buddies.conns.get_mut(&b) else { return };
         if let Some(t) = x.presence_timer.take() {
@@ -520,9 +524,9 @@ impl Core {
         let now = self.bnow();
         self.buddies.conns.get_mut(&b).expect("held").told = Some(now);
         let frame = encode_frame("PGET", "", &what)?;
-        // the online personas that have b as a friend or met it, in the order of `online` (the JS's): what is on the
-        // lists and who met whom do not change while this goes out, and a connection is in `online` exactly while it
-        // has a persona (one that went during this loop is passed over, as the JS's Map passes over what was deleted)
+        // the online personas that have b as a friend or met it, in the order of `online` (the order they logged in):
+        // what is on the lists and who met whom do not change while this goes out, and a connection is in `online`
+        // exactly while it has a persona (one that went during this loop is passed over)
         let bs = &self.buddies;
         let mut hear: Vec<(u64, u64)> = Vec::new();
         for owner in bs.fans.get(&me).into_iter().flatten() {
@@ -591,7 +595,7 @@ impl Core {
         if !mine || !them {
             return Ok(());
         }
-        // (a list the second one pushed out of the store takes its friend nowhere, as in the JS)
+        // (a list the second one pushed out of the store takes its friend nowhere: `add_friend` finds no list)
         for (l, n) in [(&me, who), (&k, bp.as_str())] {
             self.buddies.add_friend(l, lower(n), n.to_string());
         }
@@ -640,8 +644,7 @@ impl Core {
             // the lobby's key for this browser's persona: the only thing that says who this is
             let key = f.str("LKEY").to_string();
             let vip = x.vip;
-            // the first of the live sessions with this key from this browser (the JS looks through all of them: the
-            // others are not of this browser)
+            // the first of this browser's live sessions with this key (a session of another browser never counts)
             let s = if key.encode_utf16().count() >= 24 {
                 self.lobby.of_vip(vip).iter().copied().find(|id| {
                     let y = self.lobby.s(*id);
@@ -909,6 +912,7 @@ impl Core {
                 let o = self.buddies.online.get(&lower(&to)).copied();
                 let t = self.bnow();
                 let x = self.buddies.conns.get_mut(&b).expect("held");
+                // messages and invites: 2 a second, a burst of 5 (over that: "full", the connection stays)
                 x.msgs_v = 5f64.min(x.msgs_v + (t - x.msgs_t) / 500.0);
                 x.msgs_t = t;
                 if x.msgs_v < 1.0 {
@@ -944,6 +948,49 @@ impl Core {
                 }
             }
             _ => self.bsend(b, &short, &with_id, ""),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // buddies.json read leniently and written again, with room for 3 lists: what the Node server's Buddies made of
+    // the same files
+    #[test]
+    fn buddies_json_read_and_written_again() {
+        let friends: Vec<String> = (0..60).map(|i| format!("\"Friend{i}\"")).collect();
+        let many = format!(r#"{{"personas":[{{"name":"Many","seen":"2026-03","B":[{}]}}]}}"#, friends.join(","));
+        let fifty = format!(r#"{{"name":"Many","seen":"2026-03","B":[{}]}}"#, friends[..50].join(","));
+        let cases = [
+            ("{not json", ""),
+            ("", ""),
+            (
+                r#"{"v":2,"note":"NFSU2 online friends lists (persona names only)","personas":[{"name":"Alpha","seen":"2026-10","B":["Bravo","Charlie"]}]}"#,
+                r#"{"name":"Alpha","seen":"2026-10","B":["Bravo","Charlie"]}"#,
+            ),
+            // a friend twice: the later spelling in the earlier one's place; friends that are no name; the blocked
+            // list (I) not read; an owner twice: the more recently seen list, in the other one's place
+            (
+                r#"{"personas":[{"name":"Alpha","seen":"2026-10","B":["Bravo","bravo","x y",5,null,"Delta"],"I":["Mallory"]},{"name":"alpha","seen":"2026-09","B":["Echo"]}]}"#,
+                r#"{"name":"Alpha","seen":"2026-10","B":["bravo","Delta"]}"#,
+            ),
+            // owners that are no name not read; of the others the 3 most recently seen (no month: the oldest), of
+            // those the lists with friends
+            (
+                r#"{"personas":[{"name":"NoFriends","seen":"2026-10","B":[]},{"name":"Bad Name","B":["Alpha"]},{"name":"Old","B":["Alpha"]},{"name":"Mid","seen":"2026-05","B":["Alpha"]},{"name":"New","seen":"2026-12","B":"Alpha"},{"name":"Newer","seen":"2027-01","B":["Zed"]}]}"#,
+                r#"{"name":"Newer","seen":"2027-01","B":["Zed"]}"#,
+            ),
+            // 50 friends at most
+            (many.as_str(), fifty.as_str()),
+        ];
+        for (text, kept) in cases {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(dir.path().join("buddies.json"), text).unwrap();
+            let b = Buddies::new(Some(dir.path().to_path_buf()), BuddyLimits { lists: 3.0, ..Default::default() });
+            let want = format!(r#"{{"v":2,"note":"NFSU2 online friends lists (persona names only)","personas":[{kept}]}}"#);
+            assert_eq!(b.serialize(), want, "{text}");
         }
     }
 }

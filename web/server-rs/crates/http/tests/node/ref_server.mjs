@@ -1,6 +1,7 @@
-// Node's http server with the rules server.mjs sets on it (LIMITS, serverOptions, harden(), onClientError,
-// refuseSocket, onReq's pipelining count), and a test service: the reference the Rust engine is compared with
-// (tests/cross_node.rs).  Every route answers the same bytes as the Rust tests' service (tests/common/mod.rs).
+// Node's http server with the rules the Node server set on it (LIMITS: its sizes, timeouts and keep-alive;
+// onClientError, refuseSocket, onReq's pipelining count), and a test service: the reference the Rust engine is
+// compared with (tests/cross_node.rs).  Every route answers the same bytes as the Rust tests' service
+// (tests/common/mod.rs).
 //   node ref_server.mjs '<json options>'     prints "listening <port>" once it is up (on 127.0.0.1, port 0)
 import http from 'node:http';
 

@@ -1,15 +1,19 @@
 # syntax=docker/dockerfile:1
-# NFS Underground 2 in the browser: the Rust server (web/server-rs) as a container image.
+# NFS Underground 2 in the browser: the server (web/server-rs) as a container image (docs/web/VPS.md).
 #
 #   docker build -f web/server-rs/Dockerfile -t nfsu2-web-rs .
 #
-# The Node server's image (Dockerfile) in every way a VPS sees it: the page (web/dist, without the test pages and
-# source maps), the mounts (/game the NFS Underground 2 folder, /module nfsu2.wasm and nfsu2.json, /state the keys and
-# the Online records), the user (uid 1000, so the state volume the Node image wrote stays writable), the options and
-# NFSU2_* environment, the port and the health check.  Only the server differs: one static binary instead of Node.
-# So switching a VPS is NFSU2_IMAGE=ghcr.io/<owner>/nfsu2-web-rs:<tag> in its .env (web/deploy/compose.yml), and
-# switching back is the old line.  The image never holds the game or anything made from it (this Dockerfile's
-# .dockerignore lets only the page's and the server's sources into the build).
+# The image holds the server (one static binary) and the page (web/dist, without the test pages and source maps).  It
+# never holds the game or anything made from it (this Dockerfile's .dockerignore lets only the server's and the page's
+# sources into the build); those are mounted:
+#   /game     the NFS Underground 2 folder (the one with SPEED2.EXE), read-only, readable by everyone
+#   /module   nfsu2.wasm and nfsu2.json, built with web/build.sh from the image's revision, read-only
+#   /state    the server's keys (ETags, the switch's tokens) and the Online mode's records: a volume, kept across
+#             updates (a new ETag key would make every browser download the game data again)
+# The server runs as uid 1000 (the user of the Node server's image before it, so a state volume that one wrote stays
+# writable) and listens on 127.0.0.1:8080 of the network it is given: the VPS's own, with Caddy in front
+# (web/deploy/compose.yml), or a tunnel's (compose.tunnel.yml).  Its command line is the server's options; by default
+# --behind-proxy, which needs NFSU2_HOST, the name players open.
 #
 # Both stages that build run on the build machine's platform: the binary is cross-compiled (cargo-zigbuild, static
 # musl) for the image's, so building it for arm64 on amd64 needs no emulation.
@@ -21,7 +25,6 @@ RUN npm ci --no-audit --no-fund
 COPY app/registry-defaults.txt /src/app/
 COPY web/build.mjs web/index.html ./
 COPY web/src src
-COPY web/server/names.mjs server/
 RUN node build.mjs && mkdir /state
 
 FROM --platform=$BUILDPLATFORM rust:1-bookworm AS server
@@ -37,13 +40,17 @@ RUN case "$TARGETARCH" in \
  && ln -s /opt/zig-*/zig /usr/local/bin/zig \
  && cargo install --locked cargo-zigbuild@0.23.4
 WORKDIR /src
-COPY web/server/cloudflare-ips.txt web/server/
 COPY web/server-rs web/server-rs
 # no line tables in the image's binary (a third of its size); a panic still names its functions
 ENV CARGO_PROFILE_RELEASE_DEBUG=0
 # (the build folder goes once the binary is out: the layer, which the CI's cache keeps, holds 6 MB instead of 500)
 RUN cd web/server-rs && cargo zigbuild --release --locked -p nfsu2-server --target "$(cat /target)" \
  && cp "target/$(cat /target)/release/nfsu2-server" /nfsu2-server && rm -rf target
+
+# the binary on its own, for a VPS without Docker (web/deploy/pack.sh):
+#   docker build -f web/server-rs/Dockerfile --platform linux/amd64 --target binary --output <dir> .
+FROM scratch AS binary
+COPY --from=server /nfsu2-server /nfsu2-server
 
 FROM alpine:3.22
 LABEL org.opencontainers.image.title="nfsu2-web-rs" \
@@ -53,7 +60,7 @@ WORKDIR /app
 COPY --from=page /src/web/dist web/dist
 COPY --from=server /nfsu2-server /app/nfsu2-server
 COPY --from=page --chown=1000:1000 --chmod=700 /state /state
-# NFSU2_REPO: where the server finds the page (web/dist), as the Node image's server finds it next to itself
+# NFSU2_REPO: where the server finds the page (web/dist); its own default is the checkout it was built in
 ENV NFSU2_REPO=/app \
     NFSU2_DATA=/game \
     NFSU2_WASM=/module/nfsu2.wasm \

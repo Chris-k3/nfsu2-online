@@ -1,5 +1,5 @@
-//! server.mjs's routes and rules: the files, the game data in blocks, the module, /players, /lan's handshake, the
-//! per-client budgets, and the answers every response carries.
+//! The routes and rules: the files, the game data in blocks, the module, /players, /lan's handshake, the per-client
+//! budgets, and the answers every response carries.
 //!
 //! There is no access control: whoever can reach the server may play, and the firewall in front of it decides who
 //! that is.  What the server does instead is say nothing about the machine (no host name, addresses, paths, versions
@@ -46,9 +46,10 @@ use crate::options::{Options, js_to_number};
 
 pub use run::run;
 
-/// server.mjs `LIMITS`: what one client may hold and do.  "Per client" is per client address: an IPv4 address or an
-/// IPv6 /56 (headers.mjs addressKey); "per site" is per IPv6 /48 (siteKey: one site, or one free tunnel-broker
-/// allocation, which holds 256 /56s and would otherwise be 256 budgets for one client: the review of the audit's F3).
+/// What one client may hold and do (one connection's limits: nfsu2_http::Limits).  "Per client" is per client
+/// address: an IPv4 address or an IPv6 /56 (nfsu2_headers::address_key); "per site" is per IPv6 /48 (site_key: one
+/// site, or one free tunnel-broker allocation, which holds 256 /56s and would otherwise be 256 budgets for one client:
+/// the review of the audit's F3).
 pub mod limits {
     /// connections at once per client and per site, TCP peers that are not trusted proxies only: Chrome opens at
     /// most 6 per server and a WebSocket, so this leaves room for a household of players behind one address, and
@@ -102,8 +103,8 @@ pub(crate) async fn finish(s: &mut Response) -> Res {
     s.end().await.map_err(|_| Fail::Gone)
 }
 
-/// A response's headers as server.mjs built them: an object whose keys keep the place they were first given
-/// (`{ ...security, ...cache, ...extra }`: an extra key that is there already replaces the value in place).
+/// A response's headers in the order they were first given (the security headers, the cache headers, then the
+/// route's own): a name that is there already keeps its place and takes the new value.
 pub struct Hdrs(pub Vec<(String, String)>);
 
 impl Hdrs {
@@ -183,7 +184,7 @@ pub fn has_word(s: &str, word: &str) -> bool {
     false
 }
 
-/// a header that is there and not empty (JS truthiness of `q.headers[name]`)
+/// a header that is there and not empty (an empty one counts as none)
 fn present(q: &Request, name: &str) -> bool {
     q.headers.get(name).is_some_and(|v| !v.is_empty())
 }
@@ -200,6 +201,7 @@ pub struct App {
     base: Vec<Vec<(String, String)>>,
     /// the raw answers (refused upgrades, requests the engine cannot read), made once
     raw: HashMap<u16, Vec<u8>>,
+    /// requests in progress per client and site (REQUESTS_PER_CLIENT, REQUESTS_PER_SITE), of max_connections in all
     pub requests: Arc<Budget>,
     pub conns: Arc<Budget>,
     pub lan_conns: Arc<Budget>,
@@ -311,7 +313,8 @@ impl App {
         Hdrs(self.base[i].clone())
     }
 
-    /// `plain(q, s, code, text, extra, cache, noindex)`: a short text answer (the JS's arguments, one for one)
+    /// a short text answer: the code, the text (a newline after it), headers besides the usual ones, the cache rule,
+    /// and whether search engines are told to keep out
     #[allow(clippy::too_many_arguments)]
     pub async fn plain(
         &self,
@@ -345,7 +348,8 @@ impl App {
         self.plain(q, s, 400, "Bad request", &[], Cache::Store, true).await
     }
 
-    /// `rawResponse(code)`
+    /// the answer for code written on the raw connection (refused upgrades, requests the engine cannot read): the
+    /// same headers as every answer, nothing else (a code it has none for: the 400)
     pub fn raw_response(&self, code: u16) -> Vec<u8> {
         self.raw.get(&code).cloned().unwrap_or_else(|| self.raw[&400].clone())
     }
@@ -381,7 +385,7 @@ impl App {
         js::base64url(&mac.finalize().into_bytes())[..22].to_string()
     }
 
-    /// `onReq`: the requests budget, the Cloudflare keep-alive rule, the access log, and the handler with its 500
+    /// One request: the requests budget, the Cloudflare keep-alive rule, the access log, and the handler with its 500
     async fn on_req(&self, mut q: Request, s: &mut Response) {
         // with Cloudflare's proxy in front, the long keep-alive is for the proxies' connections: any other peer gets
         // the usual one, and is told so (keep_alive() gives the engine the time itself)
@@ -426,7 +430,8 @@ impl App {
         }
         if self.o.access_log {
             // the opt-in that names client addresses; a page loads its game data in thousands of requests: plenty
-            // for one client, not a flood
+            // for one client, not a flood.  (The method and the URL as every console line has them: one line,
+            // printable, short; a client chooses what is in a URL.)
             let line = format!(
                 "[http] {} {} {} {} {} ms",
                 if ip.is_empty() { "?" } else { &ip },
@@ -439,7 +444,7 @@ impl App {
         }
     }
 
-    /// server.mjs `handler(q, s)`: the router
+    /// the router
     async fn handler(&self, q: &mut Request, s: &mut Response) -> Res {
         const CLOSE: &[(&str, &str)] = &[("connection", "close")];
         // HTTP/1.1 needs a Host (checked here, not by the engine, so the answer has our headers)
@@ -556,7 +561,7 @@ impl App {
         finish(s).await
     }
 
-    /// `refreshManifest()`: one walk at a time; a request while one is under way takes its result
+    /// the manifest walked again: one walk at a time; a request while one is under way takes its result
     pub async fn refresh_manifest(&self) -> Result<Arc<manifest::Manifest>, String> {
         self.manifest.refresh(&self.o.data, &self.real_state, &self.etag_key).await
     }
@@ -653,8 +658,8 @@ fn artifact_name(name: &str) -> bool {
 }
 
 impl Service for App {
-    /// server.mjs `admit`: connections at once per client and site, for TCP peers that are not trusted proxies (a proxy
-    /// carries many clients); counted from the first byte, before any TLS, so stalled handshakes count too
+    /// connections at once per client and site, for TCP peers that are not trusted proxies (a proxy carries many
+    /// clients); counted from the first byte, before any TLS, so stalled handshakes count too
     fn admit(&self, peer: &SocketAddr) -> Option<Box<dyn Send + Sync>> {
         let ip = nfsu2_headers::bare_ip(&peer.ip().to_string());
         if ip.is_empty() {
@@ -675,9 +680,10 @@ impl Service for App {
         if self.o.trust.trusts(&peer.ip().to_string()) {
             return Duration::from_secs(limits::KEEP_ALIVE_CLOUDFLARE_S);
         }
-        // the usual time for a peer that is not Cloudflare's: server.mjs's conn.setTimeout(65 s) after the answer
-        // replaced Node's own keep-alive timer, its extra second and all, so a second less here (the engine adds
-        // Node's second; on_req says timeout=65 in the Keep-Alive header itself)
+        // the usual time for a peer that is not Cloudflare's: 65 s from the end of the answer.  The engine adds a
+        // second to every keep-alive time (as Node does: nfsu2_http's KEEP_ALIVE_BUFFER), so a second less here: the
+        // Node server set the socket's timeout to 65 s once an answer was finished, which replaced Node's own
+        // keep-alive timer, its extra second and all.  (on_req says timeout=65 in the Keep-Alive header itself.)
         Duration::from_secs(limits::KEEP_ALIVE_S - 1)
     }
 
@@ -694,8 +700,9 @@ impl Service for App {
         self.on_upgrade(req, up)
     }
 
-    /// server.mjs `onClientError`: a request the engine could not read gets a short answer with this server's
-    /// headers, then the connection goes
+    /// A request the engine could not read (a parse error, a head over max_header_size, a header or request that
+    /// took too long) gets a short answer with this server's headers, then the connection goes.  A TLS handshake that
+    /// failed or took too long has no HTTP to answer with: the engine closes the connection without a byte.
     fn client_error(&self, e: ClientError) -> Option<Vec<u8>> {
         Some(self.raw_response(match e {
             ClientError::Parse => 400,

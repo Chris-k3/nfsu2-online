@@ -1,12 +1,12 @@
 //! The server's own HTTP/1.1, on tokio, on every core: what Node's `http.createServer` / `https.createServer` did
-//! for server.mjs, with the rules server.mjs set on them (`LIMITS`, `serverOptions`, `harden()`), and the answers it
-//! gave to what it could not read (`onClientError`, `refuseSocket`).  Not hyper: the audits' rules need answers of
-//! the server's own to requests a library refuses by itself (with the security headers), the pipelining cut, a
+//! for the Node server it replaced, with the rules that server set on them ([`Limits`]), and the answers to what it
+//! cannot read ([`Service::client_error`], [`raw_refusal`]).  Not hyper: the audits' rules need answers of the
+//! server's own to requests a library refuses by itself (with the security headers), the pipelining cut, a
 //! keep-alive time per connection, and the connection budget before any TLS.
 //!
 //! - [`serve`]: the accept loop of one listening socket (plain, or TLS with [`tls::TlsState`])
 //! - [`Service`]: what the server does with a connection, a request, an upgrade, a request it cannot read
-//! - [`Request`], [`Response`]: one exchange, as Node's `IncomingMessage` / `ServerResponse` were to server.mjs
+//! - [`Request`], [`Response`]: one exchange, as Node's `IncomingMessage` / `ServerResponse` were to the Node server
 //! - [`Stream`]: a connection, plain or TLS, that an upgrade hands over (the /lan WebSocket), split into halves
 //!
 //! Inside: `parse` reads requests as llhttp 9 (Node 24's parser) does, `conn` runs a connection as Node's http server
@@ -21,7 +21,7 @@ mod parse;
 mod response;
 pub mod tls;
 
-/// The unit tests' cross-checks run the JS itself.
+/// The unit tests' cross-checks run node itself.
 #[cfg(test)]
 pub(crate) mod node {
     use std::io::Write;
@@ -76,29 +76,32 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
-/// The limits Node's server had (server.mjs `LIMITS` and `serverOptions`).
+/// The limits of one connection and of a listening socket (the ones the Node server set on Node's http server).
 #[derive(Clone, Debug)]
 pub struct Limits {
     /// request line + headers (Node's maxHeaderSize; above: 431)
     pub max_header_size: usize,
     /// the whole header must arrive within this (from the request's first byte; slow-loris): 408
     pub headers_timeout: Duration,
-    /// and the whole request: 408
+    /// and the whole request (nothing takes a body but the test PUTs): 408
     pub request_timeout: Duration,
-    /// a TLS handshake
+    /// a TLS handshake (Node's default is 120 s)
     pub handshake_timeout: Duration,
-    /// a connection with nothing to do for this long goes (Node's server.setTimeout: reads and writes reset it)
+    /// a connection with nothing to do for this long goes (Node's server.setTimeout: reads and writes reset it); an
+    /// answer the client stopped reading is ended sooner, by the progress rule
     pub socket_idle: Duration,
-    /// requests queued on one connection without a finished answer; one more and the connection goes
+    /// requests queued on one connection without a finished answer (browsers and proxies send one at a time); one
+    /// more and the connection goes
     pub pipelined: usize,
     /// connections at once on one listening socket (Node's maxConnections: more are closed at once)
     pub max_connections: usize,
     /// how often the header and request timeouts are checked (Node's connectionsCheckingInterval)
     pub check_interval: Duration,
-    /// a response must move: at least `progress_bytes` in every `progress_ms`...
+    /// a response must move: at least `progress_bytes` in every `progress`... (a 1 MiB block or the 7 MB module takes
+    /// seconds; a client that stops reading, or reads a trickle, is let go)
     pub progress_bytes: u64,
     pub progress: Duration,
-    /// ...and may take this long at most (server.mjs mustFlow)
+    /// ...and may take this long at most (the progress rule: conn.rs `progress`)
     pub response_max: Duration,
 }
 
@@ -124,8 +127,8 @@ impl Default for Limits {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Version {
     Http10,
-    /// HTTP/1.1, and the other versions Node takes (0.9, 2.0): server.mjs's "HTTP/1.1 needs a Host" was
-    /// `q.httpVersion !== '1.0'` ([`Request::http_version`] has the exact one)
+    /// HTTP/1.1, and the other versions Node takes (0.9, 2.0), which the server's "HTTP/1.1 needs a Host" counts as
+    /// HTTP/1.1: only HTTP/1.0 may come without one ([`Request::http_version`] has the exact version)
     Http11,
 }
 
@@ -236,7 +239,7 @@ impl nfsu2_headers::Req for Request {
 }
 
 /// One answer (Node's `ServerResponse`), written to its connection.  Headers are given in order with lower-case
-/// names, as server.mjs gave them to `writeHead`; the engine adds what Node added (`Date`, `Connection`,
+/// names, as the server gives them to `head`; the engine adds what Node added (`Date`, `Connection`,
 /// `Keep-Alive: timeout=<the connection's>` and `Transfer-Encoding: chunked` when there is no Content-Length on
 /// HTTP/1.1).  A HEAD request's answer has no body, whatever is written.  Bytes written count towards the
 /// response's progress (`Limits::progress_bytes`): an answer the client does not take fast enough is cut, and the
@@ -262,7 +265,7 @@ pub struct Response {
     implicit_len: Option<u64>,
 }
 
-/// A request the server could not read (server.mjs `onClientError`).
+/// A request the engine could not read (what it is answered with: [`Service::client_error`]).
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ClientError {
     /// a request Node's parser refuses (an HPE_ error): 400
@@ -273,10 +276,10 @@ pub enum ClientError {
     Timeout,
 }
 
-/// What the server does (server.mjs's `onReq`, `onUpgrade`, `admit`, `onClientError`, `checkExpectation`).
+/// What the server does with a connection, a request, an upgrade, a request it cannot read.
 pub trait Service: Send + Sync + 'static {
-    /// A new TCP connection, before any TLS or byte (server.mjs `admit`): None closes it at once.  What it returns
-    /// is dropped when the connection goes (the per-client connection budget gives its share back).
+    /// A new TCP connection, before any TLS or byte: None closes it at once.  What it returns is dropped when the
+    /// connection goes (the per-client connection budget gives its share back).
     fn admit(&self, peer: &SocketAddr) -> Option<Box<dyn Send + Sync>>;
     /// How long an idle keep-alive connection from this peer is kept, and what its answers' `Keep-Alive: timeout=`
     /// says (Cloudflare's own connections: 905 s; others 65 s).
@@ -289,8 +292,8 @@ pub trait Service: Send + Sync + 'static {
     /// A request that asks for an upgrade (Connection: upgrade and an Upgrade header; Node's 'upgrade' event): the
     /// service takes the connection over, and the 101 or a refusal (`raw_refusal`) is its to write.
     fn upgrade(&self, req: Request, up: Upgraded) -> impl Future<Output = ()> + Send;
-    /// A request the engine cannot read: the raw answer to write before the connection goes (server.mjs
-    /// `rawResponse(code)`), or None to close it at once.
+    /// A request the engine cannot read: the raw answer to write before the connection goes, or None to close it at
+    /// once.
     fn client_error(&self, e: ClientError) -> Option<Vec<u8>>;
 }
 
@@ -428,9 +431,10 @@ impl AsyncWrite for Stream {
     }
 }
 
-/// Listen on `port` at `host`; a `fallback` host (server.mjs: "::" falls back to "0.0.0.0" on a machine without
+/// Listen on `port` at `host`; a `fallback` host (the server's "::" falls back to "0.0.0.0" on a machine without
 /// IPv6, for EAFNOSUPPORT, EADDRNOTAVAIL, EINVAL) is tried when that fails.  Ok: the listener and the host it is on.
-/// Err: the message server.mjs dies with ("port N is in use", or the error's).
+/// Err: the message the server dies with after "cannot listen: " ("port N is in use", or the error's as Node wrote
+/// it).
 pub async fn bind(host: &str, port: u16, fallback: Option<&str>) -> Result<(TcpListener, String), String> {
     let mut host = host.to_string();
     let mut fallback = fallback.map(str::to_string);
@@ -532,7 +536,7 @@ async fn accept_loop<S: Service>(listener: TcpListener, tls: Option<Arc<tls::Tls
         }
         open.fetch_add(1, Relaxed);
         let count = Open(open.clone());
-        // server.mjs admit: the per-client connection budget, before any TLS or byte.  (It runs on this loop: a panic
+        // Service::admit: the per-client connection budget, before any TLS or byte.  (It runs on this loop: a panic
         // in it costs this connection only, not the loop and with it the port.)
         let Ok(Some(admitted)) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| service.admit(&peer))) else { continue };
         // Node's http server: noDelay
@@ -569,7 +573,8 @@ async fn connection<S: Service>(
             match done {
                 Ok(Some(s)) => Stream::Tls(Box::new(s)),
                 // failed or too slow: the connection goes, without a byte of HTTP (an answer queued into a TLS socket
-                // whose handshake never finished held the socket for good: the phase-2 deploy review's finding 2)
+                // whose handshake never finished held the socket for good, and 1024 such sockets locked the port: the
+                // phase-2 deploy review's finding 2)
                 _ => return,
             }
         }
@@ -588,8 +593,8 @@ fn remote_address(peer: &SocketAddr) -> String {
     }
 }
 
-/// server.mjs `refuseSocket(sock, code)` on a connection taken over by an upgrade: the raw answer, then the
-/// connection goes (at once once written, or after 1 s at most).
+/// A refusal on a connection taken over by an upgrade: the raw answer, then the connection goes (at once once
+/// written, or after 1 s at most).
 pub async fn raw_refusal(stream: Stream, answer: Vec<u8>) {
     let (mut r, mut w) = stream.split();
     conn::refuse_io(&mut r, &mut w, &answer).await;

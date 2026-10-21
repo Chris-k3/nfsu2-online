@@ -1,9 +1,8 @@
-//! TLS with a certificate given to the server (--tls-cert/--tls-key; server.mjs `certNames`, `loadCert`,
-//! `sniCallback`): rustls, TLS 1.2 and 1.3.  The handshake goes through only for a server name (SNI) the
-//! certificate covers (exact, or "*.zone" for one label), so a scanner that connects to the bare address, or asks
-//! for another name, never sees the certificate or the domain in it (the audit's F4); a certificate that names an
-//! IP address is shown for handshakes without a name too.  `reload()` reads the files again (a renewed
-//! certificate, picked up without a restart).
+//! TLS with a certificate given to the server (--tls-cert/--tls-key): rustls, TLS 1.2 and 1.3.  The handshake goes
+//! through only for a server name (SNI) the certificate covers (exact, or "*.zone" for one label), so a scanner that
+//! connects to the bare address, or asks for another name, never sees the certificate or the domain in it (the
+//! audit's F4); a certificate that names an IP address is shown for handshakes without a name too (that is how
+//! browsers ask for an IP).  `reload()` reads the files again (a renewed certificate, picked up without a restart).
 //!
 //! A refused handshake looks as Node's did: without a name, OpenSSL had no certificate and sent a fatal
 //! handshake_failure alert; for a name the SNI callback refused, the socket was destroyed without a byte.  (rustls
@@ -24,7 +23,7 @@ use tokio_rustls::StartHandshake;
 use tokio_rustls::server::TlsStream;
 
 /// The names a certificate is for (its subjectAltName): DNS names in lower case, and IP addresses (bare, as
-/// headers.mjs `bareIp` gives them).
+/// nfsu2_headers::bare_ip gives them).
 #[derive(Clone, Debug, Default)]
 pub struct CertNames {
     pub dns: Vec<String>,
@@ -58,7 +57,7 @@ const HANDSHAKE_FAILURE: [u8; 7] = [0x15, 0x03, 0x03, 0x00, 0x02, 0x02, 0x28];
 
 impl TlsState {
     /// Reads and checks both files.  Err: why they cannot be used ("<cert> names no host (no subjectAltName)", a
-    /// broken file), for server.mjs's "the certificate files cannot be used: ..."
+    /// broken file), for the server's "the certificate files cannot be used: ..."
     pub fn load(cert: &Path, key: &Path) -> Result<(std::sync::Arc<TlsState>, CertNames), String> {
         let tickets = rustls::crypto::ring::Ticketer::new().map_err(|e| e.to_string())?;
         let sessions: Arc<dyn StoresServerSessions> = ServerSessionMemoryCache::new(SESSION_CACHE);
@@ -134,7 +133,7 @@ async fn client_hello(tcp: &mut TcpStream) -> Option<rustls::server::Accepted> {
     }
 }
 
-/// server.mjs loadCert: the key, the certificate, its names (none: refused), the context
+/// the key, the certificate, its names (none: refused), the context
 fn build(
     cert: &Path,
     key: &Path,
@@ -190,7 +189,7 @@ impl ResolvesServerCert for Resolver {
     }
 }
 
-/// server.mjs sniCallback: the name in lower case, without a trailing dot, then sniMatch
+/// the SNI rule: the name in lower case, without a trailing dot, then sni_match
 fn covers(dns: &[String], name: &str) -> bool {
     let mut n = name.to_ascii_lowercase();
     if n.ends_with('.') {
@@ -199,7 +198,7 @@ fn covers(dns: &[String], name: &str) -> bool {
     sni_match(&n, dns)
 }
 
-/// server.mjs sniMatch: a name of the certificate, or under one of its "*.zone" names by one label
+/// a name of the certificate, or under one of its "*.zone" names by one label
 pub(crate) fn sni_match(name: &str, list: &[String]) -> bool {
     list.iter().any(|d| {
         if d == name {
@@ -214,8 +213,8 @@ pub(crate) fn sni_match(name: &str, list: &[String]) -> bool {
     })
 }
 
-/// server.mjs certNames: the subjectAltName as Node's X509Certificate writes it ("DNS:a, IP Address:1.2.3.4"),
-/// read back the way server.mjs read it
+/// the certificate's names: its subjectAltName as Node's X509Certificate wrote it ("DNS:a, IP Address:1.2.3.4"),
+/// read back the way the Node server read it
 pub(crate) fn cert_names(der: &CertificateDer<'_>) -> Result<CertNames, String> {
     let (_, x) = x509_parser::parse_x509_certificate(der.as_ref()).map_err(|e| format!("not a certificate: {e}"))?;
     let mut names = CertNames::default();
@@ -258,8 +257,8 @@ fn node_dns(d: &str) -> String {
     s
 }
 
-/// an IP address as Node prints it ("1.2.3.4", or eight groups "0:0:0:0:0:0:0:1"), then headers.mjs bareIp (lower
-/// case)
+/// an IP address as Node prints it ("1.2.3.4", or eight groups "0:0:0:0:0:0:0:1"), then as nfsu2_headers::bare_ip
+/// gives it (lower case)
 fn node_ip(b: &[u8]) -> Option<String> {
     match b.len() {
         4 => Some(format!("{}.{}.{}.{}", b[0], b[1], b[2], b[3])),
@@ -289,7 +288,7 @@ mod tests {
     }
 
     #[test]
-    fn sni_as_server_mjs_matches_it() {
+    fn sni_matches_a_name_or_one_label_under_a_wildcard() {
         let names = l(&["game.test", "*.wild.test"]);
         assert!(sni_match("game.test", &names));
         assert!(sni_match("a.wild.test", &names));
@@ -297,11 +296,11 @@ mod tests {
         assert!(!sni_match("wild.test", &names));
         assert!(!sni_match("scan.invalid", &names));
         assert!(!sni_match("xgame.test", &names));
-        // (an empty label: what the JS rule says too)
+        // (an empty label: what the Node server's rule says too)
         assert!(sni_match(".wild.test", &names));
     }
 
-    /// server.mjs sniMatch itself, over names built on the edges of the rule
+    /// the Node server's sniMatch itself, over names built on the edges of the rule
     #[test]
     fn sni_as_the_js_matches_it() {
         let labels = ["a", "b", "game", "test", "wild", "x-y", "", "*"];

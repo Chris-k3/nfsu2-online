@@ -11,19 +11,23 @@
 #      build script.  A few seconds with the shared object cache.
 #   3. The page (web/dist): built with node build.mjs only when older than its
 #      sources.
-#   4. The server (web/server/server.mjs) in the foreground, with the game folder:
-#      --data, else $NFSU2_DATA, else the folder used last time, else
+#   4. The server (out/web/server-rs/nfsu2-server): built with
+#      web/server-rs/build.sh only when it is missing or older than its sources
+#      (it needs Rust: https://rustup.rs).
+#   5. The server in the foreground, with the game folder: --data, else
+#      $NFSU2_DATA, else the folder used last time, else
 #      ~/projects/nsfu2/Need for Speed - Underground 2 if it exists.  Ctrl-C stops it.
 # It prints the address for this Mac, http://localhost:<port>/; --open also opens
 # it in Chrome.  The server listens on this Mac only: other PCs need HTTPS, from
 # a certificate or a proxy or tunnel in front (docs/web/VPS.md).
 # A build that fails stops here with its error (the last 40 lines; the whole log
 # is in out/web/server/), instead of starting the server with a stale or missing
-# module.
+# module, page or server.
 set -e -o pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 STATE="$ROOT/out/web/server"
+SERVER=out/web/server-rs/nfsu2-server
 DATA="" HTTP_PORT=8080 OPEN=0 BUILD=1
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -31,7 +35,7 @@ while [ $# -gt 0 ]; do
     --http-port) HTTP_PORT="$2"; shift 2 ;;
     --open) OPEN=1; shift ;;
     --no-build) BUILD=0; shift ;;
-    -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "start.sh: unknown option $1 (see --help)"; exit 2 ;;
   esac
 done
@@ -58,7 +62,7 @@ fi
 
 if [ "$BUILD" = 1 ]; then
   # ---- 1. the page's tools ----
-  if [ ! -d web/node_modules/esbuild ] || [ ! -d web/node_modules/ws ]; then
+  if [ ! -d web/node_modules/esbuild ]; then
     say "Installing the page's tools (npm ci, once)"
     (cd web && npm ci --no-audit --no-fund)
   fi
@@ -96,13 +100,27 @@ if [ "$BUILD" = 1 ]; then
     fi
     tail -1 "$STATE/page-build.log"
   fi
+  # ---- 4. the server ----
+  if [ ! -x "$SERVER" ] || [ -n "$(find web/server-rs \( -name '*.rs' -o -name 'Cargo.*' -o -name '*.txt' \) -newer "$SERVER" -type f -print -quit 2>/dev/null || true)" ]; then
+    say "Building the server"
+    if ! web/server-rs/build.sh > "$STATE/server-build.log" 2>&1; then
+      tail -40 "$STATE/server-build.log"
+      echo "The server did not build (it needs Rust: https://rustup.rs; the whole log: $STATE/server-build.log). It was not started."
+      exit 1
+    fi
+    tail -2 "$STATE/server-build.log"
+  fi
+fi
+if [ ! -x "$SERVER" ]; then
+  echo "No server ($SERVER): start without --no-build, or build it with web/server-rs/build.sh."
+  exit 1
 fi
 
-# ---- 4. the server ----------------------------------------------------------------
+# ---- 5. the server ----------------------------------------------------------------
 say "Starting the server (Ctrl-C stops it)"
 echo "  On this Mac:  http://localhost:$HTTP_PORT/"
 if [ "$OPEN" = 1 ]; then
   ( for _ in $(seq 1 50); do curl -sf -o /dev/null "http://localhost:$HTTP_PORT/game.json" && break; sleep 0.2; done
     open -a "Google Chrome" "http://localhost:$HTTP_PORT/" 2>/dev/null || open "http://localhost:$HTTP_PORT/" ) &
 fi
-exec node web/server/server.mjs --data "$DATA" --http-port "$HTTP_PORT"
+exec "$SERVER" --data "$DATA" --http-port "$HTTP_PORT"

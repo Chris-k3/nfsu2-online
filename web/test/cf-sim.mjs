@@ -1,6 +1,6 @@
 // A local stand-in for Cloudflare's proxy in front of the server, for tests
 // only (nothing here opens anything to the internet; it listens on 127.0.0.1):
-//   browser --TLS--> this proxy --HTTP--> server.mjs --behind-proxy (127.0.0.1)
+//   browser --TLS--> this proxy --HTTP--> the server --behind-proxy (127.0.0.1)
 // It does what the edge does to a request and a response that matter here:
 //   - terminates TLS with a test certificate (makeTestCerts)
 //   - sets CF-Connecting-IP to the client (replacing whatever the client

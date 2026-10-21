@@ -1,15 +1,15 @@
-# The Rust server's container image (web/server-rs/Dockerfile) -> ghcr.io/<owner>/<repo>-rs, for amd64 and arm64:
-# the same tags as the Node server's image (image.yml): latest (the default branch), <version> and <major>.<minor>
-# (a v* tag), sha-<commit> (every push).  Pull requests build it without pushing.  Its own workflow, so that the
-# Node image is built and published whatever happens to this one.  The image never holds the game or the game module:
-# the build sees only the page's and the server's sources (web/server-rs/Dockerfile.dockerignore).
+# The server's container image (web/server-rs/Dockerfile) -> ghcr.io/<owner>/<repo>-rs, for amd64 and arm64, tagged
+# latest (the default branch), <version> and <major>.<minor> (a v* tag), sha-<commit> (every push).  Pull requests
+# build it without pushing.  (ghcr.io/<owner>/<repo>, without -rs, was the Node server's image: its tags up to
+# 6076514 stay in the registry.)  The image never holds the game or the game module: the build sees only the page's
+# and the server's sources (web/server-rs/Dockerfile.dockerignore).
 name: image-rs
 on:
   push:
     branches: [main]
     tags: ['v*']
   pull_request:
-    paths: ['web/server-rs/**', web/server/cloudflare-ips.txt, web/server/names.mjs, 'web/src/**', web/build.mjs, web/index.html,
+    paths: ['web/server-rs/**', 'web/src/**', web/build.mjs, web/index.html,
       web/package.json, web/package-lock.json, app/registry-defaults.txt, .github/workflows/image-rs.yml]
   workflow_dispatch:
 permissions:
@@ -49,6 +49,5 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # a cache of its own: the Node image's stays as it is
           cache-from: type=gha,scope=image-rs
           cache-to: type=gha,mode=max,scope=image-rs

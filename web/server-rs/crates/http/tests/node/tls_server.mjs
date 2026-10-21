@@ -1,6 +1,6 @@
-// Node's https server with server.mjs's TLS rules (certNames, sniCallback, a default context only for a certificate
-// that names an address, minVersion, handshakeTimeout, onClientError): the reference for how a handshake the server
-// refuses looks on the wire (tests/tls.rs).
+// Node's https server with the Node server's TLS rules (certNames, sniCallback, a default context only for a
+// certificate that names an address, minVersion, handshakeTimeout, onClientError): the reference for how a handshake
+// the server refuses looks on the wire (tests/tls.rs).
 //   node tls_server.mjs <cert> <key>     prints "listening <port>" once it is up (on 127.0.0.1, port 0)
 import https from 'node:https';
 import tls from 'node:tls';
@@ -24,7 +24,7 @@ function sniCallback(servername, cb) {
 }
 const tlsFiles = { SNICallback: sniCallback, ...(ips.length ? { key, cert } : {}) };
 const srv = https.createServer({ ...tlsFiles, minVersion: 'TLSv1.2', handshakeTimeout: 15_000 }, (q, s) => s.end('ok'));
-// server.mjs onClientError: no HTTP to answer a handshake with, the connection goes at once
+// onClientError: no HTTP to answer a handshake with, the connection goes at once
 srv.on('clientError', (e, sock) => sock.destroy());
 srv.listen(0, '127.0.0.1', () => console.log(`listening ${srv.address().port}`));
 process.on('SIGTERM', () => process.exit(0));

@@ -1,10 +1,10 @@
 //! The free-roam wire format (runtime/roam_core.h): a 16-byte header ("N2FR", version 1, type, length, sender id,
 //! sequence, flags; little-endian), the payload, then the CRC-32 (zlib's) of everything before it.  And the switch's
-//! frame around a datagram (lan.mjs): `[0]` kind, `[4..8]` source vip, `[8..12]` destination vip, `[12..16]` ports.
+//! frame around a datagram (nfsu2-lan): `[0]` kind, `[4..8]` source vip, `[8..12]` destination vip, `[12..16]` ports.
 
 use crate::{PeerEntry, RoamMsg};
 
-/// the switch's frame kinds (lan.mjs): a UDP datagram
+/// the switch's frame kinds (nfsu2-lan): a UDP datagram
 pub(crate) const KIND_UDP: u8 = 1;
 /// the switch's header in front of a datagram
 pub(crate) const F_DATA: usize = 16;
@@ -129,7 +129,7 @@ pub(crate) fn decode(d: &[u8]) -> Option<(u8, u32, Msg<'_>)> {
     Some((kind, sender, m))
 }
 
-/// roam-hub.mjs `decodeRoam(d)`
+/// One free-roam datagram, or None: what `decode` reads of it, the name its own
 pub fn decode_roam(d: &[u8]) -> Option<RoamMsg> {
     let (kind, sender, m) = decode(d)?;
     Some(match m {
@@ -159,7 +159,7 @@ pub(crate) fn write_peers(b: &mut [u8], sender: u32, seq: u16, list: impl ExactS
     b[8..12].copy_from_slice(&sender.to_le_bytes());
     b[12..14].copy_from_slice(&seq.to_le_bytes());
     b[14..16].copy_from_slice(&[0, 0]);
-    // a Buffer keeps the low byte of what it is given, as `as u8` does
+    // the count's low byte: one byte holds every count roam_core reads (RC_MAX_PEERS at most, as above)
     b[16] = list.len() as u8;
     for (i, e) in list.enumerate() {
         let o = 17 + 10 * i;
@@ -171,7 +171,7 @@ pub(crate) fn write_peers(b: &mut [u8], sender: u32, seq: u16, list: impl ExactS
     b[len - CRC..].copy_from_slice(&crc.to_le_bytes());
 }
 
-/// roam-hub.mjs `encodePeers(sender, seq, list)`
+/// A PEERS datagram: `write_peers` into a buffer of its own
 pub fn encode_peers(sender: u32, seq: u16, list: &[PeerEntry]) -> Vec<u8> {
     let mut b = vec![0u8; peers_len(list.len())];
     write_peers(&mut b, sender, seq, list.iter().copied());

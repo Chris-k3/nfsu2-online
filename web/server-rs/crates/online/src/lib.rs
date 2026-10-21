@@ -1,7 +1,7 @@
 //! The server's stand-in for EA's online servers of NFS Underground 2, for the game's own Online mode (main menu,
-//! Online) between browsers on this server: the port of web/server/online/, rule for rule, with the same files in
-//! the state folder (online/stats.json, online/buddies.json, read and written byte for byte as the JS does) and the
-//! same console lines.
+//! Online) between browsers on this server.  It keeps the rules and the console lines of the Node server it
+//! replaced, and its two files in the state folder (online/stats.json, online/buddies.json) byte for byte as that one
+//! wrote them, so the results and friends lists kept before are read as they are.
 //!
 //! - browser: lifted DirtySock -> winsock.c (pcnfs05.ea.com = 10.77.0.1) -> runtime/web/net_lan.c -> page -> /lan
 //!   WebSocket -> the switch (nfsu2-lan)
@@ -19,7 +19,7 @@
 //! undecoded).  The log names players by persona and virtual address only, never their real address or what they
 //! typed as a password.  The lines a client causes (logins, games, races, complaints, friends) go through
 //! `log(line, key)` with that client's opaque group id as the key: the server shows at most a few a minute per
-//! client (server.mjs logLimited; the Online audit's ONL-8).
+//! client (`nfsu2_util::log::limited`; the Online audit's ONL-8).
 //!
 //! The whole of it runs on one thread of its own, as it ran on Node's one thread: the switch posts it its frames in
 //! order ([`OnlineHost`] is a `nfsu2_util::Host`), and its timers (the lobby's ticks, the services' time-outs, the
@@ -60,12 +60,12 @@ use tokio::sync::oneshot;
 
 pub use crate::trace::LobbyTrace;
 
-/// 10.77.0.1 (vhost.mjs `VHOST_VIP`)
+/// 10.77.0.1: the server's own host on the virtual LAN, the address the switch never hands to a browser (vhost.rs)
 pub const VHOST_VIP: u32 = 0x0A4D_0001;
-/// vhost.mjs `VHOST_NAME`
+/// the host's name on the switch's peer lists
 pub const VHOST_NAME: &str = "NFSU2 Online";
 
-/// index.mjs `PORTS`
+/// the online host's ports: the redirector, the lobby, EA Messenger, the web pages (see the crate's text)
 pub const PORT_REDIRECTOR: u16 = 20920;
 pub const PORT_LOBBY: u16 = 20922;
 pub const PORT_BUDDY: u16 = 13505;
@@ -74,23 +74,23 @@ pub const PORT_HTTP: u16 = 80;
 /// a console line and the client it is for (None: the server's own), on the host's thread
 pub(crate) type LogFn = Rc<dyn Fn(&str, Option<&str>)>;
 
-/// the host's two clocks: `now` the JS `Date.now()` its rules read (a test's own in the tests), `timer` the one its
-/// timers run on (monotonic)
+/// the host's two clocks: `now` the wall clock its rules read (ms since 1970; a test's own in the tests), `timer` the
+/// one its timers run on (monotonic)
 pub(crate) struct Clocks {
     pub now: Box<dyn Fn() -> f64>,
     pub timer: Box<dyn Fn() -> f64>,
 }
 
-/// What the Online host is given (index.mjs `OnlineHost` opts).
+/// What the Online host is given.
 #[derive(Clone)]
 pub struct OnlineOptions {
     /// where stats.json and buddies.json are kept (the server's --state/online); None: in memory only
     pub state_dir: Option<PathBuf>,
     /// a console line, and the opaque group id of the client that caused it (None: the server's own line); the
-    /// server shows at most a few a minute per client (server.mjs logLimited, the Online audit's ONL-8)
+    /// server shows at most a few a minute per client (`nfsu2_util::log::limited`, the Online audit's ONL-8)
     #[allow(clippy::type_complexity)]
     pub log: Arc<dyn Fn(&str, Option<&str>) + Send + Sync>,
-    /// the dev trace: sees every frame the host sends
+    /// the dev trace: sees every frame the host sends (the switch's own tap sees what the browsers send)
     pub tap: Option<Tap>,
 }
 
@@ -169,8 +169,8 @@ fn run(o: OnlineOptions, rx: mpsc::Receiver<Event>) {
     }
 }
 
-/// one event, and what the JS did when a handler threw: the error on the console, the stream the frame came on
-/// closed (vhost.mjs: "service error"); the host goes on
+/// one event; a handler that panics: the error on the console, the stream the frame came on closed ("service
+/// error"), and the host goes on
 fn guarded(core: &mut core::Core, frame: Option<(u32, &[u8])>, f: impl FnOnce(&mut core::Core)) {
     if let Err(e) = catch_unwind(AssertUnwindSafe(|| f(core))) {
         let what = e.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| e.downcast_ref::<String>().cloned()).unwrap_or_default();
@@ -201,7 +201,7 @@ impl Host for OnlineHost {
     fn peer_gone(&self, vip: u32) {
         let _ = self.tx.send(Event::PeerGone(vip));
     }
-    /// index.mjs `info()`: the virtual host's counts and the lobby's (`personas`, `racing`, ...)
+    /// the virtual host's counts and the lobby's (`personas`, `racing`, ...; core.rs `Core::info`)
     fn info(&self) -> oneshot::Receiver<serde_json::Value> {
         let (tx, rx) = oneshot::channel();
         let _ = self.tx.send(Event::Info(tx));

@@ -10,9 +10,9 @@
 # Behind Cloudflare's proxy (orange cloud): uncomment this first block too (it
 # must stay the first thing in the file), and use the Cloudflare site block at
 # the end instead of the game.example.com block.  Caddy then believes
-# CF-Connecting-IP only from Cloudflare's addresses (web/server/cloudflare-ips.txt,
-# as of 2026-10-18; https://www.cloudflare.com/ips/) and hands the server the
-# address it decided on, so a client that reaches the VPS directly cannot claim
+# CF-Connecting-IP only from Cloudflare's addresses
+# (web/server-rs/crates/headers/cloudflare-ips.txt, as of 2026-10-18;
+# https://www.cloudflare.com/ips/) and hands the server the address it decided on, so a client that reaches the VPS directly cannot claim
 # another address.  Even so, let only Cloudflare reach 443 and 80 (docs/web/VPS.md, "Cloudflare").
 #{
 #	servers {

@@ -1,7 +1,7 @@
 //! ETags without file-system detail: a keyed hash of what names a version (a file's real path, size and time; the
-//! manifest's content; the module's), with a key that never leaves this machine.  The parts are joined as JS joined
-//! them (`parts.join('\0')`: numbers as `Number#toString` writes them, a time as Node computes `mtimeMs`), so that the
-//! ETags are the Node server's own for the same key: a browser's copy stays good across a switch between the two.
+//! manifest's content; the module's), with a key that never leaves this machine.  The parts are joined by NUL,
+//! numbers as JS's `Number#toString` writes them and a time as Node computes `mtimeMs`: the ETags the Node server gave
+//! for the same key, so that a browser's copy stayed good across the switch to this server.
 
 use std::io::{self, Read};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
@@ -26,7 +26,7 @@ pub fn load_key(state: &str) -> io::Result<Vec<u8>> {
     Ok(k)
 }
 
-/// `etagOf(...parts)`: '"' + HMAC-SHA256(key, parts joined by NUL), base64url, 22 characters + '"'
+/// '"' + HMAC-SHA256(key, parts joined by NUL), base64url, 22 characters + '"'
 pub fn etag_of(key: &[u8], parts: &[&str]) -> String {
     let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(key).expect("HMAC takes any key");
     for (i, p) in parts.iter().enumerate() {
@@ -73,7 +73,7 @@ pub(crate) mod tests {
         k
     };
 
-    // the values node computed with this key (etagOf of server.mjs)
+    // the values the Node server's etagOf computed with this key
     #[test]
     fn etags_equal_the_node_servers() {
         assert_eq!(etag_of(&KEY, &["manifest", "abc"]), "\"hWN06E5JbvKr11mCWqBV1D\"");

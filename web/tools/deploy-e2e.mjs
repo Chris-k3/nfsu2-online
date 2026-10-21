@@ -5,21 +5,21 @@
 // and renderer of the integrated app) the main menu, with a screenshot.
 //
 //   node web/tools/deploy-e2e.mjs --out <dir> [--mode tls|proxy|both|docker] [--menu] [--headed]
-//        [--data "<game folder>"] [--port 8527] [--http-port 8627] [--server <server.mjs>] [--node <node binary>]
+//        [--data "<game folder>"] [--port 8527] [--http-port 8627] [--server <binary>]
 //        [--image <name>] [--module <dir>]
-// --server: another server script, such as the one of an unpacked bundle (web/deploy/pack.sh);
-// --node: the Node.js that runs it (a Node LTS, say).
+// --server: another server than web/tools/server-cmd.mjs's, such as the nfsu2-server of an unpacked bundle
+// (web/deploy/pack.sh), with the page and the module of the folder it is in (NFSU2_REPO).
 // --proxy-cmd "<command>": in mode proxy, this command is the proxy instead of the Cloudflare stand-in
 // (a real Caddy with the example Caddyfile's directives, say); it must serve the test certificate on
 // 127.0.0.1:<port> and forward to 127.0.0.1:<http-port>.  It is stopped at the end.
 //
-// mode tls:    server.mjs --tls-cert <test certificate>   (Let's Encrypt / Origin CA on a VPS)
-// mode proxy:  server.mjs --behind-proxy, and web/test/cf-sim.mjs in front (Cloudflare)
+// mode tls:    the server with --tls-cert <test certificate>   (Let's Encrypt / Origin CA on a VPS)
+// mode proxy:  the server with --behind-proxy, and web/test/cf-sim.mjs in front (Cloudflare)
 // mode docker: the Docker stack, web/deploy/compose.yml (the server's image and Caddy), with the test
 //              certificate in Caddy instead of Let's Encrypt, its HTTPS on 127.0.0.1:<port> and the server on
 //              127.0.0.1:<http-port> of the Docker host (with Colima or Docker Desktop: their Linux VM, which
 //              forwards <port> to this Mac); not in "both".  --image <name> (default nfsu2-web:dev, from
-//              docker build -t nfsu2-web:dev .), --module <dir> (nfsu2.wasm + nfsu2.json; default out/web).
+//              docker build -f web/server-rs/Dockerfile -t nfsu2-web:dev .), --module <dir> (nfsu2.wasm + nfsu2.json; default out/web).
 //              Needs docker compose; the stack is removed at the end.
 // Chrome reaches https://nfsu2.test:<port>/ (mapped to 127.0.0.1) and accepts
 // the test certificate by its key (--ignore-certificate-errors-spki-list), so
@@ -33,6 +33,7 @@ import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { makeTestCerts, startCfSim } from '../test/cf-sim.mjs';
+import { serverCommand } from './server-cmd.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const arg = (n, d) => { const i = process.argv.indexOf(n); return i > 0 ? process.argv[i + 1] : d; };
@@ -41,8 +42,7 @@ const MODES = arg('--mode', 'both') === 'both' ? ['tls', 'proxy'] : [arg('--mode
 const MENU = process.argv.includes('--menu');
 const DATA = arg('--data', process.env.NFSU2_DATA || path.join(os.homedir(), 'projects/nsfu2/Need for Speed - Underground 2'));
 const P1 = +arg('--port', 8527), P2 = +arg('--http-port', 8627);
-const SERVER = path.resolve(arg('--server', path.join(REPO, 'web/server/server.mjs')));
-const NODE = arg('--node', process.execPath);
+const SERVER = arg('--server', '') && path.resolve(arg('--server'));
 const PROXY_CMD = arg('--proxy-cmd', '');
 const IMAGE = arg('--image', 'nfsu2-web:dev');
 const MODULE = path.resolve(arg('--module', path.join(REPO, 'out/web')));
@@ -58,8 +58,8 @@ const machine = [os.hostname(), os.hostname().replace(/\.local$/, ''), os.homedi
 
 async function startServer(args) {
   const state = path.join(OUT, `state-${args.includes('--behind-proxy') ? 'proxy' : 'tls'}`);
-  const c = spawn(NODE, [SERVER, '--data', DATA, '--state', state, '--access-log', ...args],
-    { stdio: ['ignore', 'pipe', 'pipe'] });
+  const c = spawn(...serverCommand(['--data', DATA, '--state', state, '--access-log', ...args], SERVER || undefined),
+    { stdio: ['ignore', 'pipe', 'pipe'], env: SERVER ? { ...process.env, NFSU2_REPO: path.dirname(SERVER) } : process.env });
   const log = fs.createWriteStream(path.join(OUT, `server-${args.includes('--behind-proxy') ? 'proxy' : 'tls'}.log`));
   c.stdout.pipe(log); c.stderr.pipe(log);
   await new Promise((res, rej) => {

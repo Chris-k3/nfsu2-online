@@ -1,7 +1,7 @@
-//! A player's name that reads as a slur: the port of web/server/names.mjs.  The server refuses one for the Online
-//! mode (an account or persona; the Online results drop the ones kept under one) and the switch's peer list shows
-//! "player" for one (lan.mjs cleanName); the page's settings refuse one as "Your name".  runtime/names.h is the same
-//! lists and the same matching for the game (the names over the cars in free roam).
+//! A player's name that reads as a slur: the rules of web/src/app/names.mjs (the page's), ported.  The server refuses
+//! one for the Online mode (an account or persona; the Online results drop the ones kept under one) and the switch's
+//! peer list shows "player" for one (nfsu2-lan's `clean_name`); the page's settings refuse one as "Your name".
+//! runtime/names.h is the same lists and the same matching for the game (the names over the cars in free roam).
 //!
 //! A name is read as letters only: a to z in lower case, the digits and signs that stand for letters as those
 //! (0 o, 1 ! | l i, 3 e, 4 @ a, 5 $ s, 7 + t, 6 9 g, 8 b), anything else left out: "N1-g g@" reads "nigga".  Digits
@@ -49,7 +49,7 @@ pub const WHOLE: &[&str] = &["fag", "dyke", "coon", "spic", "paki", "kike", "goo
 const FROM: &[u8; 15] = b"01!|l34@5$7+698";
 const TO: &[u8; 15] = b"oiiiieaassttggb";
 
-/// `letter(ch)` of the JS for every ASCII character, worked out once: the letter it reads as, 0 for none.  No other
+/// names.mjs `letter(ch)` for every ASCII character, worked out once: the letter it reads as, 0 for none.  No other
 /// character reads as a letter.
 const LETTERS: [u8; 128] = {
     let mut table = [0; 128];
@@ -76,7 +76,7 @@ fn letter(ch: char) -> Option<u8> {
     (c != 0).then_some(c)
 }
 
-/// A word of the lists as the letters a name is read as (`word` in the JS: "l" reads "i", so "junglebunny" is
+/// A word of the lists as the letters a name is read as (`word` in names.mjs: "l" reads "i", so "junglebunny" is
 /// looked for as "jungiebunny"), worked out at compile time.
 #[derive(Clone, Copy)]
 struct Word {
@@ -220,7 +220,7 @@ fn unknown(ch: char) -> bool {
     !ch.is_ascii() && get_general_category(ch) == GeneralCategory::Unassigned
 }
 
-/// The name's characters as the JS reads them, `[...name.normalize('NFKD').replace(/\p{M}/gu, '')]` with the
+/// The name's characters as names.mjs reads them, `[...name.normalize('NFKD').replace(/\p{M}/gu, '')]` with the
 /// lookalikes as their Latin letters.
 fn read(name: &str) -> Vec<char> {
     // NFKD, the marks and the lookalikes change no ASCII character

@@ -14,10 +14,8 @@ import http from 'node:http';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import { serverCommand } from '../tools/server-cmd.mjs';
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PORT = +(process.env.NFSU2_TEST_MODULE_PORT || 8533);
 const TMP = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'nfsu2-module-test-'));
 test.after(() => fs.rmSync(TMP, { recursive: true, force: true }));
@@ -37,8 +35,8 @@ function build(seed) {
 }
 
 async function server() {
-  const srv = spawn(...serverCommand(path.join(HERE, '../server/server.mjs'), ['--data', DATA, '--http-port', String(PORT),
-    '--state', path.join(TMP, 'state'), '--wasm', WASM]), { stdio: ['ignore', 'pipe', 'pipe'] });
+  const srv = spawn(...serverCommand(['--data', DATA, '--http-port', String(PORT), '--state', path.join(TMP, 'state'), '--wasm', WASM]),
+    { stdio: ['ignore', 'pipe', 'pipe'] });
   await new Promise((res, rej) => {
     let out = '';
     const t = setTimeout(() => rej(new Error('server did not start: ' + out)), 15000);

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Stress of the host's file RPC (tests/web/iostress.c) through the real
 # browser host: 8 threads x 20000 small preads of a /data file, checked.
-#   web/tools/iostress.sh [http://localhost:<port>]   (a running web/server/server.mjs, started with --dev)
+#   web/tools/iostress.sh [http://localhost:<port>]   (a running server, started with --dev)
 set -e
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"; cd "$ROOT"
 BASE="${1:-http://localhost:8611}"

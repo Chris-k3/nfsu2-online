@@ -1,5 +1,5 @@
-//! What the Rust hub does that roam-hub.mjs never did (Node's hub is no longer changed): links that look ahead at the
-//! cars' speeds, and the world map's answer (MAPREQ / MAP).
+//! What the hub does that the Node server's hub never did: links that look ahead at the cars' speeds, and the world
+//! map's answer (MAPREQ / MAP).
 
 mod kit;
 

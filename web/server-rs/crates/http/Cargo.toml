@@ -1,6 +1,6 @@
 [package]
 name = "nfsu2-http"
-description = "The server's own HTTP/1.1 (and TLS): what Node's http/https servers did for server.mjs, with its rules"
+description = "The server's own HTTP/1.1 (and TLS): what Node's http/https servers did for the Node server, with its rules"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

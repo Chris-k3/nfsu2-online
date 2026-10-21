@@ -1,6 +1,117 @@
-//! The virtual LAN switch: the port of web/server/lan.mjs, rule for rule (its long comment at the top is the
-//! protocol and the reasoning behind every limit; this crate keeps the same frames, messages, limits, counts and
-//! file), on every core instead of Node's one thread.
+//! The virtual LAN switch: every browser that joins gets a virtual IPv4 address, and the game's network traffic goes
+//! from browser to browser through it, on every core.  It keeps the frames, messages, limits, counts and file of the
+//! Node server it replaced (which did all of it on its one thread), rule for rule.
+//!
+//! # The protocol
+//!
+//! Every browser that joins gets an address on 10.77.0.0/21 (`MASK`): 250 in each of 10.77.0-7.x (host bytes 2-251,
+//! so none ends in .0 or .255 and 10.77.0.1 and .253 stay the server's own), `ADDRS` (2000) in all, handed out in turn
+//! across the eight (`vip_at`: 10.77.0.2, 10.77.1.2, ..., 10.77.7.2, 10.77.0.3, ...), so two players are rarely in the
+//! same /24 and anything that still takes the network for a /24 (or for the /22 it was before) shows at once, not only
+//! past 250 (or 1000) players.  Binary frames carry the game's network traffic; the switch only routes them and never
+//! looks inside:
+//!
+//! ```text
+//! [0]     u8  kind (opaque to the switch: datagram, stream open/data/close, ...)
+//! [1..3]  reserved
+//! [4..7]  u32 source vip      (rewritten here to the sender's own address)
+//! [8..11] u32 destination vip (0xFFFFFFFF = BROADCAST, to everyone else)
+//! [12..]  payload (ports and data, defined by the runtime's socket layer)
+//! ```
+//!
+//! Numbers are big-endian.  Kinds in use (runtime/web/net_proto.h, web/src/net):
+//!
+//! - 1 (`KIND_UDP`): a UDP datagram: [12..13] source port, [14..15] destination port, [16..] data.
+//! - 2: a UDP datagram on the test harness's emulated loopback (the same layout, always to the broadcast address;
+//!   only test-mode instances take it).
+//! - 3, 4, 5 (`KIND_LAN_UDP`, `KIND_STREAM`, `KIND_LAN_ICMP`): LAN play (the Winsock HLE, runtime/web/net_lan.c):
+//!   UDP, TCP segments and ICMP with ports at [12..15] and an 8-byte LAN header (op, ttl, connection id) before the
+//!   data.  Their broadcasts go only to the browsers that have LAN play open (the game's LAN or Online screens:
+//!   "lan":1 in the hello, then {"t":"lan","on":0|1}; a page of before says nothing and gets them all): the others
+//!   drop them anyway, and on a full switch each one would reach 2000 browsers.
+//! - 32 (`KIND_BUNDLE`): a bundle: several frames in one message, [1..3] reserved, then entries of [0] u8 n,
+//!   [1] reserved, [2..3] u16 frame length, n x u32 destination vip, the frame: to each of the n (the frame's own
+//!   destination is ignored), or with n = 0 to its own.  The switch takes them from anyone (the welcome says
+//!   "bundle":1) and sends a client its datagrams as bundles (n = 0) when its hello said "bundle":1: what is queued
+//!   for it by the bundle clock's next tick goes out as one message (one frame alone goes as it is; the clock is in
+//!   how the work is shared out, below).  Free roam sends each friend the same snapshot 20 times a second: 32 friends
+//!   were 640 messages a second each way per player, and each message, not its bytes, is what the server and the
+//!   tunnel in front pay for.  LAN play's TCP segments (kind 4) are never bundled by the switch (they have a queue of
+//!   their own: `stream_queue`).
+//!
+//! Text frames are JSON control messages: {"t":"hello","name":...,"deltas":1,"lan":0|1,"bundle":1},
+//! {"t":"lan","on":0|1} and {"t":"ping","id":n} from a client; {"t":"welcome","vip":...,"vipStr":...,"mask":...,
+//! "token":...,"bundle":1}, {"t":"peers",...}, {"t":"delta",...} and {"t":"pong","id":n} from the switch.
+//!
+//! ## The peer list
+//!
+//! A connection's first hello names its player (later ones change nothing: the page sends one a connection) and gets
+//! it the whole list, {"t":"peers","peers":[{vip,name},...]}.  After that a client whose hello said "deltas":1 (the
+//! page) hears only what changed, at most every `peers_ms`: {"t":"delta","peers":[{vip,name} that joined or got their
+//! name],"gone":[vip that left (and may be back: the client takes gone first)]}.  One that did not (a page of before),
+//! or sent no hello, gets the whole list again, at most every `full_peers_ms`.  (The security review: each rename, 20
+//! a second per connection, sent the whole list to everyone: 11,700 times what came in, at 100 players.)
+//!
+//! ## Addresses and tokens
+//!
+//! Addresses belong to the connection that holds them.  The welcome carries a random token (128 bits) that only that
+//! client sees.  A client that lost its connection opens /lan?resume (`AttachOpts::resume`) and sends, as its first
+//! message, a hello with its old address and that token ({"t":"hello","name":...,"vip":"10.77.x.x","token":...});
+//! it gets the address back.  Nobody else can: when a holder leaves, its address stays reserved for its token for
+//! `reserve_ms` (not when the page closed the connection itself, 1000 "idle" or "closed": no network feature in use,
+//! or the game ended; its address is free at once), and an address is never handed out on request without the token
+//! (the audit's F1: /lan?vip= gave a dropped player's address, and the frames other players sent to it, to whoever
+//! asked first).  A reservation is never given to another client either, not even when every address is held or
+//! reserved: a newcomer then gets "LAN full" until one frees (the review of F1: handing out the oldest reservation let
+//! a client that opened and closed connections fast enough take a dropped player's address within 60 ms).  So that
+//! one client cannot reserve them all, a client (group) keeps at most `group_reserve` reservations and a site
+//! `site_reserve`; past that its own oldest one goes.  A resume with the token also replaces a connection of the same
+//! client that the switch still holds (one that died without a close).  Without ?resume the welcome comes at once,
+//! as before.
+//!
+//! With a store (the server's state folder: lan-addresses.json, store.rs), the addresses held and reserved (by a hash
+//! of their tokens) outlive a restart of the server: each is reserved for its token again for `reserve_ms` after the
+//! start, so the players come back to the same addresses, as they did before tokens.
+//!
+//! ## What a peer learns
+//!
+//! What a peer learns about the others: their virtual address and the display name they chose (`clean_name`: control
+//! and format characters removed, at most 32 characters), nothing else.  The switch is never told who a peer really
+//! is (no address, no headers): the server counts connections per client address itself (its /lan handler) and hands
+//! the switch only opaque ids for the limits shared by one client's connections (`AttachOpts`): a group (one client
+//! address) and a site (an IPv6 /48, which holds 256 client addresses).  Close reasons are fixed texts.
+//!
+//! ## Limits
+//!
+//! The limits are `LanOptions` (each field says what it bounds and why), sized to the game: free roam sends 20
+//! snapshots a second of about 95 bytes to each friend, 1.9 KB/s per friend, and with 32 friends near about 700 frames
+//! and 70 KB a second in all, at the 60 a second Settings allow about 2000 frames and 190 KB; the host of a 3-player
+//! LAN race sent at most 100 frames and 7.7 KB a second (the audit's measurement on the switch); LAN play's frames are
+//! at most an Ethernet MTU (runtime/web/net_proto.h NET_SLOT_BYTES 1536).
+//!
+//! ## The server's own hosts
+//!
+//! The Online host (`online`, nfsu2-online): the server's own host on the switch, 10.77.0.1 (an address the switch
+//! never hands out).  It is on every peer list as {vip, name, server: true} (so a page lets the game connect to it;
+//! the page shows it to nobody), frames addressed to it go to its `Host::frame` instead of to a browser (broadcasts
+//! never do; the `FrameCtx` has the sender's opaque group and site ids, for the host's own per-client limits), it
+//! answers through [`LanSwitch::send_to`], and its `Host::peer_gone` hears of every browser that left.  What the host
+//! sends while it handles a frame (its answer, and what it tells other players because of it: a lobby's chat, a
+//! game's players) is charged to the sender's budgets, as a broadcast is (`Cause`); a sender that overspends them has
+//! the stream that frame came on closed (the host asks `Charge::overspent`) and pays the debt (at most one burst) off
+//! before its next frame gets through.  The host's frames are never dropped on the way (its streams have no
+//! retransmission): a receiver with more than `online_queue` queued is not sent more, and the host closes the stream
+//! it was for, instead of the whole connection being cut (the Online audit's ONL-2).
+//!
+//! The free-roam hub (`roam`, nfsu2-roam): 10.77.0.253, the same way: frames to it go to its `Host::frame`, it sends
+//! through `send_to` (its own lists, every second: charged to nobody), and its `Host::peer_gone` hears of every
+//! browser that left.  It is on no peer list (`Host::listed`).
+//!
+//! ## Test aids
+//!
+//! The trace (`Tap`, the server's --online-trace, nfsu2-online's trace.rs) sees every frame the switch takes from a
+//! browser, as sent to its destination; the Online host shows it what it sends itself.  The impairment (the server's
+//! --lan-impair) delays, loses and reorders LAN play's frames between browsers (impair.rs).
 //!
 //! # How the work is shared out
 //!
@@ -30,16 +141,18 @@
 //!   posts them their frames in order and they send through [`LanSwitch::send_to`] from their thread.
 //! - Counters that every frame touches are sharded (`nfsu2_util::Counter`); the per-peer ones are the peer's own.
 //!
-//! What Node's `ws.bufferedAmount` was is the receiver's `buffered` count here: bytes handed to its writer and not
-//! yet taken by the kernel.  The datagrams waiting for the bundle clock are counted apart (Node's `p.outBytes`), so
-//! every rule reads what it read in Node: `roamQueue` and `shedQueue` both, `sendBuffer`, `onlineQueue` and the
-//! stream pump `buffered` alone.
+//! A receiver's `buffered` count is the bytes handed to its writer and not yet taken by the kernel (what the Node
+//! server read as its socket's `bufferedAmount`).  The datagrams waiting for the bundle clock are counted apart
+//! (`dgram`), so every rule reads what it read in Node: `roam_queue` and `shed_queue` both, `send_buffer`,
+//! `online_queue` and the stream pump `buffered` alone.
 //!
 //! A frame is never written to in place: a datagram is copied once, by its receiver's writer, into the bytes that
 //! go out, with its source (the sender's address) and its destination written there.  So a bundle's frame goes to
 //! its 32 receivers as 32 references to the bytes the sender's reader read, and no receiver needs a copy of its own.
 //!
 //! # The ws library's behaviour kept
+//!
+//! The Node server spoke WebSocket through the ws library; what a client saw of it stays.
 //!
 //! A close frame from the client is answered with one (its code) and the connection ends; the 'close' the switch
 //! sees has the client's code and reason (1005 without a code), or 1006 when the connection ended without one.
@@ -80,14 +193,14 @@ pub const ADDRS: usize = 2000;
 pub const BROADCAST: u32 = 0xFFFF_FFFF;
 
 const BASE: u32 = (10 << 24) | (77 << 16);
-/// free roam's datagrams (and LAN play's broadcasts): dropped first (roamQueue)
+/// free roam's datagrams (and LAN play's broadcasts): dropped first (`roam_queue`)
 const KIND_UDP: u8 = 1;
 /// LAN play's UDP and ICMP (with TCP, kinds 3-5): broadcasts only to the browsers with LAN play open
 const KIND_LAN_UDP: u8 = 3;
 const KIND_LAN_ICMP: u8 = 5;
 /// LAN play's TCP segments: never dropped
 const KIND_STREAM: u8 = 4;
-/// several frames in one message (lan.mjs's comment)
+/// several frames in one message (the crate doc's protocol)
 const KIND_BUNDLE: u8 = 32;
 /// a receiver with less than this queued gets stream segments at once
 const STREAM_LOW: usize = 64 << 10;
@@ -96,35 +209,85 @@ const BUNDLE_OUT: usize = 32 << 10;
 /// how long ws waited for the client's close frame after its own (`closeTimeout`)
 const CLOSE_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// lan.mjs `LAN_DEFAULTS` (the meaning of each is in lan.mjs's comment)
+/// The switch's limits (the crate doc's Limits says what they are sized to); `Default` has their values.
 #[derive(Clone, Debug)]
 pub struct LanOptions {
+    /// players on the switch at once (one more: closed with 1013 "LAN full")
     pub max_peers: usize,
+    /// bytes in one binary frame (larger ones are dropped)
     pub max_frame: usize,
+    /// bytes in one bundle from a client (larger ones are dropped); one to a client is at most `BUNDLE_OUT`, then the
+    /// next begins
     pub max_bundle: usize,
+    /// binary frames a second per connection (a token bucket, its burst 2 s worth): 32 friends at 60 snapshots a
+    /// second, and the page's answers to stray connects (web/src/net, 32 KB/s at most)
     pub frame_rate: f64,
+    /// binary bytes a second per connection (the same)
     pub byte_rate: f64,
+    /// the same for all connections of one client address together (the group id the server passes): room for about
+    /// 7 players behind one address with 32 friends each
     pub group_frame_rate: f64,
+    /// (the same, in bytes)
     pub group_byte_rate: f64,
+    /// and for all of one site (the site id)
     pub site_frame_rate: f64,
+    /// (the same, in bytes)
     pub site_byte_rate: f64,
+    /// control messages a second per connection
     pub text_rate: f64,
+    /// bytes in one control message (larger ones are dropped)
     pub max_text: usize,
+    /// WebSocket control frames a second (a token bucket, its burst 2 s worth): pings, which the switch answers
+    /// itself, and pongs it did not ask for.  No browser sends either (the WebSocket API has no ping), so a client
+    /// over the rate is disconnected.
     pub ctl_rate: f64,
+    /// datagrams (kinds 1, 2, 3, 5 and unknown kinds) to a receiver with more than this queued are dropped, as a full
+    /// link drops UDP: a flood never gets a slower player disconnected
     pub shed_queue: usize,
+    /// the same for kind 1 (free roam's snapshots, and LAN play's broadcasts), at a much shorter queue: about a second
+    /// of free roam (a SNAP of 94 bytes, 20 a second from each of up to 32 friends).  A car's position is of no use
+    /// once it is that old (the game draws friends' cars 100 ms in the past and throws late ones away), so a receiver
+    /// whose link falls behind gets the newest ones as soon as it catches up, not seconds of old ones first.  The
+    /// queue is the switch's own: the kernel's buffer to the receiver (or to the tunnel) comes before it.
     pub roam_queue: usize,
+    /// LAN play's TCP segments (kind 4) are never dropped (the virtual LAN's streams have no retransmission).  A
+    /// receiver may have `stream_queue` of them queued, `stream_share` of those from one client (group).  Past that,
+    /// whose fault it is decides who goes: a receiver that has stopped reading (nothing it was sent got out for
+    /// `stall_ms` while segments waited) is disconnected; otherwise the senders outrun it and the client with the
+    /// most queued there is disconnected, all of its connections (the review of the audit's F2: streams from 9
+    /// addresses got a reading victim cut, and a receiver that stopped reading got its sender cut).  A LAN race's
+    /// host sends about 11 KB of stream data a race.
     pub stream_queue: usize,
+    /// (see `stream_queue`)
     pub stream_share: usize,
+    /// (see `stream_queue`)
     pub stall_ms: f64,
+    /// bytes queued towards one receiver: a receiver that falls this far behind anyway (it stopped reading) is
+    /// disconnected (it reconnects and gets its address back).  Checked before everything the switch sends and on
+    /// every keepalive tick.
     pub send_buffer: usize,
+    /// a WebSocket ping this often, well under a proxy's idle cut (Cloudflare closes a WebSocket that stays quiet for
+    /// about 100 s); no pong to that ping (its payload is random: only a client that reads can answer) by the next
+    /// ping = the connection is gone
     pub keepalive_ms: u64,
+    /// no message at all from the client for this long: closed (the page pings the switch every 2 s while it is
+    /// connected)
     pub idle_ms: i64,
+    /// how long a departed player's address waits for its token
     pub reserve_ms: i64,
+    /// departed players' addresses kept for one client (group) at most
     pub group_reserve: usize,
+    /// and for one site
     pub site_reserve: usize,
+    /// how long a ?resume connection may take to send its hello
     pub resume_wait_ms: u64,
+    /// bytes queued towards one receiver past which the Online host sends it nothing more (the host closes that
+    /// stream instead)
     pub online_queue: usize,
+    /// what changed on the peer list goes out at most this often, as one message to each player (a join and its name
+    /// in one)
     pub peers_ms: u64,
+    /// the whole list to a client that does not take changes, at most this often
     pub full_peers_ms: f64,
     /// the bundle clock's shortest tick (0: no clock, a datagram wakes its writer at once)
     pub bundle_ms: u64,
@@ -134,7 +297,7 @@ pub struct LanOptions {
     pub bundle_budget: u64,
     /// SO_SNDBUF for /lan connections (NFSU2_LAN_SNDBUF; 0: the kernel's own, which Linux grows to megabytes)
     pub send_buffer_os: usize,
-    /// the largest WebSocket message a client may send (server.mjs `LIMITS.wsMaxPayload`, the ws library's
+    /// the largest WebSocket message a client may send (the server's `limits::WS_MAX_PAYLOAD`, the ws library's
     /// `maxPayload`: a larger one closes the connection with 1009); the switch drops frames over `max_frame` and
     /// bundles over `max_bundle` itself
     pub max_payload: usize,
@@ -180,8 +343,8 @@ impl Default for LanOptions {
 }
 
 impl LanOptions {
-    /// lan.mjs takes only finite numbers above 0 from its options: a 0 (or a negative or non-finite rate) keeps the
-    /// default.  (`bundle_ms` and `send_buffer_os` are not lan.mjs's: their 0 means what it says.)
+    /// only finite numbers above 0 are taken from the options: a 0 (or a negative or non-finite rate) keeps the
+    /// default.  (`bundle_ms`, `bundle_max_ms` and `send_buffer_os` are left as they are: their 0 means what it says.)
     fn sane(mut self) -> Self {
         let d = LanOptions::default();
         macro_rules! whole {
@@ -234,7 +397,7 @@ pub type OnJoin = Box<dyn Fn(u32, bool, usize) + Send + Sync>;
 /// `AttachOpts::on_leave`: (vip, name, players on the switch now)
 pub type OnLeave = Box<dyn Fn(u32, &str, usize) + Send + Sync>;
 
-/// What the server tells the switch about a new connection (lan.mjs `attach` opts).
+/// What the server tells the switch about a new connection (never its address: the crate doc's What a peer learns).
 #[derive(Default)]
 pub struct AttachOpts {
     /// the client asked for /lan?resume (its first message says which address, with the token)
@@ -249,7 +412,7 @@ pub struct AttachOpts {
     pub on_leave: Option<OnLeave>,
 }
 
-/// lan.mjs `breakdown()`
+/// What the players on the switch do (`LanSwitch::breakdown`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Breakdown {
     pub players: usize,
@@ -261,7 +424,7 @@ pub struct Breakdown {
     pub bundles: usize,
 }
 
-/// Why the switch closed a connection (lan.mjs `cuts`): a control-frame flood, a queue over sendBuffer (when
+/// Why the switch closed a connection (info()'s `cuts`): a control-frame flood, a queue over `send_buffer` (when
 /// sending; on the keepalive tick), no pong to its ping, idle, a client that flooded a receiver with stream segments,
 /// a receiver that stopped reading the stream segments it was sent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -277,7 +440,7 @@ pub(crate) enum Cut {
 
 const CUT_NAMES: [&str; 7] = ["flood", "slow", "queue", "dead", "idle", "hog", "stall"];
 
-/// The switch's counts (lan.mjs's `frames`, `bytes`, ... and `cuts`): sharded, every frame adds to some.
+/// The switch's counts (info()'s `frames`, `bytes`, ... and `cuts`): sharded, every frame adds to some.
 #[derive(Default)]
 pub(crate) struct Stats {
     frames: Counter,
@@ -293,7 +456,7 @@ pub(crate) struct Stats {
     resumed: Counter,
     /// addresses freed at once: the page closed its connection itself
     released: Counter,
-    /// reservations a client gave up for its newer ones (groupReserve, siteReserve)
+    /// reservations a client gave up for its newer ones (`group_reserve`, `site_reserve`)
     evicted: Counter,
     /// frames the impairment lost
     lost: Counter,
@@ -323,12 +486,12 @@ impl Pair {
         self.bytes.has_at(now, 0.0);
         (self.frames.v, self.bytes.v)
     }
-    /// what `refill` found there paid for some of it (lan.mjs `take`, once for several)
+    /// what `refill` found there paid for some of it (each bucket's `take_at`, once for several)
     fn spend_paid(&mut self, frames: f64, bytes: f64) {
         self.frames.v -= frames;
         self.bytes.v -= bytes;
     }
-    /// a host's frame charged: false once a bucket is in debt (both are spent, as lan.mjs's `|` did)
+    /// a host's frame charged: false once a bucket is in debt (both are spent, also when the first is in debt)
     fn spend(&mut self, now: f64, frames: f64, bytes: f64) -> bool {
         let a = self.frames.spend_at(now, frames);
         let b = self.bytes.spend_at(now, bytes);
@@ -352,7 +515,7 @@ const LAN_NULL: u8 = 0;
 const LAN_OFF: u8 = 1;
 const LAN_ON: u8 = 2;
 
-/// A player on the switch (lan.mjs's `peer`): one connection holding one address.
+/// A player on the switch: one connection holding one address.
 pub(crate) struct Peer {
     vip: u32,
     conn: Arc<Conn>,
@@ -401,7 +564,7 @@ impl Peer {
     }
 }
 
-/// What the switch keeps of a connection while it is open (lan.mjs `attach`'s closure).
+/// What the switch keeps of a connection while it is open.
 pub(crate) struct AttachCtx {
     resume: bool,
     group: Arc<Group>,
@@ -410,8 +573,8 @@ pub(crate) struct AttachCtx {
     on_leave: Option<OnLeave>,
 }
 
-/// The sender's buckets while the Online host handles its frame (lan.mjs `this.cause`): what the host sends because
-/// of it is spent from them, and once one ran dry the host closes that stream (`overrun`).
+/// The sender's buckets while the Online host handles its frame: what the host sends because of it is spent from
+/// them, and once one ran dry the host closes that stream (its `overrun`).
 struct Cause {
     peer: Arc<Peer>,
     stats: Arc<Stats>,
@@ -462,7 +625,7 @@ pub struct LanSwitch {
     store: Option<Arc<store::Store>>,
     /// the peer at each of the 2000 addresses (`slot()`), for unicast without a lock
     table: Box<[ArcSwapOption<Peer>]>,
-    /// every peer, in the order the JS Map kept them (broadcasts, the timers, info)
+    /// every peer, in the order of `Members::peers` (broadcasts, the timers, info)
     all: ArcSwap<Vec<Arc<Peer>>>,
     members: Mutex<members::Members>,
     /// LAN play's stream segments queued at their receivers (rare traffic: one lock for all of them)
@@ -495,10 +658,10 @@ fn slot(vip: u32) -> Option<usize> {
 }
 
 impl LanSwitch {
-    /// lan.mjs `new LanSwitch(opts)`: `impair` the --lan-impair spec ("" for none), the hosts (the Online host and
-    /// the free-roam hub; give them `switch_send()` afterwards), the dev trace, and the store (the state folder's
-    /// lan-addresses.json: the addresses held and reserved, by the hashes of their tokens, outlive a restart).
-    /// Starts the switch's timers: call it on the tokio runtime.
+    /// The switch: `impair` the --lan-impair spec ("" for none), the hosts (the Online host and the free-roam hub;
+    /// give them `switch_send()` afterwards), the dev trace, and the store (the state folder's lan-addresses.json:
+    /// the addresses held and reserved, by the hashes of their tokens, outlive a restart).  Starts the switch's
+    /// timers: call it on the tokio runtime.
     pub fn new(
         o: LanOptions,
         impair: &str,
@@ -590,7 +753,7 @@ impl LanSwitch {
     }
 
     /// A new connection, its WebSocket handshake answered already: `r`/`w` its halves, `pre` the bytes read past the
-    /// handshake (lan.mjs `attach(ws, null, opts)`).  Its tasks run until it closes.
+    /// handshake.  Its tasks run until it closes.
     pub fn attach<R, W>(self: &Arc<Self>, r: R, w: W, pre: Bytes, opts: AttachOpts)
     where
         R: AsyncRead + Unpin + Send + 'static,
@@ -607,7 +770,7 @@ impl LanSwitch {
         tokio::spawn(conn::run(self.clone(), conn, r, w, pre, ctx));
     }
 
-    /// lan.mjs `group(map, id, ...)`: the limits of one client (or site), shared by its connections
+    /// the limits of one client (or site), shared by its connections (a connection without an id has its own)
     fn join_group(&self, site: bool, id: Option<&str>) -> Arc<Group> {
         let key: Arc<str> = match id {
             Some(id) => id.into(),
@@ -624,7 +787,7 @@ impl LanSwitch {
         e.0.clone()
     }
 
-    /// lan.mjs `release(map, g)`: a connection of that client is gone
+    /// a connection of that client is gone (with its last one, its limits go)
     fn leave_group(&self, site: bool, g: &Arc<Group>) {
         let mut m = if site { self.sites.lock() } else { self.groups.lock() };
         if let Some(e) = m.get_mut(&g.id).filter(|e| Arc::ptr_eq(&e.0, g)) {
@@ -635,8 +798,8 @@ impl LanSwitch {
         }
     }
 
-    /// lan.mjs `sendTo(vip, data)`: a host's frame to one browser (never through the impairment), charged to `cause`
-    /// when given
+    /// a host's frame to one browser (never through the impairment), charged to `cause` when given.  Not sent: `Full`
+    /// (the receiver is too far behind) or `Gone` (it is not on the switch), and the host closes the stream it was for.
     pub fn send_to(&self, vip: u32, data: Bytes, cause: Option<&dyn Charge>) -> SendResult {
         let guard = slot(vip).map(|i| self.table[i].load());
         let Some(p) = guard.as_ref().and_then(|g| g.as_ref()).filter(|p| p.open()) else {
@@ -666,21 +829,21 @@ impl LanSwitch {
         })
     }
 
-    /// players on the switch now (lan.mjs `peers.size`)
+    /// players on the switch now
     pub fn peer_count(&self) -> usize {
         self.all.load().len()
     }
 
-    /// lan.mjs `full`: a newcomer would get "LAN full" now
+    /// a newcomer would get "LAN full" now
     pub fn full(&self) -> bool {
         self.members.lock().full(self.o.max_peers)
     }
 
-    /// lan.mjs `breakdown()`: what the players on the switch do, each counted once, in this order: Online mode (the
-    /// online host's vips()), the LAN or Online screens open, free roam (the hub's vips()), a page from before the
-    /// page said whether LAN play is open (it holds its place until its tab closes), the rest (leaving: the page
-    /// lets go 10 s after the last network feature; or starting: free roam not yet heard by the hub); and apart from
-    /// that, how many of them take bundles (a page loaded since the switch has them)
+    /// what the players on the switch do, each counted once, in this order: Online mode (the online host's vips()),
+    /// the LAN or Online screens open, free roam (the hub's vips()), a page from before the page said whether LAN
+    /// play is open (it holds its place until its tab closes), the rest (leaving: the page lets go 10 s after the
+    /// last network feature; or starting: free roam not yet heard by the hub); and apart from that, how many of them
+    /// take bundles (a page loaded since the switch has them)
     pub async fn breakdown(&self) -> Breakdown {
         let online = match &self.online {
             Some(h) => h.vips().await.unwrap_or_default(),
@@ -712,7 +875,8 @@ impl LanSwitch {
         n
     }
 
-    /// lan.mjs `info()`, as JSON (for the tests: names and virtual addresses only, never a real address)
+    /// the switch's counts and its players, as JSON (for the tests: names and virtual addresses only, never a real
+    /// address)
     pub async fn info(&self) -> Value {
         let s = &self.stats;
         let peers: Vec<Value> = self
@@ -765,7 +929,7 @@ impl LanSwitch {
         Value::Object(m)
     }
 
-    /// lan.mjs `stop()`: the timers end, the store is written, the hosts stop
+    /// the timers end, the store is written, the hosts stop
     pub fn stop(&self) {
         self.stopped.cancel();
         self.flush_now();
@@ -777,8 +941,8 @@ impl LanSwitch {
         }
     }
 
-    /// WebSocket pings keep proxies from cutting a quiet connection and find dead ones (lan.mjs `keepalive()`, every
-    /// keepaliveMs; public for the tests)
+    /// WebSocket pings keep proxies from cutting a quiet connection and find dead ones (every `keepalive_ms`; public
+    /// for the tests)
     #[doc(hidden)]
     pub fn keepalive(&self) {
         let now = nfsu2_util::now_ms();
@@ -814,8 +978,7 @@ impl LanSwitch {
         }
     }
 
-    /// lan.mjs `room(p)`: room in p's queue; a peer that cannot keep up is disconnected instead of buffered without
-    /// end
+    /// room in p's queue (`send_buffer`); a peer that cannot keep up is disconnected instead of buffered without end
     fn room(&self, p: &Peer, why: Cut) -> bool {
         if p.conn.out.buffered() <= self.o.send_buffer {
             return true;
@@ -824,7 +987,7 @@ impl LanSwitch {
         false
     }
 
-    /// lan.mjs `send(p, data)`: to one peer, when there is room
+    /// to one peer, when there is room
     fn send(&self, p: &Peer, out: Out) -> bool {
         if !self.room(p, Cut::Slow) {
             self.stats.dropped.inc();
@@ -834,9 +997,9 @@ impl LanSwitch {
         true
     }
 
-    // ---- for the tests: what lan.test.mjs reads of the switch's insides ----
+    // ---- for the tests: what they read of the switch's insides ----
 
-    /// the peers in the order the JS Map kept them
+    /// the peers in their order (`Members::peers`)
     #[doc(hidden)]
     pub fn peers_view(&self) -> Vec<PeerView> {
         self.all
@@ -855,7 +1018,7 @@ impl LanSwitch {
             .collect()
     }
 
-    /// the reservations in the order the JS Map kept them
+    /// the reservations in their order (`Members::reserved`)
     #[doc(hidden)]
     pub fn reserved_view(&self) -> Vec<ReservedView> {
         self.members
@@ -871,7 +1034,7 @@ impl LanSwitch {
             .collect()
     }
 
-    /// lan.test.mjs's `lan.reserved.set(v, { hash, until, group, site })`
+    /// a reservation set as it is given (`until` included)
     #[doc(hidden)]
     pub fn reserve_for_test(&self, vip: u32, hash: [u8; 32], until: i64, group: Option<&str>, site: Option<&str>) {
         self.members
@@ -885,7 +1048,7 @@ impl LanSwitch {
         self.members.lock().reserved.clear();
     }
 
-    /// every reservation ends now (lan.test.mjs: `r.until = Date.now() - 1`)
+    /// every reservation ends now (its `until` a millisecond ago)
     #[doc(hidden)]
     pub fn expire_reserved(&self) {
         let now = nfsu2_util::now_ms();
@@ -894,13 +1057,13 @@ impl LanSwitch {
         }
     }
 
-    /// lan.mjs `allocate()`
+    /// `Members::allocate`: the next free address that is nobody's reservation, or 0
     #[doc(hidden)]
     pub fn allocate(&self) -> u32 {
         self.members.lock().allocate()
     }
 
-    /// every peer's connection ends at once (the JS harness's `for (const c of wss.clients) c.terminate()`)
+    /// every peer's connection ends at once, without a close frame (each one as `terminate()` ends it)
     #[doc(hidden)]
     pub fn terminate_all(&self) {
         for p in self.all.load().iter() {
@@ -920,7 +1083,7 @@ pub struct PeerView {
     pub bundle: bool,
     pub lan: Option<bool>,
     pub open: bool,
-    /// ws.bufferedAmount
+    /// bytes queued to it and not yet taken by the kernel (its `OutQueue::buffered`)
     pub buffered: usize,
 }
 
@@ -934,7 +1097,7 @@ pub struct ReservedView {
     pub site: Option<String>,
 }
 
-/// lan.mjs `vipAt(i)`: the i-th address in the order they are handed out (round the eight /24s)
+/// the i-th address in the order they are handed out (round the eight /24s: the crate doc says why)
 pub fn vip_at(i: usize) -> u32 {
     10 << 24 | 77 << 16 | ((i & 7) << 8) as u32 | ((i >> 3) as u32 + 2)
 }

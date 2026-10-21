@@ -25,7 +25,7 @@
 //        --mode drift|streetx: drift and Street X games (the mode carousel's 4th and 5th entries, as the
 //                    "mode" dumps of the runs show: Circuit, Sprint, Drag, Drift, Street X)
 //
-// Without --base it starts its own server (web/server/server.mjs, the game
+// Without --base it starts its own server (web/tools/server-cmd.mjs, the game
 // folder from --data or NFSU2_DATA) and stops it by its child handle at the end.
 // --bounce <s>: stops that server <s> s after the first page opened and starts
 // it again 3 s later (the pages reconnect; TCP connections are reset).
@@ -116,7 +116,7 @@ function url(i) {
 let server = null;
 const serverLog = fs.createWriteStream(path.join(OUT, 'server.log'), { flags: 'a' });
 async function startServer() {
-  const c = spawn(...serverCommand(path.join(REPO, 'web/server/server.mjs'), ['--data', DATA,
+  const c = spawn(...serverCommand(['--data', DATA,
     '--http-port', String(HTTP_PORT), '--dev', '--artifacts', OUT, ...(opt('impair', '') ? ['--lan-impair', opt('impair', '')] : [])]), { stdio: ['ignore', 'pipe', 'pipe'] });
   c.stdout.pipe(serverLog, { end: false }); c.stderr.pipe(serverLog, { end: false });
   await new Promise((res, rej) => {

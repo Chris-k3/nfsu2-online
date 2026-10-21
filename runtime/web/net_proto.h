@@ -24,7 +24,7 @@
  *
  * Addresses are IPv4 numbers in host order (a.b.c.d = a<<24 | ...), ports are
  * plain numbers; in memory everything is little-endian (wasm).  On the switch
- * the page sends big-endian frames (web/server/lan.mjs):
+ * the page sends big-endian frames (web/server-rs/crates/lan):
  *   [0] kind  [1..3] 0  [4..7] source vip  [8..11] destination vip
  *   [12..13] source port  [14..15] destination port  [16..] the payload
  *
@@ -64,7 +64,7 @@
                                    over the game (free roam: a friend joined, left, went into a race);
                                    the friend's name first, ended by 0x1F */
 #define NET_BROADCAST      0xFFFFFFFFu
-#define NET_ROAM_HUB       0x0A4D00FDu  /* 10.77.0.253: the server's free-roam hub (web/server/roam-hub.mjs),
+#define NET_ROAM_HUB       0x0A4D00FDu  /* 10.77.0.253: the server's free-roam hub (web/server-rs/crates/roam),
                                    an address the switch never hands out */
 
 /* LAN header: the first NET_LAN_HDR bytes of a NET_KIND_LAN_* payload

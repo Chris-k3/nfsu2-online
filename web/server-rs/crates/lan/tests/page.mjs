@@ -1,6 +1,6 @@
-// The four tests of web/test/lan.test.mjs that run the page (web/src/net/index.ts, bundled as the app bundles it)
-// against a switch: here the Rust one, started by tests/page.rs, which passes its ports.  What the JS tests read of
-// the switch's insides (lan.peers, lan.info(), lan.reserved) comes from the harness's GET /state.
+// Four tests of the page (web/src/net/index.ts, bundled as the app bundles it) against the Rust switch, started by
+// tests/page.rs, which passes its ports.  What they read of the switch's insides (its peers, info(), reserved) comes
+// from the harness's GET /state.
 //   node page.mjs <case> <port> [<port> ...]
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -14,12 +14,12 @@ const WEB = path.join(HERE, '../../../..');
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const ipStr = (v) => [v >>> 24, (v >>> 16) & 255, (v >>> 8) & 255, v & 255].join('.');
 
-/** the switch's insides, as the JS tests read them: { peers: [{ vip, name, hello, lan }], info, reserved } */
+/** the switch's insides, as these tests read them: { peers: [{ vip, name, hello, lan }], info, reserved } */
 const state = async (port) => (await fetch(`http://127.0.0.1:${port}/state`)).json();
-/** lan.test.mjs's until(), its condition read from the switch (async) */
+/** until f() says yes (5 s at most), its condition read from the switch (async) */
 const until = async (f, ms = 5000) => { const t0 = Date.now(); while (!(await f())) { if (Date.now() - t0 > ms) throw new Error('timed out'); await sleep(20); } };
 
-// lan.test.mjs's Client (the parts these tests use)
+// a fake browser on the switch's WebSocket (what these tests need of one)
 class Client {
   constructor(port, name, query = '', resume = null, { deltas = false, lan, bundle = false } = {}) {
     this.name = name; this.frames = []; this.ctl = []; this.waiters = []; this.resume = resume; this.deltas = deltas;
@@ -120,7 +120,7 @@ function rxTake(memory, mb) {
 }
 
 const cases = {
-  // lan.test.mjs 'the page: a notice when the switch is full, and one when a place frees up' (a switch with room for one)
+  // the page: a notice when the switch is full, and one when a place frees up (a switch with room for one)
   async full([port]) {
     const { attachNet } = await pageNet(port);
     const game = (name, notices) => {
@@ -148,7 +148,8 @@ const cases = {
     } finally { a.close(); }
   },
 
-  // lan.test.mjs 'the page: the switch let go when no mailbox wants it, taken again when one does; LAN play open or not; a module of before'
+  // the page: the switch let go when no mailbox wants it, taken again when one does; LAN play open or not; a module of
+  // before
   async mailboxes([port, port2, port3]) {
     const { attachNet } = await pageNet(port);
     const pages = Math.ceil(2 * P.NET_MAILBOX_BYTES / 65536);
@@ -230,7 +231,7 @@ const cases = {
     }
   },
 
-  // lan.test.mjs 'the page: away, the place goes back while the game wants it and stays free; back, it is taken again'
+  // the page: away, the place goes back while the game wants it and stays free; back, it is taken again
   async away([port]) {
     const { attachNet } = await pageNet(port);
     const memory = new WebAssembly.Memory({ initial: 10, maximum: 10, shared: true }), roam = mailbox(memory, 0);
@@ -263,7 +264,8 @@ const cases = {
     } finally { link.close(); }
   },
 
-  // lan.test.mjs 'the page: what C queued at once goes as one bundle, a snapshot to several friends once; bundles from the switch are taken apart in order'
+  // the page: what C queued at once goes as one bundle, a snapshot to several friends once; bundles from the switch are
+  // taken apart in order
   async bundles([port]) {
     const { attachNet } = await pageNet(port);
     const memory = new WebAssembly.Memory({ initial: 10, maximum: 10, shared: true }), roam = mailbox(memory, 0);

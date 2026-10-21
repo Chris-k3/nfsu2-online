@@ -10,7 +10,8 @@
 #   web/tools/main_all.sh [http://localhost:<port>]   (default: a server on 8611)
 #
 # Needs a built tree (web/build.sh, cd web && node build.mjs) and a running
-# web/server/server.mjs started with --dev.  Exit 0 = all checks passed.
+# server (out/web/server-rs/nfsu2-server) started with --dev.  Exit 0 = all
+# checks passed.
 set -e
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"; cd "$ROOT"
 BASE="${1:-http://localhost:8611}"

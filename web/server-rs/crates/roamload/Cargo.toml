@@ -1,6 +1,6 @@
 [package]
 name = "nfsu2-roamload"
-description = "A crowd of simulated free-roam players for either server (2000 at once): what roam-crowd.mjs does without the game's own core, light enough to leave the cores to the server"
+description = "A crowd of simulated free-roam players for the server (2000 at once): what web/tools/roam-crowd.mjs does without the game's own core, light enough to leave the cores to the server"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

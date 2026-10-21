@@ -1,7 +1,6 @@
-//! /lan: the WebSocket upgrade to the virtual LAN switch (server.mjs `onUpgrade`), every check in its order, and
-//! every refusal the same raw answer with this server's headers.  A handshake the ws library refused by itself (a
-//! malformed Sec-WebSocket-Protocol) is our 400 too, not its own (which had none of the security headers and named
-//! the library).
+//! /lan: the WebSocket upgrade to the virtual LAN switch, every check in its order, and every refusal the same raw
+//! answer with this server's headers.  A malformed Sec-WebSocket-Protocol is our 400 too (the Node server's ws library
+//! refused it with an answer of its own, which had none of the security headers and named the library).
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -19,7 +18,7 @@ use super::{App, Share, url};
 
 /// One half of a /lan connection, holding the client's share of the /lan budget and the connection's own shares (the
 /// per-client connection budget, the listener's count: nfsu2_http::Hold): given back once both halves are gone (the
-/// connection closed), as the JS gave them back on the socket's 'close'.
+/// connection closed).
 pub struct Held<T> {
     inner: T,
     _share: Arc<(Share, Hold)>,
@@ -71,12 +70,13 @@ fn ws_key(k: &str) -> bool {
 }
 
 impl App {
-    /// `refuseSocket(sock, code)`
+    /// the raw answer for code, then the connection goes (nfsu2_http::raw_refusal)
     async fn refuse(&self, up: Upgraded, code: u16) {
         nfsu2_http::raw_refusal(up.stream, self.raw_response(code)).await;
     }
 
-    /// server.mjs `onUpgrade(q, sock, head)`
+    /// An upgrade: the target, the Host, the path, the handshake, the Origin, the client's /lan connections and how
+    /// fast it opens them, the subprotocols, in that order; then the 101, and the connection to the switch.
     pub async fn on_upgrade(&self, q: Request, up: Upgraded) {
         let Some(u) = url::parse_target(&q.url) else { return self.refuse(up, 400).await };
         if !self.own_host(&q) {
@@ -123,7 +123,7 @@ impl App {
             drop(share);
             return;
         }
-        // what the ws library checked besides: the subprotocols (a malformed list: 400)
+        // the subprotocols (a malformed list: 400), last, where the Node server's ws library checked them
         let Ok(protocol) = nfsu2_ws::pick_protocol(q.headers.get("sec-websocket-protocol")) else {
             self.refuse(up, 400).await;
             drop(share);

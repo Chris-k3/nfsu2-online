@@ -13,7 +13,7 @@
 // --census (with --from: also apply the game-run census below to that dump),
 // --script <url path> (game run, default /tests/scripts/quickrace.txt), --env K=V
 // (game run, repeatable).
-// Needs the server (web/server/server.mjs, started with --dev) on that port and web/dist built.
+// Needs the server (out/web/server-rs/nfsu2-server, started with --dev) on that port and web/dist built.
 // Exit code 0 only when every module compiles, every pipeline builds, the
 // vertex-pulling and differential tests match, no translation was REJECTED
 // (index.txt, pairs.txt) and, for a game run, the game ran the whole quick race

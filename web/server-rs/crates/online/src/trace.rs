@@ -1,4 +1,4 @@
-//! A test aid (server option --online-trace <file>, only with --dev; trace.mjs): the lobby protocol's messages,
+//! A test aid (server option --online-trace <file>, only with --dev): the lobby protocol's messages,
 //! decoded, one line each, for the TCP streams on the lobby ports between browsers (LAN play: EA's server.dll in the
 //! hosting browser, port 9900 and its redirector 10901) and to the server's own online host (vhost.rs).  The online
 //! mode's reference transcripts were recorded with it.
@@ -26,7 +26,7 @@ use crate::aries::{FrameReader, redact_body};
 pub const TRACE_PORTS: [u16; 6] = [9900, 10901, 20920, 20921, 20922, 13505];
 const MAX_STREAMS: usize = 256;
 
-/// the trace's decoding and its lines (trace.mjs `LobbyTrace` without its file)
+/// the trace's decoding and its lines, on any writer (the file, on [`LobbyTrace`]'s thread; a test's own)
 pub struct TraceState<W: Write> {
     out: W,
     t0: i64,
@@ -111,12 +111,6 @@ impl<W: Write> TraceState<W> {
     pub fn flush(&mut self) {
         let _ = self.out.flush();
     }
-
-    /// (tests) what was written
-    #[cfg(test)]
-    pub fn into_inner(self) -> W {
-        self.out
-    }
 }
 
 enum Msg {
@@ -124,7 +118,7 @@ enum Msg {
     Close,
 }
 
-/// The dev trace (--online-trace, trace.mjs `LobbyTrace`): the lobby protocol's messages, decoded, secrets redacted,
+/// The dev trace (--online-trace): the lobby protocol's messages, decoded, secrets redacted,
 /// one line each, into a file of the server user's alone; written on a thread of its own.
 pub struct LobbyTrace {
     tx: mpsc::Sender<Msg>,

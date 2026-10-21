@@ -1,8 +1,8 @@
 //! The switch (nfsu2-lan) with the free-roam hub at 10.77.0.253 (nfsu2-roam) and the Online host beside it, as
-//! src/app/run.rs wires them, and browsers on its WebSocket: what web/test/roam-hub.test.mjs checks on the switch.
+//! src/app/run.rs wires them, and browsers on its WebSocket: the hub on the switch.
 //!   cargo test --test roam_switch
-//! The JS test ticks its hub by hand (`timer: false`); the hub here ticks on its own thread every second, as it does
-//! in the server, so the test waits for the list it looks for.
+//! The hub ticks on its own thread every second, as it does in the server (the hub's own tests in crates/roam tick it
+//! by hand), so the test waits for the list it looks for.
 
 mod common;
 
@@ -34,8 +34,7 @@ fn list_from_hub(g: &Got, to: u32) -> Option<(Vec<u8>, u32, u32)> {
         .map(|f| (f.clone(), be32(f, 16 + 17), le32(f, 16 + 23)))
 }
 
-// roam-hub.test.mjs 'on the switch: frames to 10.77.0.253 reach the hub, its lists come back, a departure is
-// forgotten'
+// on the switch: frames to 10.77.0.253 reach the hub, its lists come back, a departure is forgotten
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn on_the_switch_frames_to_the_hub_reach_it_its_lists_come_back_a_departure_is_forgotten() {
     let hub = roam_hub(RoamOptions::default());
@@ -75,7 +74,7 @@ async fn on_the_switch_frames_to_the_hub_reach_it_its_lists_come_back_a_departur
     sw.close().await;
 }
 
-// (not a JS case: a browser whose connection just ends, without a close frame, is forgotten by the hub as well)
+// a browser whose connection just ends, without a close frame, is forgotten by the hub as well
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_connection_that_ends_without_a_close_frame_is_forgotten_by_the_hub() {
     let hub = roam_hub(RoamOptions::default());
@@ -94,7 +93,7 @@ async fn a_connection_that_ends_without_a_close_frame_is_forgotten_by_the_hub() 
     sw.close().await;
 }
 
-/// a bundle (lan.mjs kind 32) of (frame, destinations) entries: none for the frame's own destination
+/// a bundle (the switch's frame kind 32) of (frame, destinations) entries: none for the frame's own destination
 fn bundle_to(entries: &[(Vec<u8>, Vec<u32>)]) -> Vec<u8> {
     let mut b = vec![32, 0, 0, 0];
     for (f, to) in entries {
@@ -109,9 +108,9 @@ fn bundle_to(entries: &[(Vec<u8>, Vec<u32>)]) -> Vec<u8> {
     b
 }
 
-// (lan.mjs's bundles with the hub on the switch, not a JS case) A page that takes bundles sends its datagrams in
-// them: an entry to the hub by its own destination, and one whose list names the hub and a friend: the hub takes
-// both (the friend's SNAP links the two), the friend gets its copy with the sender's address
+// bundles with the hub on the switch: a page that takes bundles sends its datagrams in them, an entry to the hub by
+// its own destination, and one whose list names the hub and a friend: the hub takes both (the friend's SNAP links
+// the two), the friend gets its copy with the sender's address
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn datagrams_to_the_hub_inside_bundles_reach_it() {
     let hub = roam_hub(RoamOptions::default());

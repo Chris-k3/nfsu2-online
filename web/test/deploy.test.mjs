@@ -1,4 +1,4 @@
-// The server as it would face the internet (web/server/server.mjs):
+// The server as it would face the internet (out/web/server-rs/nfsu2-server, web/tools/server-cmd.mjs):
 //   node --test --test-concurrency=1 web/test/deploy.test.mjs
 // - the no-leak crawl: every route and error path, in each TLS mode (none:
 //   this machine only, a certificate, behind a Cloudflare-like proxy, --dev): no host name,
@@ -39,12 +39,13 @@ import { serverCommand } from '../tools/server-cmd.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '../..');
-// NFSU2_TEST_SERVER / NFSU2_TEST_READY: another server script and its start-up line (a negative control:
-// the crawl against the server before this track lists what it gave away)
-const SERVER = process.env.NFSU2_TEST_SERVER || path.join(REPO, 'web/server/server.mjs');
+// NFSU2_SERVER_BIN / NFSU2_TEST_READY: another server and its start-up line (a negative control: the crawl
+// against a server before a fix lists what it gave away)
 const READY = process.env.NFSU2_TEST_READY || '  access    :';
-// a server from a bundle (web/deploy/pack.sh) has no test pages, test scripts or source maps even with --dev
-const AIDS = fs.existsSync(path.join(path.dirname(SERVER), '../dist-dev/test')) && fs.existsSync(path.join(path.dirname(SERVER), '../../tests'));
+// a server from a bundle (web/deploy/pack.sh, NFSU2_REPO its folder) has no test pages, test scripts or source maps
+// even with --dev
+const SERVED = process.env.NFSU2_REPO;
+const AIDS = fs.existsSync(path.join(SERVED, 'web/dist-dev/test')) && fs.existsSync(path.join(SERVED, 'tests'));
 const DATA = process.env.NFSU2_DATA || path.join(os.homedir(), 'projects/nsfu2/Need for Speed - Underground 2');
 const P1 = +(process.env.NFSU2_TEST_PORT1 || 8527), P2 = +(process.env.NFSU2_TEST_PORT2 || 8627);
 const TMP = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'nfsu2-deploy-test-'));
@@ -128,7 +129,7 @@ const upgrade = (p, extra = {}) => req('GET', p, { headers: { Upgrade: 'websocke
 
 // ---- a server under test ----
 async function startServer(args, { expectExit = false, env = {}, state = fs.mkdtempSync(path.join(TMP, 'state-')) } = {}) {
-  const c = spawn(...serverCommand(SERVER, [...(args.includes('--data') ? [] : ['--data', DATA]), '--state', state, ...args]), { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env } });
+  const c = spawn(...serverCommand([...(args.includes('--data') ? [] : ['--data', DATA]), '--state', state, ...args]), { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env } });
   let out = '';
   c.stdout.on('data', d => { out += d; }); c.stderr.on('data', d => { out += d; });
   const exited = new Promise(r => c.on('exit', code => r(code)));
@@ -349,10 +350,10 @@ test('path traversal and file safety', { skip: SKIP, timeout: 60_000 }, async ()
   const get = async p => rawRequest({ port: P2, data: req('GET', p) });
   try {
     const attacks = [
-      '/data/../server/server.mjs', '/data/%2e%2e/%2e%2e/etc/passwd', '/data/..%2f..%2f..%2fetc%2fpasswd', '/data/%252e%252e/%252e%252e/etc/passwd',
+      '/data/../build.mjs', '/data/%2e%2e/%2e%2e/etc/passwd', '/data/..%2f..%2f..%2fetc%2fpasswd', '/data/%252e%252e/%252e%252e/etc/passwd',
       '/data/....//....//etc/passwd', '/data/..%5c..%5cetc%5cpasswd', '/data/..\\..\\etc\\passwd', '/data/SPEED2.EXE%00.txt',
-      '/data/.%2e/.%2e/etc/passwd', '/data/%2e%2e%2f%2e%2e%2fweb/server/server.mjs', '/%2e%2e/%2e%2e/etc/passwd', '/..%2f..%2fout/web/server/etag.key',
-      '/../web/server/server.mjs', '/web/server/server.mjs', '/ca.key', '/server.key', '/etag.key', '/.git/config', '/data/.hidden', '/data/%2ehidden',
+      '/data/.%2e/.%2e/etc/passwd', '/data/%2e%2e%2f%2e%2e%2fweb/build.mjs', '/%2e%2e/%2e%2e/etc/passwd', '/..%2f..%2fout/web/server/etag.key',
+      '/../web/build.mjs', '/web/build.mjs', '/ca.key', '/server.key', '/etag.key', '/.git/config', '/data/.hidden', '/data/%2ehidden',
       '/data/link-out.txt', '/data/dir-out/secret.txt', '/data/etc/passwd', '/data/etc/hosts', '/data/GLOBAL/../../outside/secret.txt',
       '/data//etc/passwd', '/data/%2fetc%2fpasswd', '/data/%c0%ae%c0%ae/etc/passwd', '/data/%u002e%u002e/etc/passwd', '/DATA/../../etc/passwd',
       `/data/${encodeURIComponent(outside + '/secret.txt')}`, '/data/GLOBAL%2f..%2f..%2fetc%2fpasswd',

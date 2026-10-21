@@ -1,12 +1,14 @@
-// Side by side: the same load against the Node server (web/server/server.mjs) and its ports (web/server-rs, built
-// with web/server-rs/build.sh; web/server-dotnet on its branch), one after the other, on this machine.
+// Side by side: the same load against builds of the server (web/server-rs, built with web/server-rs/build.sh), one
+// after the other, on this machine: a change against main's, say.
 //
-//   node web/tools/server-compare.mjs [--load roam,online,http] [--n 120] [--seconds 60] [--servers node,rust]
+//   node web/tools/server-compare.mjs [--load roam,online,http] [--n 120] [--seconds 60] [--servers a=<bin>,b=<bin>]
 //        [--port 8691] [--data <game folder>] [--out <dir>] [--spread 3000] [--rate 20] [--gen-threads 8]
 //        [--server-cpus 0-11] [--gen-cpus 12-23] [--server-env NFSU2_THREADS=8,NFSU2_BUNDLE_MS=8]
 //   --server-cpus, --gen-cpus  the CPUs (taskset) the server and the load generators may use: apart, so that on
 //                              one machine they do not take each other's cores, as on two machines
-//   --server-env               environment for the server (the Rust server's knobs: NFSU2_THREADS, NFSU2_BUNDLE_MS)
+//   --server-env               environment for the server (its knobs: NFSU2_THREADS, NFSU2_BUNDLE_MS)
+//   --servers                  name=binary for each (default rust=out/web/server-rs/nfsu2-server; a name alone is
+//                              that binary too)
 //
 // Each server starts fresh for each load (its own state folder, --max-peers 2000 --dev), and while the load runs
 // its process is sampled every second (CPU time and resident memory, from /proc), and a probe measures the
@@ -34,12 +36,14 @@ import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { WebSocket } from 'ws';
-import { serverCommand } from './server-cmd.mjs';
+import { serverCommand, SERVER_BIN } from './server-cmd.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && i + 1 < argv.length ? argv[i + 1] : d; };
-const LOADS = opt('load', 'roam,online,http').split(','), SERVERS = opt('servers', 'node,rust').split(',');
+const LOADS = opt('load', 'roam,online,http').split(',');
+const BINS = Object.fromEntries(opt('servers', 'rust').split(',').map(s => s.split('=')).map(([n, b]) => [n, b ? path.resolve(b) : SERVER_BIN]));
+const SERVERS = Object.keys(BINS);
 const N = +opt('n', 120), SECONDS = +opt('seconds', 60), PORT = +opt('port', 8691);
 const DATA = opt('data', process.env.NFSU2_DATA || path.join(os.homedir(), 'projects/nsfu2/Need for Speed - Underground 2'));
 const OUT = path.resolve(opt('out', path.join(REPO, 'out/web/server-compare')));
@@ -54,8 +58,8 @@ const pinned = (cpus, cmd, args) => (cpus ? ['taskset', ['-c', cpus, cmd, ...arg
 
 async function startServer(impl, port, tag) {
   const state = fs.mkdtempSync(path.join(os.tmpdir(), `nfsu2-compare-${impl}-`));
-  const [cmd, args] = serverCommand(path.join(REPO, 'web/server/server.mjs'),
-    ['--data', DATA, '--http-port', String(port), '--max-peers', '2000', '--dev', '--state', state], [], impl);
+  const [cmd, args] = serverCommand(['--data', DATA, '--http-port', String(port), '--max-peers', '2000', '--dev', '--state', state],
+    BINS[impl]);
   const c = spawn(...pinned(SERVER_CPUS, cmd, args), { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...SERVER_ENV } });
   const log = fs.createWriteStream(path.join(OUT, `server-${impl}-${tag}.log`));
   c.stdout.pipe(log); c.stderr.pipe(log);

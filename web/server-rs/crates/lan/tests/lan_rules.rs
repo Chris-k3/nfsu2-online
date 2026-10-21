@@ -1,4 +1,4 @@
-//! web/test/lan.test.mjs, its second half (tests/lan.rs has the first): the audit's F2 (what one client can make the
+//! The switch's own tests, the second half (tests/lan.rs has the first): the audit's F2 (what one client can make the
 //! switch send, and whom it can get cut), the store, the 2000 addresses, LAN play's broadcasts, a page that lets go,
 //! the breakdown, bundles.
 
@@ -20,7 +20,7 @@ fn src(f: &[u8]) -> u32 {
     u32::from_be_bytes(f[4..8].try_into().unwrap())
 }
 
-/// lan.test.mjs's options for the F2 tests: the budgets far away, so that the queue rules are what is tested
+/// the options for the F2 tests: the budgets far away, so that the queue rules are what is tested
 fn unlimited() -> LanOptions {
     LanOptions {
         byte_rate: (64 << 20) as f64,
@@ -31,7 +31,7 @@ fn unlimited() -> LanOptions {
     }
 }
 
-// lan.test.mjs 'a flood of datagrams never gets a slower receiver cut: they are dropped for it, as a full link drops UDP'
+// a flood of datagrams never gets a slower receiver cut: they are dropped for it, as a full link drops UDP
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_flood_of_datagrams_never_gets_a_slower_receiver_cut() {
     let _s = serial().await;
@@ -64,7 +64,7 @@ async fn a_flood_of_datagrams_never_gets_a_slower_receiver_cut() {
     sw.close().await;
 }
 
-// lan.test.mjs 'free roam's datagrams (kind 1) are dropped at a much shorter queue than the others: no seconds of old positions'
+// free roam's datagrams (kind 1) are dropped at a much shorter queue than the others: no seconds of old positions
 // (The kernel's buffers to the victim are kept small, so that they are full before the switch's queue builds: a
 // burst reaches the switch faster than the victim's writer hands it to the kernel, and the queue rules shed most of
 // it there, where Node wrote each frame to the kernel at once; the kernel then takes the rest and the queue this
@@ -123,7 +123,7 @@ fn stream_opts() -> LanOptions {
     }
 }
 
-// lan.test.mjs 'a burst of stream segments (kind 4) at a receiver: the sender is cut, not the receiver'
+// a burst of stream segments (kind 4) at a receiver: the sender is cut, not the receiver
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_burst_of_stream_segments_the_sender_is_cut_not_the_receiver() {
     let _s = serial().await;
@@ -172,9 +172,9 @@ async fn a_burst_of_stream_segments_the_sender_is_cut_not_the_receiver() {
 // the review of F2: stream segments from 9 client addresses, each under its own share, got a receiver that reads
 // (slower than all of them together) cut.  (The kernel's buffers are kept small here, as in the never-reads test:
 // the switch's send buffer and the victim's receive buffer, which Linux grows to megabytes for a socket that reads,
-// take the 2 MB more than the victim reads in the 5 s and the switch's own queue never fills; the JS test fails
-// that way on this machine.)
-// lan.test.mjs 'stream segments from many clients at a receiver that reads: the clients flooding it go, it stays'
+// take the 2 MB more than the victim reads in the 5 s and the switch's own queue never fills; the test fails that
+// way with Linux's sizes.)
+// stream segments from many clients at a receiver that reads: the clients flooding it go, it stays
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn stream_segments_from_many_clients_at_a_receiver_that_reads() {
     let _s = serial().await;
@@ -219,7 +219,7 @@ async fn stream_segments_from_many_clients_at_a_receiver_that_reads() {
 
 // the review of F2's fix: a receiver that stopped reading (and kept its connection alive with text pings) got the
 // SENDER of an ordinary stream cut
-// lan.test.mjs 'a receiver that stopped reading: it goes, not the player streaming to it'
+// a receiver that stopped reading: it goes, not the player streaming to it
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_receiver_that_stopped_reading_goes_not_the_player_streaming_to_it() {
     use tokio::io::AsyncWriteExt;
@@ -263,7 +263,7 @@ async fn a_receiver_that_stopped_reading_goes_not_the_player_streaming_to_it() {
     sw.close().await;
 }
 
-// lan.test.mjs 'a broadcast costs its size for every player it reaches; one client address shares one budget'
+// a broadcast costs its size for every player it reaches; one client address shares one budget
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_broadcast_costs_its_size_for_every_player_it_reaches() {
     let _s = serial().await;
@@ -353,7 +353,7 @@ async fn a_broadcast_costs_its_size_for_every_player_it_reaches() {
     sw.close().await;
 }
 
-// lan.test.mjs 'the most free roam sends goes through one connection: 32 friends at 60 snapshots a second'
+// the most free roam sends goes through one connection: 32 friends at 60 snapshots a second
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_most_free_roam_sends_goes_through_one_connection() {
     let _s = serial().await;
@@ -382,7 +382,7 @@ async fn the_most_free_roam_sends_goes_through_one_connection() {
     sw.close().await;
 }
 
-// lan.test.mjs 'with a store, a restart of the server keeps each player's address for its token (and only for it)'
+// with a store, a restart of the server keeps each player's address for its token (and only for it)
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn with_a_store_a_restart_keeps_each_players_address_for_its_token() {
     let _s = serial().await;
@@ -416,7 +416,7 @@ async fn with_a_store_a_restart_keeps_each_players_address_for_its_token() {
     sw2.close().await;
 }
 
-// lan.test.mjs 'addresses: 2000 on 10.77.0.0/21, handed out round its eight /24s; never .0, .1 or .252 and up; full past them'
+// addresses: 2000 on 10.77.0.0/21, handed out round its eight /24s; never .0, .1 or .252 and up; full past them
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn addresses_2000_round_the_eight_24s_full_past_them() {
     let _s = serial().await;
@@ -445,7 +445,7 @@ async fn addresses_2000_round_the_eight_24s_full_past_them() {
     lan.stop();
 }
 
-// lan.test.mjs 'LAN play's broadcasts (kinds 3-5) reach only the browsers with LAN play open; free roam's reach everyone'
+// LAN play's broadcasts (kinds 3-5) reach only the browsers with LAN play open; free roam's reach everyone
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn lan_plays_broadcasts_reach_only_the_browsers_with_lan_play_open() {
     let _s = serial().await;
@@ -498,7 +498,8 @@ async fn lan_plays_broadcasts_reach_only_the_browsers_with_lan_play_open() {
     sw.close().await;
 }
 
-// lan.test.mjs 'a page that lets go (1000 "idle" or "closed") frees its address at once; a connection lost otherwise keeps it for its token'
+// a page that lets go (1000 "idle" or "closed") frees its address at once; a connection lost otherwise keeps it for its
+// token
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_page_that_lets_go_frees_its_address_at_once() {
     let _s = serial().await;
@@ -526,8 +527,8 @@ async fn a_page_that_lets_go_frees_its_address_at_once() {
     sw.close().await;
 }
 
-// the server's console says what the players on the switch do (server.mjs, every 5 minutes): each counted once
-// lan.test.mjs 'breakdown: Online mode, the LAN or Online screens, free roam, an older page, leaving or starting'
+// the server's console says what the players on the switch do (src/app/run.rs, every 5 minutes): each counted once
+// breakdown: Online mode, the LAN or Online screens, free roam, an older page, leaving or starting
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn breakdown_online_lan_screens_free_roam_older_page_leaving_or_starting() {
     let _s = serial().await;
@@ -562,7 +563,8 @@ async fn breakdown_online_lan_screens_free_roam_older_page_leaving_or_starting()
 
 // ---- bundles (kind 32): several frames in one message ----
 
-// lan.test.mjs 'bundles: each entry reaches its destinations as a frame of its own; a client that takes bundles gets one message a turn, one that does not gets frames as before'
+// bundles: each entry reaches its destinations as a frame of its own; a client that takes bundles gets one message a
+// turn, one that does not gets frames as before
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn bundles_each_entry_reaches_its_destinations_as_a_frame_of_its_own() {
     let _s = serial().await;
@@ -633,7 +635,8 @@ async fn bundles_each_entry_reaches_its_destinations_as_a_frame_of_its_own() {
     sw.close().await;
 }
 
-// lan.test.mjs 'bundles: each frame pays the budgets as a frame of its own; a broken entry, one over the budget, or a bundle too large ends it'
+// bundles: each frame pays the budgets as a frame of its own; a broken entry, one over the budget, or a bundle too
+// large ends it
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn bundles_each_frame_pays_the_budgets_a_broken_entry_ends_it() {
     let _s = serial().await;

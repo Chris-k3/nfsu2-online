@@ -1,11 +1,9 @@
 //! Token buckets and budgets.
 //!
-//! - [`Bucket`]: lan.mjs's `Bucket` (`rate` a second, a burst of two seconds' worth), with its `spend()` that may run
-//!   into a debt of one burst.  Not thread-safe by itself: the switch keeps each behind the lock of what owns it.
-//! - [`Budget`]: server.mjs's `Budget` (what clients hold at once: per client, per site, in all, a free share for
-//!   newcomers), thread-safe.
-//! - [`Rate`]: server.mjs's `Rate` (how often a client may do something: a bucket per client and per site),
-//!   thread-safe.
+//! - [`Bucket`]: a token bucket (`rate` a second, a burst of two seconds' worth), with a `spend()` that may run into
+//!   a debt of one burst.  Not thread-safe by itself: the switch keeps each behind the lock of what owns it.
+//! - [`Budget`]: what clients hold at once (per client, per site, in all, a free share for newcomers), thread-safe.
+//! - [`Rate`]: how often a client may do something (a bucket per client and per site), thread-safe.
 
 use std::collections::HashMap;
 
@@ -13,7 +11,7 @@ use parking_lot::Mutex;
 
 use crate::clock::mono_ms;
 
-/// lan.mjs `Bucket`: `rate` a second, at most `2 * rate` (two seconds' worth) stored, full at the start.
+/// A token bucket: `rate` a second, at most `2 * rate` (two seconds' worth) stored, full at the start.
 /// Times are `mono_ms()` milliseconds; the `_at` forms take one the caller read once for several buckets.
 #[derive(Clone, Debug)]
 pub struct Bucket {
@@ -63,9 +61,9 @@ impl Bucket {
     }
 }
 
-/// server.mjs `Budget`: what clients hold at once.  At most `per` for one client (key), `per_site` for one site, `total`
-/// in all, and the last `free` share of the total only for a client (and site) that holds none yet.  An empty site
-/// is none (an IPv4 client).
+/// What clients hold at once.  At most `per` for one client (key), `per_site` for one site, `total` in all, and the
+/// last `free` share of the total only for a client (and site) that holds none yet.  An empty site is none (an IPv4
+/// client).
 pub struct Budget {
     per: usize,
     per_site: usize,
@@ -82,7 +80,7 @@ struct BudgetInner {
 }
 
 impl Budget {
-    /// `total`: `usize::MAX` for none (Node's Infinity)
+    /// `total`: `usize::MAX` for no limit
     pub fn new(per: usize, per_site: usize, total: usize, free: f64) -> Self {
         let open = if total == usize::MAX { usize::MAX } else { total - (total as f64 * free).floor() as usize };
         Budget { per, per_site, total, open, inner: Mutex::new(BudgetInner::default()) }
@@ -141,8 +139,8 @@ impl Budget {
     }
 }
 
-/// server.mjs `Rate`: how often a client may do something; a token bucket per client (`burst`, `per_sec`) and per site
-/// (twice the client's).  `prune()` (every minute) drops the buckets that are full again.
+/// How often a client may do something: a token bucket per client (`burst`, `per_sec`) and per site (twice the
+/// client's).  `prune()` (every minute) drops the buckets that are full again.
 pub struct Rate {
     burst: f64,
     rate: f64,

@@ -2,7 +2,7 @@
  * in place of roam_bsd.c.  See roam_plat.h.
  *
  * A page cannot open sockets.  The page's main thread holds one WebSocket to
- * the local server's virtual-LAN switch (web/server/lan.mjs, /lan), which gives
+ * the local server's virtual-LAN switch (web/server-rs/crates/lan, /lan), which gives
  * every browser a virtual IPv4 address (10.77.x.x) and routes frames by virtual
  * destination address.  This file is one virtual UDP endpoint on that LAN:
  *
@@ -22,7 +22,7 @@
  *   player   our own virtual address and port; peers are virtual addresses
  *            (roam_peers takes 10.77.x.x literals, the page shows them).  Who
  *            our peers are comes from the server's free-roam hub
- *            (NET_ROAM_HUB, web/server/roam-hub.mjs: the players nearest to
+ *            (NET_ROAM_HUB, web/server-rs/crates/roam: the players nearest to
  *            us, rc_config.hub_ip), so a server takes far more players than
  *            one group; NFSU2_ROAM_HUB=0 does without it.  Without a hub
  *            answering, discovery (roam_discovery = on) is one datagram to
@@ -473,8 +473,8 @@ int roam_plat_start(const roam_plat_cfg *cfg, rc_session *s){
     s->io = io;
     if (use_hub){ s->conf.hub_ip = NET_ROAM_HUB; s->conf.hub_port = g_cfg.port; }
     /* the WebSocket loses no datagram, so a SNAP carries only the newest
-     * state: half the bytes (a receiver the switch sheds for, see lan.mjs
-     * roamQueue, interpolates over the gap).  The impairment knob stands for
+     * state: half the bytes (a receiver the switch sheds for, see nfsu2-lan's
+     * roam_queue, interpolates over the gap).  The impairment knob stands for
      * a lossy link: all three there, as on a LAN */
     s->conf.snap_states = IMP.on ? RC_SNAP_STATES : 1;
     roam_plat_unlock();

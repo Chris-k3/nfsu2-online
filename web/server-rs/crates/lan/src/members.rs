@@ -1,5 +1,5 @@
-//! Who is on the switch (lan.mjs `admit`, the 'close' handler, `allocate`, `full`, `reserve`, the peer list's
-//! changes, `persist`): all of it under the one `members` lock, which routing never takes.
+//! Who is on the switch (admission, a connection's close, the free addresses, "LAN full", the reservations, the peer
+//! list's changes, the store): all of it under the one `members` lock, which routing never takes.
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering::Relaxed;
@@ -25,7 +25,7 @@ pub(crate) struct Reservation {
 }
 
 pub(crate) struct Members {
-    /// in the order of a JS Map (a replaced holder keeps its place): the peer lists, info and the store show it
+    /// in the order they came (a replaced holder keeps its place): the peer lists, info and the store show it
     pub(crate) peers: IndexMap<u32, Arc<Peer>>,
     pub(crate) reserved: IndexMap<u32, Reservation>,
     next: usize,
@@ -59,8 +59,8 @@ impl Members {
         }
     }
 
-    /// lan.mjs `allocate()`: a free address that is nobody's reservation, or 0: a reservation is never given to
-    /// anyone but its token
+    /// a free address that is nobody's reservation, or 0: a reservation is never given to anyone but its token (the
+    /// review of the audit's F1, in the crate doc)
     pub(crate) fn allocate(&mut self) -> u32 {
         let now = now_ms();
         self.reserved.retain(|_, r| r.until > now);
@@ -75,7 +75,7 @@ impl Members {
         0
     }
 
-    /// lan.mjs `full`: every place taken, or every address in use or kept for its player
+    /// a newcomer would get "LAN full" now: every place taken, or every address in use or kept for its player
     pub(crate) fn full(&self, max_peers: usize) -> bool {
         if self.peers.len() >= max_peers {
             return true;
@@ -91,8 +91,8 @@ impl Members {
 }
 
 impl LanSwitch {
-    /// lan.mjs `admit(ws, group, site, opts, hello)`: the address (given back only to the token that held it), the
-    /// welcome, the peer list.  None: not admitted (closed already, or "LAN full").
+    /// A connection admitted: the address (given back only to the token that held it), the welcome, the peer list.
+    /// None: not admitted (closed already, or "LAN full").
     pub(crate) fn admit(&self, conn: &Arc<Conn>, ctx: &AttachCtx, hello: Option<Map<String, Value>>) -> Option<Arc<Peer>> {
         if !conn.open() {
             return None;
@@ -193,10 +193,10 @@ impl LanSwitch {
         Some(peer)
     }
 
-    /// the 'close' of a connection (lan.mjs `attach`'s and `admit`'s handlers): its client's limits let go, and for
-    /// the holder of an address, the address reserved for its token (not when the page closed the connection itself,
-    /// 1000 "idle" or "closed": no network feature in use, or the game ended; its address is free at once).  An old
-    /// connection's late close must not take the address from a new holder.
+    /// the 'close' of a connection: its client's limits let go, and for the holder of an address, the address
+    /// reserved for its token (not when the page closed the connection itself, 1000 "idle" or "closed": no network
+    /// feature in use, or the game ended; such a page comes back without a token, so its address is free at once).
+    /// An old connection's late close must not take the address from a new holder.
     pub(crate) fn closed(&self, conn: &Arc<Conn>, ctx: &AttachCtx) {
         self.leave_group(false, &ctx.group);
         if let Some(s) = &ctx.site {
@@ -243,13 +243,13 @@ impl LanSwitch {
         }
     }
 
-    /// the copy-on-write list of every peer, after a change (in the Map's order)
+    /// the copy-on-write list of every peer, after a change (in the order of `peers`)
     fn publish(&self, m: &Members) {
         self.all.store(Arc::new(m.peers.values().cloned().collect()));
     }
 
-    /// lan.mjs `reserve(vip, peer)`: vip is kept for its token; past its client's (and site's) share of
-    /// reservations, that client's own oldest go
+    /// vip is kept for its token for `reserve_ms`; past its client's (and site's) share of reservations
+    /// (`group_reserve`, `site_reserve`: so that one client cannot reserve them all), that client's own oldest go
     fn reserve(&self, m: &mut Members, vip: u32, peer: &Peer) {
         let now = now_ms();
         let group = peer.group.id.clone();
@@ -265,7 +265,7 @@ impl LanSwitch {
                 .filter(|(_, r)| r.until > now && if by_site { r.site.as_ref() == Some(id) } else { r.group.as_ref() == Some(id) })
                 .map(|(v, r)| (*v, r.until))
                 .collect();
-            // the oldest first (a stable sort, as Array#sort is: equal times stay in the Map's order)
+            // the oldest first (a stable sort: equal times stay in the order of `reserved`)
             mine.sort_by_key(|e| e.1);
             for (v, _) in &mine[..mine.len().saturating_sub(max)] {
                 m.reserved.shift_remove(v);
@@ -278,7 +278,7 @@ impl LanSwitch {
         }
     }
 
-    /// lan.mjs `peerList()`: the whole peer list, as a message (the Online host on it as `server: true`)
+    /// the whole peer list, as a message (the Online host on it as `server: true`)
     pub(crate) fn peer_list(&self, m: &Members) -> Bytes {
         let mut s = String::with_capacity(32 + 48 * m.peers.len());
         s.push_str(r#"{"t":"peers","peers":["#);
@@ -305,8 +305,7 @@ impl LanSwitch {
         Bytes::from(s)
     }
 
-    /// lan.mjs `peersChanged(vip, left)`: vip joined, got its name or left; everyone hears of it peersMs later, with
-    /// whatever else changed by then
+    /// vip joined, got its name or left; everyone hears of it `peers_ms` later, with whatever else changed by then
     pub(crate) fn peers_changed(&self, m: &mut Members, vip: u32, left: bool) {
         m.changed.insert(vip);
         if left {
@@ -339,7 +338,7 @@ impl LanSwitch {
         });
     }
 
-    /// lan.mjs `sendDelta()`: the changes, to the clients that take them (sent under the lock, so that a client's
+    /// the changes, to the clients that take them (sent under the lock, so that a client's
     /// whole list and the changes after it reach it in the order they were made)
     fn send_delta(&self) {
         let mut m = self.members.lock();
@@ -373,7 +372,7 @@ impl LanSwitch {
         }
     }
 
-    /// lan.mjs `sendFull()`: the whole list to the clients that take no changes, at most every fullPeersMs
+    /// the whole list to the clients that take no changes, at most every `full_peers_ms`
     fn send_full(&self) {
         let mut m = self.members.lock();
         m.full_armed = false;
@@ -389,7 +388,7 @@ impl LanSwitch {
         }
     }
 
-    /// a hello, the connection's first (lan.mjs's message handler): its name and what it takes, the whole list
+    /// a hello, the connection's first (later ones change nothing): its name and what it takes, the whole list
     pub(crate) fn hello(&self, peer: &Arc<Peer>, msg: &Map<String, Value>) {
         let mut m = self.members.lock();
         if peer.hello.load(Relaxed) {
@@ -404,7 +403,7 @@ impl LanSwitch {
         }
     }
 
-    /// lan.mjs `persist()`: the store gets the addresses held and reserved, shortly after a change
+    /// the store gets the addresses held and reserved, shortly after a change
     pub(crate) fn persist(&self, m: &mut Members) {
         if self.store.is_none() || m.save_armed {
             return;
@@ -418,7 +417,7 @@ impl LanSwitch {
         });
     }
 
-    /// a timer that `stop()` does not end (the JS saveTimer outlived it)
+    /// a timer that `stop()` does not end (a change after the stop is still saved)
     fn after_always(&self, d: Duration, f: impl FnOnce(&LanSwitch) + Send + 'static) {
         let me = self.me.clone();
         tokio::spawn(async move {
@@ -429,7 +428,7 @@ impl LanSwitch {
         });
     }
 
-    /// lan.mjs `flush()`: the list, taken under the lock, written on a blocking thread (or here, as the switch stops)
+    /// the store's list, taken under the lock, written on a blocking thread (or here, as the switch stops)
     fn flush(&self, now: bool) {
         let Some(store) = self.store.clone() else { return };
         let (seq, json) = {
@@ -495,8 +494,8 @@ fn lan_full() -> Bytes {
     Bytes::from(p)
 }
 
-/// lan.mjs `greet(peer, m)`: a connection's first hello: its player's name, and whether it takes the changes to the
-/// peer list, bundles, and has LAN play open (a page of before says nothing: it gets every broadcast)
+/// a connection's first hello: its player's name, and whether it takes the changes to the peer list, bundles, and has
+/// LAN play open (a page of before says nothing: it gets every broadcast)
 fn greet(peer: &Peer, m: &Map<String, Value>) {
     use nfsu2_util::json::is_num;
     peer.hello.store(true, Relaxed);

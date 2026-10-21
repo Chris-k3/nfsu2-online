@@ -1,7 +1,6 @@
 //! The switch's hosts: the server's own addresses on the virtual LAN, the Online host (10.77.0.1, nfsu2-online) and
-//! the free-roam hub (10.77.0.253, nfsu2-roam).  In Node these were objects the switch called on its one thread
-//! (lan.mjs `online.frame()`, `roam.frame()`, `sendTo()`); here each host runs on a thread of its own and the switch
-//! (nfsu2-lan) posts it its frames in order.  Both directions:
+//! the free-roam hub (10.77.0.253, nfsu2-roam).  Each host runs on a thread of its own and the switch (nfsu2-lan)
+//! posts it its frames in order.  Both directions:
 //!
 //! - switch -> host: [`Host::frame`] for every frame a browser sends to the host's address (the switch has written
 //!   the sender's true address into it), [`Host::peer_gone`] for every browser that left the switch.  Both only
@@ -10,12 +9,11 @@
 //!   host's own thread, which answers at once whether the frame went ([`SendResult`]).
 //!
 //! What the Online host sends while it handles a frame (its answer, and what it tells other players because of it)
-//! is charged to the sender's budgets, as lan.mjs did with `this.cause`: the switch hands the host a [`Charge`] with
-//! each frame (`FrameCtx::cause`), the host passes it to every `send` it makes for that frame, and the switch spends
-//! from the sender's buckets for each frame that goes (after its checks that the receiver is there and not too far
-//! behind).  After the frame the host asks [`Charge::overspent`]: the sender spent more than its budgets, and the
-//! host closes the stream the frame came on (vhost.mjs `overrun`).  The free-roam hub's frames are charged to nobody
-//! (`cause: None`).
+//! is charged to the sender's budgets: the switch hands the host a [`Charge`] with each frame (`FrameCtx::cause`), the
+//! host passes it to every `send` it makes for that frame, and the switch spends from the sender's buckets for each
+//! frame that goes (after its checks that the receiver is there and not too far behind).  After the frame the host
+//! asks [`Charge::overspent`]: the sender spent more than its budgets, and the host closes the stream the frame came
+//! on (nfsu2-online's `overrun`).  The free-roam hub's frames are charged to nobody (`cause: None`).
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -24,15 +22,15 @@ use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use bytes::Bytes;
 use tokio::sync::oneshot;
 
-/// What became of a frame a host sent to one browser (lan.mjs `sendTo`: true, false, null).
+/// What became of a frame a host sent to one browser.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum SendResult {
     /// queued to the browser
     Sent,
-    /// not sent: the browser is too far behind (lan.mjs `onlineQueue`, or its queue is over `sendBuffer` and it
-    /// was cut); the host closes the stream it was for (JS `false`)
+    /// not sent: the browser is too far behind (more than the switch's `online_queue` queued, or its queue is over
+    /// `send_buffer` and it was cut); the host closes the stream it was for
     Full,
-    /// not sent: no such browser on the switch (JS `null`)
+    /// not sent: no such browser on the switch
     Gone,
 }
 
@@ -141,9 +139,9 @@ pub trait Host: Send + Sync + 'static {
     fn frame(&self, from: u32, data: Bytes, ctx: FrameCtx);
     /// browser `vip` left the switch
     fn peer_gone(&self, vip: u32);
-    /// counts for the tests and the console (the JS `info()`), as JSON
+    /// counts for the tests and the console, as JSON
     fn info(&self) -> oneshot::Receiver<serde_json::Value>;
-    /// the browsers this host counts as its players now (the JS `vips()`)
+    /// the browsers this host counts as its players now
     fn vips(&self) -> oneshot::Receiver<HashSet<u32>>;
     /// the server stops: save what is kept, end the timers
     fn stop(&self);

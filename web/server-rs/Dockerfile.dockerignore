@@ -7,7 +7,5 @@
 !web/build.mjs
 !web/index.html
 !web/src/
-!web/server/names.mjs
-!web/server/cloudflare-ips.txt
 !web/server-rs/
 web/server-rs/target/

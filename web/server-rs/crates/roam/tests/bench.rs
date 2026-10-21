@@ -1,5 +1,5 @@
 //! How long a tick takes with a full hub: 2000 players in one room (the grid and the heap), in 20 rooms of 100 (every
-//! pair of each), and in 8 rooms of 250 (every pair of rooms just under exactRoom: the most pairs a tick sorts).
+//! pair of each), and in 8 rooms of 250 (every pair of rooms just under `exact_room`: the most pairs a tick sorts).
 //! Not a test: run it in release,
 //!   cargo.sh roam test --release -p nfsu2-roam --test bench -- --ignored --nocapture
 

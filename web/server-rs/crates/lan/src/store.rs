@@ -1,6 +1,6 @@
-//! The state folder's lan-addresses.json (server.mjs's store for the switch): `[{"v":"10.77.0.2","h":"<base64url of
-//! the token's SHA-256>"},...]`, the addresses held and then the ones reserved, so that the players come back to the
-//! same addresses after a restart.  Written as server.mjs wrote it: a .tmp file (mode 0600), then renamed.
+//! The state folder's lan-addresses.json (the switch's store): `[{"v":"10.77.0.2","h":"<base64url of the token's
+//! SHA-256>"},...]`, the addresses held and then the ones reserved, so that the players come back to the same
+//! addresses after a restart.  Written whole to a .tmp file (mode 0600), then renamed over the old one.
 
 use std::path::PathBuf;
 
@@ -20,7 +20,8 @@ impl Store {
         Store { path, written: Mutex::new(0) }
     }
 
-    /// lan.mjs's constructor: the addresses and their hashes (none when the file is missing or broken)
+    /// what the switch starts with: the addresses and their hashes (none when the file is missing or broken; an entry
+    /// that is not an address the switch hands out with a hash of 32 bytes is skipped)
     pub(crate) fn load(&self) -> Vec<(u32, [u8; 32])> {
         let Ok(bytes) = std::fs::read(&self.path) else { return Vec::new() };
         let text = String::from_utf8_lossy(&bytes);
@@ -55,7 +56,8 @@ impl Store {
     }
 }
 
-/// fs.writeFileSync(path, data, { mode: 0o600 }): the mode is the new file's
+/// the file written whole, readable by the server's user alone (0600, the mode a file made here gets; one that was
+/// there already keeps its own)
 fn write_private(path: &PathBuf, data: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     let mut o = std::fs::OpenOptions::new();

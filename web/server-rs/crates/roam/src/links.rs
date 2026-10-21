@@ -1,6 +1,6 @@
 //! The pieces the links are made of: the distance (Math.hypot as V8 computes it), the grid and its nearest-first walk
-//! (Near), and the heap that merges the walks (roam-hub.mjs `grid`, `Near`, `Heap`).  Each gives what the JS gives,
-//! bit for bit and in the same order: the order decides between pairs at one distance, and so the links.
+//! (Near), and the heap that merges the walks.  Together they give the pairs in the order a sort of every pair would,
+//! bit for bit, ties included: the order decides between pairs at one distance, and so the links.
 
 /// `Math.hypot(x, y, z)` as V8 computes it (scaled by the largest, Kahan's sum): the same distances as the Node hub,
 /// so the same order of pairs.  (Rust never fuses the multiply and the subtraction into an FMA, nor does V8.)
@@ -35,21 +35,21 @@ pub(crate) fn hypot3(x: f64, y: f64, z: f64) -> f64 {
     sum.sqrt() * max
 }
 
-/// the distance of two positions, as the JS writes it: `Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])`
+/// the distance of two positions: `hypot3` of their differences in x, y and z, in that order
 #[inline]
 pub(crate) fn distance(a: &[f64; 3], b: &[f64; 3]) -> f64 {
     hypot3(a[0] - b[0], a[1] - b[1], a[2] - b[2])
 }
 
 /// A number's place in the order of numbers as a u64 (the sign flipped, a negative one's bits all flipped; -0 as 0,
-/// as the JS's `x.d - y.d` sees them equal).
+/// which it equals).
 #[inline]
 pub(crate) fn order_key(d: f64) -> u64 {
     let b = (d + 0.0).to_bits();
     b ^ (((b as i64) >> 63) as u64 | 1 << 63)
 }
 
-/// Sorts (key, index) by key, and at one key by the order they were in: the JS's stable sort of a room's pairs by
+/// Sorts (key, index) by key, and at one key by the order they were in: the stable sort of a room's pairs by
 /// their place.  A stable radix sort (11 bits a pass, a pass that would move nothing skipped): every pair of 250
 /// players is 31,000 of them, which a comparison sort took most of a tick over.  `tmp`: room to work in.
 pub(crate) fn sort_stable(v: &mut Vec<(u64, u32)>, tmp: &mut Vec<(u64, u32)>) {
@@ -95,10 +95,9 @@ const PER_CELL: f64 = 8.0;
 const MIN_CELL: f64 = 5.0;
 
 /// The players of a room (indices into its list) by their cell in x and y, sized for PER_CELL players over the area
-/// they span, and the cells they span.  The JS keeps the cells in a Map by `(x + 8192) * 16384 + (y + 8192)`; here
-/// they are an array over the span (positions are within 20 km and cells at least 5 m, so the span is at most
-/// 8001 cells a side and the array at most n/8 + 32004 cells; that key never makes two cells one there, so a cell
-/// outside the span is empty in both).
+/// they span, and the cells they span.  The cells are an array over the span (positions are within 20 km and cells at
+/// least 5 m, so the span is at most 8001 cells a side and the array at most n/8 + 32004 cells); a cell outside the
+/// span is empty.
 #[derive(Default)]
 pub(crate) struct Grid {
     pub(crate) cell: f64,
@@ -113,7 +112,7 @@ pub(crate) struct Grid {
 }
 
 impl Grid {
-    /// the grid of every position in `pos` (roam-hub.mjs `grid(list, members)` with every member)
+    /// the grid of every position in `pos`
     pub(crate) fn build(&mut self, pos: &[[f64; 3]]) {
         self.start.clear();
         self.members.clear();
@@ -136,7 +135,7 @@ impl Grid {
         self.y2 = (h2 / cell).floor() as i64;
         self.rows = self.y2 - self.y1 + 1;
         let cells = ((self.x2 - self.x1 + 1) * self.rows) as usize;
-        // counted, then placed (a counting sort): each cell's players in the order of the list, as the JS pushes them
+        // counted, then placed (a counting sort): each cell's players in the order of the list
         self.start.clear();
         self.start.resize(cells + 1, 0);
         for p in pos {
@@ -179,13 +178,13 @@ impl Grid {
 /// distance the lowest j first): ring after ring of cells around its own; one found is the nearest left once the
 /// next ring is farther (a cell r rings away is at least r - 1 cells off).
 ///
-/// The JS keeps what it found in an array it sorts after each ring and takes the nearest off its end.  Here what
+/// A plain walk sorts what it found after each ring and takes the nearest off the end.  Here what
 /// is found waits in a pool, in no order; once the ones within reach of the rings read (r - 1 cells) are all given,
 /// the next ring is read and those within its reach move to `ready`, still in no order, and of those only the
 /// nearest `CHUNK` at a time are put in order (`next`): of the 100 to 200 a player finds it takes 30 or 40 (in a
 /// crowd on one spot, of 2000 within reach), so most are never sorted.  The same order, step for step: the nearest
 /// found is in `next` or `ready` whenever any is within reach (every j is found once, so the order by distance,
-/// then j, is total), and a ring is read exactly when the JS reads it, when none found is within reach.
+/// then j, is total), and a ring is read exactly when a plain walk reads it, when none found is within reach.
 ///
 /// Nor is the distance (Math.hypot as V8 computes it, three divisions) worked out for most.  The pool and `ready`
 /// keep the square of the distance (rounded, within 1e-15 of the true one).  Where the reach decides, only a square
@@ -246,8 +245,8 @@ impl Near {
                 self.order(pos);
                 continue;
             }
-            // none found is within reach of the rings read (the JS's test of its nearest): the next ring, or once
-            // every ring is read, all that is left
+            // none found is within reach of the rings read (a plain walk's test of its nearest): the next ring, or
+            // once every ring is read, all that is left
             let reach = if self.r <= self.last { self.r as f64 * g.cell } else { f64::INFINITY };
             if reach == f64::INFINITY && self.found.pool.is_empty() {
                 return None;
@@ -359,7 +358,7 @@ impl Within {
     }
 }
 
-/// An entry of the order a large room's pairs are taken in: `[d, min(i, j), max(i, j), i, j, since, nearest]` in 16
+/// An entry of the order a large room's pairs are taken in: `(d, min(i, j), max(i, j), i, j, since, nearest)` in 16
 /// bytes (a room of 2000 players has 34,000 of them).  `key` is `min << 33 | max << 3` and three flags: whether i is
 /// the higher one, whether this is i's nearest one (else a link of the last tick), and whether that nearest one is
 /// by the places ahead (else by the places now).  The order of `key >> 3` is the order of (min, max), and the flags
@@ -418,7 +417,7 @@ pub(crate) fn before(x: &Cand, y: &Cand) -> bool {
     x.d < y.d || (x.d == y.d && x.key >> 3 < y.key >> 3)
 }
 
-/// A binary heap, the least on top (the JS's own): each player's nearest one not taken yet (`link_many`, which says
+/// A binary heap, the least on top: each player's nearest one not taken yet (`link_many`, which says
 /// why entries equal in (d, lo, hi) may come out in any order).
 #[derive(Default)]
 pub(crate) struct Heap {
@@ -508,7 +507,7 @@ mod tests {
             let mut v: Vec<(u64, u32)> = ds.iter().enumerate().map(|(i, &d)| (order_key(d), i as u32)).collect();
             sort_stable(&mut v, &mut Vec::new());
             let mut want: Vec<u32> = (0..n as u32).collect();
-            // what the JS does: a stable sort by x.d - y.d
+            // a stable comparison sort by the number
             want.sort_by(|&x, &y| ds[x as usize].partial_cmp(&ds[y as usize]).unwrap());
             assert_eq!(v.iter().map(|e| e.1).collect::<Vec<_>>(), want, "{n}");
         }

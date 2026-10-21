@@ -1,12 +1,12 @@
-//! The two files of the state folder written as stats.mjs and buddy.mjs write them: the folder made 0700 when it is
+//! The two files of the state folder (stats.json, buddies.json), written atomically: the folder made 0700 when it is
 //! missing (the Online audit's ONL-13), a temporary file of 0600 (`<file>.tmp-<pid>`), then a rename; a failure
-//! described as Node describes it (`e.message`, which the console line quotes).
+//! described in Node's words (its `e.message`: the console line quotes it, as the Node server's line did).
 
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 
-/// `mkdirSync(dir, { recursive: true, mode: 0o700 })`, `writeFileSync(tmp, body, { mode: 0o600 })`, `renameSync`
+/// the folder (0700, with its parents), the temporary file (0600), then the rename over `file`
 pub fn write_atomic(dir: &Path, file: &Path, body: &[u8]) -> Result<(), String> {
     let mut b = fs::DirBuilder::new();
     b.recursive(true);

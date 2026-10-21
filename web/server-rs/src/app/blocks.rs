@@ -9,15 +9,15 @@
 //! per run, not per file: the music's first megabyte does not compress, the rest does), and an answer while the
 //! compressors are taken (per client, per site, in all).  An answer holds its compressor until the client has its
 //! last byte, so most of them wait on the network: about 100 players draw some 70 MB/s of game data, dozens of answers
-//! under way at once.  The CPU follows the bytes, not the answers, so the total bounds memory: 128 compressors take
-//! about 200 MB at most (zstd 1.5 MB each, br 0.9, gzip 0.4).  The compressing itself, chunk by chunk, is on the
-//! pool's threads (pool.rs), never on the runtime's workers.
+//! under way at once.  The CPU follows the bytes, not the answers (br 3 does 200 MB/s on one core of an M4 Pro), so
+//! the total bounds memory: 128 compressors take about 200 MB at most (zstd 1.5 MB each, br 0.9, gzip 0.4).  The
+//! compressing itself, chunk by chunk, is on the pool's threads (pool.rs), never on the runtime's workers.
 //!
 //! A shared cache (Cloudflare's, with a Cache Rule for /data-blocks/*) may keep a run for good (EDGE_KEEP), as the
 //! game data is the same for every player: only when its address names this version of the file (m and s, the
 //! manifest's mtime and size, so a changed file is a new address) and it is as small as it gets (compressed, or a run
-//! that does not compress; not one sent as it is because the compressors were taken).  At about 110 players the 1
-//! Gbit uplink was full without it.
+//! that does not compress; not one sent as it is because the compressors were taken).  The movies too.  At about 110
+//! players the 1 Gbit uplink was full without it.
 
 use std::io::{self, Write};
 use std::os::unix::fs::{FileExt, MetadataExt};
@@ -137,7 +137,7 @@ fn step(file: &std::fs::File, mut enc: Encoder, off: u64, end: u64) -> io::Resul
 }
 
 impl App {
-    /// `sendBlocks(q, s, file, u)`
+    /// /data-blocks/: the run of the game file `file` that b and n name (None: 404), compressed or as it is
     pub async fn send_blocks(&self, q: &Request, s: &mut Response, file: Option<String>, u: &Url) -> Res {
         // one open file for the whole answer, its size and version, the probe and the bytes: a file put in place
         // meanwhile is another one, and a run kept for good is the version its address names (opened where it is
@@ -232,7 +232,7 @@ impl App {
         let mut next = Some(job(None, start));
         while let Some(j) = next.take() {
             let Some(Ok(st)) = j.await else {
-                // a read or compression error (JS: rs or zs 'error'): the answer cannot be finished
+                // a read or compression error: the answer cannot be finished
                 s.destroy();
                 return Err(Fail::Gone);
             };

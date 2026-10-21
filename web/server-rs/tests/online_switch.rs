@@ -1,8 +1,8 @@
-//! The switch (nfsu2-lan) with the Online host at 10.77.0.1 (nfsu2-online), and browsers on its WebSocket: what
-//! web/test/online-vhost.test.mjs and web/test/online-audit.test.mjs check of the two together.
+//! The switch (nfsu2-lan) with the Online host at 10.77.0.1 (nfsu2-online), and browsers on its WebSocket: the two
+//! together.
 //!   cargo test --test online_switch
-//! - online-vhost: the host is on every peer list as server: true, frames to it never reach a browser, its answers
-//!   do, broadcasts never reach it, a browser that leaves is reported
+//! - the host is on every peer list as server: true, frames to it never reach a browser, its answers do, broadcasts
+//!   never reach it, a browser that leaves is reported
 //! - ONL-2: what the host sends because of a client's frame is charged to that client (over its budget: that stream
 //!   goes, the others stay); a receiver far behind loses its online stream, not its connection
 
@@ -19,7 +19,7 @@ use nfsu2_util::{FrameCtx, Host, SendResult};
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
 
-/// online-vhost.test.mjs's stand-in for the online host: it keeps what the switch hands it
+/// a stand-in for the online host: it keeps what the switch hands it
 #[derive(Default)]
 struct FakeOnline {
     seen: Mutex<Vec<(u32, Vec<u8>)>>,
@@ -55,7 +55,7 @@ impl Host for FakeOnline {
     fn stop(&self) {}
 }
 
-// online-vhost.test.mjs 'switch: the online host on the peer list, frames to it and back, no broadcasts'
+// the online host on the peer list, frames to it and back, no broadcasts
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn switch_the_online_host_on_the_peer_list_frames_to_it_and_back_no_broadcasts() {
     let online = Arc::new(FakeOnline::default());
@@ -101,7 +101,7 @@ async fn switch_the_online_host_on_the_peer_list_frames_to_it_and_back_no_broadc
     s.close().await;
 }
 
-/// online-audit.test.mjs `Browser.open()` and `login(name)`, then `move` to the Lounge
+/// a browser of client `group`, logged in to the lobby as `name`, then moved to the Lounge
 async fn in_the_lounge(port: u16, group: &str, name: &str, rcvbuf: Option<u32>) -> (Browser, Conn) {
     let b = Browser::open(port, &format!("?g={group}"), rcvbuf).await;
     let c = b.login(name).await;
@@ -110,8 +110,7 @@ async fn in_the_lounge(port: u16, group: &str, name: &str, rcvbuf: Option<u32>) 
     (b, c)
 }
 
-// online-audit.test.mjs 'ONL-2: the switch: what the host sends for a client is charged to it (over its budget: that
-// stream goes); a receiver far behind loses its online stream, not its connection', its first half
+// ONL-2, its first half: what the host sends for a client is charged to it (over its budget: that stream goes)
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn onl2_the_switch_what_the_host_sends_for_a_client_is_charged_to_it() {
     let (online, _lines) = online_host();
@@ -148,12 +147,12 @@ async fn onl2_the_switch_what_the_host_sends_for_a_client_is_charged_to_it() {
     sw.close().await;
 }
 
-// the same JS case, its second half.  The JS test makes the receiver's ws.bufferedAmount 9 MiB by hand, past both
-// onlineQueue (1 MiB) and sendBuffer (8 MiB), so that only the order of the two checks keeps the connection; here
-// the receiver truly stops reading (small kernel buffers: its SO_RCVBUF and the switch's SO_SNDBUF, as the lan tests
-// keep them) and another browser's LAN datagrams fill its queue on the switch until it is just past sendBuffer (2
-// MiB here; datagrams queue up to shedQueue, 4 MiB here).  That flood needs budgets that let it through, so this
-// half runs on a switch of its own.
+// ONL-2, its second half: a receiver far behind loses its online stream, not its connection.  The receiver truly
+// stops reading (small kernel buffers: its SO_RCVBUF and the switch's SO_SNDBUF, as the lan tests keep them) and
+// another browser's LAN datagrams fill its queue on the switch until it is just past `send_buffer` (2 MiB here;
+// datagrams queue up to `shed_queue`, 4 MiB here), past `online_queue` (1 MiB) too, so that only the order of the
+// two checks keeps the connection.  That flood needs budgets that let it through, so this half runs on a switch of
+// its own.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn onl2_the_switch_a_receiver_far_behind_loses_its_online_stream_not_its_connection() {
     let (online, _lines) = online_host();
@@ -179,7 +178,7 @@ async fn onl2_the_switch_a_receiver_far_behind_loses_its_online_stream_not_its_c
     let personas = |info: &Value| info["online"]["personas"].as_u64().unwrap();
     assert_eq!(personas(&sw.info().await), 5);
     // the slow receiver stops reading; a flood of LAN play's datagrams to it, in batches while its queue is short,
-    // then one at a time until the queue is past sendBuffer (and stays so: before the kernel's buffers are full an
+    // then one at a time until the queue is past `send_buffer` (and stays so: before the kernel's buffers are full an
     // ACK still frees some of it a moment later), so that no datagram of the flood finds it over the limit
     slow.pause(true);
     let flood = Browser::open(sw.port, "?g=flood", None).await;
@@ -225,9 +224,9 @@ async fn onl2_the_switch_a_receiver_far_behind_loses_its_online_stream_not_its_c
     sw.close().await;
 }
 
-// (a measurement, not a JS case: cargo test --test online_switch -- --ignored --nocapture; NFSU2_FLOOD_CONNS
-// connections, 32 by default)  Clients within their budgets (2500 frames a second each, one client address each)
-// send the Online host SYNs to a closed port (its cheapest frame: one RST back), in bundles of 250 every 100 ms.
+// (a measurement: cargo test --test online_switch -- --ignored --nocapture; NFSU2_FLOOD_CONNS connections, 32 by
+// default)  Clients within their budgets (2500 frames a second each, one client address each) send the Online host
+// SYNs to a closed port (its cheapest frame: one RST back), in bundles of 250 every 100 ms.
 // Every 500 ms: how long the host takes to answer info() (what is queued in front of it), what it got through, and
 // this process's memory.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -290,14 +289,14 @@ async fn measure_the_online_hosts_queue_under_a_flood_of_frames() {
     sw.close().await;
 }
 
-// (a measurement, not a JS case: cargo test --test online_switch -- --ignored --nocapture) The Online host's queue
-// has no bound.  Its thread made slow here by hand (the dev trace's tap takes 100 us a frame: a thread that
-// handles 10,000 frames a second, as a stalled disk or a busy core would make it), 16 clients within their budgets
-// send it SYNs to a closed port for 3 s.  What waits for the thread grows as long as they send (the free-roam hub
-// drops frames past MAX_PENDING for this; Node could not fall behind: the host ran in the switch's own calls, and
-// every socket waited for it): info() answers later and later, the memory grows, and once they stop it takes the
-// thread seconds to catch up, while every Online player's lobby is that far behind.  (A first version of this
-// measurement waited for each info() while the clients went on sending: it reached 3.8 GB in 10 minutes.)
+// (a measurement: cargo test --test online_switch -- --ignored --nocapture) The Online host's queue has no bound.
+// Its thread made slow here by hand (the dev trace's tap takes 100 us a frame: a thread that handles 10,000 frames a
+// second, as a stalled disk or a busy core would make it), 16 clients within their budgets send it SYNs to a closed
+// port for 3 s.  What waits for the thread grows as long as they send (the free-roam hub drops frames past
+// MAX_PENDING for this; Node could not fall behind: the host ran in the switch's own calls, and every socket waited
+// for it): info() answers later and later, the memory grows, and once they stop it takes the thread seconds to
+// catch up, while every Online player's lobby is that far behind.  (A first version of this measurement waited for
+// each info() while the clients went on sending: it reached 3.8 GB in 10 minutes.)
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore]
 async fn measure_the_online_hosts_queue_behind_a_slow_thread() {

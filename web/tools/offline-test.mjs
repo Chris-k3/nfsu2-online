@@ -16,6 +16,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { serverCommand } from './server-cmd.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const arg = (n, d) => { const i = process.argv.indexOf(n); return i > 0 ? process.argv[i + 1] : d; };
@@ -29,8 +30,8 @@ fs.mkdirSync(OUT, { recursive: true });
 
 let server = null;
 async function startServer() {
-  server = spawn(process.execPath, [path.join(ROOT, 'web/server/server.mjs'), '--data', DATA, '--http-port', String(PORT), '--dev',
-    '--state', path.join(OUT, 'state'), '--wasm', WASM], { stdio: ['ignore', 'pipe', 'pipe'] });
+  server = spawn(...serverCommand(['--data', DATA, '--http-port', String(PORT), '--dev', '--state', path.join(OUT, 'state'), '--wasm', WASM]),
+    { stdio: ['ignore', 'pipe', 'pipe'] });
   await new Promise((res, rej) => {
     let out = '';
     const t = setTimeout(() => rej(new Error('server did not start: ' + out)), 20000);

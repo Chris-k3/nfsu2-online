@@ -3,7 +3,7 @@
  *
  * In a network race the other players' cars are the game's own: its race
  * link moves them with datagrams on UDP 3658 between the players' games, a
- * star around the game's creator (web/server/online).  The horn goes beside
+ * star around the game's creator (web/server-rs/crates/online).  The horn goes beside
  * that link, between the same games, on a UDP port of the runtime's own
  * (HORN_PORT, net_lan.c's vlan_rt_*), so the game never sees it:
  *   - to whom: the games the race link exchanged datagrams with in the last

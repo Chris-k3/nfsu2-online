@@ -88,7 +88,7 @@ const waitLine = (re, ms) => new Promise((res, rej) => {
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 // a JS expression as a function made here: Playwright evaluates a string predicate
 // with eval inside the page, which the player's page forbids (CSP script-src without
-// 'unsafe-eval', web/server/headers.mjs); a function goes over DevTools instead
+// 'unsafe-eval', web/server-rs/crates/headers); a function goes over DevTools instead
 const predicate = expr => new Function(`return (${expr});`);
 const seen = (re, from) => lines.slice(from).some(l => re.test(l));
 

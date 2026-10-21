@@ -1,6 +1,5 @@
-//! A frame from a browser to the browsers it reaches, the free-roam hub or the Online host (lan.mjs `route`,
-//! `deliver`, `sendFrame`, `post`, the stream rules, `pump`, `stalled`, `cutGroup`).  It runs on the sender's reader,
-//! on whatever core that is.
+//! A frame from a browser to the browsers it reaches, the free-roam hub or the Online host (the sender's budgets, the
+//! receivers' queue rules, the stream rules).  It runs on the sender's reader, on whatever core that is.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -20,8 +19,7 @@ use crate::{BROADCAST, Cause, Cut, KIND_LAN_ICMP, KIND_LAN_UDP, KIND_STREAM, KIN
 #[derive(Default)]
 pub(crate) struct Streams {
     by_conn: HashMap<u64, StreamQueue>,
-    /// tells one sending client's queued segments from those of the same client after it was cut (lan.mjs compared
-    /// the objects)
+    /// tells one sending client's queued segments from those of the same client after it was cut
     era: u64,
 }
 
@@ -31,11 +29,11 @@ impl Streams {
     }
 }
 
-/// lan.mjs's `sq`, `streamQueued`, `streamTotal`, `streamSince`, `streamOut` of one receiver.
+/// The stream segments waiting at one receiver, behind the switch's own queue (`stream_queue`, `stream_share`).
 #[derive(Default)]
 struct StreamQueue {
     sq: VecDeque<Segment>,
-    /// bytes queued by sending client, in the order they first queued (lan.mjs's Map: the first of equals is cut)
+    /// bytes queued by sending client, in the order they first queued (the first of equals is cut)
     queued: Vec<Queued>,
     total: usize,
     /// since when the queue is not empty, and when a segment last went out
@@ -64,19 +62,20 @@ impl StreamQueue {
 }
 
 impl LanSwitch {
-    /// lan.mjs `route(peer, data, dst)` for each of `dsts` in turn (the frame's own destination, or a bundle entry's
-    /// list): from peer to the browsers each reaches, the free-roam hub or the Online host, within peer's budgets.
-    /// False: over them (what follows in a bundle goes too).
+    /// One frame, to each of `dsts` in turn (the frame's own destination, or a bundle entry's list): from peer to the
+    /// browsers each reaches, the free-roam hub or the Online host, within peer's budgets.  False: over them (what
+    /// follows in a bundle goes too).
     ///
-    /// lan.mjs charged each destination on its own (k frames of n bytes: k the players a broadcast reaches, 1 for any
-    /// other) and stopped at the first its buckets could not pay for.  Here the buckets are locked once for all of
-    /// them (32 friends were 32 times three locks and a clock read): the destinations go up to the first whose running
-    /// total one of the buckets cannot pay for, which is where lan.mjs's checks one after the other stopped.
+    /// Each destination costs k frames of n bytes (k the players a broadcast reaches, 1 for any other), and the first
+    /// one the buckets cannot pay for ends it.  The buckets are locked once for all of them (32 friends were 32 times
+    /// three locks and a clock read): the destinations go up to the first whose running total one of the buckets
+    /// cannot pay for, which is where checking them one destination after the other stops.
     pub(crate) fn route(&self, peer: &Arc<Peer>, data: &Bytes, dsts: impl Iterator<Item = u32> + Clone) -> bool {
         let n = data.len();
         let lan_only = (KIND_LAN_UDP..=KIND_LAN_ICMP).contains(&data[0]);
         let reaches = |p: &Arc<Peer>| !Arc::ptr_eq(p, peer) && p.open() && (!lan_only || p.lan() != Some(false));
-        // what the switch sends for each: a broadcast costs its size for every player it reaches
+        // what the switch sends for each: a broadcast costs its size for every player it reaches, so the switch never
+        // sends more for a client than its budgets allow (the audit's F2: one 4 MB/s sender made it send 15 x that)
         let all = dsts.clone().any(|d| d == BROADCAST).then(|| self.all.load());
         let reached: SmallVec<[usize; 2]> = match &all {
             Some(all) => dsts.clone().filter(|&d| d == BROADCAST).map(|_| all.iter().filter(|p| reaches(p)).count()).collect(),
@@ -101,7 +100,7 @@ impl LanSwitch {
         all_paid
     }
 
-    /// one destination that was paid for (lan.mjs `route` past its checks): the trace, a host, or the browsers
+    /// one destination that was paid for: the trace, a host, or the browsers
     fn route_one(
         &self,
         peer: &Arc<Peer>,
@@ -163,8 +162,8 @@ impl LanSwitch {
         let mut a = peer.buckets.lock();
         let mut b = peer.group.buckets.lock();
         let mut c = peer.site.as_ref().map(|s| s.buckets.lock());
-        // what the poorest bucket has (lan.mjs's checks one destination after the other subtracted whole frames and
-        // bytes from what each had, exactly: a running total compared with what each had is the same check)
+        // what the poorest bucket has (checks one destination after the other subtract whole frames and bytes from
+        // what each has, exactly: a running total compared with what each had is the same check)
         let (mut frames, mut bytes) = a.refill(now);
         for (f, b) in [Some(b.refill(now)), c.as_mut().map(|c| c.refill(now))].into_iter().flatten() {
             frames = frames.min(f);
@@ -199,8 +198,8 @@ impl LanSwitch {
         }
     }
 
-    /// lan.mjs `deliver(from, p, data, dst)`: one frame to one peer, through the impairment when it is on, always
-    /// through `send_frame` (the queue rules)
+    /// one frame to one peer, through the impairment when it is on (LAN play's kinds only), always through
+    /// `send_frame` (the queue rules)
     pub(crate) fn deliver(&self, from: &Arc<Peer>, p: &Arc<Peer>, data: &Bytes, dst: u32) {
         match &self.impair {
             Some(im) if (KIND_LAN_UDP..=KIND_LAN_ICMP).contains(&data[0]) => im.deliver(&self.stats, from, p, data, dst),
@@ -214,8 +213,9 @@ impl LanSwitch {
         }
     }
 
-    /// lan.mjs `sendFrame(from, p, data, dst)`: a datagram is dropped while the receiver's queue is long, a stream
-    /// segment never is (see streamQueue: the receiver or the client flooding it goes instead)
+    /// a binary frame to a receiver: a datagram is dropped while the receiver's queue is long (`roam_queue`,
+    /// `shed_queue`), a stream segment never is (see `stream_queue`: the receiver or the client flooding it goes
+    /// instead)
     fn send_frame(&self, from: &Arc<Peer>, p: &Arc<Peer>, data: &Bytes, dst: u32) -> bool {
         if data[0] == KIND_STREAM {
             return self.send_stream(from, p, data, dst);
@@ -229,8 +229,7 @@ impl LanSwitch {
         self.post(p, data, from.vip, dst)
     }
 
-    /// lan.mjs `post(p, data, dst)`: a datagram to p, into its bundle when it takes them (out at the bundle clock's
-    /// next tick), else as it is
+    /// a datagram to p, into its bundle when it takes them (out at the bundle clock's next tick), else as it is
     fn post(&self, p: &Arc<Peer>, data: &Bytes, src: u32, dst: u32) -> bool {
         if !p.takes_bundles() {
             return self.send(p, Out::Frame { data: data.clone(), src, dst });
@@ -243,9 +242,9 @@ impl LanSwitch {
         true
     }
 
-    /// a stream segment to p (lan.mjs `sendFrame`'s kind 4): past the receiver's share for one client (or its whole
-    /// queue), whose fault it is decides who goes: a receiver that stopped reading, or the client with the most
-    /// queued there (all of its connections)
+    /// a stream segment (kind 4) to p: past the receiver's share for one client (or its whole queue), whose fault it
+    /// is decides who goes: a receiver that stopped reading, or the client with the most queued there (all of its
+    /// connections)
     fn send_stream(&self, from: &Arc<Peer>, p: &Arc<Peer>, data: &Bytes, dst: u32) -> bool {
         let g = &from.group.id;
         let len = data.len();
@@ -312,14 +311,13 @@ impl LanSwitch {
         true
     }
 
-    /// lan.mjs `stalled(p)`: p has stream segments waiting and none of them got out for stallMs: it stopped reading
+    /// p has stream segments waiting and none of them got out for `stall_ms`: it stopped reading
     fn stalled(&self, s: &StreamQueue, now: f64) -> bool {
         let ms = self.o.stall_ms;
         !s.sq.is_empty() && now - s.since > ms && now - s.out > ms
     }
 
-    /// lan.mjs `cutGroup(id, why)`: every connection of one client goes, and the stream segments of it still waiting
-    /// at the others
+    /// every connection of one client goes, and the stream segments of it still waiting at the others
     fn cut_group(&self, st: &mut Streams, id: &Arc<str>, why: Cut) {
         for q in self.all.load().iter() {
             if q.group.id == *id && q.open() {
@@ -333,8 +331,8 @@ impl LanSwitch {
         }
     }
 
-    /// lan.mjs `pump(p)`: p's queued stream segments into its connection, as far as it has taken the ones before
-    /// (after each write of its writer)
+    /// p's queued stream segments into its connection, as far as it has taken the ones before (after each write of
+    /// its writer)
     pub(crate) fn pump(&self, conn: &Arc<Conn>) {
         let mut st = self.streams.lock();
         match st.by_conn.get_mut(&conn.id) {
@@ -394,9 +392,9 @@ pub(crate) mod tests {
         Bytes::from(f)
     }
 
-    /// The buckets charged once for a bundle entry's destinations come to what lan.mjs's charges one destination
-    /// after the other came to: the same destinations paid for (the first that does not fit ends the bundle) and the
-    /// same frames and bytes left in each bucket, to the bit.
+    /// The buckets charged once for a bundle entry's destinations come to what charging them one destination after
+    /// the other comes to: the same destinations paid for (the first that does not fit ends the bundle) and the same
+    /// frames and bytes left in each bucket, to the bit.
     #[tokio::test]
     async fn charging_a_list_at_once_is_charging_it_one_by_one() {
         let sw = LanSwitch::new(LanOptions::default(), "", None, None, None, None);
@@ -411,7 +409,7 @@ pub(crate) mod tests {
         let (mut cut_short, mut whole) = (0, 0);
         for case in 0..20_000 {
             let p = &peers[case % peers.len()].2;
-            // mostly free roam's snapshots, now and then up to maxFrame
+            // mostly free roam's snapshots, now and then up to `max_frame`
             let n = (12 + if rnd(4) == 0 { rnd(8180) } else { rnd(200) }) as f64;
             // levels anywhere from empty to full, with fractions (a refill leaves them), and a debt (the Online host's)
             let mut set = |pair: &mut crate::Pair| {

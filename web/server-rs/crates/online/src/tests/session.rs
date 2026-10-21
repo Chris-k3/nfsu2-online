@@ -1,17 +1,71 @@
-//! Scripted sessions of the whole online host, run by the JS (js/cross.mjs, mode session) and here, compared frame for
-//! frame: six browsers (two of them one client) log in, chat, make and join and start games, report races, use EA
-//! Messenger, go and come back, fall behind (the switch refuses their frames) and leave; the lobby's clock moves.
-//! What is random on purpose in the host (SESS, MASK, SKEY, LKEY, AUTH, SEED) is masked; the LKEY and AUTH the
-//! script uses are each side's own (`{"lkey": conn}`, `{"ses": [conn, key]}`).
+//! Scripted random sessions of the whole online host (a fixed seed each): six browsers (two of them one client) log
+//! in, chat, make and join and start games, report races, use EA Messenger, go and come back, fall behind (the switch
+//! refuses their frames) and leave; the lobby's clock moves.  After every step the lobby's counts agree with its
+//! sessions (`Lobby::check_counts`), nothing panics, and the files the host writes at its stop read back to the same
+//! bytes.  The script's LKEY and AUTH values are the ones the host gave (`{"lkey": conn}`, `{"ses": [conn, key]}`).
 
 use serde_json::{Value, json};
 
-use super::cross::{Rng, canon_frame, hs, node, resu_of, unhex};
 use super::world::{C, Opts, World, ip};
 use crate::aries::{Fields, V};
 use crate::{PORT_BUDDY, PORT_HTTP, PORT_LOBBY, PORT_REDIRECTOR};
 
-const T0: f64 = 1_792_411_200_000.0;
+const T0: f64 = 1_792_411_200_000.0; // Date.UTC(2026, 9, 19, 12)
+
+/// xorshift64*: the same session for the same seed
+struct Rng(u64);
+
+impl Rng {
+    fn new(seed: u64) -> Rng {
+        Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1)
+    }
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 >> 12;
+        self.0 ^= self.0 << 25;
+        self.0 ^= self.0 >> 27;
+        self.0.wrapping_mul(0x2545_F491_4F6C_DD1D)
+    }
+    fn below(&mut self, n: usize) -> usize {
+        (self.next() % n as u64) as usize
+    }
+    fn pick<'a, T>(&mut self, xs: &'a [T]) -> &'a T {
+        &xs[self.below(xs.len())]
+    }
+    fn chance(&mut self, p: f64) -> bool {
+        (self.next() >> 11) as f64 / (1u64 << 53) as f64 <= p
+    }
+}
+
+fn unhex(s: &str) -> Vec<u8> {
+    (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
+}
+
+/// a latin1 string as the script keeps one (hex of its bytes)
+fn hs(s: &str) -> String {
+    let mut b = Vec::new();
+    crate::jsx::latin1_encode(s, &mut b);
+    crate::jsx::hex(&b)
+}
+
+/// a race report for n players, the places and times from the seed
+fn resu(n: usize, seed: u64) -> String {
+    let mut b = vec![0u8; 8 + 55 * n];
+    b[0] = 3;
+    b[1] = n as u8;
+    b[2] = (seed % 7) as u8;
+    b[4..6].copy_from_slice(&4014u16.to_be_bytes());
+    b[7] = 2;
+    for i in 0..n {
+        let o = 8 + 55 * i;
+        b[o] = i as u8;
+        b[o + 1] = ((i as u64 + seed) % n as u64) as u8 + 1;
+        b[o + 2] = if (seed + i as u64).is_multiple_of(5) { 0x0c } else { 1 };
+        let t = (25.0 + i as f64 * 1.5 + (seed % 7) as f64 * 10.25) as f32;
+        b[o + 8..o + 12].copy_from_slice(&t.to_be_bytes());
+    }
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(b)
+}
 
 pub struct Session {
     pub steps: Vec<Value>,
@@ -522,8 +576,7 @@ pub fn generate(seed: u64, n: usize) -> Session {
     generate_with(seed, n, false)
 }
 
-/// the same with odd switch frames and time passing on the timers' clock (the JS side runs its timers on a clock of
-/// the script's own: js/cross.mjs `fakeTimers`)
+/// the same with odd switch frames and time passing on the timers' clock (`World::sleep`)
 pub fn generate_ext(seed: u64, n: usize) -> Session {
     generate_with(seed, n, true)
 }
@@ -549,16 +602,23 @@ fn latin1(v: &Value) -> String {
     crate::jsx::latin1_decode(&unhex(v.as_str().unwrap()))
 }
 
-/// the session here: per step, the frames sent (as text), the lines, info()
-fn run_here(s: &Session, dir: &std::path::Path) -> (Vec<Value>, Option<String>, Option<String>) {
+/// What a session did: the frames the host sent, the lines it logged, the files its stop left (stats.json and
+/// buddies.json), and the lobby's clock at the end
+struct Run {
+    frames: usize,
+    lines: Vec<String>,
+    stats: Option<String>,
+    buddies: Option<String>,
+    t: f64,
+}
+
+/// the session on one online host, the lobby's counts checked after every step
+fn run(s: &Session, dir: &std::path::Path) -> Run {
     let mut w = World::new(Opts { state_dir: Some(dir.to_path_buf()), ..Default::default() });
     w.t.set(T0);
     let mut conns: Vec<C> = Vec::new();
-    let mut out = Vec::new();
     for st in &s.steps {
-        let mark = (w.sent.lock().len(), w.lines.borrow().len());
         let conn = st.get("conn").and_then(Value::as_u64).map(|i| conns[i as usize]);
-        let mut info = Value::Null;
         let value = |w: &World, v: &Value| -> V {
             match v {
                 Value::Number(n) => V::N(n.as_f64().unwrap()),
@@ -574,7 +634,7 @@ fn run_here(s: &Session, dir: &std::path::Path) -> (Vec<Value>, Option<String>, 
                     } else if let Some(a) = o.get("resu") {
                         let n = crate::jsx::to_number(&last(&a[0], "+ses", "COUNT"));
                         let n = if w.c(conns[a[0].as_u64().unwrap() as usize]).last("+ses").is_some() { n as usize } else { 2 };
-                        V::S(resu_of(n, a[1].as_u64().unwrap()))
+                        V::S(resu(n, a[1].as_u64().unwrap()))
                     } else {
                         panic!("a value: {v}")
                     }
@@ -632,9 +692,8 @@ fn run_here(s: &Session, dir: &std::path::Path) -> (Vec<Value>, Option<String>, 
                 }
             }
             "info" => {
-                let mut vips: Vec<u32> = w.core.vips().into_iter().collect();
-                vips.sort();
-                info = json!({ "info": w.core.info(), "vips": vips });
+                // (what /players and the console read of the host)
+                let _ = (w.core.info(), w.core.vips());
             }
             "stop" => {
                 w.core.stop();
@@ -643,56 +702,35 @@ fn run_here(s: &Session, dir: &std::path::Path) -> (Vec<Value>, Option<String>, 
             op => panic!("a step: {op}"),
         }
         w.core.lobby.check_counts();
-        let sent: Vec<Value> = w.sent.lock()[mark.0..].iter().map(|(v, f, r)| json!(canon_frame(*v, f, *r))).collect();
-        let lines: Vec<Value> = w.lines.borrow()[mark.1..].iter().map(|(s, k)| json!([s, k])).collect();
-        out.push(json!({ "sent": sent, "lines": lines, "info": info }));
     }
     let read = |f: &str| std::fs::read_to_string(dir.join(f)).ok();
-    (out, read("stats.json"), read("buddies.json"))
+    let lines = w.lines.borrow().iter().map(|(l, _)| l.clone()).collect();
+    let frames = w.sent.lock().len();
+    Run { frames, lines, stats: read("stats.json"), buddies: read("buddies.json"), t: w.t.get() }
 }
 
-/// the session by the JS and here: the same, step for step
-pub fn run_both(s: &Session, seed: u64) {
+/// a session from its seed: consistent after every step, and its files read back as they were written
+fn check(s: &Session, seed: u64) {
     let tmp = tempfile::tempdir().unwrap();
-    let (jsdir, rsdir) = (tmp.path().join("js"), tmp.path().join("rs"));
-    let req = json!({ "mode": "session", "t0": T0, "stateDir": jsdir, "steps": s.steps });
-    let Some(js) = node(&req) else { return };
-    let (mine, stats, buddies) = run_here(s, &rsdir);
-    let theirs = js["steps"].as_array().unwrap();
-    let mut frames = 0;
-    for (i, (a, b)) in mine.iter().zip(theirs).enumerate() {
-        let tsent: Vec<Value> = b["sent"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|x| {
-                let f = unhex(x[1].as_str().unwrap());
-                json!(canon_frame(x[0].as_u64().unwrap() as u32, &f, x[2].as_bool().unwrap()))
-            })
-            .collect();
-        frames += tsent.len();
-        let ctx = || {
-            let from = i.saturating_sub(6);
-            s.steps[from..=i].iter().map(|x| x.to_string()).collect::<Vec<_>>().join("\n")
-        };
-        assert_eq!(a["sent"], Value::Array(tsent), "seed {seed}, step {i}: the frames out differ; the steps up to it:\n{}", ctx());
-        assert_eq!(a["lines"], b["lines"], "seed {seed}, step {i}: the lines differ; the steps up to it:\n{}", ctx());
-        if !b["info"].is_null() {
-            assert_eq!(nfsu2_util::json::stringify(&a["info"]), nfsu2_util::json::stringify(&b["info"]), "seed {seed}, step {i}: info()");
-        }
+    let r = run(s, tmp.path());
+    let clock = std::rc::Rc::new(std::cell::Cell::new(r.t));
+    let quiet: crate::LogFn = std::rc::Rc::new(|_: &str, _: Option<&str>| {});
+    let dir = Some(tmp.path().to_path_buf());
+    if let Some(text) = &r.stats {
+        let back = crate::stats::Stats::new(crate::stats::StatsOptions::new(dir.clone(), crate::stats::tests::clocks(clock), quiet));
+        assert_eq!(*text, back.serialize(), "seed {seed}: stats.json read back");
     }
-    assert_eq!(mine.len(), theirs.len());
-    assert_eq!(stats.as_deref(), js["stats"].as_str(), "seed {seed}: stats.json");
-    assert_eq!(buddies.as_deref(), js["buddies"].as_str(), "seed {seed}: buddies.json");
+    if let Some(text) = &r.buddies {
+        assert_eq!(*text, crate::buddy::Buddies::new(dir, Default::default()).serialize(), "seed {seed}: buddies.json read back");
+    }
     // what the session went through (each seed's share of the rules)
-    let lines: Vec<String> =
-        mine.iter().flat_map(|x| x["lines"].as_array().unwrap().iter().map(|l| l[0].as_str().unwrap().to_string())).collect();
-    let n = |p: &str| lines.iter().filter(|l| l.contains(p)).count();
+    let n = |p: &str| r.lines.iter().filter(|l| l.contains(p)).count();
     eprintln!(
-        "session {seed}: {} steps, {frames} frames, {} lines, the same; results {}, not taken {}, differs {}, friends {}, asked {}, \
-         kicked {}, ended {}, dropped {}, slow {}, refused {}, races {}",
+        "session {seed}: {} steps, {} frames, {} lines; results {}, not taken {}, differs {}, friends {}, asked {}, kicked {}, \
+         ended {}, dropped {}, slow {}, refused {}, races {}",
         s.steps.len(),
-        lines.len(),
+        r.frames,
+        r.lines.len(),
         n("ranked)") + n("ranked):"),
         n("not taken"),
         n("differs"),
@@ -705,4 +743,25 @@ pub fn run_both(s: &Session, seed: u64) {
         n("refused"),
         n("the race starts"),
     );
+}
+
+#[test]
+fn random_sessions_keep_the_lobby_consistent() {
+    // (NFSU2_SESSIONS=<n>: n of them; 8 by default)
+    let n: u64 = std::env::var("NFSU2_SESSIONS").ok().and_then(|v| v.parse().ok()).unwrap_or(8);
+    for seed in 11..11 + n {
+        check(&generate(seed, 900), seed);
+    }
+}
+
+/// the same with odd switch frames, streams that reset in the middle of a message, overlapping sessions of one
+/// browser, and time passing on the timers' clock (the services' time-outs, the game list's and the populations'
+/// once-a-second, held-back presence, the Messenger login tried again, the files' saves)
+#[test]
+fn random_sessions_with_timers_keep_the_lobby_consistent() {
+    // (NFSU2_SESSIONS=<n>: n of them; 8 by default)
+    let n: u64 = std::env::var("NFSU2_SESSIONS").ok().and_then(|v| v.parse().ok()).unwrap_or(8);
+    for seed in 1011..1011 + n {
+        check(&generate_ext(seed, 900), seed);
+    }
 }

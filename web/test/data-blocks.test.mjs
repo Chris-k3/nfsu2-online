@@ -17,11 +17,8 @@ import http from 'node:http';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import { pickEncoding } from '../server/headers.mjs';
 import { serverCommand } from '../tools/server-cmd.mjs';
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PORT = +(process.env.NFSU2_TEST_BLOCKS_PORT || 8532);
 const M = 1 << 20;
 const TMP = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'nfsu2-blocks-test-'));
@@ -44,8 +41,8 @@ fs.writeFileSync(path.join(TMP, 'game.wasm'), Buffer.alloc(8));
 
 async function server() {
   const st = path.join(TMP, 'state');
-  const srv = spawn(...serverCommand(path.join(HERE, '../server/server.mjs'), ['--data', DATA, '--http-port', String(PORT), '--state', st,
-    '--wasm', path.join(TMP, 'game.wasm')]), { stdio: ['ignore', 'pipe', 'pipe'] });
+  const srv = spawn(...serverCommand(['--data', DATA, '--http-port', String(PORT), '--state', st, '--wasm', path.join(TMP, 'game.wasm')]),
+    { stdio: ['ignore', 'pipe', 'pipe'] });
   await new Promise((res, rej) => {
     let out = '';
     const t = setTimeout(() => rej(new Error('server did not start: ' + out)), 15000);
@@ -75,19 +72,6 @@ const KEEP = 'public, max-age=31536000, immutable';
 /** what a shared cache is told: 'keep' (for good, both CDN headers) or 'no' (no-store) */
 const edge = r => r.headers['cdn-cache-control'] === KEEP && r.headers['cloudflare-cdn-cache-control'] === KEEP ? 'keep'
   : r.headers['cdn-cache-control'] === 'no-store' && r.headers['cloudflare-cdn-cache-control'] === 'no-store' ? 'no' : JSON.stringify(r.headers);
-
-test('Accept-Encoding: the first of the server\'s encodings the client takes', () => {
-  const have = ['zstd', 'br', 'gzip'];
-  assert.equal(pickEncoding('gzip, deflate, br, zstd', have), 'zstd');
-  assert.equal(pickEncoding('gzip, br', have), 'br');                         // Cloudflare's edge to an origin
-  assert.equal(pickEncoding('GZIP', have), 'gzip');
-  assert.equal(pickEncoding('br;q=0, gzip', have), 'gzip');
-  assert.equal(pickEncoding('zstd;q=0.0, br; q=1', have), 'br');
-  assert.equal(pickEncoding('identity', have), null);
-  assert.equal(pickEncoding('*', have), null);
-  assert.equal(pickEncoding(undefined, have), null);
-  assert.equal(pickEncoding('zstd, br', ['br', 'gzip']), 'br');               // a Node without zstd
-});
 
 test('/data-blocks/: named by the manifest, exact in every encoding, as they are where they do not compress, bounds refused', { timeout: 60_000 }, async () => {
   const s = await server();

@@ -1,7 +1,7 @@
-//! The online host's state and its events (index.mjs `OnlineHost`): one struct for the virtual host, the lobby, EA
-//! Messenger, the results and the timers, run on one thread with no locks.  The JS modules call each other freely
-//! (a lobby send fails, the connection goes, its session leaves, the others hear of it); here they are methods of
-//! one `Core` that name sessions, games and connections by id, so each call finds what is still there.
+//! The online host's state and its events: one struct for the virtual host, the lobby, EA Messenger, the results and
+//! the timers, run on one thread with no locks.  The services call each other freely (a lobby send fails, the
+//! connection goes, its session leaves, the others hear of it), so they are methods of one `Core` that name
+//! sessions, games and connections by id: each call finds what is still there.
 //!
 //! An event is a frame from the switch, a browser that left, a timer, the lobby's tick: what it ended (a session, a
 //! game, a Messenger connection) is let go once it is over (`purge`).
@@ -21,7 +21,7 @@ use crate::timers::{Action, TimerId, Timers};
 use crate::vhost::{Listener, VHost, VhostLimits};
 use crate::{Clocks, LogFn, PORT_BUDDY, PORT_HTTP, PORT_LOBBY, PORT_REDIRECTOR};
 
-/// what the core is given (index.mjs `OnlineHost` opts)
+/// what the core is given (`OnlineOptions`, and the limits: the defaults in the server, the tests' own)
 pub struct CoreOptions {
     pub state_dir: Option<PathBuf>,
     pub log: LogFn,
@@ -46,12 +46,12 @@ pub struct Core {
     pub vh: VHost,
     pub lobby: Lobby,
     pub buddies: Buddies,
-    /// the lobby's results (lobby.mjs `this.results`)
+    /// the races' results (stats.rs): the lobby records them, EA Messenger's search reads their names
     pub stats: Stats,
     /// (tests) what a service probe was told
     #[cfg(test)]
     pub probe: Vec<String>,
-    /// (tests) the console.error lines
+    /// (tests) the error lines (`console_error`)
     #[cfg(test)]
     pub errors: Vec<String>,
 }
@@ -82,20 +82,20 @@ impl Core {
             #[cfg(test)]
             errors: Vec::new(),
         };
-        // the lobby's setInterval(tick, 5000)
+        // the lobby's tick, every 5 s
         core.tick_timer = Some(core.set_timeout(5000.0, Action::LobbyTick));
         core
     }
 
-    /// `setTimeout(fn, ms)` on the timer clock
+    /// `a` once `ms` have passed on the timer clock
     pub fn set_timeout(&mut self, ms: f64, a: Action) -> TimerId {
-        // Node takes a delay below 1 ms, or beyond 2^31 - 1 ms, as 1 ms
+        // a delay below 1 ms, or beyond 2^31 - 1 ms, is 1 ms (as the Node server's timers took it)
         let ms = if (1.0..=2_147_483_647.0).contains(&ms) { ms } else { 1.0 };
         let at = (self.clocks.timer)() + ms;
         self.timers.set(at, a)
     }
 
-    /// console.error: a handler that failed (the JS's exceptions its callers catch)
+    /// a handler that failed, as an error line on the console (and kept for the tests)
     pub fn console_error(&mut self, line: &str) {
         nfsu2_util::log::error(line);
         #[cfg(test)]
@@ -109,7 +109,7 @@ impl Core {
 
     /// a frame from a browser (ctx: its client's group and site ids and its budgets, from the switch); what the host
     /// sent because of it is charged to that client, and when that was more than its share the stream it came on
-    /// goes (lan.mjs `overrun`)
+    /// goes (vhost.rs `overrun`)
     pub fn frame(&mut self, from: u32, data: &[u8], ctx: &FrameCtx) {
         self.here.insert(from);
         self.lobby.seen(from);
@@ -174,16 +174,16 @@ impl Core {
         }
     }
 
-    /// the lobby's tick as one event (the tests call it when they move their clock, as the JS tests do)
+    /// the lobby's tick as one event (the tests call it when they move their clock)
     #[cfg(test)]
     pub fn tick(&mut self) {
         self.lobby_tick();
         self.purge();
     }
 
-    /// index.mjs `info()`: `{ ...vh.info(), ...lobby.info() }`.  Both have a `refused` and the lobby's `games` (the
-    /// games at once) is written over by its stats' `games` (made in all): the lobby's values stand, in the virtual
-    /// host's places, as JS's object spread puts them.
+    /// the virtual host's counts, then the lobby's, as one object.  Both have a `refused`, and the lobby two `games`
+    /// (the games at once, and its stats' games made in all): the lobby's `refused` and its games made in all stand,
+    /// each in the place of the first of its name (as the Node server's object spread put them).
     pub fn info(&self) -> Value {
         let v = &self.vh.stats;
         let l = &self.lobby.stats;

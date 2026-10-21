@@ -27,10 +27,10 @@ export const NET_KIND_LAN_UDP = 3;            // LAN play (Winsock): a UDP datag
 export const NET_KIND_LAN_TCP = 4;            // LAN play: a TCP segment of the virtual LAN's stream protocol
 export const NET_KIND_LAN_ICMP = 5;           // LAN play: an ICMP message
 export const NET_KIND_NOTICE = 16;            // TX ring only, never sent: a line of text the page shows over the game, a friend's name first, ended by 0x1F
-export const NET_KIND_BUNDLE = 32;            // page and switch only (web/server/lan.mjs): several frames in one message
+export const NET_KIND_BUNDLE = 32;            // page and switch only (nfsu2-lan): several frames in one message
 export const NET_BUNDLE_MAX = 32 << 10;       // bytes in one bundle the page sends at most (the switch takes 64 KB)
 export const NET_BROADCAST = 0xffffffff;
-export const NET_ROAM_HUB = 0x0a4d00fd;       // 10.77.0.253: the server's free-roam hub (web/server/roam-hub.mjs)
+export const NET_ROAM_HUB = 0x0a4d00fd;       // 10.77.0.253: the server's free-roam hub (web/server-rs/crates/roam)
 
 // LAN header: the first NET_LAN_HDR bytes of a NET_KIND_LAN_* payload
 //   [0] op  [1] ttl  [2..3] 0  [4..7] connection id (TCP, little-endian)
@@ -70,7 +70,7 @@ export const D_SWITCH_RTT_MS = 14, D_TX_WAIT_MS_SUM = 15, D_TX_WAIT_MS_MAX = 16;
 // slot fields (byte offsets inside a slot; little-endian)
 export const S_LEN = 0, S_KIND = 4, S_SRC_IP = 8, S_DST_IP = 12, S_SRC_PORT = 16, S_DST_PORT = 18, S_T_MS = 24, S_DATA = 32;
 
-// a UDP frame on the switch (big-endian; web/server/lan.mjs)
+// a UDP frame on the switch (big-endian; web/server-rs/crates/lan)
 //   [0] kind  [1..3] 0  [4..7] source vip (the switch writes it)  [8..11] destination vip
 //   [12..13] source port  [14..15] destination port  [16..] the datagram
 export const F_KIND = 0, F_SRC = 4, F_DST = 8, F_SPORT = 12, F_DPORT = 14, F_DATA = 16;

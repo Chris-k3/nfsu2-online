@@ -25,7 +25,7 @@
 //                    (<out>/crowd.log): with 5 or more friends the first cars of our own come into use, in the AI range
 //        [--crowd-race 1-3:200:320]  roam-crowd's --race: those players are in a race meanwhile
 //
-// Without --base it starts its own server (web/server/server.mjs --dev on the given
+// Without --base it starts its own server (web/tools/server-cmd.mjs, --dev on the given
 // ports, the game folder from --data or NFSU2_DATA) and stops it at the end.
 // --bounce <s>: stops that server <s> seconds after the first page opened and
 // starts it again 3 s later (the pages reconnect to the switch).
@@ -102,7 +102,7 @@ let server = null;
 const serverLog = fs.createWriteStream(path.join(OUT, 'server.log'), { flags: 'a' });
 async function startServer() {
   const certs = HTTPS ? makeTestCerts(path.join(OUT, 'certs')) : null;
-  const c = spawn(...serverCommand(path.join(REPO, 'web/server/server.mjs'), ['--data', DATA,
+  const c = spawn(...serverCommand(['--data', DATA,
     ...(certs ? ['--port', String(HTTPS_PORT), '--tls-cert', certs.cert, '--tls-key', certs.key] : []),
     '--http-port', String(HTTP_PORT), '--dev', ...(PLAY ? ['--artifacts', OUT] : [])]), { stdio: ['ignore', 'pipe', 'pipe'] });
   c.stdout.pipe(serverLog, { end: false }); c.stderr.pipe(serverLog, { end: false });

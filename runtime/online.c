@@ -1,6 +1,6 @@
 /* online.c -- the game's Online menu logs in under the player's name.
  *
- * The browser's server is its own stand-in for EA's servers (web/server/online/,
+ * The browser's server is its own stand-in for EA's servers (web/server-rs/crates/online,
  * runtime/winsock.c): any name logs in, there are no accounts.  So the EA Login
  * screens (Create New / Use Existing EA Account, the account name and password,
  * "save the login in a profile?", Select An Online Persona) ask for nothing the
@@ -83,7 +83,7 @@ int winsock_online(void);                    /* winsock.c: online on (browser, N
 static int g_auto;                  /* the Online Main Menu was shown by this file */
 static char g_name[16];
 
-/* 3 to 15 of A-Z a-z 0-9 _ -, as the server takes a name (lobby.mjs validName):
+/* 3 to 15 of A-Z a-z 0-9 _ -, as the server takes a name (nfsu2-online valid_name):
  * any other run of characters becomes one '_' (none at either end), then cut
  * to 15; one or two characters are padded with '_'.  0 if nothing is left. */
 static int clean(char out[16], const char *src){
@@ -192,13 +192,13 @@ void sub_004f19a0(CPU *c){
 
 /* The persona the server gave: its answer to pers (code 0) names it, the name
  * the game asked for or, when another player is online or racing under that,
- * the name with four digits in place of its end (lobby.mjs).  The game finds
+ * the name with four digits in place of its end (nfsu2-online free_variant).  The game finds
  * itself among a race's players by its own persona and account fields, so they
  * take the server's name: a game that kept the name it asked for took the
  * other player's place for its own and sent its race traffic to itself.
  * winsock.c hands over the lobby link's bytes as the game reads them; a frame
  * is 12 bytes of header (kind, code, u32 big-endian length, the header
- * included) and TagField text (aries.mjs). */
+ * included) and TagField text (nfsu2-online aries.rs). */
 static int name_char(int ch){ return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-'; }
 static void persona_given(const char *body){
     const char *v = 0;

@@ -4,7 +4,7 @@
  * x86; runtime/winsock.c answers its Winsock calls with Windows semantics.  On
  * the Mac its "vlan" mode is a client of tools/vlanhub.py (runtime/net_vlan.c).
  * A page has no sockets, so here the same vlan_* backend runs over the local
- * server's virtual-LAN switch (web/server/lan.mjs), the one free roam uses:
+ * server's virtual-LAN switch (web/server-rs/crates/lan), the one free roam uses:
  *
  *   guest threads --winsock.c--> vlan_* / vfd_* (this file) --TX ring--> page --WebSocket--> switch
  *   LAN thread (this file) <--RX ring-- page <--WebSocket-- switch <-- other browsers

@@ -1,4 +1,4 @@
-//! The online races' results per persona (stats.mjs): the one thing the online host keeps on disk
+//! The online races' results per persona: the one thing the online host keeps on disk
 //! (<state>/online/stats.json).  What is in it is public in the game anyway (the rankings and every player's online
 //! career): a persona name, its races, wins and losses per race type, ranked and unranked, rating points, best times
 //! per track, the month they were last seen.  Nothing about who plays a persona: no account name, address, password
@@ -15,8 +15,8 @@
 //! Messenger's search).
 //!
 //! Written atomically (a temporary file, then rename), at most every `save_ms` and when the server stops, byte for
-//! byte as the Node server writes it (either server reads what the other wrote).  A file that does not parse is
-//! kept aside (stats.json.bad-<time>) and the server starts with no results.
+//! byte as the Node server it replaced wrote it (the file that one left is read as it is).  A file that does not
+//! parse is kept aside (stats.json.bad-<time>) and the server starts with no results.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -38,7 +38,7 @@ pub const RACE_TYPES: [&str; 6] = ["circuit", "sprint", "drag", "drift", "street
 const MAX_PERSONAS: usize = 100_000;
 const MAX_BEST: usize = 300;
 
-/// one race type's counts (numbers as JS keeps them: a hand-edited file may hold any)
+/// one race type's counts (f64: a hand-edited file's numbers are kept, fractions too, from 0 to 2^31)
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Counts {
     pub races: f64,
@@ -50,7 +50,7 @@ pub struct Counts {
     pub dc: f64,
 }
 
-/// the counts by race type (the JS object `{ 0: {...}, 3: {...} }`, which JSON.stringify writes in key order)
+/// the counts by race type (in the file an object of the types raced, `{ "0": {...}, "3": {...} }`, in key order)
 pub type Table = [Option<Counts>; 6];
 
 /// a persona's record: its name, the month it was last seen, its counts overall (all) and for the month, its best
@@ -107,7 +107,7 @@ struct Sorted {
     names: Vec<(String, String)>,
 }
 
-/// what a Stats is given (stats.mjs constructor options)
+/// what a Stats is given (the server's: `StatsOptions::new`; the tests change them)
 pub struct StatsOptions {
     /// where stats.json lives (None: in memory only, for the tests)
     pub dir: Option<PathBuf>,
@@ -135,7 +135,9 @@ pub struct Stats {
     board_ms: f64,
     /// lower-case name -> record, the least recently seen first
     p: OrderedMap<String, Record>,
+    /// (race type, monthly) -> the ranking as last built
     boards: HashMap<(u32, bool), Ranking>,
+    /// the names sorted by their lower case (EA Messenger's search), and when
     sorted: Option<Sorted>,
     dirty: bool,
     /// when the debounced save is due (the timer clock), if one is armed
@@ -190,7 +192,8 @@ impl Stats {
                         .iter()
                         .filter_map(|r| {
                             let name = r.get("name")?.as_str()?;
-                            // kept before names.mjs: the server takes no such name now
+                            // one kept before names were checked for slurs (nfsu2-names): the server takes no such
+                            // name now
                             (jsx::valid_name(name) && !nfsu2_names::blocked_name(name)).then(|| clean(r, name))
                         })
                         .collect(),
@@ -248,7 +251,7 @@ impl Stats {
         self.p.len()
     }
 
-    /// One race's result (stats.mjs `addRace`).
+    /// One race's result: each player's counts and points (overall and for the month), best time, month seen.
     pub fn add_race(&mut self, race: &Race) {
         let n = race.players.len();
         if n < 2 || race.kind as usize >= RACE_TYPES.len() {
@@ -428,7 +431,7 @@ impl Stats {
         }
     }
 
-    /// the file's text: JSON.stringify of the Node server's records, field for field
+    /// the file's text: version 1, every record, field for field in the Node server's format
     pub fn serialize(&self) -> String {
         let mut s = String::with_capacity(64 + 160 * self.p.len());
         s.push_str("{\"v\":1,\"note\":\"NFSU2 online results per persona (public in the game)\",\"personas\":[");
@@ -479,11 +482,6 @@ impl Stats {
         self.save_due = None;
         self.save();
     }
-
-    #[cfg(test)]
-    pub fn force_dirty(&mut self) {
-        self.dirty = true;
-    }
 }
 
 /// a new month: the monthly counts start again
@@ -501,7 +499,7 @@ fn month_parts(s: &str) -> (i64, i64) {
 }
 
 fn num(x: f64) -> String {
-    // JSON.stringify: a finite number as JS writes it (-0 as 0)
+    // a finite number as JSON.stringify writes it (-0 as 0), else null
     if x.is_finite() { js::number_to_string(x) } else { "null".into() }
 }
 
@@ -528,7 +526,7 @@ fn write_table(s: &mut String, t: &Table) {
     s.push('}');
 }
 
-/// JS truthiness of a parsed JSON value
+/// a parsed JSON value that counts as there: not null, false, 0, NaN or ""
 fn truthy(v: &Value) -> bool {
     match v {
         Value::Null => false,
@@ -539,7 +537,7 @@ fn truthy(v: &Value) -> bool {
     }
 }
 
-/// `Number.isFinite(v) && v >= 0 ? Math.min(v, 2 ** 31) : 0`
+/// a count from the file: a finite number of at least 0, at most 2^31; anything else is 0
 fn count(v: Option<&Value>) -> f64 {
     match v.and_then(Value::as_f64) {
         Some(x) if x.is_finite() && x >= 0.0 => x.min(2_147_483_648.0),
@@ -547,8 +545,8 @@ fn count(v: Option<&Value>) -> f64 {
     }
 }
 
-/// stats.mjs `clean(r).counts(t)`: `t?.[i]` for each race type (an object's "0".."5", an array's elements, a string's
-/// characters), a falsy one skipped, the numbers checked
+/// a record's counts from the file: each race type's entry (an object's "0".."5"; an array's elements and a string's
+/// characters too, as the Node server read them), one that is not there (`truthy`) skipped, the numbers checked
 fn counts(t: Option<&Value>) -> Table {
     // a string's character: truthy, with none of the fields
     static CHARACTER: Value = Value::Bool(true);
@@ -572,15 +570,15 @@ fn counts(t: Option<&Value>) -> Table {
     o
 }
 
-/// `/^\d:\d{1,6}$/`
+/// a best time's key: one digit (the race type), ':', 1 to 6 digits (the track)
 fn best_key(k: &str) -> bool {
     let b = k.as_bytes();
     b.len() >= 3 && b.len() <= 8 && b[0].is_ascii_digit() && b[1] == b':' && b[2..].iter().all(u8::is_ascii_digit)
 }
 
-/// stats.mjs `clean(r)`: a stored record, with only the fields this file writes (numbers checked).  (A `seen` or
-/// `month.key` that is not a string counts as none: the JS takes one whose String() reads as a month, an array
-/// ["2026-10"], and then fails to write the file.)
+/// A stored record, with only the fields this file writes (numbers checked).  (A `seen` or `month.key` that is not a
+/// string counts as none: the Node server took one whose text read as a month, an array ["2026-10"], and then failed
+/// to write the file.)
 fn clean(r: &Value, name: &str) -> Record {
     let mut best = IndexMap::new();
     if let Some(Value::Object(b)) = r.get("best") {
@@ -612,7 +610,7 @@ fn clean(r: &Value, name: &str) -> Record {
 ///   record (one byte here: UNVERIFIED)
 /// (from the reports of real races here and the research's notes; the fields not used are UNVERIFIED).
 #[derive(Clone, Debug)]
-#[allow(dead_code)] // decoded whole (the tests compare it with the JS's), read in part
+#[allow(dead_code)] // decoded whole (the report as the game wrote it), read in part
 pub struct RaceReport {
     pub kind: u8,
     pub reporter: u8,
@@ -632,7 +630,7 @@ pub struct ReportPlayer {
     pub dropped: bool,
 }
 
-/// stats.mjs `decodeResult(b64)`: None for anything that does not parse
+/// a race report from its base64 (rank RESU): None for anything that does not parse
 pub fn decode_result(b64: &str) -> Option<RaceReport> {
     let b = node_base64(b64);
     if b.len() < 8 || b[0] != 3 {
@@ -666,8 +664,8 @@ pub fn decode_result(b64: &str) -> Option<RaceReport> {
     Some(RaceReport { kind: b[2], reporter: b[3], track: u16::from_be_bytes([b[4], b[5]]), dir: b[6], laps: b[7], players })
 }
 
-/// Node's `Buffer.from(s, 'base64')`: both alphabets, other characters skipped, the first "=" ends it, the bits of
-/// an unfinished last byte dropped
+/// base64 as Node's `Buffer.from(s, 'base64')` reads it (a report the Node server took is taken): both alphabets,
+/// other characters skipped, the first "=" ends it, the bits of an unfinished last byte dropped
 pub fn node_base64(s: &str) -> Vec<u8> {
     let mut o = Vec::with_capacity(s.len() * 3 / 4);
     let (mut acc, mut bits) = (0u32, 0u32);
@@ -721,7 +719,7 @@ pub(crate) mod tests {
         s.split(',').filter(|x| !x.is_empty()).map(|x| u32::from_str_radix(x, 16).unwrap()).collect()
     }
 
-    // online-stats.test.mjs 'counts, points, STAT, boards, months'
+    // counts, points, STAT, boards, months
     #[test]
     fn counts_points_stat_boards_months() {
         let t = Rc::new(Cell::new(T0));
@@ -755,7 +753,7 @@ pub(crate) mod tests {
         assert_eq!(st.board(1, true)[0].name, "Alpha");
     }
 
-    // 'saved atomically with public fields only, read back, a damaged file kept aside, pruned'
+    // saved atomically with public fields only, read back, a damaged file kept aside, pruned
     #[test]
     fn saved_read_back_damaged_pruned() {
         let dir = tempfile::tempdir().unwrap();
@@ -810,7 +808,21 @@ pub(crate) mod tests {
         assert_eq!(names, ["New", "Newer"]);
     }
 
-    // 'race report decoder'
+    // a persona kept from before names were checked for slurs is dropped as the file is read; the others stay (the
+    // Node server's Stats kept only "speedy" of this file, as here)
+    #[test]
+    fn a_name_that_reads_as_a_slur_is_dropped_from_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("stats.json"),
+            r#"{"v":1,"personas":[{"name":"Speedy","seen":1792411200000},{"name":"F4g_42","seen":1792411200000}]}"#,
+        )
+        .unwrap();
+        let st = Stats::new(StatsOptions::new(Some(dir.path().to_path_buf()), clocks(Rc::new(Cell::new(T0))), quiet()));
+        assert_eq!(st.p.keys().collect::<Vec<_>>(), ["speedy"]);
+    }
+
+    // race report decoder
     #[test]
     fn race_report_decoder() {
         let r = decode_result("AwIAAQ+uAAIBAQEVQAADJ0M60exCuGZnQflKqkIogLdAsZmaQU2tD0I5HwoAAAAAAAAAAAAAAAAAAAAAAAAAAAIBFUAAAOhDO6uGQreo9kH44idCKNlYQL3CkEFciThCPgV4AAAAAAAAAAAAAAAAAAAAAAAAAA==").unwrap();
@@ -845,8 +857,8 @@ pub(crate) mod tests {
         assert_eq!(d, [false, true]);
     }
 
-    // online-audit.test.mjs 'ONL-7: the results store: room for new players when full, ... best times capped'
-    // (the store's parts; the rankings built once for many asks: lobby.rs)
+    // ONL-7: the results store: room for new players when full, ... best times capped (the store's parts; the
+    // rankings built once for many asks: lobby.rs)
     #[test]
     fn onl7_store_full_best_capped() {
         let t = Rc::new(Cell::new(T0));
@@ -899,7 +911,7 @@ pub(crate) mod tests {
             })
             .unwrap();
         let (alpha, buddies, bad) = t.join().expect("read on the online host's stack");
-        // (the array in "1" is a count block of none of the fields, as the JS's clean() makes it)
+        // (the array in "1" is a count block of none of the fields, as `clean` makes it)
         assert_eq!(alpha, Some((Some(Counts { races: 2.0, rw: 1.0, ..Default::default() }), true)));
         assert_eq!(
             buddies,

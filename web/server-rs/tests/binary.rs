@@ -1,7 +1,7 @@
 //! The whole server as a process (cargo's CARGO_BIN_EXE_nfsu2-server), with a made-up game folder as
 //! web/test/module.test.mjs makes one: its start-up lines, /players counting a /lan client and an Online login, what
-//! the console says of them, and SIGTERM (exit code 0, the addresses saved).  Where node is there, the same scenario
-//! runs against web/server/server.mjs too and the two must agree (paths and ports aside).
+//! the console says of them, and SIGTERM (exit code 0, the addresses saved); its state folder over restarts; other
+//! options; the lobby trace; players who leave nothing behind; a page's first messages and its replaced connection.
 //!   cargo test --test binary
 
 mod common;
@@ -16,17 +16,6 @@ use std::time::{Duration, Instant};
 use common::*;
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-/// web/ (the Node server and its node_modules)
-fn web_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap()
-}
-
-/// node with the server's own dependencies (ws), when they are there
-fn node() -> bool {
-    let ok = Command::new("node").arg("--version").output().is_ok_and(|o| o.status.success());
-    ok && web_dir().join("node_modules/ws").exists()
-}
 
 /// module.test.mjs's game folder (SPEED2.EXE, "MZ") and a module beside it
 fn game_folder(root: &Path) -> (PathBuf, PathBuf) {
@@ -132,15 +121,15 @@ impl Drop for Server {
     }
 }
 
-/// What one server did in the scenario
-#[derive(Debug, PartialEq)]
+/// What the server did in the scenario
+#[derive(Debug)]
 struct Run {
     /// the start-up lines, from "NFSU2 web server" to "  access    :"
     startup: Vec<String>,
     /// /players: at the start, with a /lan client on, once it logged in to Online mode, once it left
     players: Vec<String>,
     /// what the console said after the start-up lines (sorted: the switch and the Online host print from threads of
-    /// their own in Rust)
+    /// their own)
     console: Vec<String>,
     exit: Option<i32>,
     /// lan-addresses.json's addresses after the stop, the state folder's mode and the online folder's
@@ -209,13 +198,12 @@ async fn the_binary_starts_counts_its_players_and_stops() {
             wasm.to_string_lossy().into(),
         ]
     };
-    let (port, state) = (free_port(), tmp.path().join("state-rust"));
+    let (port, state) = (free_port(), tmp.path().join("state"));
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_nfsu2-server"));
     cmd.args(args(port, &state)).env("NFSU2_THREADS", "2");
     let rust = normal(scenario(cmd, port, &state).await, port, &state);
     println!("{rust:#?}");
 
-    // what it must say, whichever server
     let data_s = data.to_string_lossy();
     assert_eq!(rust.startup[0], "NFSU2 web server");
     assert!(rust.startup[1].starts_with(&format!("  game data : {data_s} (")), "{}", rust.startup[1]);
@@ -237,18 +225,6 @@ async fn the_binary_starts_counts_its_players_and_stops() {
     // (the online folder is made with its first file: none here, no race and no friend)
     assert_eq!(rust.modes.0, 0o700, "the state folder is private");
     assert!(rust.modes.1 == 0 || rust.modes.1 == 0o700, "the online folder is private");
-
-    // the same against Node's server
-    if !node() {
-        println!("skipped the comparison with web/server/server.mjs: no node (or no web/node_modules/ws)");
-        return;
-    }
-    let (port, state) = (free_port(), tmp.path().join("state-node"));
-    let mut cmd = Command::new("node");
-    cmd.arg(web_dir().join("server/server.mjs")).args(args(port, &state));
-    let node = normal(scenario(cmd, port, &state).await, port, &state);
-    println!("{node:#?}");
-    assert_eq!(rust, node, "the Rust server and Node's: the same start-up lines, answers, console, files");
 }
 
 /// a header of an answer's head (its name in any case)
@@ -256,33 +232,17 @@ fn header(head: &str, name: &str) -> Option<String> {
     head.split("\r\n").filter_map(|l| l.split_once(':')).find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.trim().to_string())
 }
 
-// (not a JS case) One state folder for Node's server, then the Rust one, then Node's again, as a site that switches
-// between them (or back) keeps it: a player's address comes back to its token after each restart
-// (lan-addresses.json), and the ETags stay the same (etag.key), so the players keep their places and their browsers
-// their copies.
+// One state folder over two restarts: a player's address comes back to its token after each (lan-addresses.json), and
+// the ETags stay the same (etag.key), so the players keep their places and their browsers their copies.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_state_folder_carries_over_between_node_and_rust_both_ways() {
-    if !node() {
-        println!("skipped: no node (or no web/node_modules/ws)");
-        return;
-    }
+async fn a_state_folder_carries_over_a_restart() {
     let tmp = tempfile::tempdir().unwrap();
     let (data, wasm) = game_folder(tmp.path());
     let state = tmp.path().join("state");
     let (mut vip, mut token, mut etag) = (0, String::new(), None);
-    for (i, which) in ["node", "rust", "node"].into_iter().enumerate() {
+    for (i, which) in ["first run", "second run", "third run"].into_iter().enumerate() {
         let port = free_port();
-        let mut cmd = if which == "node" {
-            let mut c = Command::new("node");
-            c.arg(web_dir().join("server/server.mjs"));
-            c
-        } else {
-            let mut c = Command::new(env!("CARGO_BIN_EXE_nfsu2-server"));
-            c.env("NFSU2_THREADS", "2");
-            c
-        };
-        cmd.arg("--data").arg(&data).arg("--http-port").arg(port.to_string()).arg("--state").arg(&state).arg("--wasm").arg(&wasm);
-        let mut srv = Server::spawn(cmd, port);
+        let mut srv = Server::spawn(command(&data, &wasm, port, &state, &[]), port);
         srv.ready().await;
         let e = header(&srv.get("/data-manifest").await.0, "etag");
         assert!(e.is_some(), "{which}: /data-manifest has an ETag");
@@ -309,24 +269,17 @@ async fn a_state_folder_carries_over_between_node_and_rust_both_ways() {
     }
 }
 
-/// a server command: the Rust binary or Node's server.mjs, with the game folder, a port and a state folder
-fn command(which: &str, data: &Path, wasm: &Path, port: u16, state: &Path, extra: &[&str]) -> Command {
-    let mut c = if which == "node" {
-        let mut c = Command::new("node");
-        c.arg(web_dir().join("server/server.mjs"));
-        c
-    } else {
-        let mut c = Command::new(env!("CARGO_BIN_EXE_nfsu2-server"));
-        c.env("NFSU2_THREADS", "2");
-        c
-    };
+/// the server's command, with the game folder, a port and a state folder
+fn command(data: &Path, wasm: &Path, port: u16, state: &Path, extra: &[&str]) -> Command {
+    let mut c = Command::new(env!("CARGO_BIN_EXE_nfsu2-server"));
+    c.env("NFSU2_THREADS", "2");
     c.arg("--data").arg(data).arg("--http-port").arg(port.to_string()).arg("--state").arg(state).arg("--wasm").arg(wasm);
     c.args(extra);
     c
 }
 
-/// What a server with --online off --roam-hub off --max-peers 1 did
-#[derive(Debug, PartialEq)]
+/// What the server with --online off --roam-hub off --max-peers 1 did
+#[derive(Debug)]
 struct SmallRun {
     startup: Vec<String>,
     /// /players at the start, with one player on (full), after the second was refused
@@ -335,7 +288,6 @@ struct SmallRun {
     refused: (Vec<Value>, Option<(u16, String)>),
     /// what the first one got back for frames to 10.77.0.1 and 10.77.0.253 (no hosts there)
     answers: usize,
-    console: Vec<String>,
     exit: Option<i32>,
 }
 
@@ -361,21 +313,19 @@ async fn small(cmd: Command, port: u16, state: &Path) -> SmallRun {
     let last = lines.iter().position(|l| l.starts_with("  access    :")).unwrap();
     let st = state.to_string_lossy().to_string();
     let fix = |l: &String| untimed(l.replace(&st, "<state>").replace(&format!(":{port}/"), ":<port>/"));
-    let mut console: Vec<String> = lines[last + 1..].iter().map(fix).collect();
-    console.sort();
-    SmallRun { startup: lines[first..=last].iter().map(fix).collect(), players, refused, answers, console, exit }
+    SmallRun { startup: lines[first..=last].iter().map(fix).collect(), players, refused, answers, exit }
 }
 
 // (module.test.mjs's way, other options) --online off --roam-hub off --max-peers 1: the start-up lines say so,
 // /players says online: null and full once one plays, a second client gets "LAN full", nothing answers at
-// 10.77.0.1 or 10.77.0.253; the same as Node's server where node is there
+// 10.77.0.1 or 10.77.0.253
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_binary_with_online_and_the_hub_off_and_one_place() {
     let tmp = tempfile::tempdir().unwrap();
     let (data, wasm) = game_folder(tmp.path());
     let extra = ["--online", "off", "--roam-hub", "off", "--max-peers", "1"];
-    let (port, state) = (free_port(), tmp.path().join("state-rust"));
-    let rust = small(command("rust", &data, &wasm, port, &state, &extra), port, &state).await;
+    let (port, state) = (free_port(), tmp.path().join("state"));
+    let rust = small(command(&data, &wasm, port, &state, &extra), port, &state).await;
     println!("{rust:#?}");
     assert!(rust.startup.contains(&"  online    : off (--online off)".to_string()), "{:?}", rust.startup);
     assert!(rust.startup.contains(&"  switch    : at most 1 players".to_string()));
@@ -385,17 +335,10 @@ async fn the_binary_with_online_and_the_hub_off_and_one_place() {
     assert_eq!(rust.refused.1, Some((1013, "LAN full".to_string())));
     assert_eq!(rust.answers, 0, "no host at 10.77.0.1 or 10.77.0.253");
     assert_eq!(rust.exit, Some(0));
-    if !node() {
-        println!("skipped the comparison with web/server/server.mjs: no node (or no web/node_modules/ws)");
-        return;
-    }
-    let (port, state) = (free_port(), tmp.path().join("state-node"));
-    let node = small(command("node", &data, &wasm, port, &state, &extra), port, &state).await;
-    assert_eq!(rust, node, "the Rust server and Node's");
 }
 
 /// the lobby trace's lines without their times (and the start line's date) and the game's own port, sorted: the
-/// switch and the Online host write theirs from threads of their own in Rust
+/// switch and the Online host write theirs from threads of their own
 fn trace_lines(f: &Path, game_port: u16) -> Vec<String> {
     let mut l: Vec<String> = std::fs::read_to_string(f)
         .unwrap_or_default()
@@ -408,42 +351,29 @@ fn trace_lines(f: &Path, game_port: u16) -> Vec<String> {
 }
 
 // (ONL-12 through the binary) --dev --online-trace: an Online login's lobby messages in the trace, its LKEY
-// redacted, the file 0600; the same lines as Node's server writes for it where node is there
+// redacted, the file 0600
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_lobby_trace_of_a_login() {
     let tmp = tempfile::tempdir().unwrap();
     let (data, wasm) = game_folder(tmp.path());
-    let run = |which: &'static str| {
-        let (port, state, trace) = (free_port(), tmp.path().join(format!("state-{which}")), tmp.path().join(format!("{which}.trace")));
-        let cmd = command(which, &data, &wasm, port, &state, &["--dev", "--online-trace", trace.to_str().unwrap()]);
-        async move {
-            let mut srv = Server::spawn(cmd, port);
-            srv.ready().await;
-            assert!(srv.lines().iter().any(|l| l.starts_with("  trace     : lobby messages (secrets redacted) into ")));
-            let a = Browser::open_at(&format!("localhost:{port}"), port, "", None).await;
-            a.hello("Ann");
-            let c = a.login("Ann").await;
-            let lkey = a.tcp(c, |t| t.last("pers").and_then(|m| m.get("LKEY")).map(str::to_string));
-            sleep(200).await;
-            assert_eq!(srv.stop().await, Some(0));
-            let mode = std::fs::metadata(&trace).unwrap().permissions().mode() & 0o777;
-            (trace_lines(&trace, c.port), mode, lkey)
-        }
-    };
-    let (rust, mode, lkey) = run("rust").await;
+    let (port, state, trace) = (free_port(), tmp.path().join("state"), tmp.path().join("lobby.trace"));
+    let mut srv = Server::spawn(command(&data, &wasm, port, &state, &["--dev", "--online-trace", trace.to_str().unwrap()]), port);
+    srv.ready().await;
+    assert!(srv.lines().iter().any(|l| l.starts_with("  trace     : lobby messages (secrets redacted) into ")));
+    let a = Browser::open_at(&format!("localhost:{port}"), port, "", None).await;
+    a.hello("Ann");
+    let c = a.login("Ann").await;
+    let lkey = a.tcp(c, |t| t.last("pers").and_then(|m| m.get("LKEY")).map(str::to_string));
+    sleep(200).await;
+    assert_eq!(srv.stop().await, Some(0));
+    let mode = std::fs::metadata(&trace).unwrap().permissions().mode() & 0o777;
+    let rust = trace_lines(&trace, c.port);
     println!("{rust:#?}");
     assert_eq!(mode, 0o600, "the trace is the server user's alone");
     let lkey = lkey.expect("the login's LKEY");
     assert!(!lkey.is_empty() && !rust.iter().any(|l| l.contains(&lkey)), "no LKEY in the trace");
     assert!(rust.iter().any(|l| l.contains("LKEY=<redacted>")), "{rust:?}");
     assert!(rust.iter().any(|l| l.contains(" auth/0 ")), "{rust:?}");
-    if !node() {
-        println!("skipped the comparison with web/server/server.mjs: no node (or no web/node_modules/ws)");
-        return;
-    }
-    let (node, mode, _) = run("node").await;
-    assert_eq!(mode, 0o600);
-    assert_eq!(rust, node, "the Rust server's trace and Node's");
 }
 
 /// a process's open files, threads and resident memory (/proc/<pid>)
@@ -456,7 +386,7 @@ fn proc_use(pid: u32) -> (usize, usize, u64) {
     (fds, field("Threads:") as usize, field("VmRSS:") * 1024)
 }
 
-// (not a JS case) Players come and go through the whole binary, in rounds of 40 (each a client address of its own,
+// Players come and go through the whole binary, in rounds of 40 (each a client address of its own,
 // as a proxy on this machine names it): a /lan connection, an Online login, free roam's HELLO and SNAP to the hub,
 // then the page closes.  Once they left, /players says 0 and the process holds what it held after the first round:
 // the same open files, about the same memory.
@@ -465,7 +395,7 @@ async fn players_who_leave_leave_nothing_behind() {
     let tmp = tempfile::tempdir().unwrap();
     let (data, wasm) = game_folder(tmp.path());
     let (port, state) = (free_port(), tmp.path().join("state"));
-    let mut srv = Server::spawn(command("rust", &data, &wasm, port, &state, &[]), port);
+    let mut srv = Server::spawn(command(&data, &wasm, port, &state, &[]), port);
     srv.ready().await;
     let pid = srv.child.id();
     let host = format!("localhost:{port}");
@@ -585,47 +515,36 @@ async fn pipelined(port: u16, query: &str, frames: &[u8], want: &str) -> Vec<Str
     text_messages(&mut s, buf[end..].to_vec(), want).await
 }
 
-// (not a JS case: the http crate's upgrade and the switch together) A client that sends its first messages in the
-// same write as its handshake loses none of them: the hello names it; a resume's hello with its token gives it its
-// address back, with no wait for the hello (the switch waits up to 5 s for it); the same as Node's server
+// (the http crate's upgrade and the switch together) A client that sends its first messages in the same write as its
+// handshake loses none of them: the hello names it; a resume's hello with its token gives it its address back, with no
+// wait for the hello (the switch waits up to 5 s for it)
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn messages_in_the_same_write_as_the_handshake_are_not_lost() {
     let tmp = tempfile::tempdir().unwrap();
     let (data, wasm) = game_folder(tmp.path());
-    let mut servers = vec!["rust"];
-    if node() {
-        servers.push("node");
-    } else {
-        println!("(no node: the Rust server alone)");
-    }
-    for which in servers {
-        let (port, state) = (free_port(), tmp.path().join(format!("state-{which}")));
-        let mut srv = Server::spawn(command(which, &data, &wasm, port, &state, &[]), port);
-        srv.ready().await;
-        let hello = client_frame(1, br#"{"t":"hello","name":"Early","deltas":1}"#);
-        let got = pipelined(port, "", &hello, r#""name":"Early""#).await;
-        let welcome: Value = serde_json::from_str(got.iter().find(|m| m.contains("welcome")).expect("a welcome")).unwrap();
-        assert!(
-            got.iter().any(|m| m.contains(r#""t":"peers""#) && m.contains(r#""name":"Early""#)),
-            "{which}: the hello named it: {got:?}"
-        );
-        let (vip, token) = (welcome["vipStr"].as_str().unwrap().to_string(), welcome["token"].as_str().unwrap().to_string());
-        // it leaves (no close frame: its address is kept for its token), and resumes in one write
-        sleep(300).await;
-        let t0 = Instant::now();
-        let hello = client_frame(1, format!(r#"{{"t":"hello","name":"Early","vip":"{vip}","token":"{token}"}}"#).as_bytes());
-        let got = pipelined(port, "?resume", &hello, "welcome").await;
-        let back: Value = serde_json::from_str(got.iter().find(|m| m.contains("welcome")).expect("a welcome")).unwrap();
-        assert_eq!(back["vipStr"], vip.as_str(), "{which}: its address back");
-        assert!(t0.elapsed() < Duration::from_secs(2), "{which}: at once, not after the 5 s wait for a hello");
-        assert_eq!(srv.stop().await, Some(0));
-        let lines = srv.lines();
-        assert!(lines.contains(&format!("[lan] {vip} is back (1 on the switch)")), "{which}: {lines:?}");
-    }
+    let (port, state) = (free_port(), tmp.path().join("state"));
+    let mut srv = Server::spawn(command(&data, &wasm, port, &state, &[]), port);
+    srv.ready().await;
+    let hello = client_frame(1, br#"{"t":"hello","name":"Early","deltas":1}"#);
+    let got = pipelined(port, "", &hello, r#""name":"Early""#).await;
+    let welcome: Value = serde_json::from_str(got.iter().find(|m| m.contains("welcome")).expect("a welcome")).unwrap();
+    assert!(got.iter().any(|m| m.contains(r#""t":"peers""#) && m.contains(r#""name":"Early""#)), "the hello named it: {got:?}");
+    let (vip, token) = (welcome["vipStr"].as_str().unwrap().to_string(), welcome["token"].as_str().unwrap().to_string());
+    // it leaves (no close frame: its address is kept for its token), and resumes in one write
+    sleep(300).await;
+    let t0 = Instant::now();
+    let hello = client_frame(1, format!(r#"{{"t":"hello","name":"Early","vip":"{vip}","token":"{token}"}}"#).as_bytes());
+    let got = pipelined(port, "?resume", &hello, "welcome").await;
+    let back: Value = serde_json::from_str(got.iter().find(|m| m.contains("welcome")).expect("a welcome")).unwrap();
+    assert_eq!(back["vipStr"], vip.as_str(), "its address back");
+    assert!(t0.elapsed() < Duration::from_secs(2), "at once, not after the 5 s wait for a hello");
+    assert_eq!(srv.stop().await, Some(0));
+    let lines = srv.lines();
+    assert!(lines.contains(&format!("[lan] {vip} is back (1 on the switch)")), "{lines:?}");
 }
 
-/// What a server did when a page replaced its connection while logged in to Online mode
-#[derive(Debug, PartialEq)]
+/// What the server did when a page replaced its connection while logged in to Online mode
+#[derive(Debug)]
 struct Replaced {
     /// the address came back to the new connection
     same_vip: bool,
@@ -637,9 +556,9 @@ struct Replaced {
     console: Vec<String>,
 }
 
-async fn replaced(which: &str, data: &Path, wasm: &Path, root: &Path) -> Replaced {
-    let (port, state) = (free_port(), root.join(format!("state-{which}")));
-    let mut srv = Server::spawn(command(which, data, wasm, port, &state, &[]), port);
+async fn replaced(data: &Path, wasm: &Path, root: &Path) -> Replaced {
+    let (port, state) = (free_port(), root.join("state"));
+    let mut srv = Server::spawn(command(data, wasm, port, &state, &[]), port);
     srv.ready().await;
     let host = format!("localhost:{port}");
     let a = Browser::open_at(&host, port, "", None).await;
@@ -660,15 +579,15 @@ async fn replaced(which: &str, data: &Path, wasm: &Path, root: &Path) -> Replace
     Replaced { same_vip: b.vip == a.vip, old_closed, answer, players, console }
 }
 
-// (not a JS case: the switch's replacement of a connection and the Online host together) A page whose connection
-// died without a close comes back with ?resume and its token while the old one is still on the switch: it takes
-// the address over, the old connection goes, and the game's lobby connection goes on over the new one (the Online
-// host never hears of a departure); the same as Node's server where node is there
+// (the switch's replacement of a connection and the Online host together) A page whose connection died without a
+// close comes back with ?resume and its token while the old one is still on the switch: it takes the address over,
+// the old connection goes, and the game's lobby connection goes on over the new one (the Online host never hears of
+// a departure)
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_page_that_replaces_its_connection_keeps_its_online_session() {
     let tmp = tempfile::tempdir().unwrap();
     let (data, wasm) = game_folder(tmp.path());
-    let rust = replaced("rust", &data, &wasm, tmp.path()).await;
+    let rust = replaced(&data, &wasm, tmp.path()).await;
     println!("{rust:#?}");
     assert!(rust.same_vip, "the address came back");
     assert_eq!(rust.old_closed, Some((1006, String::new())), "the old connection ended, no close frame (terminate)");
@@ -676,10 +595,4 @@ async fn a_page_that_replaces_its_connection_keeps_its_online_session() {
     assert_eq!(rust.players, r#"{"players":1,"online":1,"full":false,"roamBusy":false}"#);
     assert!(rust.console.contains(&"[lan] 10.77.0.2 is back (1 on the switch)".to_string()), "{:?}", rust.console);
     assert!(!rust.console.iter().any(|l| l.contains("the browser left")), "{:?}", rust.console);
-    if !node() {
-        println!("skipped the comparison with web/server/server.mjs: no node (or no web/node_modules/ws)");
-        return;
-    }
-    let node = replaced("node", &data, &wasm, tmp.path()).await;
-    assert_eq!(rust, node, "the Rust server and Node's");
 }

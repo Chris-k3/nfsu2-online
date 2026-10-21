@@ -1,6 +1,6 @@
 [package]
 name = "nfsu2-lan"
-description = "The virtual LAN switch (web/server/lan.mjs) on every core"
+description = "The virtual LAN switch between the browsers (10.77.0.0/21), on every core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -20,8 +20,8 @@ sha2.workspace = true
 smallvec.workspace = true
 unicode-normalization.workspace = true
 unicode-general-category.workspace = true
-# the JS Maps and Sets the switch keeps (peers, reservations, the peer list's changes) are in insertion order, and
-# the peer lists, the store and the reservations' eviction show it
+# the maps and sets the switch keeps (peers, reservations, the peer list's changes) are in insertion order, and the
+# peer lists, the store and the reservations' eviction show it
 indexmap = "2"
 
 [dev-dependencies]

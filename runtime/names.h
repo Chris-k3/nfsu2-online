@@ -1,7 +1,7 @@
 /* names.h -- a player's name that reads as a slur.  The game shows another
  * name for one: "Player" over a car in free roam (roam_core.c: every name
  * heard, and our own), and the Mac's settings refuse one as roam_name
- * (bundle.m).  web/server/names.mjs is the same lists and the same matching
+ * (bundle.m).  web/src/app/names.mjs is the same lists and the same matching
  * for the server (Online names, the switch's peer list) and the page's
  * settings; web/test/names.test.mjs checks that the two agree.
  *

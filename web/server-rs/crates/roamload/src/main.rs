@@ -1,4 +1,4 @@
-//! A crowd of simulated free-roam players for either server, light enough that 2000 of them leave the cores to the
+//! A crowd of simulated free-roam players for the server, light enough that 2000 of them leave the cores to the
 //! server: what web/tools/roam-crowd.mjs does, without the game's own core (which costs each of its bots a wasm
 //! instance).  Each bot is a page in free roam with the hub on: one /lan WebSocket (its own client address by
 //! X-Forwarded-For, so the per-address limits see 2000 clients), a hello that takes bundles, a HELLO to the hub every
@@ -7,7 +7,7 @@
 //! them (web/src/net TxBundle).  What it measures, from the players' side:
 //!   - how many friends each has (the hub's lists: 32 when the server keeps up, fewer when its busy cap cuts them)
 //!   - snapshots sent (one per friend) and received, so how many got lost on the way (the switch drops a datagram
-//!     for a receiver that is too far behind, lan.mjs roamQueue)
+//!     for a receiver that is too far behind, nfsu2-lan's `roam_queue`)
 //!   - a snapshot's delay from sender to friend through the switch (the SNAP's own clock field carries the send
 //!     time; one clock for every bot), and the switch's answer to the page's ping
 //!   - WebSocket messages each way (what the server and the tunnel in front pay for)

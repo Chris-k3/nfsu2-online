@@ -1,4 +1,4 @@
-# The server in Rust: a port of web/server (Node), side by side with it (README.md).
+# The server, in Rust (README.md): the binary (src/) and its crates (crates/).  It replaced the Node server.
 [workspace]
 members = ["crates/*"]
 resolver = "3"

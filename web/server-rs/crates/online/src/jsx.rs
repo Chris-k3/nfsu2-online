@@ -1,7 +1,8 @@
-//! The JavaScript the lobby's rules lean on, beyond nfsu2_util::js: `Number(s)` and what `| 0` and `>>> 0` make
-//! of it, latin1 buffers, slices in UTF-16 code units, `Math.round`, and the few regexes of the online host written
-//! out by hand.  Every text the online host reads comes from latin1 bytes (aries.rs), so its strings hold
-//! characters up to U+00FF only; the helpers still follow JS for any string.
+//! The JavaScript rules the online host keeps from the Node server it replaced, beyond nfsu2_util::js, so that a
+//! field the game sends reads as the same number and a text is cut in the same place: `Number(s)` and what `| 0`
+//! and `>>> 0` make of it, latin1 buffers, slices in UTF-16 code units, `Math.round`, and the few patterns of names
+//! and text written out by hand.  Every text the online host reads comes from latin1 bytes (aries.rs), so its
+//! strings hold characters up to U+00FF only; the helpers still follow JS for any string.
 
 use nfsu2_util::js;
 use unicode_general_category::{GeneralCategory, get_general_category};
@@ -149,13 +150,13 @@ pub fn slice16(s: &str, n: usize) -> &str {
     s
 }
 
-/// lobby.mjs `validName`: what the game lets one type for a persona or account (letters, digits, - and _), 3 to 15
+/// what the game lets one type for a persona or account (letters, digits, - and _), 3 to 15
 /// characters
 pub fn valid_name(s: &str) -> bool {
     (3..=15).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
-/// lobby.mjs `cleanText(s, max)`: text another player will see (chat, game names): NFC, control and format
+/// text another player will see (chat, game names): NFC, control and format
 /// characters as spaces, white space collapsed and trimmed, at most max code points
 pub fn clean_text(s: &str, max: usize) -> String {
     let nfc: String = s.nfc().collect();
@@ -175,8 +176,9 @@ fn line_terminator(c: char) -> bool {
     matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}')
 }
 
-/// buddy.mjs `.replace(/[@/].*$/, '')`: the name before a "@domain" or "/resource".  `.` does not cross a line
-/// terminator and `$` is the end of the text, so the cut is at the first @ or / after the last line terminator.
+/// the name before a "@domain" or "/resource" (EA Messenger's USER): the pattern `[@/].*$` cut off.  `.` does not
+/// cross a line terminator and `$` is the end of the text, so the cut is at the first @ or / after the last line
+/// terminator.
 pub fn strip_at(s: &str) -> &str {
     let from = s.char_indices().rfind(|(_, c)| line_terminator(*c)).map_or(0, |(i, c)| i + c.len_utf8());
     match s[from..].find(['@', '/']) {
@@ -190,19 +192,19 @@ pub fn lower(s: &str) -> String {
     s.to_lowercase()
 }
 
-/// `${y}.${m}.${d}` of a JS time (lobby.mjs `day`)
+/// a day as the lobby writes it, "2026.1.5" (UTC, no leading zeros), of a time in ms since 1970
 pub fn day(t: f64) -> String {
     let (y, m, d, ..) = js::utc_parts(t.trunc() as i64);
     format!("{y}.{m}.{d}")
 }
 
-/// `YYYY-MM` of a JS time (stats.mjs and buddy.mjs `monthOf`)
+/// `YYYY-MM` (UTC) of a time in ms since 1970: the month the results and the friends lists keep
 pub fn month_of(t: f64) -> String {
     let (y, m, ..) = js::utc_parts(t.trunc() as i64);
     format!("{y}-{m:02}")
 }
 
-/// `/^\d{4}-\d{2}$/.test(s)`
+/// a month as the files keep it: `YYYY-MM`, in digits
 pub fn is_month(s: &str) -> bool {
     let b = s.as_bytes();
     b.len() == 7 && b[4] == b'-' && b.iter().enumerate().all(|(i, c)| i == 4 || c.is_ascii_digit())

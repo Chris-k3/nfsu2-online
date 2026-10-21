@@ -14,7 +14,7 @@
 // noted and ignored, so a typo never silently selects something else.
 //
 // This module is pure (no DOM, no OPFS) so it can be checked under node.
-import { blockedName } from '../../server/names.mjs';
+import { blockedName } from './names.mjs';
 
 /** bundle.m's K_* kinds.  ic: K_IC, "value ; comment" (the free-roam keys). */
 export type Kind = 'raw' | 'bool' | 'boolInv' | 'enum' | 'num' | 'id' | 'token' | 'int' | 'name' | 'peers'
@@ -118,7 +118,7 @@ export const KEYS: readonly KeyDef[] = [
   { key: 'texture_budget', env: 'NFSU2_TEXBUDGET', kind: 'int', vals: '16..65536', scope: 'mac' },
   // the browser's own, web-only (read by the page; also passed on, so the runtime could use it)
   { key: 'audio_latency', env: 'NFSU2_AUDIO_LATENCY', kind: 'enum', vals: 'interactive|balanced|playback|#', scope: 'web' },
-  // the game's Online mode against this server's own stand-in (web/server/online/; read by runtime/winsock.c)
+  // the game's Online mode against this server's own stand-in (web/server-rs/crates/online; read by runtime/winsock.c)
   { key: 'online', env: 'NFSU2_ONLINE', kind: 'bool', scope: 'web' },
   // each profile's Save option set to Autosave once, before Play (the page's own: profile.ts turnOnAutosave)
   { key: 'autosave', env: 'NFSU2_AUTOSAVE', kind: 'bool', scope: 'web' },

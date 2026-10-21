@@ -1,7 +1,7 @@
 #!/bin/bash
 # The guest lock's hand-off latency and fairness in Chrome (tests/web/gilbench.c):
 # FIFO ticket lock (runtime/web/ticketlock.h) vs wasi-libc's pthread mutex.
-#   web/tools/gilbench.sh [http://localhost:<port>]   (a running web/server/server.mjs, started with --dev)
+#   web/tools/gilbench.sh [http://localhost:<port>]   (a running server, started with --dev)
 set -e
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"; cd "$ROOT"
 BASE="${1:-http://localhost:8611}"

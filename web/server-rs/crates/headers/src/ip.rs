@@ -1,6 +1,6 @@
 //! IP addresses as Node reads them: `net.isIPv4` / `net.isIPv6` (the regexes of Node 24's lib/internal/net.js,
-//! written out by hand), the value an address stands for, headers.mjs's `bareIp`, and the WHATWG URL serializer of
-//! an IPv6 host (what `new URL('http://[…]/').hostname` gives).
+//! written out by hand), the value an address stands for, an address in its plain form (`bare`), and the WHATWG URL
+//! serializer of an IPv6 host (what `new URL('http://[…]/').hostname` gives).
 
 use std::fmt::Write;
 
@@ -181,7 +181,7 @@ fn mapped_dotted(s: &str) -> bool {
     n == 4
 }
 
-/// headers.mjs `bareIp` before its lower-casing: the address text (a slice of `a`, in its own case) and its value;
+/// `bare_ip` before its lower-casing: the address text (a slice of `a`, in its own case) and its value;
 /// None when it is not an address.  A socket's "::ffff:1.2.3.4" (an IPv4 client of a dual-stack listener) is
 /// "1.2.3.4", "[::1]" is "::1", and a zone ("fe80::1%en0") goes.
 pub(crate) fn bare(a: &str) -> Option<(&str, Ip)> {
@@ -241,8 +241,8 @@ pub(crate) fn serialize6(g: &[u16; 8]) -> String {
     out
 }
 
-/// headers.mjs `canon6`: `new URL('http://[' + s + ']/').hostname` without its brackets, '' where that throws (a
-/// zone: the URL parser takes no '%' in an IPv6 host).  `s` passed `net.isIPv6`.
+/// An IPv6 host as a URL holds it: `new URL('http://[' + s + ']/').hostname` without its brackets, '' where that
+/// throws (a zone: the URL parser takes no '%' in an IPv6 host).  `s` passed `net.isIPv6`.
 pub(crate) fn canon6(s: &str) -> String {
     if s.contains('%') {
         return String::new();

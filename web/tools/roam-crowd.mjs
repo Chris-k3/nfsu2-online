@@ -7,7 +7,7 @@
 //        [--out <summary.json>]
 //        [--race 1-3:60:120] [--bundle] [--first 0]
 //
-// --bundle the players send and take bundles as the page does (web/src/net/index.ts TxBundle, lan.mjs kind 32): what
+// --bundle the players send and take bundles as the page does (web/src/net/index.ts TxBundle, nfsu2-lan kind 32): what
 //          one tick or one received message made them send goes as one message, a snapshot to several friends once
 //          with their addresses.  Without it each datagram is a message of its own, as a page of before sends them.
 // --first  the first player's number (from 0), for several of these at once on one server: their names and client

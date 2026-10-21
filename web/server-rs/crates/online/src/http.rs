@@ -1,4 +1,4 @@
-//! The online host's web pages (http.mjs; port 80 of 10.77.0.1): the two addresses the server config hands the game
+//! The online host's web pages (port 80 of 10.77.0.1): the two addresses the server config hands the game
 //! (lobby.rs `config_fields`), NEWSURL and TOSURL.  The game fetches them with its own HTTP/1.0 client (ProtoHTTP)
 //! and runs the answer through EA's "web offer" script engine: a %{ CMD=... %} header line with the command and its
 //! fields, then the text.  Only the "news" command is ever served (a title, the text, one button that closes the

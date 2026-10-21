@@ -1,4 +1,4 @@
-// Load and abuse test of the online host (web/server/online/) through the real
+// Load and abuse test of the online host (web/server-rs/crates/online) through the real
 // server: many fake browsers on /lan (each its own WebSocket and virtual
 // address; a different X-Forwarded-For per client, which the server takes from
 // this machine as a trusted proxy, so the per-address WebSocket limit is the
@@ -21,8 +21,6 @@ import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { WebSocket } from 'ws';
-import { encodeFrame, FrameReader, fieldMap } from '../server/online/aries.mjs';
-import { lanFrame } from '../server/online/vhost.mjs';
 import { serverCommand } from './server-cmd.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -38,9 +36,77 @@ const VH = ((10 << 24) | (77 << 16) | 1) >>> 0;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const pct = (a, p) => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); return +s[Math.min(s.length - 1, Math.floor(p / 100 * s.length))].toFixed(1); };
 
+// ---- the game's side of the lobby protocol (the server's: web/server-rs/crates/online/src/aries.rs, vhost.rs) ----
+// a message: [0..3] kind, [4..7] code (0 = success), [8..11] u32 big-endian length (these 12 bytes included), then
+// KEY=VALUE fields, NUL-terminated; a value with a byte below 0x20, DEL or = " : % ^ has them as %xx, and is in
+// double quotes when it has a space (as SPEED2.EXE writes one)
+const HDR = 12, SPECIAL = new Set([0x3d, 0x22, 0x3a, 0x25, 0x5e, 0x7f]), HEX = '0123456789abcdef';
+function encodeValue(v) {
+  const b = Buffer.from(String(v), 'latin1');
+  let s = '';
+  for (const c of b) s += c < 0x20 || SPECIAL.has(c) ? '%' + HEX[c >> 4] + HEX[c & 15] : String.fromCharCode(c);
+  return b.includes(0x20) ? `"${s}"` : s;
+}
+const tag4 = t => { const b = Buffer.alloc(4); if (t) Buffer.from(String(t), 'latin1').copy(b, 0, 0, 4); return b; };
+const tagText = b => [...b].filter(c => c).map(c => c >= 0x20 && c < 0x7f ? String.fromCharCode(c) : '\\x' + HEX[c >> 4] + HEX[c & 15]).join('');
+/** one message: kind, code, fields ([[k, v]] or {k: v}) */
+function encodeFrame(kind, code, fields = []) {
+  const list = Array.isArray(fields) ? fields : Object.entries(fields);
+  const body = Buffer.from(list.filter(([, v]) => v !== undefined && v !== null).map(([k, v]) => `${k}=${encodeValue(v)}\n`).join('') + '\0', 'latin1');
+  const f = Buffer.alloc(HDR + body.length);
+  tag4(kind).copy(f, 0); tag4(code).copy(f, 4); f.writeUInt32BE(f.length, 8); body.copy(f, HDR);
+  return f;
+}
+/** the messages of a byte stream: push() returns those complete so far as { kind, code, body } */
+class FrameReader {
+  constructor(max) { this.max = max; this.buf = Buffer.alloc(0); this.error = null; }
+  push(chunk) {
+    if (this.error) return [];
+    this.buf = this.buf.length ? Buffer.concat([this.buf, chunk]) : Buffer.from(chunk);
+    const out = [];
+    while (this.buf.length >= HDR) {
+      const n = this.buf.readUInt32BE(8);
+      if (n < HDR || n > this.max) { this.error = `a message of ${n} bytes (at most ${this.max})`; this.buf = Buffer.alloc(0); break; }
+      if (this.buf.length < n) break;
+      out.push({ kind: tagText(this.buf.subarray(0, 4)), code: tagText(this.buf.subarray(4, 8)), body: this.buf.subarray(HDR, n) });
+      this.buf = this.buf.subarray(n);
+    }
+    return out;
+  }
+}
+/** a body's fields as a Map, keys upper-cased (the first of a repeated key wins, as the game's own search finds it) */
+function fieldMap(body) {
+  const m = new Map();
+  let end = body.indexOf(0); if (end < 0) end = body.length;
+  for (let i = 0; i < end;) {
+    while (i < end && body[i] <= 0x20) i++;
+    if (i >= end) break;
+    let k = i;
+    while (k < end && body[k] > 0x20 && body[k] !== 0x3d) k++;
+    const key = body.toString('latin1', i, k).toUpperCase();
+    if (k >= end || body[k] !== 0x3d) { i = k; continue; }
+    let q = k + 1, raw;
+    if (body[q] === 0x22) { const a = q + 1; q = a; while (q < end && body[q] !== 0x22) q++; raw = body.toString('latin1', a, q); i = q + 1; }
+    else { const a = q; while (q < end && body[q] > 0x20) q++; raw = body.toString('latin1', a, q); i = q; }
+    if (!m.has(key)) m.set(key, raw.replace(/%([0-9a-fA-F]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16))));
+  }
+  return m;
+}
+/** one switch frame of a LAN kind: [0] kind, [4..7] source, [8..11] destination, [12..15] ports, then the LAN header
+ * (op, ttl, 2 reserved, the connection id, little-endian) and the data */
+function lanFrame(kind, src, dst, sport, dport, op, cid, data = null) {
+  const n = data ? data.length : 0;
+  const f = Buffer.alloc(16 + 8 + n);
+  f[0] = kind; f.writeUInt32BE(src >>> 0, 4); f.writeUInt32BE(dst >>> 0, 8);
+  f.writeUInt16BE(sport, 12); f.writeUInt16BE(dport, 14);
+  f[16] = op; f[17] = 64; f.writeUInt32LE(cid >>> 0, 20);
+  if (n) data.copy(f, 24);
+  return f;
+}
+
 let server = null;
 if (OWN) {
-  server = spawn(...serverCommand(path.join(REPO, 'web/server/server.mjs'), ['--data', DATA, '--http-port', String(HTTP_PORT), '--port', '0',
+  server = spawn(...serverCommand(['--data', DATA, '--http-port', String(HTTP_PORT), '--port', '0',
     '--dev', '--max-peers', '250', '--state', path.join(OUT, 'state')]), { stdio: ['ignore', 'pipe', 'pipe'] });
   const log = fs.createWriteStream(path.join(OUT, 'server.log'));
   server.stdout.pipe(log); server.stderr.pipe(log);

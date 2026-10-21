@@ -59,7 +59,7 @@ fn compress(path: &str) -> std::io::Result<(String, Vec<u8>)> {
 }
 
 impl App {
-    /// `compressedWasm()`: the module of the build on disk now, compressed (once per build; a request while it is
+    /// the module of the build on disk now, compressed (once per build; a request while it is
     /// being compressed waits for it); None when there is none
     pub async fn compressed_wasm(&self) -> Option<Arc<WasmReady>> {
         let md = tokio::fs::metadata(&self.o.wasm).await.ok()?;

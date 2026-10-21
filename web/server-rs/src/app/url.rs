@@ -1,4 +1,4 @@
-//! A request target read as server.mjs read it: `new URL('http://x' + url)` for a path ("/path?query", origin
+//! A request target read as the Node server read it: `new URL('http://x' + url)` for a path ("/path?query", origin
 //! form), `new URL(url)` for anything else (an absolute URL, and an Origin header), by the WHATWG URL parser's rules:
 //! "\" is "/" in a special scheme's path, "." and ".." segments are resolved (also as "%2e"), what the path and query
 //! percent-encode sets name is encoded, tabs and newlines are dropped, and a host is lowercased, percent-decoded and
@@ -782,7 +782,8 @@ mod tests {
         (paths, abs)
     }
 
-    // server.mjs's reading of a target (new URL, its pathname, searchParams, decodeURIComponent) against node's own
+    // the Node server's reading of a target (new URL, its pathname, searchParams, decodeURIComponent) against node's
+    // own
     #[test]
     fn the_same_reading_as_node() {
         let (paths, abs) = corpus();

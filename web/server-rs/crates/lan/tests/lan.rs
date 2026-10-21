@@ -1,6 +1,6 @@
-//! web/test/lan.test.mjs, test for test, against the Rust switch (each test names the JS one it ports).  The one
-//! that starts the real server.mjs belongs to the server's integration tests; the four that run the page's
-//! TypeScript run it in node against this switch (tests/page.mjs).
+//! The switch's own tests, the first half (tests/lan_rules.rs has the second), on a switch on an ephemeral port with
+//! fake browsers (tests/harness).  The real server's /lan (its Origin check, ?resume) is web/test/lan.test.mjs's; the
+//! page's own net code runs in node against this switch in tests/page.rs.
 //!
 //! Address assignment, peer lists, unicast and broadcast routing (source rewritten), UDP frames passed through
 //! untouched, ping/pong, disconnects, reconnecting to the same address (only with the token the welcome gave: the
@@ -24,12 +24,12 @@ fn vip_of(m: &Value) -> u32 {
     m["vip"].as_u64().unwrap() as u32
 }
 
-// lan.test.mjs 'addresses, peer lists, unicast, broadcast, ping, disconnect, reconnect'
+// addresses, peer lists, unicast, broadcast, ping, disconnect, reconnect
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn addresses_peer_lists_unicast_broadcast_ping_disconnect_reconnect() {
     let _s = serial().await;
     let sw = start(opts()).await;
-    // (one after another: the addresses follow the order of arrival; the JS opened all three at once, a race)
+    // (one after another: the addresses follow the order of arrival; opened all at once, which gets which is a race)
     let mut a = Client::connect(sw.port, "Alice").await;
     let wa = a.welcome().await;
     let mut b = Client::connect(sw.port, "Bob").await;
@@ -125,7 +125,7 @@ async fn addresses_peer_lists_unicast_broadcast_ping_disconnect_reconnect() {
     sw.close().await;
 }
 
-// lan.test.mjs 'latency of a frame through the switch (this machine)'
+// latency of a frame through the switch (this machine)
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn latency_of_a_frame_through_the_switch() {
     let _s = serial().await;
@@ -165,7 +165,7 @@ async fn latency_of_a_frame_through_the_switch() {
     sw.close().await;
 }
 
-// lan.test.mjs 'what a peer learns about the others: virtual addresses and cleaned names, nothing else'
+// what a peer learns about the others: virtual addresses and cleaned names, nothing else
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn what_a_peer_learns_about_the_others() {
     let _s = serial().await;
@@ -237,7 +237,7 @@ async fn what_a_peer_learns_about_the_others() {
     sw.close().await;
 }
 
-/// the dotted quads in a text (lan.test.mjs's /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/g)
+/// the dotted quads in a text (what /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/g finds)
 fn dotted_quads(s: &str) -> Vec<String> {
     let b = s.as_bytes();
     let mut out = Vec::new();
@@ -269,7 +269,7 @@ fn dotted_quads(s: &str) -> Vec<String> {
     out
 }
 
-// lan.test.mjs 'the peer list: the page hears what changed, a page of before the whole list; a name is the first hello's'
+// the peer list: the page hears what changed, a page of before the whole list; a name is the first hello's
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_peer_list_changes_to_the_page_the_whole_list_to_a_page_of_before() {
     let _s = serial().await;
@@ -347,7 +347,7 @@ async fn the_peer_list_changes_to_the_page_the_whole_list_to_a_page_of_before() 
     sw.close().await;
 }
 
-// lan.test.mjs 'the cost of the peer list: a rename costs nothing, a join one small change to each player (the security review)'
+// the cost of the peer list: a rename costs nothing, a join one small change to each player (the security review)
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_cost_of_the_peer_list_a_rename_costs_nothing() {
     let _s = serial().await;
@@ -408,7 +408,7 @@ async fn the_cost_of_the_peer_list_a_rename_costs_nothing() {
     sw.close().await;
 }
 
-// lan.test.mjs 'limits: players, frame size, frame rate, control messages'
+// limits: players, frame size, frame rate, control messages
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn limits_players_frame_size_frame_rate_control_messages() {
     let _s = serial().await;
@@ -449,7 +449,7 @@ async fn limits_players_frame_size_frame_rate_control_messages() {
     sw.close().await;
 }
 
-// lan.test.mjs 'keepalive: pings well under a proxy idle cut, dead and idle connections closed'
+// keepalive: pings well under a proxy idle cut, dead and idle connections closed
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn keepalive_pings_dead_and_idle_connections_closed() {
     let _s = serial().await;
@@ -475,7 +475,7 @@ async fn keepalive_pings_dead_and_idle_connections_closed() {
     sw.close().await;
 }
 
-// lan.test.mjs 'control frames: pings answered a few a second, a ping flood cut, unasked pongs never count'
+// control frames: pings answered a few a second, a ping flood cut, unasked pongs never count
 // (WebSocket control frames: the switch answers pings itself, a few a second; a client that floods them, or sends
 // pongs nobody asked for, is cut, and only a pong to the switch's own ping counts as a sign of life: the phase-2
 // deploy review's finding 1)
@@ -564,11 +564,11 @@ async fn control_frames_pings_answered_a_flood_cut_unasked_pongs_never_count() {
     sw.close().await;
 }
 
-// lan.test.mjs 'a receiver that never reads: cut by the keepalive tick once its queue is over the limit'
+// a receiver that never reads: cut by the keepalive tick once its queue is over the limit
 // B sends to A, which never reads, until A's queue on the switch is just over the limit, then stops: no further
 // send finds it, the next keepalive tick does (before the missing pong would).  The kernel's buffers come first:
 // here they are kept small (the switch's SO_SNDBUF, the server's NFSU2_LAN_SNDBUF, and A's SO_RCVBUF), as Linux
-// otherwise grows them to megabytes and the missing pong ends A first (the JS test fails that way on this machine);
+// otherwise grows them to megabytes and the missing pong ends A first (the test fails that way with Linux's sizes);
 // and "over the limit" counts once it stays so for 100 ms (before the kernel's buffers are full, a delayed ACK
 // frees them again a moment later).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -634,7 +634,7 @@ async fn a_receiver_that_never_reads_is_cut_by_the_keepalive_tick() {
     sw.close().await;
 }
 
-// lan.test.mjs 'LAN impairment (--lan-impair): UDP lost, TCP delayed in order, free roam untouched'
+// LAN impairment (--lan-impair): UDP lost, TCP delayed in order, free roam untouched
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn lan_impairment_udp_lost_tcp_delayed_in_order_free_roam_untouched() {
     let _s = serial().await;
@@ -673,7 +673,7 @@ async fn lan_impairment_udp_lost_tcp_delayed_in_order_free_roam_untouched() {
 
 // ---- the audit's F1: a departed player's address and the frames meant for it ----
 
-// lan.test.mjs 'a departed player's address goes only to its token: an attacker who asks first gets nothing of it'
+// a departed player's address goes only to its token: an attacker who asks first gets nothing of it
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_departed_players_address_goes_only_to_its_token() {
     let _s = serial().await;
@@ -733,7 +733,7 @@ async fn a_departed_players_address_goes_only_to_its_token() {
     sw.close().await;
 }
 
-// lan.test.mjs 'a resume replaces the same client's older connection (one that died without a close), and only with the token'
+// a resume replaces the same client's older connection (one that died without a close), and only with the token
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_resume_replaces_the_same_clients_older_connection_only_with_the_token() {
     let _s = serial().await;
@@ -765,7 +765,8 @@ async fn a_resume_replaces_the_same_clients_older_connection_only_with_the_token
     sw.close().await;
 }
 
-// lan.test.mjs 'reservations: never handed to another client, not even when every address is held or reserved (LAN full instead); a silent ?resume times out to a fresh one'
+// reservations: never handed to another client, not even when every address is held or reserved (LAN full instead); a
+// silent ?resume times out to a fresh one
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn reservations_never_handed_to_another_client_a_silent_resume_times_out() {
     let _s = serial().await;
@@ -796,7 +797,7 @@ async fn reservations_never_handed_to_another_client_a_silent_resume_times_out()
 
 // the review of F1: with every address held or reserved, opening and closing connections fast enough made the
 // switch hand out the oldest reservation, a dropped player's address, within 60 ms
-// lan.test.mjs 'churning connections never takes a dropped player's address; each client keeps only its own share of reservations'
+// churning connections never takes a dropped player's address; each client keeps only its own share of reservations
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn churning_connections_never_takes_a_dropped_players_address() {
     let _s = serial().await;

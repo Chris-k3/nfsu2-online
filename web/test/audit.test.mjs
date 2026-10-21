@@ -1,5 +1,5 @@
 // The server's fixes for the security and privacy audit, one test per finding,
-// against the real server (web/server/server.mjs):
+// against the real server (out/web/server-rs/nfsu2-server, web/tools/server-cmd.mjs):
 //   node --test --test-concurrency=1 web/test/audit.test.mjs
 // - F1:  ?vip= is ignored; a dropped player's address goes back only to its token (/lan?resume); a client that
 //        opens /lan over and over gets 429; the console names no client address
@@ -11,13 +11,13 @@
 // - F7, PRIV-4: a DNS-rebinding page (any other Host) gets 421 everywhere, the /lan upgrade included
 // - PRIV-1: the game folder is served and listed only as far as it is the game (the real folder's installer
 //        log, SAVE and mod scripts never)
-// - DEP-1: the server starts and serves where os.networkInterfaces() throws (systemd without AF_NETLINK)
+// - DEP-1: the server starts and serves in every mode, reading no network interfaces (systemd without AF_NETLINK)
 // - DEP-4: a client's refused upgrades cost the console two lines a minute, not one each
 // - DEP-8: the state folder the server makes is private (0700), the files in it 0600
 // Ports: NFSU2_TEST_AUDIT_PORT1 (8529), NFSU2_TEST_AUDIT_PORT2 (8629): not deploy.test.mjs's, so the two can
 // run at once.  Needs the game folder (NFSU2_DATA) and a built out/web/nfsu2.wasm; skipped without them.
-// NFSU2_TEST_SERVER=<server.mjs>: another server (a negative control: the server before the audit's fixes
-// fails these tests).  Options that are new here go by environment (NFSU2_HOST), which it ignores.
+// NFSU2_SERVER_BIN=<binary>: another server (a negative control: a server without the audit's fixes fails these
+// tests).  Options that are new here go by environment (NFSU2_HOST), which an older one ignores.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -33,7 +33,6 @@ import { serverCommand } from '../tools/server-cmd.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '../..');
-const SERVER = process.env.NFSU2_TEST_SERVER ? path.resolve(process.env.NFSU2_TEST_SERVER) : path.join(REPO, 'web/server/server.mjs');
 const DATA = process.env.NFSU2_DATA || path.join(os.homedir(), 'projects/nsfu2/Need for Speed - Underground 2');
 const P1 = +(process.env.NFSU2_TEST_AUDIT_PORT1 || 8529), P2 = +(process.env.NFSU2_TEST_AUDIT_PORT2 || 8629);
 const TMP = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'nfsu2-audit-test-'));
@@ -44,8 +43,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const ssl = (...a) => execFileSync('openssl', a, { stdio: ['ignore', 'pipe', 'pipe'] }).toString();
 const HOST = 'nfsu2.test';
 
-async function startServer(args, { env = {}, state = fs.mkdtempSync(path.join(TMP, 'state-')), execArgv = [], expectExit = false } = {}) {
-  const c = spawn(...serverCommand(SERVER, ['--data', DATA, '--state', state, ...args], execArgv), { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env } });
+async function startServer(args, { env = {}, state = fs.mkdtempSync(path.join(TMP, 'state-')), expectExit = false } = {}) {
+  const c = spawn(...serverCommand(['--data', DATA, '--state', state, ...args]), { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env } });
   let out = '';
   c.stdout.on('data', d => { out += d; }); c.stderr.on('data', d => { out += d; });
   const exited = new Promise(r => c.on('exit', code => r(code)));
@@ -282,10 +281,7 @@ test('F3: a download the client stopped reading, or reads only a trickle of, is 
   } finally { for (const so of socks) so.destroy(); await s.stop(); }
 });
 
-test('DEP-1: the server starts and serves where os.networkInterfaces() throws (systemd without AF_NETLINK)', { skip: SKIP, timeout: 90_000 }, async () => {
-  const pre = path.join(TMP, 'nonetlink.mjs');
-  fs.writeFileSync(pre, `import os from 'node:os';
-os.networkInterfaces = () => { const e = new Error('A system error occurred: uv_interface_addresses returned Unknown system error 97'); e.code = 'ERR_SYSTEM_ERROR'; throw e; };\n`);
+test('DEP-1: the server starts and serves in every mode (it reads no network interfaces: systemd without AF_NETLINK)', { skip: SKIP, timeout: 90_000 }, async () => {
   const dir = fs.mkdtempSync(path.join(TMP, 'cert-'));
   ssl('req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes', '-keyout', path.join(dir, 'k.pem'), '-out', path.join(dir, 'c.pem'),
     '-days', '5', '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost');
@@ -296,7 +292,7 @@ os.networkInterfaces = () => { const e = new Error('A system error occurred: uv_
     'this machine only': [['--http-port', String(P2)], {}, () => request(P2, { p: '/players' })],
   };
   for (const [name, [args, env, probe]] of Object.entries(modes)) {
-    const s = await startServer(args, { env, execArgv: ['--import', pre], expectExit: true });
+    const s = await startServer(args, { env, expectExit: true });
     const r = s.ready ? await probe() : { status: 0 };
     const code = s.ready ? 'running' : `exited ${await s.exited}`;
     console.log(`${name}: ${code}, /players ${r.status}${s.ready ? '' : `\n${s.out().split('\n').filter(l => /Error|error/.test(l)).slice(0, 2).join('\n')}`}`);

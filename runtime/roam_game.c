@@ -1824,7 +1824,7 @@ static void map_update(CPU *c, uint32_t w, int64_t host){
 /* ---- per-frame --------------------------------------------------------------------------------- */
 typedef struct { int idx; uint32_t id; char name[RC_NAME_MAX + 1]; int visible, paused; float dist; uint32_t cfg_gen;
                  float rank;           /* the slots' order (assign): the nearer of dist and the distance LOOK_S
-                                          ahead, both cars at their speeds (as the hub links, roam-hub.mjs) */
+                                          ahead, both cars at their speeds (as the hub links, nfsu2-roam) */
                  int duels;            /* takes outrun challenges (its HELLO) */
                  int has_cfg;          /* a complete car record is held */
                  int cfg_len;          /* > 0: the record is copied here (a slot needs it) */

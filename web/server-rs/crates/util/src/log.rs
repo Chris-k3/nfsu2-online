@@ -1,7 +1,8 @@
-//! The console: one line at a time to stdout (or stderr), and server.mjs's `logLimited`: the lines a client causes
-//! (refused requests and upgrades, joins and leaves, the access log, Online lines), at most `per` a minute of one
-//! topic for one client, then one line that says how many were left out (the audit's DEP-4).  The client is only
-//! the key of the count: no line names its address.
+//! The console: one line at a time to stdout (or stderr), and [`limited`]: the lines a client causes (refused
+//! requests and upgrades, joins and leaves, the access log, Online lines), at most `per` a minute of one topic for
+//! one client, then one line that says how many were left out.  So one client can no longer fill the journal, push
+//! the VPS's other logs out or make journald drop real players' lines (the audit's DEP-4).  The client is only the
+//! key of the count: no line names its address.
 
 use std::io::Write;
 use std::sync::OnceLock;
@@ -49,8 +50,8 @@ struct Quiet {
     topic: String,
 }
 
-/// The counts by topic and client, in the order they began (the JS Map's: the lines that say how many were left out
-/// come in that order).  A count leaves and comes back at the end each minute, among up to 10,000 of them: a place
+/// The counts by topic and client, in the order they began (the lines that say how many were left out come in that
+/// order).  A count leaves and comes back at the end each minute, among up to 10,000 of them: a place
 /// number per count keeps the order with no shift of the others (an IndexMap's ordered removal moved them all, under
 /// the lock every client's line takes).
 #[derive(Default)]
@@ -147,10 +148,12 @@ fn flush_all(force: bool) {
     }
 }
 
-/// server.mjs `logLimited(kind, topic, key, line, per)`.  What goes out is decided under the counts' lock and written
-/// after it (with --access-log every request comes here: none waits on another's write to the console).  A call that
-/// ends a minute with lines left out takes the console before it lets the counts go, so that its "N more" line comes
-/// before every line decided after it, as the JS's did (a client over its share: once a minute at most).
+/// A line client `key` caused: shown while it is among the first `per` of its `kind` and `topic` in a minute, else
+/// counted, and the count of those left out said once the minute is over ("[kind] N more topic from one client in
+/// that minute (not shown)").  What goes out is decided under the counts' lock and written after it (with
+/// --access-log every request comes here: none waits on another's write to the console).  A call that ends a minute
+/// with lines left out takes the console before it lets the counts go, so that its "N more" line comes before every
+/// line decided after it (a client over its share: once a minute at most).
 pub fn limited(kind: &str, topic: &str, key: &str, text: &str, per: u32) {
     let now = now_ms();
     let k = format!("{kind} {topic} {key}");
@@ -164,7 +167,7 @@ pub fn limited(kind: &str, topic: &str, key: &str, text: &str, per: u32) {
         }
         if !q.contains_key(&k) {
             if q.len() >= 10_000 {
-                // every count goes out at once (the JS flushAllQuiet(true))
+                // every count goes out at once: at most 10,000 are kept
                 out.extend(q.drain().iter().filter_map(left_out));
             }
             q.insert(k.clone(), Quiet { t: now, n: 0, left: 0, kind: kind.to_string(), topic: topic.to_string() });
@@ -222,7 +225,7 @@ mod tests {
         all.lines().filter(|l| l.starts_with(prefix)).map(str::to_string).collect()
     }
 
-    // the counts keep the order they began in, a count that comes back goes to the end, as in the JS's Map
+    // the counts keep the order they began in, a count that comes back goes to the end
     #[test]
     fn counts_keep_the_maps_order() {
         let q = |t: i64| Quiet { t, n: 0, left: 0, kind: String::new(), topic: String::new() };
@@ -240,9 +243,9 @@ mod tests {
         assert_eq!(c.len(), 0);
     }
 
-    // The JS wrote the line that says how many of a client's lines a minute left out before any line that came after
-    // it (one thread: at once).  Here the line is decided under the counts' lock and written after it, so another
-    // thread's line decided later could be written first, while the console was busy: "[order] third" before "1 more".
+    // The line that says how many of a client's lines a minute left out comes before any line decided after it.  The
+    // line is decided under the counts' lock and written after it, so another thread's line decided later could be
+    // written first, while the console was busy: "[order] third" before "1 more".
     #[test]
     fn a_minutes_count_comes_before_the_lines_decided_after_it() {
         let (kind, topic, key) = ("order", "test lines", "client a");

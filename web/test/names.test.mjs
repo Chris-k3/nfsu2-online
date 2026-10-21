@@ -1,5 +1,6 @@
-// Names that read as a slur: web/server/names.mjs (the server, the page's settings) and runtime/names.h (the
-// game: free roam, the Mac's settings), the same lists and the same answers.
+// Names that read as a slur: web/src/app/names.mjs (the page's settings) and runtime/names.h (the game: free roam,
+// the Mac's settings), the same lists and the same answers.  The server's port (web/server-rs/crates/names) is
+// checked against names.mjs in its crate.
 //   node --test web/test/names.test.mjs        (the C side needs clang: Xcode's command line tools)
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -7,9 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { SLURS, blockedName } from '../server/names.mjs';
-import { cleanName } from '../server/lan.mjs';
-import { Stats } from '../server/online/stats.mjs';
+import { SLURS, blockedName } from '../src/app/names.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const OUT = path.join(REPO, 'out/web/test'); fs.mkdirSync(OUT, { recursive: true });
@@ -27,7 +26,7 @@ const ALLOWED = ['Mustafa69', 'MustafaGS', 'Mustafa_GS', 'Mustafa Gamer', 'musta
   'Pakize', 'Nigar', 'Niger', 'Nigeria', 'Nigerian', 'Nigel', 'Raccoon', 'Tycoon', 'Cocoon', 'spicy', 'Spice',
   'despicable', 'Pakistan', 'Fagundes', 'Bigger', 'Trigger', 'Digger', 'Knight', 'Chinook', 'Scunthorpe', 'Cooper',
   'Ahmet35', 'Emre_34', 'Gökhan', 'İbrahim', 'Thom', 'Player', 'NAME', 'OLHOST', 'Speedy', '',
-  // a name and a number: a year, two digits, the digits the Online mode adds to a taken name (lobby.mjs freeVariant)
+  // a name and a number: a year, two digits, the digits the Online mode adds to a taken name (lobby.rs free_variant)
   'Hakan1995', 'Furkan1999', 'Ozan_1996', 'Can 1969', 'Kaan1998', 'Dani99', 'Toni69', 'Dani99GS', 'Ozan1996GS',
   'Hakan1993TR', 'Dani9912', 'Strannik', 'VanDyke', 'Van Dyke'];
 
@@ -37,19 +36,6 @@ test('names.mjs: the lists\' words, the ways round them, and not the other words
   for (const n of ALLOWED) assert.ok(!blockedName(n), n);
   // a word of the whole list only as a part on its own
   assert.ok(!blockedName('xfagx') && blockedName('x_fag_x') && blockedName('xFagX'));
-});
-
-test('the switch shows "player", the Online results drop one, kept from before', () => {
-  assert.equal(cleanName('  N1gg4  '), 'player');
-  assert.equal(cleanName('Mustafa GS'), 'Mustafa GS');
-  const dir = fs.mkdtempSync(path.join(OUT, 'names-'));
-  try {
-    const seen = Date.now();
-    fs.writeFileSync(path.join(dir, 'stats.json'), JSON.stringify({ v: 1, personas: [{ name: 'Speedy', seen }, { name: 'F4g_42', seen }] }));
-    const st = new Stats({ dir });
-    assert.deepEqual([...st.p.keys()], ['speedy']);
-    st.stop?.();
-  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('names.h has the lists of names.mjs', () => {
