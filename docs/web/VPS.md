@@ -225,7 +225,15 @@ files in the state volume, so either server takes over the other's.
 Tested 2026-10-21 on Docker Desktop (WSL), the images built from the checkout: amd64 and arm64 built; the amd64 one
 run as `compose.yml` runs the server (a read-only root, no capabilities, `no-new-privileges`) was `healthy` within
 6 s; the Node image, then this one, then the Node image again on one state volume kept the ETag key (the module's
-and the data manifest's ETags stayed the same). The published image and a real VPS: **UNVERIFIED**.
+and the data manifest's ETags stayed the same).
+
+On a real VPS, 2026-10-21: nfsu2.xyz (16 vCPU, `compose.yml:compose.tunnel.yml`) went from the Node image to
+`nfsu2-web-rs:sha-6076514` with the `.env` line and `docker compose up -d server`, with 970 players on. It was
+`healthy` within 4 s; the pages came back on their old switch addresses (`is back`), Online read its records from
+the volume, and the module stayed (the commit changed no page or module file). Six minutes later, 1209 players (165
+in Online): the server 0.7 of a core over its 8 workers (about 8 % each; the free-roam hub 1 %), 340 MB, free roam
+not busy; cloudflared 1.7 cores; the VPS 80 % idle. The Node server's one thread had been at 100 % with 820-960
+players the evening before.
 
 ## Copying the game
 
