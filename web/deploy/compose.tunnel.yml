@@ -17,11 +17,14 @@ services:
   net:
     image: registry.k8s.io/pause:3.10
     restart: unless-stopped
+    cgroup_parent: ${NFSU2_SLICE:-nfsu2.slice}
   cloudflared:
     image: cloudflare/cloudflared:2026.9.3
     restart: unless-stopped
     network_mode: service:net
     command: ["tunnel", "--no-autoupdate", "run"]
+    # in the game's share of the CPU with the server (web/deploy/nfsu2.slice): it pays for each message too
+    cgroup_parent: ${NFSU2_SLICE:-nfsu2.slice}
     environment:
       TUNNEL_TOKEN: ${TUNNEL_TOKEN:?set TUNNEL_TOKEN in .env, the tunnel's token}
     logging: { driver: local }

@@ -81,7 +81,7 @@ pub fn vip_num(s: &str) -> u32 {
     if parts != 4 {
         return 0;
     }
-    if v & 0xFFFF_F800 == BASE && (2..=251).contains(&(v & 255)) { v } else { 0 }
+    if v & 0xFFFF_F000 == BASE && (2..=251).contains(&(v & 255)) { v } else { 0 }
 }
 
 /// JS `String(x ?? '')` of a parsed JSON value
@@ -272,11 +272,12 @@ mod tests {
     fn addresses_as_vip_num_reads_them() {
         assert_eq!(vip_num("10.77.0.2"), 0x0A4D_0002);
         assert_eq!(vip_num("10.77.7.251"), 0x0A4D_07FB);
+        assert_eq!(vip_num("10.77.15.251"), 0x0A4D_0FFB);
         for s in [
             "10.77.0.1",
             "10.77.0.252",
             "10.77.0.255",
-            "10.77.8.2",
+            "10.77.16.2",
             "192.168.1.20",
             "10.77.0.02.1",
             "10.77.0",

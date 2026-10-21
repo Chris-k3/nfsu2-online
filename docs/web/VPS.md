@@ -119,8 +119,10 @@ The rest of this guide is reference.
 
 ## Sizing
 
-For up to 2000 players at once (the image's limit): 8 vCPU, 8 GB of memory (the compose file's limit), 40 GB of
-disk and a 1 Gbit/s port with a few TB of traffic a month.
+For up to 4000 players at once (the image's limit; the Node server's was 2000, [From the Node
+server](#from-the-node-server)): 8 vCPU for 2000 and 16 for 4000 (4000 in free roam took the Rust server 6-8 cores of a Ryzen 9 5900X,
+and a Cloudflare Tunnel's cloudflared pays for each message again, `web/server-rs/README.md`), 8 GB of memory (the
+compose file's limit), 40 GB of disk and a 1 Gbit/s port with a few TB of traffic a month.
 
 - Measured on a live server behind a Cloudflare Tunnel (16 vCPU, 2026-10-21): 1209 players, 165 of them in the
   game's Online mode and most of the rest in free roam, took the server 0.7 of a core over its 8 workers and 340 MB,
@@ -143,9 +145,33 @@ disk and a 1 Gbit/s port with a few TB of traffic a month.
   priority than the switch, so a burst of downloads takes only what the players' traffic leaves.
 - Free roam is at most about 25 KB/s each way per player: the server's free-roam hub pairs each player with the 7
   nearest, and snapshots go between those only. 2000 players roaming at once are about 400 Mbit/s each way through
-  the VPS. Measured with 62 simulated players and 2 real pages on one server (`web/tools/roam-crowd.mjs`, a Ryzen 9
-  5900X): about 9,500 datagrams a second each way through the switch, the server at 11 % of one core. More players
-  than that, and a real VPS's CPU, are **UNVERIFIED**.
+  the VPS, 4000 about 800 Mbit/s. Measured with 62 simulated players and 2 real pages on one server
+  (`web/tools/roam-crowd.mjs`, a Ryzen 9 5900X): about 9,500 datagrams a second each way through the switch, the
+  server at 11 % of one core. More players than that, and a real VPS's CPU, are **UNVERIFIED**.
+
+### A share of the VPS
+
+The compose files put every container of theirs (the server, Caddy, or cloudflared and its namespace) into the
+systemd slice `nfsu2.slice` (`cgroup_parent`, `NFSU2_SLICE` to name another), and `web/deploy/nfsu2.slice` gives that
+slice at most 80 % of a 16-vCPU VPS (`CPUQuota=1280%`, 12.8 cores; 80 times the vCPUs for another size), so the
+rest of the VPS keeps at least 3.2 cores whatever the players do. The server and cloudflared share the 12.8 as their
+load goes. At the limit they are slowed down, never the rest: the server's workers count the time they wait as busy
+(wall time), so the free-roam hub's busy cap gives players fewer friends, as it does on a busy server.
+
+    cp web/deploy/nfsu2.slice /etc/systemd/system/ && systemctl daemon-reload
+    docker compose up -d --force-recreate
+    systemctl status nfsu2.slice                               # the containers in it
+    systemctl show nfsu2.slice -p CPUQuotaPerSecUSec           # 12.8s
+
+It needs Docker's systemd cgroup driver (`docker info`: `Cgroup Driver: systemd`, the default with cgroup v2).
+Without the file the containers still start, in a slice systemd makes for them with no limit; with the cgroupfs
+driver (Docker Desktop) `nfsu2.slice` is a plain cgroup, also with no limit.
+
+How far 12.8 cores go: 1209 players took the server 0.7 of a core and cloudflared 1.7 (2026-10-21). 4000 simulated
+players in free roam took the server 8.2 cores on 12 workers at 32 friends each (`NFSU2_THREADS=12`), 6.5 on 8
+workers at the busy cap's 8 (`web/server-rs/README.md`); cloudflared pays for each message again, so 4000 players
+are about where the slice's limit is reached, and past it free roam gives fewer friends instead of taking more of the
+VPS.
 
 ## The image
 
@@ -212,6 +238,13 @@ NFSU2_IMAGE=ghcr.io/th0mk/nfsu2-web-rs:sha-<commit>
   commit, then `docker compose up -d`. The state volume serves either.
 - `UV_THREADPOOL_SIZE` means nothing to the Rust server; `NFSU2_THREADS` sets its worker threads (by default half
   the cores, 2 to 8). Its console has the Node server's lines.
+- **4000 players** where the Node server took 2000 (`--max-peers` 1 to 4000, the image's `NFSU2_MAX_PEERS=4000`): the
+  virtual network is 10.77.0.0/20, and the game module's peer bits cover a /21, so for a player on 10.77.8-15.x the
+  game asks that host itself (a LAN race's connect to one who has just gone ends after the same 3 s as "timed out"
+  instead of "unreachable"; nothing else differs, and pages and modules of before need no change). Online mode takes
+  2000 lobby sessions and 600 games (Node: 1000 and 300), the free-roam hub 4096 players. 4000 players need 65536
+  open files (`ulimits: { nofile: 65536 }` in `compose.yml`), and past about 3000 in free roam more workers than 8
+  (`NFSU2_THREADS=12` in `.env`; `compose.yml` passes it on) keep them at 32 friends each instead of the busy cap's 8.
 
 Tested 2026-10-21 on Docker Desktop (WSL), the images built from the checkout: amd64 and arm64 built; the amd64 one
 run as `compose.yml` runs the server (a read-only root, no capabilities, `no-new-privileges`) was `healthy` within
@@ -265,8 +298,8 @@ players the evening before.
     restarts);
   - closes, without an answer, a connection that asks for another name (the bare address, a scanner's made-up
     name), on 80 and on 443; a TLS handshake without your name fails, so the certificate is not shown;
-  - opens at most 15900 connections to the server (one per request in progress; with 2000 players the server takes
-    16000);
+  - opens at most 31900 connections to the server (one per request in progress; with 4000 players the Rust server
+    takes 32000, 8 per player; the Node image, at most 2000 players, takes 16000);
   - has its admin API off: nothing reconfigures it while it runs, and a changed `.env` takes `docker compose up -d`.
 - **NFSU2_HOST is one name.** For a second name, or a wildcard, edit the Caddyfile in `compose.yml` and the
   server's `NFSU2_HOST` (a comma list; `*.example.com` for one label under it). A wildcard certificate needs Let's
@@ -423,7 +456,7 @@ With Caddy or nginx already on the VPS, run the server alone on the VPS's networ
 ```sh
 docker run -d --name nfsu2-web --restart unless-stopped --network host \
   --read-only --cap-drop ALL --security-opt no-new-privileges \
-  --memory 8g --memory-swap 8g --ulimit nofile=32768 --log-driver local \
+  --memory 8g --memory-swap 8g --ulimit nofile=65536 --log-driver local \
   -e NFSU2_HOST=game.example.com \
   -v /srv/nfsu2/game:/game:ro -v /srv/nfsu2/module:/module:ro -v nfsu2-state:/state \
   ghcr.io/th0mk/nfsu2-web-rs
@@ -481,8 +514,9 @@ paths to the VPS, so pick a VPS location between you.
 - **Keepalive:** the switch pings every connection every 25 s. Proxies and Cloudflare then never cut a quiet player,
   and the switch finds players whose connection died.
 - **Limits:**
-  - 2000 players on the switch with the image (`NFSU2_MAX_PEERS=2000`; the server's own default is 128, and 2000 is
-    the most its virtual network, 10.77.0.0/21, has addresses for). A game the switch refuses as full shows "The
+  - 4000 players on the switch with the Rust image (`NFSU2_MAX_PEERS=4000`; the server's own default is 128, and
+    4000 is the most its virtual network, 10.77.0.0/20, has addresses for), 2000 with the Node image (its network
+    is 10.77.0.0/21). A game the switch refuses as full shows "The
     server is full" in the game and tries again every 5 s; it says so again when it gets a place, and the start
     page says the server is full;
   - a player holds a place only while a network feature needs it: free roam while it is on, LAN play and Online
@@ -530,9 +564,9 @@ paths to the VPS, so pick a VPS location between you.
     than 24 links a player (its thread is busy; the start page doesn't ask its free-roam question then). Nothing
     else: no names, addresses or times, never cached. The
     game's own lobby shows its players to anyone who logs in anyway.
-  - **Limits:** 1000 lobby sessions, 3 per browser, 8 per client address, 32 per IPv6 /48, and the last quarter
-    only for a client that holds none; 300 games of at most 6, 2 open and 2 started per browser (4 and 8 per client
-    address), one browser one player of a race; 20 lobby messages a second per session (a flood ends the session);
+  - **Limits:** 2000 lobby sessions (the Node server: 1000), 3 per browser, 8 per client address, 32 per IPv6 /48,
+    and the last quarter only for a client that holds none; 600 games (Node: 300) of at most 6, 2 open and 2
+    started per browser (4 and 8 per client address), one browser one player of a race; 20 lobby messages a second per session (a flood ends the session);
     games created one every 2 s (a burst of 3), games joined, rooms entered and car descriptions published one a
     second (a burst of 4; a car description over that is not passed on); chat 1 a second with a burst of 5 (then
     10 s muted), 255 characters; a silent session goes after 120 s; a race whose players' browsers left the switch

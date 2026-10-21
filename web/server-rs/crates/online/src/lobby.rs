@@ -124,7 +124,7 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Limits {
-            sessions: 1000.0,
+            sessions: 2000.0,
             per_vip: 3.0,
             per_group: 8.0,
             per_site: 32.0,
@@ -137,7 +137,7 @@ impl Default for Limits {
             act_rate: 1.0,
             announce_ms: 1000.0,
             personas: 4.0,
-            games: 300.0,
+            games: 600.0,
             open_per_vip: 2.0,
             open_per_group: 4.0,
             started_per_vip: 2.0,

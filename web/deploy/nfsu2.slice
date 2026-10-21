@@ -1,0 +1,16 @@
+# The game's share of the VPS: the compose files put every container of theirs (the server, Caddy or the
+# Cloudflare Tunnel's cloudflared and its namespace) into this slice (cgroup_parent), and the slice gets at most
+# CPUQuota of the CPU between them, so the rest of the VPS always keeps the remainder whatever the players do.
+# 1280 % is 80 % of 16 vCPU (12.8 cores): 80 x the vCPUs for another VPS.  The server and cloudflared share it as
+# their load goes; when they reach it they are slowed down (the server's free-roam hub counts that as busy and
+# gives players fewer friends), never the rest of the VPS.
+#   cp web/deploy/nfsu2.slice /etc/systemd/system/ && systemctl daemon-reload
+# then recreate the containers (docker compose up -d --force-recreate).  Without the file the containers still
+# start, in a slice systemd makes for them with no limit.  Needs Docker's systemd cgroup driver (docker info:
+# "Cgroup Driver: systemd", the default with cgroup v2).
+[Unit]
+Description=NFS Underground 2 in the browser: its containers' share of the CPU
+
+[Slice]
+CPUAccounting=yes
+CPUQuota=1280%

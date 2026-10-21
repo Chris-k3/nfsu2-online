@@ -23,7 +23,7 @@ ports; give each its own `--state`.  Knobs for measurements, from the environmen
 
 | | |
 |---|---|
-| `NFSU2_THREADS` | the runtime's workers (default half the cores, 2 to 8: more did the same work for more CPU) |
+| `NFSU2_THREADS` | the runtime's workers (default half the cores, 2 to 8: more did the same work for more CPU; past about 3000 players in free roam more keep them at 32 friends, "Measured" below) |
 | `NFSU2_BUNDLE_MS` | a fixed tick for the bundle clock (default: it follows the crowd, below; 0: no clock, each datagram wakes its writer at once) |
 | `NFSU2_BUNDLE_MAX_MS`, `NFSU2_BUNDLE_BUDGET` | the adaptive tick's longest (25 ms) and its aim (125,000 bundles a second in all) |
 | `NFSU2_LAN_SNDBUF` | SO_SNDBUF of /lan connections (default the kernel's own) |
@@ -60,7 +60,7 @@ is) pass against it.
 
 `web/tools/server-compare.mjs` runs the same load against builds of the server (`--servers a=<bin>,b=<bin>`: a
 change against main's, say), one after the other, and compares them.  Its `crowd`
-load is `nfsu2-roamload`: up to 2000 simulated free-roam players (each a /lan WebSocket that takes bundles, a HELLO
+load is `nfsu2-roamload`: up to 4000 simulated free-roam players (each a /lan WebSocket that takes bundles, a HELLO
 and SNAPs to the hub, 20 snapshots a second to every friend the hub gives it), light enough to leave the cores to the
 server, which measures what players feel: friends per player, snapshots lost, a snapshot's delay from player to
 player, their pings, the messages each way.  `mix` is free roam and Online clients at once, as nfsu2.xyz has them.
@@ -101,13 +101,32 @@ WebSocket message (and the tunnel in front, cloudflared, pays for each again).  
 then as long as it takes to send about 125,000 bundles a second in all, 25 ms at most (free roam draws friends' cars
 100 ms in the past).  And the worker count: 2.9 cores on 4 workers, 3.8 on 8, 4.3 on 12, the same latency up to 8.
 
+4000 players (2026-10-21, the server on CPUs 0-11, nfsu2-roamload on 12-23, 3999 bots and the probe, spread over
+3 km; other sessions' loads on the machine the same day put 2000 players on 6 workers at the busy cap's edge, 5.0
+cores and 81 % busy, on main as on this):
+
+| 4000 players in free roam | 6 workers (the default for 12 CPUs) | 8 (a 16-core VPS's default) | 12 (`NFSU2_THREADS=12`) |
+|---|---|---|---|
+| refused / closed / snapshots lost | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 |
+| friends per player | 8 (the busy cap, workers 97 % busy) | 8 (79 % busy: the cap fell while they joined) | 32 (66 % busy) |
+| snapshot deliveries a second | 515,000 | 453,000 | 1,920,000 |
+| a snapshot's delay p50 / p99 | 39-46 / 120-160 ms | 34 / 89 ms | 35 / 73 ms |
+| the players' own ping p50 / p99 (the load generator's 12 CPUs full too) | 27-33 / 100-140 ms | 25 / 75 ms | 27 / 62 ms |
+| server CPU | 6.0 cores | 6.5 cores | 8.2 cores |
+| memory (peak) | 370-420 MB | 370 MB | 420 MB |
+
+The busy cap cuts bytes but hardly messages (each player still gets a bundle most ticks), so at 4000 on 6 workers it
+falls to 8 friends and stays there; 12 workers held all 32.  A longer bundle tick (`NFSU2_BUNDLE_MAX_MS=40`) saved
+nothing measurable.  Three quarters of the CPU is the kernel's TCP (`perf`: 47 % in sendto, of it 21 % the loopback
+delivering to the receiver, 11 % recvfrom).
+
 ## How the work is shared out
 
 - **HTTP** (nfsu2-http): the server's own HTTP/1.1 and TLS (rustls), a task per connection on a tokio runtime of
   several workers.  Not hyper: the audits' rules need answers of the server's own to requests a library refuses by
   itself, the pipelining cut, a keep-alive time per connection, and the connection budget before any TLS.
 - **The switch** (nfsu2-lan): each connection's reader routes the frames it reads itself, on whatever worker it runs.
-  Who is on the switch changes under one lock; frames find their receivers without it (a table of the 2000
+  Who is on the switch changes under one lock; frames find their receivers without it (a table of the 4000
   addresses, a copy-on-write list of everyone).  Each receiver's writer takes everything queued into one write, and
   makes bundles of a page's datagrams on the bundle clock.  Counters every frame touches are sharded.
 - **The Online host and the free-roam hub** (nfsu2-online, nfsu2-roam): single-threaded, each on a thread of its
@@ -129,7 +148,7 @@ then as long as it takes to send about 125,000 bundles a second in all, 25 ms at
 | nfsu2-roam | the free-roam hub |
 | nfsu2-online | the game's Online mode |
 | nfsu2-server (src/) | the routes, the rules, the wiring, the start-up |
-| nfsu2-roamload | 2000 simulated free-roam players (as web/tools/roam-crowd.mjs, lighter) |
+| nfsu2-roamload | up to 4000 simulated free-roam players (as web/tools/roam-crowd.mjs, lighter) |
 
 Each crate has its own tests (`build.sh --test`: 330 on 2026-10-21).  Where the Node server's answers had to be
 matched exactly, they were checked against its JS while both existed, and the tests keep them as expected values
@@ -150,6 +169,12 @@ resources past their end, and nothing is shared by every frame (no lock or atomi
 
 ## Where it differs from the Node server
 
+- 4000 players (`--max-peers` 1 to 4000; the image's `NFSU2_MAX_PEERS=4000`), Node's 2000: the switch's network is
+  10.77.0.0/20 (the welcome's mask 255.255.240.0; addresses round its sixteen /24s), the free-roam hub takes 4096
+  players, Online mode 2000 lobby sessions, 600 games and 8000 streams.  The game module's peer bits (mailbox v4)
+  cover a /21: for a player on 10.77.8-15.x the game asks that host itself (`runtime/web/net_lan.c`): a LAN race's
+  connect to one who has just left sends its SYN and ends after the same 3 s with WSAETIMEDOUT instead of
+  WSAEHOSTUNREACH.  Nothing else differs: the page and the module need no change (`crates/lan/tests/page.mjs`).
 - Compressed bytes (gzip and br) differ from Node's zlib; the decoded content is the same.
 - Bundles are made on the bundle clock (above), not per turn of an event loop; between different kinds of message
   only the order differs.

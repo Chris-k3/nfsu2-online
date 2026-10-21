@@ -4,9 +4,9 @@
 //!
 //! # The protocol
 //!
-//! Every browser that joins gets an address on 10.77.0.0/21 (`MASK`): 250 in each of 10.77.0-7.x (host bytes 2-251,
-//! so none ends in .0 or .255 and 10.77.0.1 and .253 stay the server's own), `ADDRS` (2000) in all, handed out in turn
-//! across the eight (`vip_at`: 10.77.0.2, 10.77.1.2, ..., 10.77.7.2, 10.77.0.3, ...), so two players are rarely in the
+//! Every browser that joins gets an address on 10.77.0.0/20 (`MASK`): 250 in each of 10.77.0-15.x (host bytes 2-251,
+//! so none ends in .0 or .255 and 10.77.0.1 and .253 stay the server's own), `ADDRS` (4000) in all, handed out in turn
+//! across the sixteen (`vip_at`: 10.77.0.2, 10.77.1.2, ..., 10.77.15.2, 10.77.0.3, ...), so two players are rarely in the
 //! same /24 and anything that still takes the network for a /24 (or for the /22 it was before) shows at once, not only
 //! past 250 (or 1000) players.  Binary frames carry the game's network traffic; the switch only routes them and never
 //! looks inside:
@@ -28,7 +28,7 @@
 //!   UDP, TCP segments and ICMP with ports at [12..15] and an 8-byte LAN header (op, ttl, connection id) before the
 //!   data.  Their broadcasts go only to the browsers that have LAN play open (the game's LAN or Online screens:
 //!   "lan":1 in the hello, then {"t":"lan","on":0|1}; a page of before says nothing and gets them all): the others
-//!   drop them anyway, and on a full switch each one would reach 2000 browsers.
+//!   drop them anyway, and on a full switch each one would reach 4000 browsers.
 //! - 32 (`KIND_BUNDLE`): a bundle: several frames in one message, [1..3] reserved, then entries of [0] u8 n,
 //!   [1] reserved, [2..3] u16 frame length, n x u32 destination vip, the frame: to each of the n (the frame's own
 //!   destination is ignored), or with n = 0 to its own.  The switch takes them from anyone (the welcome says
@@ -121,7 +121,7 @@
 //!   own buckets (behind its own lock, uncontended but for the Online host's charges), its client's and site's
 //!   (behind theirs: shared only by that client's connections), then the receivers.  No lock is shared by all.
 //! - Who is on the switch changes under one lock (`members`: admit, leave, reservations, the peer-list changes,
-//!   the store); routing never takes it.  A frame finds its receiver in a fixed table of the 2000 addresses (an
+//!   the store); routing never takes it.  A frame finds its receiver in a fixed table of the 4000 addresses (an
 //!   `ArcSwapOption<Peer>` per address: one atomic load), a broadcast walks a copy-on-write list of every peer.
 //! - Each receiver has its own queue (`OutQueue`: a short lock, a byte count the senders read for the queue
 //!   rules, a wake-up for its writer).  Its writer takes everything queued at once and puts it into one write:
@@ -186,10 +186,10 @@ use conn::{Conn, Out};
 
 pub use text::{clean_name, vip_num};
 
-/// 10.77.0.0/21's mask, which the welcome tells the page
-pub const MASK: &str = "255.255.248.0";
-/// addresses the switch hands out: host bytes 2-251 in each of the eight /24s
-pub const ADDRS: usize = 2000;
+/// 10.77.0.0/20's mask, which the welcome tells the page
+pub const MASK: &str = "255.255.240.0";
+/// addresses the switch hands out: host bytes 2-251 in each of the sixteen /24s
+pub const ADDRS: usize = 4000;
 pub const BROADCAST: u32 = 0xFFFF_FFFF;
 
 const BASE: u32 = (10 << 24) | (77 << 16);
@@ -623,7 +623,7 @@ pub struct LanSwitch {
     online_backlog: Arc<nfsu2_util::host::Backlog>,
     tap: Option<Tap>,
     store: Option<Arc<store::Store>>,
-    /// the peer at each of the 2000 addresses (`slot()`), for unicast without a lock
+    /// the peer at each of the 4000 addresses (`slot()`), for unicast without a lock
     table: Box<[ArcSwapOption<Peer>]>,
     /// every peer, in the order of `Members::peers` (broadcasts, the timers, info)
     all: ArcSwap<Vec<Arc<Peer>>>,
@@ -651,10 +651,10 @@ fn bundle_tick(o: &LanOptions, n: u64) -> Duration {
 /// The table's index of an address the switch hands out: its /24 and its host byte, the reverse of `vip_at`.
 fn slot(vip: u32) -> Option<usize> {
     let host = vip & 255;
-    if vip & 0xFFFF_F800 != BASE || !(2..=251).contains(&host) {
+    if vip & 0xFFFF_F000 != BASE || !(2..=251).contains(&host) {
         return None;
     }
-    Some(((vip >> 8) & 7) as usize + 8 * (host as usize - 2))
+    Some(((vip >> 8) & 15) as usize + 16 * (host as usize - 2))
 }
 
 impl LanSwitch {
@@ -1097,9 +1097,9 @@ pub struct ReservedView {
     pub site: Option<String>,
 }
 
-/// the i-th address in the order they are handed out (round the eight /24s: the crate doc says why)
+/// the i-th address in the order they are handed out (round the sixteen /24s: the crate doc says why)
 pub fn vip_at(i: usize) -> u32 {
-    10 << 24 | 77 << 16 | ((i & 7) << 8) as u32 | ((i >> 3) as u32 + 2)
+    10 << 24 | 77 << 16 | ((i & 15) << 8) as u32 | ((i >> 4) as u32 + 2)
 }
 
 #[cfg(test)]
@@ -1123,7 +1123,7 @@ mod tests {
         for i in 0..ADDRS {
             assert_eq!(slot(vip_at(i)), Some(i));
         }
-        for v in [BASE, BASE | 1, BASE | 252, BASE | 255, BASE | 0x800 | 2, 0, BROADCAST, BASE | 0x0700 | 0xFD] {
+        for v in [BASE, BASE | 1, BASE | 252, BASE | 255, BASE | 0x1000 | 2, 0, BROADCAST, BASE | 0x0F00 | 0xFD] {
             assert_eq!(slot(v), None, "{v:x}");
         }
     }

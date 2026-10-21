@@ -322,8 +322,8 @@ pub fn parse(argv: &[String], env: &dyn Fn(&str) -> Option<String>, repo: &str, 
     if !online_trace.is_empty() && !dev {
         return Err("--online-trace is a test aid: it needs --dev".into());
     }
-    if !(max_peers.fract() == 0.0 && (1.0..=2000.0).contains(&max_peers)) {
-        return Err("--max-peers: 1 to 2000".into());
+    if !(max_peers.fract() == 0.0 && (1.0..=4000.0).contains(&max_peers)) {
+        return Err("--max-peers: 1 to 4000".into());
     }
     let tls = if behind {
         Tls::Proxy
@@ -524,8 +524,8 @@ mod tests {
         assert_eq!(s.err(&["--online", "maybe"], &[]), "--online: on or off");
         assert_eq!(s.err(&["--roam-hub", "no"], &[]), "--roam-hub: on or off");
         assert_eq!(s.err(&["--online-trace", "t.log"], &[]), "--online-trace is a test aid: it needs --dev");
-        for v in ["0", "2001", "1.5", "x", "Infinity"] {
-            assert_eq!(s.err(&["--max-peers", v], &[]), "--max-peers: 1 to 2000", "{v}");
+        for v in ["0", "4001", "1.5", "x", "Infinity"] {
+            assert_eq!(s.err(&["--max-peers", v], &[]), "--max-peers: 1 to 4000", "{v}");
         }
         assert_eq!(s.err(&["--port", "0", "--tls-cert", "c", "--tls-key", "k"], &[]), "--tls-cert needs --port: the HTTPS port");
         assert_eq!(

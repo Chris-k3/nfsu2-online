@@ -10,12 +10,13 @@
 //   --servers                  name=binary for each (default rust=out/web/server-rs/nfsu2-server; a name alone is
 //                              that binary too)
 //
-// Each server starts fresh for each load (its own state folder, --max-peers 2000 --dev), and while the load runs
+// Each server starts fresh for each load (its own state folder, --max-peers its most: 4000 for Rust,
+// 2000 for the others; --dev), and while the load runs
 // its process is sampled every second (CPU time and resident memory, from /proc), and a probe measures the
 // switch's answer to a ping ({"t":"ping"}, a page's own measure of the switch) every 100 ms.  The loads:
 //   roam    web/tools/roam-crowd.mjs --bundle: n players in free roam, in one spot (each with up to 32 friends)
 //   crowd   out/web/server-rs/nfsu2-roamload (web/server-rs/build.sh): n simulated players in free roam, as many as a
-//           full server holds (2000), spread over --spread metres (3000), each sending --rate snapshots a second
+//           full server holds (4000, 2000 for Node), spread over --spread metres (3000), each sending --rate snapshots a second
 //           (20) to every friend the hub gives it; light enough to leave the cores to the server.  It reports the
 //           friends each player has, the snapshots lost on the way, a snapshot's delay from player to player, the
 //           players' own pings, and the messages each way; --gen-threads (8): its threads
@@ -58,7 +59,7 @@ const pinned = (cpus, cmd, args) => (cpus ? ['taskset', ['-c', cpus, cmd, ...arg
 
 async function startServer(impl, port, tag) {
   const state = fs.mkdtempSync(path.join(os.tmpdir(), `nfsu2-compare-${impl}-`));
-  const [cmd, args] = serverCommand(['--data', DATA, '--http-port', String(port), '--max-peers', '2000', '--dev', '--state', state],
+  const [cmd, args] = serverCommand(['--data', DATA, '--http-port', String(port), '--max-peers', '4000', '--dev', '--state', state],
     BINS[impl]);
   const c = spawn(...pinned(SERVER_CPUS, cmd, args), { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...SERVER_ENV } });
   const log = fs.createWriteStream(path.join(OUT, `server-${impl}-${tag}.log`));

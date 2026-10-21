@@ -140,7 +140,7 @@ const cases = {
         assert.equal(nb.length, 1, 'said once while it keeps trying');
         assert.equal(b.state === 'online', false);
         a.close();
-        assert.match(await b.online, /^10\.77\.[0-7]\.\d+$/);
+        assert.match(await b.online, /^10\.77\.([0-9]|1[0-5])\.\d+$/);
         await until(() => nb.length === 2);
         assert.equal(nb[1], 'A place on the server freed up: you can play with others now');
         assert.deepEqual(na, [], 'the first game heard nothing');
@@ -187,13 +187,17 @@ const cases = {
       assert.notEqual(v2, v1, 'a new address (the old one went back)');
       want(lanMb, 0); await sleep(100); want(lanMb, 1); await sleep(500);
       assert.equal((await peers()).length, 1); assert.equal((await state(port)).info.released, 1, 'a short break keeps the place');
-      // peer bits: one bit per host of the /21 (a peer in another /24 has its own bit; the third lands in
-      // 10.77.4.x, past a /22)
-      const others = [new Client(port, 'O1'), new Client(port, 'O2'), new Client(port, 'O3')];
+      // peer bits: one bit per host of the /20 up to the module's 2048 (a peer in another /24 has its own bit; the
+      // third lands in 10.77.4.x, past a /22); the seventh lands in 10.77.8.x, past the /21 and the bitmap: no bit
+      // (the module asks that host itself, runtime/web/net_lan.c), and nothing written past the bitmap (its header's
+      // padding)
+      const others = Array.from({ length: 7 }, (_, i) => new Client(port, `O${i + 1}`));
       for (const o of others) await o.welcome();
-      const hs = others.map(o => (o.vip & 0x7ff) >>> 0);
-      assert.ok(hs.some(h => h >= 1024), `a host past the /22 (${hs.map(h => h.toString(16))})`);
-      for (const h of hs) await until(() => (Atomics.load(lanMb.w, P.W_PEER_BITS + (h >>> 5)) >>> (h & 31)) & 1);
+      const hs = others.map(o => (o.vip & 0xfff) >>> 0), low = hs.filter(h => h < P.NET_PEER_BITS);
+      assert.ok(low.some(h => h >= 1024), `a host past the /22 (${hs.map(h => h.toString(16))})`);
+      assert.ok(low.length < hs.length, `a host past the /21 (${hs.map(h => h.toString(16))})`);
+      for (const h of low) await until(() => (Atomics.load(lanMb.w, P.W_PEER_BITS + (h >>> 5)) >>> (h & 31)) & 1);
+      for (let i = P.NET_PEER_BITS / 32; P.W_PEER_BITS + i < P.NET_HDR_BYTES / 4; i++) assert.equal(Atomics.load(lanMb.w, P.W_PEER_BITS + i), 0, `word ${i} untouched`);
       for (const o of others) await o.close();
       assert.ok(logs.some(l => /goes back/.test(l)), 'the console says why it let go');
     } finally { link.close(); }
@@ -222,7 +226,7 @@ const cases = {
         await l3.online;
         const cs = [1, 2, 3, 4, 5].map(i => new Client(port3, `C${i}`));
         for (const c of cs) await c.welcome();
-        const hs = cs.map(c => (c.vip & 0x7ff) >>> 0), low = hs.filter(h => h < 1024);
+        const hs = cs.map(c => (c.vip & 0xfff) >>> 0), low = hs.filter(h => h < 1024);
         assert.ok(low.length && low.length < hs.length, `hosts on both sides of 1024 (${hs.map(h => h.toString(16))})`);
         for (const h of low) await until(() => (Atomics.load(v3.w, P.W_PEER_BITS + (h >>> 5)) >>> (h & 31)) & 1);
         for (let i = P.NET_V3_PEER_BITS / 32; i < P.NET_PEER_BITS / 32; i++) assert.equal(Atomics.load(v3.w, P.W_PEER_BITS + i), 0, `word ${i} untouched`);
