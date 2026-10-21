@@ -167,7 +167,9 @@ Good to know:
 - **Solid cars:** you collide with the other players' cars (Online, More online settings,
   Solid cars; off: you drive through them). A car that appears on top of yours, at a garage or after a jump, lets you
   through until you are apart. Each player's own game moves their car: a car you hit is pushed in its owner's game,
-  and moves on your screen as it does there.
+  and moves on your screen as it does there. You also drive through a car whose player is paused (or you are), one
+  that has stood still for a minute (or yours has), and any car within 20 m of a shop's, the garage's or the car
+  lot's door, so a crowd can't wall off an entrance.
 - **Names over the cars** follow the game's own player-names option, as in its LAN races. A player who paused shows
   as "paused" there.
 - **Horn:** hold N (or click the controller's left stick) to honk. The others hear it from your car: louder the nearer
@@ -184,7 +186,8 @@ Good to know:
 - **Headlights:** the other players' headlights light the road in front of their cars, as yours do, a little dimmer
   and in their own colour; in Online and LAN races too. Display, more: Other cars' headlights (All cars: AI racers and
   traffic too; Off: only yours, as in the original game). The Windows plugin draws only your own.
-- **Outruns:** stay within about 30 m of another player for 3 seconds and the game offers an outrun, as it does with
+- **Outruns:** stay within about 25 m of another player for 4 seconds, away from the shops' and the garage's doors
+  (20 m), and the game offers an outrun, as it does with
   its own tuners: the outrun icon lights up and the top of the screen says "Press Enter to challenge ... to an
   outrun" (on a controller, D-pad up, the game's Engage). The other player sees "... challenges you to an outrun" and
   takes it with Enter as well, or lets it go: a challenge lapses after 15 seconds, or when you are more than 60 m
