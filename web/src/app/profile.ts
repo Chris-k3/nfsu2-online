@@ -1,7 +1,8 @@
 // A profile the game saved ("NFS Underground 2/<NAME>/<NAME>", 54,966 bytes)
 // as far as the page reads or changes it: the file's checksums and the game's
-// own Save option (Options, Gameplay, Save: Autosave, Prompt or Off), and
-// its name (renameProfile).
+// own Save option (Options, Gameplay, Save: Autosave, Prompt or Off), its
+// name (renameProfile), and, for one from the PC game, its checks and the
+// cars a mod added (profileName, modCars).
 //
 // Layout and checksum: the clean-room description of this SPEED2.EXE (v1.2 NA,
 // the README's SHA-256) in github.com/whoismept/OpenUG2,
@@ -66,16 +67,82 @@ export function readSaveMode(file: Uint8Array, name: string): { mode: SaveMode }
 
 /** Why a file is not a profile the game saved under this name (readSaveMode's checks but the Save bytes), or null. */
 function checkProfile(file: Uint8Array, name: string): string | null {
+  const bad = checkFile(file);
+  if (bad) return bad;
+  const inside = nameInside(file);
+  if (lowerAscii(inside) !== lowerAscii(name)) return `the name inside is "${inside}"`;
+  return null;
+}
+
+/** checkProfile's checks of the file itself: what the game's loader checks too (SPEC §3.5), so it refuses such a file as well. */
+function checkFile(file: Uint8Array): string | null {
+  if (!isProfileFile(file)) return 'not a profile file (no "20CM")';
   if (file.length !== PROFILE_SIZE) return `${file.length} bytes, not ${PROFILE_SIZE}`;
-  if (file[0] !== 0x32 || file[1] !== 0x30 || file[2] !== 0x43 || file[3] !== 0x4D) return 'not a profile file (no "20CM")';
   if (u32(file, 4) !== file.length || u32(file, 8) !== 8 || u32(file, 12) !== PAYLOAD) return 'unexpected block sizes';
   if (u32(file, 24) !== checksum(file.subarray(0, 24)) || u32(file, 16) !== checksum(file.subarray(28, B)) ||
       u32(file, 20) !== checksum(file.subarray(B))) return 'its checksums do not match (edited outside the game?)';
-  if (u32(file, 28) !== VERSION || u32(file, 32) !== PAYLOAD) return `version ${u32(file, 28)}, not ${VERSION}`;
+  if (u32(file, 28) !== VERSION || u32(file, 32) !== PAYLOAD) return `saved by another version of the game (version ${u32(file, 28)}, not ${VERSION})`;
+  return null;
+}
+
+function nameInside(file: Uint8Array): string {
   let inside = '';
   for (let i = NAME; i < NAME + 32 && file[i]; i++) inside += String.fromCharCode(file[i]);
-  if (lowerAscii(inside) !== lowerAscii(name)) return `the name inside is "${inside}"`;
-  return null;
+  return inside;
+}
+
+/** A file that starts as the game's save files do ("20CM"): a profile, or one of another version. */
+export const isProfileFile = (file: Uint8Array) => file.length >= 4 && file[0] === 0x32 && file[1] === 0x30 && file[2] === 0x43 && file[3] === 0x4D;
+
+/**
+ * The name inside a profile file that comes from elsewhere (the PC game's
+ * NFS Underground 2 folder, a backup), or why the page does not take it:
+ * checkProfile's checks but the folder's name, and a name the game's own
+ * field makes (isProfileName).  A save editor that leaves the checksums
+ * stale is caught here; one that makes them again is not.
+ */
+export function profileName(file: Uint8Array): { name: string } | { bad: string } {
+  const bad = checkFile(file);
+  if (bad) return { bad };
+  const name = nameInside(file);
+  if (!isProfileName(name)) return { bad: `the name inside, "${name}", is not one the game makes (edited outside the game?)` };
+  return { name };
+}
+
+// ------------------------------------------------------- mod cars --
+//
+// The cars come first in the payload (FEDatabase+0x3c0, written by 0x5166b0
+// and read back as they are by 0x516850):
+//   0      48 stock cars, 24 bytes each: +20 u32 the car type's index (0xFFFFFFFF unused)
+//   1152   u32 stock cars in use (31)
+//   1156   20 customized cars, 1,072 bytes each
+//   22596  5 career cars, 2,034 bytes each
+//   32770  6 preset cars, 1,076 bytes each (after a u32 at 32766)
+// The customized, career and preset cars hold their type as a name hash at
+// +28 (0: unused), then 170 part hashes.  The hash is bStringHash (0x43db50)
+// of the type's name, as CarTypeInfo +0xd0 holds it.  0x503880 reads an
+// unknown one's CarTypeInfo through a NULL pointer (0x610130 returns 0).
+// Unknown part hashes find no part (0x61b980), so that slot is empty; the page
+// does not check those (the game's part table is 12,000 entries).  Checked
+// against players' profiles: their cars are all of the 31 types below.
+
+/** The player cars, CarTypeInfo 0..30 in GLOBAL/GLOBALB.BUN (chunk 0x34600); 31..45 are traffic. */
+const PLAYER_CARS = ['PEUGOT', 'FOCUS', 'COROLLA', '240SX', 'MIATA', 'CIVIC', 'PEUGOT106', 'CORSA', 'HUMMER', 'NAVIGATOR',
+  'ESCALADE', 'TIBURON', 'SENTRA', 'CELICA', 'IS300', 'SUPRA', 'GOLF', 'A3', 'RSX', 'ECLIPSE', 'TT', 'RX8', '350Z', 'G35',
+  '3000GT', 'GTO', 'MUSTANGGT', 'SKYLINE', 'LANCEREVO8', 'RX7', 'IMPREZAWRX'];
+export const bStringHash = (s: string) => { let h = 0xFFFFFFFF; for (let i = 0; i < s.length; i++) h = (Math.imul(h, 33) + s.charCodeAt(i)) >>> 0; return h; };
+const PLAYER_CAR_HASHES = new Set(PLAYER_CARS.map(bStringHash));
+
+/** How many cars in a profile (one profileName took) are of a type the game's player cars do not have: cars a mod added. */
+export function modCars(file: Uint8Array): number {
+  const at = (o: number) => u32(file, B + o);
+  let n = 0;
+  for (let i = 0; i < 48; i++) { const t = at(i * 24 + 20); if (t !== 0xFFFFFFFF && t >= PLAYER_CARS.length) n++; }
+  const typed = (o: number) => { const h = at(o + 28); if (h && !PLAYER_CAR_HASHES.has(h)) n++; };
+  for (let i = 0; i < 20; i++) typed(1156 + i * 1072);
+  for (let i = 0; i < 5; i++) typed(22596 + i * 2034);
+  for (let i = 0; i < 6; i++) typed(32770 + i * 1076);
+  return n;
 }
 
 /** The checksums a change to the payload moves (B's and the header's), made again. */

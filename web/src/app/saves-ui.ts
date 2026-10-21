@@ -1,13 +1,14 @@
 // The saves section of the start page: the profiles in this browser (each can
 // be renamed: profile.ts renameProfile), a backup of the whole save
 // overlay as a zip (profiles, registry.txt, settings.ini, screenshots) and
-// restoring one.  And the section at the bottom of the page, the game data on
+// restoring one, or adding the PC game's profiles beside the ones here
+// (readBackup tells them apart).  And the section at the bottom of the page, the game data on
 // this PC: how much of it, all of it downloaded ahead (predownload.ts), or
 // deleted.  The game data is never part of a backup and never written back:
 // it stays on the server.
 
 import { cacheBytes, clearCache, clearSaveDir, filesOf, listFiles, listProfiles, PROFILES_DIR, readBytes, writeFile, type Profile } from './savefs';
-import { NAME_MAX, renameProfile } from './profile';
+import { AUTOSAVE_SEEN, coverOf, isProfileFile, modCars, NAME_MAX, profileName, renameProfile, type RenameFiles } from './profile';
 import { listZip, unzip, zip, ZipError, type ZipEntry } from './zip';
 import { downloadBlob, stamp } from './logs';
 import { fmtBytes } from './checks';
@@ -77,9 +78,29 @@ export async function exportSaves(saveDir: string): Promise<{ zip: Uint8Array; f
   return { zip: zip(entries), files: entries.length, name: `nfsu2-saves-${stamp()}.zip`, shotBytes };
 }
 
-export interface Restore { entries: { path: string; data: Uint8Array; mtime?: number }[]; profiles: string[]; skipped: string[] }
+export interface Restore {
+  /**
+   * 'backup': a backup of this page's (registry.txt or settings.ini at its top), which replaces everything here;
+   * 'profiles': profiles alone, as the PC game keeps them (its NFS Underground 2 folder zipped in any shape, or one
+   * profile's file), added beside the ones here (addProfiles)
+   */
+  kind: 'backup' | 'profiles';
+  entries: { path: string; data: Uint8Array; mtime?: number }[];
+  profiles: string[];
+  /** entries left out: unsafe names, over the size limits, or (profiles) none of a profile's */
+  skipped: string[];
+  /** profile files the game would not load (profile.ts profileName), left out with their cover shoots */
+  refused: { name: string; why: string }[];
+  /** profiles with cars a mod added (profile.ts modCars), restored with a warning */
+  modded: string[];
+}
 
-export async function readBackup(buf: Uint8Array): Promise<Restore> {
+type FileIn = { path: string; data: Uint8Array; mtime?: number };
+const lower = (s: string) => s.toLowerCase();
+
+/** A zip of this page's backup or of the PC game's profiles, or a profile's own file (fileName: its name, for the messages). */
+export async function readBackup(buf: Uint8Array, fileName = 'the file'): Promise<Restore> {
+  if (isProfileFile(buf)) return profilesIn([{ path: fileName, data: buf }], []);
   // a backup zipped from a folder ("saves/NFS Underground 2/...") still restores: strip one common top folder
   const listed = await listZip(buf);
   const names = listed.map(n => safeEntryPath(n)).filter((x): x is string => !!x);
@@ -94,12 +115,59 @@ export async function readBackup(buf: Uint8Array): Promise<Restore> {
     if (isScreenshot(p)) return (shots += size) <= MAX_SHOTS || ((shots -= size), false);
     return (other += size) <= MAX_OTHER || ((other -= size), false);
   }, refused);
-  const out: Restore = { entries: [], profiles: [], skipped: refused };
-  for (const e of all) {
-    const p = local(e.name)!;
-    out.entries.push({ path: p, data: e.data, mtime: e.mtime });
-    const s = p.split('/');
-    if (s.length === 3 && s[0] === PROFILES_DIR && s[2].toLowerCase() === s[1].toLowerCase()) out.profiles.push(s[1]);
+  const files = all.map(e => ({ path: local(e.name)!, data: e.data, mtime: e.mtime }));
+  return files.some(e => e.path === 'registry.txt' || e.path === 'settings.ini') ? backupIn(files, refused) : profilesIn(files, refused);
+}
+
+/** A backup of this page's: every entry, but a profile the game would not load and its cover shoots. */
+function backupIn(files: FileIn[], skipped: string[]): Restore {
+  const out: Restore = { kind: 'backup', entries: [], profiles: [], skipped, refused: [], modded: [] };
+  const gone = new Set<string>();
+  for (const e of files) {
+    const s = e.path.split('/');
+    if (s.length !== 3 || s[0] !== PROFILES_DIR || lower(s[2]) !== lower(s[1]) || coverOf(s[1])) continue;
+    const r = profileName(e.data);
+    const why = 'bad' in r ? r.bad : lower(r.name) !== lower(s[1]) ? `the name inside is "${r.name}"` : null;
+    if (why) { out.refused.push({ name: s[1], why }); gone.add(lower(s[1])); continue; }
+    out.profiles.push(s[1]);
+    if (modCars(e.data)) out.modded.push(s[1]);
+  }
+  out.entries = files.filter(e => {
+    const s = e.path.split('/');
+    return !(s.length >= 3 && s[0] === PROFILES_DIR && gone.has(lower(coverOf(s[1])?.profile ?? s[1])));
+  });
+  return out;
+}
+
+/**
+ * Profiles found by what they hold, wherever they are in the zip: each one the game
+ * would load goes to "NFS Underground 2/<the name inside>/", and its cover shoots
+ * ("<NAME> DVD 1/<NAME> DVD 1" anywhere) beside it.  Everything else is left out.
+ */
+function profilesIn(files: FileIn[], skipped: string[]): Restore {
+  const out: Restore = { kind: 'profiles', entries: [], profiles: [], skipped, refused: [], modded: [] };
+  const found = new Map<string, FileIn & { name: string }>();
+  const covers: (FileIn & { profile: string; cover: string })[] = [];
+  for (const e of files) {
+    const s = e.path.split('/'), file = s[s.length - 1], folder = s.length > 1 ? s[s.length - 2] : '';
+    const c = coverOf(file);                            // named as its folder; "20CM" too, but no profile
+    if (c) { covers.push({ ...e, ...c }); continue; }
+    if (!isProfileFile(e.data)) { out.skipped.push(e.path); continue; }
+    const r = profileName(e.data);
+    if ('bad' in r) out.refused.push({ name: folder || file, why: r.bad });
+    else if (found.has(lower(r.name))) out.skipped.push(e.path);          // a second copy of one
+    else found.set(lower(r.name), { ...e, name: r.name });
+  }
+  for (const p of found.values()) {
+    out.entries.push({ path: `${PROFILES_DIR}/${p.name}/${p.name}`, data: p.data, mtime: p.mtime });
+    out.profiles.push(p.name);
+    if (modCars(p.data)) out.modded.push(p.name);
+  }
+  for (const c of covers) {
+    const p = found.get(lower(c.profile));
+    if (!p) { out.skipped.push(c.path); continue; }
+    const folder = `${p.name} ${c.cover}`;
+    out.entries.push({ path: `${PROFILES_DIR}/${folder}/${folder}`, data: c.data, mtime: c.mtime });
   }
   return out;
 }
@@ -107,6 +175,27 @@ export async function readBackup(buf: Uint8Array): Promise<Restore> {
 export async function restoreSaves(saveDir: string, r: Restore) {
   await clearSaveDir(saveDir);
   for (const e of r.entries) await writeFile(saveDir, e.path, e.data);
+}
+
+/**
+ * Add the profiles of a Restore of kind 'profiles'.  A profile of the same name here (in
+ * any case: the I/O worker finds names so) goes, with its cover shoots; nothing else
+ * changes.  The new folders are written before the old ones go.  Their names leave
+ * AUTOSAVE_SEEN, so the page's Autosave comes to them as to new profiles.
+ */
+export async function addProfiles(fs: RenameFiles, r: Restore) {
+  const names = new Set(r.profiles.map(lower));
+  const written = new Set(r.entries.map(e => e.path.split('/')[1]));
+  const old = new Set<string>();
+  for (const { path } of await fs.listFiles()) {
+    const s = path.split('/');
+    if (s.length >= 3 && s[0] === PROFILES_DIR && names.has(lower(coverOf(s[1])?.profile ?? s[1])) && !written.has(s[1])) old.add(s[1]);
+  }
+  for (const e of r.entries) await fs.writeFile(e.path, e.data);
+  for (const f of old) await fs.remove(`${PROFILES_DIR}/${f}`);
+  const seen = await fs.readText(AUTOSAVE_SEEN);
+  const kept = seen?.split('\n').filter(l => !names.has(lower(l.trim()))).join('\n');
+  if (seen != null && kept !== seen) await fs.writeFile(AUTOSAVE_SEEN, kept!);
 }
 
 /** "about 3 min left" */
@@ -305,29 +394,64 @@ export class SavesPanel {
   private async doImport(file: File) {
     if (this.deps.busy()) { this.msg('Quit the game first: restoring replaces the saves it is using.'); return; }
     let r: Restore;
-    try { r = await readBackup(new Uint8Array(await file.arrayBuffer())); }
-    catch (err) { this.msg(err instanceof ZipError ? `${file.name} cannot be restored: ${err.message}.` : `${file.name} cannot be read: ${err}`); return; }
-    if (!r.entries.length) { this.msg(`${file.name} has no save files.`); return; }
+    try { r = await readBackup(new Uint8Array(await file.arrayBuffer()), file.name); }
+    catch (err) {
+      this.msg(err instanceof ZipError ? `${file.name} cannot be restored: ${err.message === 'not a zip file' ? 'it is neither a backup (a zip) nor a profile of the game\'s' : err.message}.`
+        : `${file.name} cannot be read: ${err}`);
+      return;
+    }
+    const refused = r.refused.map(x => `${x.name}: ${x.why}`).join('; ');
+    if (!r.profiles.length && (r.kind === 'profiles' || !r.entries.length)) {
+      const one = r.refused.length === 1 ? r.refused[0] : null;
+      const covers = r.skipped.length && r.skipped.every(s => coverOf(s.split('/').pop()!));
+      this.msg(one ? `${one.name === file.name ? file.name : `The profile ${one.name} in ${file.name}`} cannot be restored: ${one.why}.`
+        : refused ? `${file.name} has no profile the game can load: ${refused}.`
+        : covers ? `${file.name} holds DVD or magazine covers only: they come with their profile, in a zip of the NFS Underground 2 folder.`
+        : `${file.name} has no save files.`);
+      return;
+    }
+    const list = (names: string[]) => names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
     const body = document.createElement('div');
     const p = document.createElement('p');
-    p.textContent = `Restoring replaces every profile, the game's options and settings.ini in this browser with the ${r.entries.length} files in ${file.name}.`;
+    const items: string[] = [];
+    const here = new Map(this.profiles.map(x => [x.name.toLowerCase(), x.name]));
+    const replaced = r.profiles.map(n => here.get(n.toLowerCase())).filter((x): x is string => !!x);
+    if (r.kind === 'profiles') {
+      p.textContent = `Adds the ${r.profiles.length > 1 ? 'profiles' : 'profile'} in ${file.name} to this browser. The other profiles here, the game's options and settings.ini stay as they are.`;
+      items.push(`Profiles: ${r.profiles.map(n => {
+        const covers = r.entries.filter(e => coverOf(e.path.split('/')[1])?.profile === n).length;
+        return covers ? `${n} (with ${covers === 1 ? 'its cover shoot' : `its ${covers} cover shoots`})` : n;
+      }).join(', ')}`);
+      if (replaced.length) items.push(replaced.length > 1 ? `Replaces the profiles ${list(replaced)} in this browser, their careers and cover shoots too`
+        : `Replaces the profile ${replaced[0]} in this browser, its career and cover shoots too`);
+    } else {
+      p.textContent = `Restoring replaces every profile, the game's options and settings.ini in this browser with the ${r.entries.length} files in ${file.name}.`;
+      const ini = r.entries.find(e => e.path === 'settings.ini');
+      const warn = ini ? settingsWarnings(new TextDecoder().decode(ini.data)) : [];
+      items.push(
+        r.profiles.length ? `Profiles: ${r.profiles.join(', ')}` : 'No profiles',
+        r.entries.some(e => e.path === 'registry.txt') ? 'The game\'s options (registry.txt)' : 'No registry.txt: the next launch starts with fresh game options',
+        ini ? (warn.length ? `settings.ini. ${warn.join(' ')}` : 'settings.ini') : 'No settings.ini: the defaults apply');
+    }
+    if (r.modded.length) items.push(`${list(r.modded)} ${r.modded.length > 1 ? 'have' : 'has'} cars a mod added, which this game does not have: the game may crash or show them wrong when it loads them.`);
+    if (refused) items.push(`Left out, as the game would not load ${r.refused.length > 1 ? 'them' : 'it'}: ${refused}.`);
+    if (r.skipped.length) items.push(`${r.skipped.length} ${r.kind === 'profiles' ? 'other files are left out' : 'entries are skipped (unsafe names, or over the size limits)'}: ${r.skipped.slice(0, 3).join(', ')}${r.skipped.length > 3 ? ' …' : ''}`);
     const ul = document.createElement('ul');
-    const ini = r.entries.find(e => e.path === 'settings.ini');
-    const warn = ini ? settingsWarnings(new TextDecoder().decode(ini.data)) : [];
-    const items = [
-      r.profiles.length ? `Profiles: ${r.profiles.join(', ')}` : 'No profiles',
-      r.entries.some(e => e.path === 'registry.txt') ? 'The game\'s options (registry.txt)' : 'No registry.txt: the next launch starts with fresh game options',
-      ini ? (warn.length ? `settings.ini. ${warn.join(' ')}` : 'settings.ini') : 'No settings.ini: the defaults apply',
-    ];
-    if (r.skipped.length) items.push(`${r.skipped.length} entries are skipped (unsafe names, or over the size limits): ${r.skipped.slice(0, 3).join(', ')}${r.skipped.length > 3 ? ' …' : ''}`);
     for (const t of items) { const li = document.createElement('li'); li.textContent = t; ul.append(li); }
     body.append(p, ul);
-    if (!await this.deps.confirm('Restore this backup?', body, 'Restore backup', true)) { this.msg('Nothing changed.'); return; }
+    const adding = r.kind === 'profiles';
+    if (!await this.deps.confirm(adding ? `Add ${r.profiles.length > 1 ? 'these profiles' : 'this profile'}?` : 'Restore this backup?', body,
+      adding ? `Add ${r.profiles.length > 1 ? 'profiles' : 'profile'}` : 'Restore backup', !adding || replaced.length > 0)) { this.msg('Nothing changed.'); return; }
     try {
-      await this.write(restoreSaves(this.deps.saveDir, r));
-      this.msg(`Restored ${r.entries.length} files from ${file.name}.`);
-      this.deps.onRestored();
-    } catch (err) { this.msg(`Restoring stopped halfway: ${err}. Restore the backup again before playing.`); }
+      if (adding) {
+        await this.write(addProfiles(filesOf(this.deps.saveDir), r));
+        this.msg(`Added ${list(r.profiles)} from ${file.name}.`);
+      } else {
+        await this.write(restoreSaves(this.deps.saveDir, r));
+        this.msg(`Restored ${r.entries.length} files from ${file.name}.`);
+        this.deps.onRestored();
+      }
+    } catch (err) { this.msg(`${adding ? 'Adding' : 'Restoring'} stopped halfway: ${err}. ${adding ? 'Add the profiles' : 'Restore the backup'} again before playing.`); }
     await this.refresh();
   }
 

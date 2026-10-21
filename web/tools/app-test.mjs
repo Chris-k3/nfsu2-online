@@ -12,7 +12,10 @@
 //   saves     ROTEST is listed; a backup downloads and holds profile, registry and settings
 //   restore   the backup restores into an empty save folder (after confirming) and the next
 //             launch auto-loads ROTEST from it (tests/scripts/app_load_probe.txt)
-//   quit      F9 -> Quit game: the game's own quit path (WM_CLOSE) -> exit 0 -> back on the start page
+//   pcsave    ROTEST's own file, as the PC game keeps it, restores into an empty save folder beside
+//             what is there (settings.ini as it was) and loads in the game; again, it would replace
+//             that one; a copy edited outside the game is refused without a question
+//   quit     F9 -> Quit game: the game's own quit path (WM_CLOSE) -> exit 0 -> back on the start page
 //   instance  a second tab on the same saves waits, and takes over when the first closes
 //   readonly  that second tab's Settings are read-only; Play reads settings.ini again
 //   retry     a failed game.wasm download is its own check, retried by itself and by Retry; a new build
@@ -59,7 +62,7 @@ await requireDev(BASE);
 const OUT = path.resolve(arg('--out', 'out/web/app-test'));
 const ONLY = arg('--only', '') ? new Set(arg('--only').split(',')) : null;
 const RUN = `apptest-${Date.now().toString(36)}`;
-const SAVE = `${RUN}-a`, SAVE2 = `${RUN}-b`;
+const SAVE = `${RUN}-a`, SAVE2 = `${RUN}-b`, SAVE3 = `${RUN}-c`;
 // the test suite's environment (DESIGN.md section 5); movies stay on/off through settings.ini
 const ENV = ['SNDSYNC=0', 'GPUVS=1', 'NFSU2_FNG_LOG=1', 'NFSU2_STATUS_EVERY=600', 'NFSU2_TIMEOUT=400'].map(e => `env=${encodeURIComponent(e)}`).join('&');
 fs.mkdirSync(OUT, { recursive: true });
@@ -137,7 +140,7 @@ const page = watch(await ctx.newPage(), 'A');
 
 try {
   // ------------------------------------------------------------ start --
-  if (want('start') || want('settings') || want('play') || want('saves') || want('restore')) {
+  if (want('start') || want('settings') || want('play') || want('saves') || want('restore') || want('pcsave')) {
     const t0 = Date.now();
     await open(page, `save=${SAVE}&fresh&${ENV}`);
     const ms = Date.now() - t0;
@@ -154,7 +157,7 @@ try {
   }
 
   // --------------------------------------------------------- settings --
-  if (want('settings') || want('play') || want('saves') || want('restore')) {
+  if (want('settings') || want('play') || want('saves') || want('restore') || want('pcsave')) {
     await settingsReady(page);
     await page.locator('#settings').screenshot({ path: path.join(OUT, 'settings.png') });
     let n0 = await saved(page);
@@ -205,7 +208,7 @@ try {
   }
 
   // ------------------------------------------------------------- play --
-  if (want('play') || want('saves') || want('restore')) {
+  if (want('play') || want('saves') || want('restore') || want('pcsave')) {
     await open(page, `save=${SAVE}&${ENV}&script=/tests/scripts/app_rw_probe.txt`);
     const run = await playUntilExit(page, 'rw', 400000);
     // while it runs: overlay, menu, beforeunload
@@ -247,7 +250,7 @@ try {
   }
 
   // ------------------------------------------------------------ saves --
-  if (want('saves') || want('restore')) {
+  if (want('saves') || want('restore') || want('pcsave')) {
     await page.waitForSelector('#profiles .name', { timeout: 15000 });   // listed again when the game ended
     await page.waitForFunction(() => !/Counting/.test(document.querySelector('#cache-info').textContent));
     const listed = await page.locator('#profiles .name').allTextContents();
@@ -295,6 +298,52 @@ try {
       /^movies = off$/m.test(ini) && exit?.code === 0 && loadedGarage && noSeed,
       { before, confirm: confirmText.replace(/\s+/g, ' ').slice(0, 300), listed, exit, garageMainReached: loadedGarage, registryFromBackup: noSeed });
     await p2.close();
+  }
+
+  // ----------------------------------------------------------- pcsave --
+  if (want('pcsave') && backupPath) {
+    const prof = execFileSync('unzip', ['-p', backupPath, 'NFS Underground 2/ROTEST/ROTEST']);
+    const pcFile = path.join(OUT, 'ROTEST'), editedFile = path.join(OUT, 'ROTEST-edited');
+    fs.writeFileSync(pcFile, prof);
+    const ed = Buffer.from(prof); ed[0xA16A] ^= 0x40; fs.writeFileSync(editedFile, ed);       // a save editor's money change
+    const p3 = watch(await ctx.newPage(), 'C');
+    await open(p3, `save=${SAVE3}&fresh&${ENV}`);
+    await p3.waitForFunction(() => !document.querySelector('#import').disabled, null, { timeout: 15000 });
+    const iniBefore = (await readOpfs(p3, SAVE3, 'settings.ini'))?.text;
+    const msg = (re, ms = 15000) => p3.waitForFunction(s => new RegExp(s).test(document.querySelector('#saves-msg').textContent), re, { timeout: ms });
+    await p3.setInputFiles('#import', pcFile);
+    await p3.waitForSelector('#confirm[open]');
+    const confirmText = await p3.locator('#confirm').innerText();
+    await shot(p3, 'pcsave-confirm.png');
+    await p3.click('#confirm-ok');
+    await msg('Added ROTEST');
+    await p3.waitForFunction(() => document.querySelectorAll('#profiles .name').length > 0, null, { timeout: 15000 }).catch(() => {});
+    const listed = await p3.locator('#profiles .name').allTextContents();
+    const written = await readOpfs(p3, SAVE3, 'NFS Underground 2/ROTEST/ROTEST');
+    const iniAfter = (await readOpfs(p3, SAVE3, 'settings.ini'))?.text;
+    // the same file again would replace it (Cancel: nothing changes); an edited copy is refused without a question
+    await p3.setInputFiles('#import', pcFile);
+    await p3.waitForSelector('#confirm[open]');
+    const againText = await p3.locator('#confirm').innerText();
+    await p3.click('#confirm-cancel');
+    await msg('Nothing changed');
+    await p3.setInputFiles('#import', editedFile);
+    await msg('cannot be restored');
+    const editedMsg = await p3.locator('#saves-msg').textContent();
+    const asked = await p3.locator('#confirm[open]').count();
+    // it loads in the game, with fresh game options (no registry.txt came with it)
+    await open(p3, `save=${SAVE3}&${ENV}&script=/tests/scripts/app_load_probe.txt`);
+    const run = await playUntilExit(p3, 'pcload', 300000);
+    const exit = await run.wait();
+    const tail = await p3.evaluate(() => window.__nfsu2.log.text());
+    fs.writeFileSync(path.join(OUT, 'play-pcload.log'), tail);
+    const loadedGarage = /\[fng\] f=\d+ top package GarageMain\.fng/.test(tail);
+    report('pcsave', /^Add this profile\?/m.test(confirmText) && /Profiles: ROTEST/.test(confirmText) && !/Replaces/.test(confirmText) &&
+      listed.includes('ROTEST') && written?.size === prof.length && iniAfter === iniBefore && /Replaces the profile ROTEST/.test(againText) &&
+      /ROTEST-edited cannot be restored: its checksums do not match/.test(editedMsg) && !asked && exit?.code === 0 && loadedGarage,
+      { confirm: confirmText.replace(/\s+/g, ' ').slice(0, 300), again: againText.replace(/\s+/g, ' ').slice(0, 300), listed,
+        profileBytes: written?.size, settingsKept: iniAfter === iniBefore, editedMsg, exit, garageMainReached: loadedGarage });
+    await p3.close();
   }
 
   // --------------------------------------------------------- instance --

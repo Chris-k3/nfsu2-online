@@ -110,7 +110,7 @@
         <li>Xbox and PlayStation controllers, with rumble.</li>
         <li>The game pauses when its tab is in the background, except in LAN and Online play.</li>
         <li>Autosave for every profile, and a note each time the game saves.</li>
-        <li>Saves stay in this browser, with zip backups.</li>
+        <li>Saves stay in this browser, with zip backups. Profiles from the PC game come in too.</li>
       </ul>
     </section>
   </div>
@@ -121,10 +121,11 @@
       <ul class="profiles" id="profiles" aria-label="Profiles in this browser"></ul>
       <p class="hint">Quit from the game's main menu, or <kbd>F9</kbd> then Quit game, so a save in progress is never cut short.</p>
       <h3>Backup</h3>
-      <p class="hint">One zip with your profiles, the game's options, settings.ini and F12 screenshots. Restoring a backup replaces all of them in this browser.</p>
+      <p class="hint">One zip with your profiles, the game's options, settings.ini and F12 screenshots. Restoring a backup replaces all of them in this browser.
+        Profiles from the PC game restore too, beside the ones here: zip the folder <code>%LOCALAPPDATA%\NFS Underground 2</code>, or pick a profile's own file in it.</p>
       <div class="row">
         <button type="button" class="btn" id="export">Download a backup</button>
-        <label class="btn file-btn">Restore a backup<input type="file" id="import" accept=".zip,application/zip"></label>
+        <label class="btn file-btn">Restore a backup<input type="file" id="import"></label>
       </div>
       <p class="msg" id="saves-msg" role="status"></p>
       <p class="msg warn" id="storage-note" hidden></p>
