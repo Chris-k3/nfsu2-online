@@ -310,6 +310,8 @@ void sub_006623da(CPU *c){
 void overrides_install(void){
     void dispatch_patch(uint32_t, void(*)(CPU*));
     dispatch_patch(0x006e2be0u, wrap_6e2be0);
+    void d3dx_hle_install(void);
+    d3dx_hle_install();
 }
 
 void overrides_report(void){
@@ -763,4 +765,317 @@ void sub_00483e40(CPU *c){
     uint32_t head = list + 4u, n = 0;
     for (uint32_t e = MR32(head); e && e != head && n < 1024u; e = MR32(e)) n++;
     MR32(list + 0xcu) = n;
+}
+
+/* --- a car's shadow outline: sub_0060cee0(points, n, comparator), cdecl ----
+ * 0x60D000 projects a car's shadow mesh onto the ground and keeps the convex
+ * hull, in two halves per car and frame: here the CRT qsort (0x75CC70) of the
+ * points (pointers to x, y floats) by 0x60CE60 (x ascending, then y
+ * descending) or 0x60CEC0 (the reverse), then a monotone chain that moves the
+ * points it keeps to the front -- popping while the cross product (at PC=24)
+ * is <= 0 -- and returns the index of the last.  Among 32 friends' cars it
+ * was ~0.8 ms a frame, mostly the comparator reached through the dispatcher
+ * (~600 calls per car).  Here: the CRT's qsort as VS2005 has it (median of
+ * three, the loguy/higuy partition with the equal-element skips, the
+ * selection sort below 9 elements, the smaller part first on its stack), its
+ * comparisons and swaps in the same order, so equal points end up in the
+ * same order; the comparators and the chain through X87R2, as the lifted
+ * code computes them.  The same memory, eax,
+ * ebx, ebp, esi, edi, esp, eip and x87 top as the lifted body; not ecx, edx,
+ * the flags, the x87 condition bits and empty slots (0x60D000, the only
+ * caller, writes those before reading them) nor the stores below the
+ * caller's esp.  Another comparator runs the lifted body.  tests/main_all.c
+ * section 9 checks it against the lifted body. */
+void sub_0060cee0_orig(CPU *c);
+uint64_t g_hull_lifted;            /* calls that ran the lifted body (tests) */
+static int hull_cmp(CPU *restrict c, uint32_t ea, uint32_t eb, int rev){
+    if (rev){ uint32_t t = ea; ea = eb; eb = t; }
+    uint32_t A = MR32(ea), B = MR32(eb);
+    double K = MRF32(0x007d7d3cu), ax = MRF32(A), bx = MRF32(B), ay = MRF32(A + 4u), by = MRF32(B + 4u);
+    double d = X87R2(ax, bx, ax - bx);
+    if (d > K) return 1;
+    if (d < K) return -1;
+    double e = X87R2(by, ay, by - ay);
+    return e > K ? 1 : e < K ? -1 : 0;
+}
+/* The sort works on positions in the array.  With the comparators' zero
+ * ([0x7D7D3C]) at 0 the points' coordinates are read once into x/y (moved
+ * along with the pointers): the sign of the rounded difference is that of
+ * the plain comparison of the two floats (the difference of two floats is
+ * zero only when they are equal, and rounding keeps its sign), a NaN falling
+ * through as before. */
+typedef struct { CPU *c; uint32_t arr; float *x, *y; int rev; } HullSort;
+static inline int hs_cmp(const HullSort *h, uint32_t i, uint32_t j){
+    if (h->rev){ uint32_t t = i; i = j; j = t; }
+    if (!h->x) return hull_cmp(h->c, h->arr + 4u * i, h->arr + 4u * j, 0);
+    float ax = h->x[i], bx = h->x[j];
+    if (ax > bx) return 1;
+    if (ax < bx) return -1;
+    float ay = h->y[i], by = h->y[j];
+    return by > ay ? 1 : by < ay ? -1 : 0;
+}
+static inline void hs_swap(const HullSort *h, uint32_t i, uint32_t j){
+    uint32_t a = h->arr + 4u * i, b = h->arr + 4u * j, t = MR32(a); MR32(a) = MR32(b); MR32(b) = t;
+    if (h->x){ float u = h->x[i]; h->x[i] = h->x[j]; h->x[j] = u; u = h->y[i]; h->y[i] = h->y[j]; h->y[j] = u; }
+}
+/* positions are signed: the partition can step one below the array, as the
+ * CRT's pointer does */
+static void hull_qsort(const HullSort *h, int32_t num){
+    int32_t lostk[32], histk[32], lo = 0, hi = num - 1;
+    int sp = 0;
+    if (num < 2) return;
+    for (;;){
+        int32_t size = hi - lo + 1;
+        if (size <= 8){
+            while (hi > lo){
+                int32_t mx = lo;
+                for (int32_t p = lo + 1; p <= hi; p++) if (hs_cmp(h, (uint32_t)p, (uint32_t)mx) > 0) mx = p;
+                hs_swap(h, (uint32_t)mx, (uint32_t)hi); hi--;
+            }
+        } else {
+            int32_t mid = lo + size / 2, loguy = lo, higuy = hi;
+            if (hs_cmp(h, lo, mid) > 0) hs_swap(h, lo, mid);
+            if (hs_cmp(h, lo, hi) > 0) hs_swap(h, lo, hi);
+            if (hs_cmp(h, mid, hi) > 0) hs_swap(h, mid, hi);
+            for (;;){
+                if (mid > loguy) do loguy++; while (loguy < mid && hs_cmp(h, loguy, mid) <= 0);
+                if (mid <= loguy) do loguy++; while (loguy <= hi && hs_cmp(h, loguy, mid) <= 0);
+                do higuy--; while (higuy > mid && hs_cmp(h, higuy, mid) > 0);
+                if (higuy < loguy) break;
+                hs_swap(h, loguy, higuy);
+                if (mid == higuy) mid = loguy;
+            }
+            higuy++;
+            if (mid < higuy) do higuy--; while (higuy > mid && hs_cmp(h, higuy, mid) == 0);
+            if (mid >= higuy) do higuy--; while (higuy > lo && hs_cmp(h, higuy, mid) == 0);
+            if (higuy - lo >= hi - loguy){
+                if (lo < higuy){ lostk[sp] = lo; histk[sp] = higuy; sp++; }
+                if (loguy < hi){ lo = loguy; continue; }
+            } else {
+                if (loguy < hi){ lostk[sp] = loguy; histk[sp] = hi; sp++; }
+                if (lo < higuy){ hi = higuy; continue; }
+            }
+        }
+        if (--sp < 0) return;
+        lo = lostk[sp]; hi = histk[sp];
+    }
+}
+void sub_0060cee0(CPU *restrict c){
+#ifdef __wasm__
+    uint32_t e = c->esp, arr = MR32(e + 4u), cmp = MR32(e + 12u);
+    int32_t n = (int32_t)MR32(e + 8u);
+    if (cmp == 0x0060ce60u || cmp == 0x0060cec0u){
+        static float hx[1024], hy[1024];
+        HullSort h = { c, arr, NULL, NULL, cmp == 0x0060cec0u };
+        if (MRF32(0x007d7d3cu) == 0.0f && n <= 1024){
+            h.x = hx; h.y = hy;
+            for (int32_t i = 0; i < n; i++){ uint32_t p = MR32(arr + 4u * (uint32_t)i); hx[i] = MRF32(p); hy[i] = MRF32(p + 4u); }
+        }
+        hull_qsort(&h, n);
+        uint32_t last = 1;
+        for (int32_t i = 2; i < n; i++){
+            uint32_t k = last;
+            if ((int32_t)k >= 1){
+                uint32_t p = MR32(arr + 4u * (uint32_t)i);
+                double px = MRF32(p), py = MRF32(p + 4u), K = MRF32(0x007d7d3cu);
+                for (;;){
+                    uint32_t a = MR32(arr + 4u * k), q = MR32(arr + 4u * k - 4u);
+                    double ax = MRF32(a), ay = MRF32(a + 4u), qx = MRF32(q), qy = MRF32(q + 4u);
+                    double u = X87R2(qy, ay, qy - ay), v = X87R2(px, ax, px - ax), t1 = X87R2(u, v, u * v);
+                    double w = X87R2(py, ay, py - ay), s = X87R2(qx, ax, qx - ax), t2 = X87R2(w, s, w * s);
+                    double t = X87R2(t1, t2, t1 - t2);
+                    if (!(t <= K)) break;                      /* > 0 or unordered: keep a */
+                    if ((int32_t)--k < 1) break;
+                }
+            }
+            uint32_t a = MR32(arr + 4u * (k + 1u));
+            last = k + 1u;
+            MR32(arr + 4u * last) = MR32(arr + 4u * (uint32_t)i);
+            MR32(arr + 4u * (uint32_t)i) = a;
+        }
+        c->eax = last;
+        POP32(c->eip);
+        return;
+    }
+#endif
+    g_hull_lifted++;
+    sub_0060cee0_orig(c);
+}
+
+/* --- spherical-harmonic lighting: sub_004895e0, thiscall, ret 0x14 ---------
+ * (this = 10 x 4 floats of SH coefficients, colour[4], scale, x, y, z): adds
+ * one light from direction (x, y, z) with colour * scale to the nine
+ * coefficients (and a tenth row), one colour channel at a time.  0x489AF0
+ * calls it twice per light, 0x48ED60 for up to 18 lights per car and frame
+ * (~0.6 ms a frame among 32 friends' cars).  The four channels do the same
+ * x87 operations, so here they are the lanes of f32x4 operations, in the
+ * same order with the same operands: at PC=24 and RC=nearest the x87 rounds
+ * each result of float operands to 24 bits as f32 arithmetic does (the
+ * lifted X87R2 gives the same) while it is a normal float, or zero from a
+ * zero operand or an exact cancellation.  Every result is checked for that
+ * (a product of non-zero operands that comes out zero underflowed); anything
+ * else (NaN, infinity, subnormal, underflow, another control word, the
+ * coefficients overlapping the colour) runs the lifted body from the
+ * untouched state.  The same coefficients, eax, ecx, edx, flags, esp, eip,
+ * x87 top and condition bits as the lifted body, and its store of
+ * 3 z^2 K - K' over the colour argument; not the scratch stores below the
+ * caller's esp nor the x87 slots it leaves empty.  tests/main_all.c section
+ * 10 checks it against the lifted body.  The Mac keeps the lifted body. */
+void sub_004895e0_orig(CPU *c);
+uint64_t g_sh_lifted;              /* calls that ran the lifted body (tests) */
+#ifdef __wasm__
+#pragma clang fp contract(off)
+typedef float sh4 __attribute__((vector_size(16), aligned(4)));
+typedef int32_t shi4 __attribute__((vector_size(16), aligned(4)));
+/* not a normal float and not zero: NaN, infinity, subnormal */
+static inline shi4 sh_bad(sh4 r){
+    sh4 a = (sh4)((shi4)r & 0x7fffffff);
+    return ((a < 0x1p-126f) & (r != 0.0f)) | (a > 0x1.fffffep127f) | (r != r);
+}
+#define SH_MUL(r, a, b) do{ sh4 _a = (a), _b = (b); r = _a * _b; bad |= sh_bad(r) | ((r == 0.0f) & (_a != 0.0f) & (_b != 0.0f)); }while(0)
+#define SH_ADD(r, a, b) do{ r = (a) + (b); bad |= sh_bad(r); }while(0)
+#define SH_SUB(r, a, b) do{ r = (a) - (b); bad |= sh_bad(r); }while(0)
+static int sh_native(CPU *restrict c){
+    if (c->fcw & 0x0F00u) return 0;
+    uint32_t e = c->esp, o = c->ecx, col = MR32(e + 4u);
+    /* the coefficients [o, o+0xA0) against the colour [col, col+16) and the return address and arguments [e, e+0x18) */
+    if (col - o + 15u < 15u + 0xa0u || e - o + 0x17u < 0x17u + 0xa0u) return 0;
+    sh4 cv, O[10], C, A, B, D, xD, S18, S1c, S20, S24, S28, S30, S2c, S34, E, G, t, u;
+    shi4 bad = { 0, 0, 0, 0 };
+    memcpy(&cv, g_mem + col, 16);
+    for (int i = 0; i < 10; i++) memcpy(&O[i], g_mem + o + 16u * (uint32_t)i, 16);
+    float s = MRF32(e + 8u), x = MRF32(e + 12u), y = MRF32(e + 16u), z = MRF32(e + 20u);
+    sh4 X = { x, x, x, x }, Y = { y, y, y, y }, Z = { z, z, z, z }, S = { s, s, s, s };
+#define SHK(a) ((sh4){ MRF32(a), MRF32(a), MRF32(a), MRF32(a) })
+    sh4 T3, T4;                                           /* lanes equal */
+    SH_MUL(t, Z, Z); SH_MUL(t, t, SHK(0x787adcu)); SH_SUB(T3, t, SHK(0x784250u));
+    SH_MUL(t, X, X); SH_MUL(u, Y, Y); SH_SUB(T4, t, u);
+    SH_MUL(C, cv, S);
+    SH_MUL(A, SHK(0x78d944u), C);
+    SH_MUL(B, C, SHK(0x78d940u));
+    SH_MUL(S18, Y, B); SH_MUL(S1c, Z, B); SH_MUL(S20, B, X);
+    SH_MUL(D, C, SHK(0x78d93cu));
+    SH_MUL(xD, X, D); SH_MUL(S24, Y, xD);
+    SH_MUL(t, D, Y); SH_MUL(S28, t, Z);
+    SH_MUL(S30, xD, Z);
+    SH_MUL(t, C, SHK(0x78d938u)); SH_MUL(S2c, t, T3);
+    SH_MUL(t, C, SHK(0x78d934u)); SH_MUL(S34, t, T4);
+    SH_MUL(A, A, SHK(0x78d930u));
+    SH_MUL(t, S2c, SHK(0x78d92cu)); SH_SUB(E, A, t);
+    SH_ADD(O[0], E, O[0]);
+    SH_MUL(G, S34, SHK(0x78d928u));
+    SH_ADD(O[1], G, O[1]);
+    SH_SUB(O[2], O[2], G);
+    SH_MUL(t, S2c, SHK(0x78d924u)); SH_ADD(O[3], t, O[3]);
+    SH_MUL(t, S24, SHK(0x78d920u)); SH_ADD(O[4], t, O[4]);
+    SH_MUL(t, S30, SHK(0x78d920u)); SH_ADD(O[5], t, O[5]);
+    SH_MUL(t, S28, SHK(0x78d928u)); SH_ADD(O[6], t, O[6]);
+    SH_MUL(t, S20, SHK(0x78d91cu)); SH_ADD(O[7], t, O[7]);
+    SH_MUL(t, S18, SHK(0x78d91cu)); SH_ADD(O[8], t, O[8]);
+    SH_MUL(t, S1c, SHK(0x78d91cu)); SH_ADD(O[9], t, O[9]);
+#undef SHK
+    if (bad[0] | bad[1] | bad[2] | bad[3]) return 0;
+    for (int i = 0; i < 10; i++) memcpy(g_mem + o + 16u * (uint32_t)i, &O[i], 16);
+    c->eax = MR32(col + 12u); c->edx = MR32(col + 8u);
+    MRF32(e + 4u) = T3[0];                                /* its fstp [esp+0x3c] */
+    { uint32_t a = e - 0x38u, r = e; FLAGS_ADD_M(a, 0x38u, r, 32, F_ALL); }    /* add esp, 0x38 */
+    POP32(c->eip); c->esp += 0x14u;
+    return 1;
+}
+/* sub_00489ba0(M), thiscall, ret 4: rotates the coefficients at this by the
+ * 3x3 matrix in rows 0-2 of M (0x48E6C0, per part group of a car), each
+ * channel by the same x87 sequence: here as f32x4 lanes like sh_native, the
+ * operations in its order.  Old coefficients in, new ones out (C0 is written
+ * back as it was).  The same coefficients, eax (this + 0x30), ecx (0), edx
+ * (the last channel's C0), flags, esp, eip, x87 top and condition bits as
+ * the lifted body, and its store of M[4] over the argument.  tests/main_all.c
+ * section 11 checks it. */
+static int shrot_native(CPU *restrict c){
+    if (c->fcw & 0x0F00u) return 0;
+    uint32_t e = c->esp, o = c->ecx, M = MR32(e + 4u);
+    if (M - o + 0x2bu < 0x2bu + 0xa0u || e - o + 7u < 7u + 0xa0u) return 0;   /* overlap */
+    sh4 C[10], N[10], t, u, w, T44, T48, T4c, T50, T54, T58, T2c, T30, T34;
+    shi4 bad = { 0, 0, 0, 0 };
+    for (int j = 0; j < 10; j++) memcpy(&C[j], g_mem + o + 16u * (uint32_t)j, 16);
+#define SHM(off) ((sh4){ MRF32(M + (off)), MRF32(M + (off)), MRF32(M + (off)), MRF32(M + (off)) })
+    sh4 a = SHM(0x00u), b = SHM(0x10u), cc = SHM(0x20u), d = SHM(0x04u), ee = SHM(0x14u), f = SHM(0x24u),
+        g = SHM(0x08u), h = SHM(0x18u), ii = SHM(0x28u);
+#undef SHM
+    /* C1 */
+    SH_MUL(t, C[6], b); SH_MUL(u, C[3], cc); SH_ADD(t, t, u); SH_MUL(u, C[5], a); SH_ADD(t, t, u); SH_MUL(t, t, cc);
+    SH_MUL(u, C[2], b); SH_MUL(w, C[4], a); SH_ADD(u, u, w); SH_MUL(u, u, b); SH_ADD(t, t, u);
+    SH_MUL(u, C[1], a); SH_MUL(u, u, a); SH_ADD(N[1], t, u);
+    /* C2 */
+    SH_MUL(T58, C[6], ee); SH_MUL(T54, f, C[3]); SH_MUL(T50, C[5], d); SH_MUL(T4c, C[2], ee);
+    SH_MUL(T48, C[4], d); SH_MUL(T44, C[1], d);
+    SH_ADD(t, T50, T54); SH_ADD(t, t, T58); SH_MUL(t, t, f);
+    SH_ADD(u, T48, T4c); SH_MUL(u, u, ee); SH_ADD(t, t, u);
+    SH_MUL(u, T44, d); SH_ADD(N[2], t, u);
+    /* C3 */
+    sh4 C2h, C4g, C1g, S;
+    SH_MUL(T34, C[6], h); SH_MUL(T30, C[3], ii); SH_MUL(T2c, C[5], g);
+    SH_MUL(C2h, C[2], h); SH_MUL(C4g, C[4], g); SH_MUL(C1g, C[1], g);
+    SH_ADD(S, T2c, T30); SH_ADD(S, S, T34); SH_MUL(t, S, ii);
+    SH_ADD(u, C4g, C2h); SH_MUL(u, u, h); SH_ADD(t, t, u);
+    SH_MUL(u, C1g, g); SH_ADD(N[3], t, u);
+    /* C4 */
+    SH_MUL(t, C[6], f); SH_MUL(t, t, b); SH_MUL(u, C[5], f); SH_MUL(u, u, a); SH_ADD(t, t, u);
+    SH_MUL(u, C[4], ee); SH_MUL(u, u, a); SH_ADD(t, t, u);
+    SH_MUL(u, T44, a); SH_ADD(u, u, u); SH_ADD(t, t, u);
+    SH_MUL(u, T48, b); SH_ADD(t, t, u);
+    SH_MUL(u, T4c, b); SH_ADD(u, u, u); SH_ADD(t, t, u);
+    SH_MUL(u, T50, cc); SH_ADD(t, t, u);
+    SH_MUL(u, T54, cc); SH_ADD(u, u, u); SH_ADD(t, t, u);
+    SH_MUL(u, T58, cc); SH_ADD(N[4], t, u);
+    /* C5 */
+    sh4 C6i, C5i, C4h, K1;
+    SH_MUL(C6i, C[6], ii); SH_MUL(C5i, C[5], ii); SH_MUL(C4h, C[4], h);
+    SH_ADD(K1, C4h, C5i);
+    SH_MUL(t, K1, a); SH_MUL(u, C6i, b); SH_ADD(t, t, u);
+    SH_MUL(u, C1g, a); SH_ADD(u, u, u); SH_ADD(t, t, u);
+    SH_MUL(u, C4g, b); SH_ADD(t, t, u);
+    SH_MUL(u, C2h, b); SH_ADD(u, u, u); SH_ADD(t, t, u);
+    SH_MUL(u, T2c, cc); SH_ADD(t, t, u);
+    SH_MUL(u, T30, cc); SH_ADD(u, u, u); SH_ADD(t, t, u);
+    SH_MUL(u, T34, cc); SH_ADD(N[5], t, u);
+    /* C6 */
+    SH_MUL(t, K1, d); SH_MUL(u, C6i, ee); SH_ADD(t, t, u);
+    SH_MUL(u, C1g, d); SH_ADD(u, u, u); SH_ADD(t, t, u);
+    SH_MUL(u, C4g, ee); SH_ADD(t, t, u);
+    SH_MUL(u, C2h, ee); SH_ADD(u, u, u); SH_ADD(t, t, u);
+    SH_MUL(u, T2c, f); SH_ADD(t, t, u);
+    SH_MUL(u, T30, f); SH_ADD(u, u, u); SH_ADD(t, t, u);
+    SH_MUL(u, T34, f); SH_ADD(N[6], t, u);
+    /* C7, C8, C9 */
+    SH_MUL(t, C[9], cc); SH_MUL(u, C[8], b); SH_ADD(t, t, u); SH_MUL(u, C[7], a); SH_ADD(N[7], t, u);
+    SH_MUL(t, C[9], f); SH_MUL(u, C[8], ee); SH_ADD(t, t, u); SH_MUL(u, C[7], d); SH_ADD(N[8], t, u);
+    SH_MUL(t, C[9], ii); SH_MUL(u, C[8], h); SH_ADD(t, t, u); SH_MUL(u, C[7], g); SH_ADD(N[9], t, u);
+    if (bad[0] | bad[1] | bad[2] | bad[3]) return 0;
+    for (int j = 1; j < 10; j++) memcpy(g_mem + o + 16u * (uint32_t)j, &N[j], 16);
+    c->eax = o + 0x30u; c->ecx = 0; c->edx = MR32(o + 12u);
+    MR32(e + 4u) = MR32(M + 0x10u);                       /* its mov [esp+0x60], edx */
+    { uint32_t x = e - 0x5cu, r = e; FLAGS_ADD_M(x, 0x5cu, r, 32, F_ALL); }    /* add esp, 0x5c */
+    POP32(c->eip); c->esp += 4u;
+    return 1;
+}
+#undef SH_MUL
+#undef SH_ADD
+#undef SH_SUB
+#pragma clang fp contract(on)
+#endif
+void sub_004895e0(CPU *restrict c){
+#ifdef __wasm__
+    if (sh_native(c)) return;
+#endif
+    g_sh_lifted++;
+    sub_004895e0_orig(c);
+}
+void sub_00489ba0_orig(CPU *c);
+uint64_t g_shrot_lifted;           /* calls that ran the lifted body (tests) */
+void sub_00489ba0(CPU *restrict c){
+#ifdef __wasm__
+    if (shrot_native(c)) return;
+#endif
+    g_shrot_lifted++;
+    sub_00489ba0_orig(c);
 }

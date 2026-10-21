@@ -271,6 +271,197 @@ static void mmul_tests(void){
     CHKI("D3DXMatrixMultiply: NaNs by the lifted body", (uint32_t)(slow > 0), 1u);
 }
 
+/* --- 9. A car's shadow outline (0x60CEE0): the runtime's version (runtime/
+ * overrides.c, wasm) against the lifted body: the order of the point array,
+ * eax, ebx, ebp, esi, edi, esp, eip and the x87 top (ecx, edx, the flags and
+ * the x87 condition bits are dead at its only caller, 0x60D000).  Inputs:
+ * 0..120 points on a coarse grid (many equal x or y, duplicates) or spread
+ * out, near the origin or at world coordinates, with either comparator and
+ * the game thread's control word or PC=53; some with a NaN, an infinity, a
+ * tiny or a huge coordinate. */
+void sub_0060cee0_orig(CPU *c);
+extern uint64_t g_hull_lifted;
+static void hull_tests(void){
+    printf("\n--- 9. Shadow outline (0x60CEE0): runtime vs lifted ---\n");
+    const uint32_t PTS = 0x00E30000u, ARR = 0x00E38000u;
+    int n = 0, bad = 0, slow = 0;
+    for (int i = 0; i < 6000; i++){
+        uint32_t np = rnd() % 121u;
+        int grid = i % 3 != 0;
+        for (uint32_t k = 0; k < np; k++){
+            float x = grid ? (float)(int)(rnd() % 9u) * 0.5f - 2.0f : frnd(-3, 3);
+            float y = grid ? (float)(int)(rnd() % 9u) * 0.25f - 1.0f : frnd(-5, 5);
+            if (i % 5 == 0){ x += 1695.3f; y -= 883.6f; }
+            if (i % 11 == 7 && rnd() % 16u == 0){ if (rnd() & 1) x = fspecial(); else y = fspecial(); }
+            MRF32(PTS + 16u * k) = x; MRF32(PTS + 16u * k + 4u) = y; MRF32(PTS + 16u * k + 8u) = 24.1f;
+            MR32(ARR + 4u * k) = PTS + 16u * k;
+        }
+        for (uint32_t k = np; k > 1; k--){
+            uint32_t j = rnd() % k, t = MR32(ARR + 4u * (k - 1u));
+            MR32(ARR + 4u * (k - 1u)) = MR32(ARR + 4u * j); MR32(ARR + 4u * j) = t;
+        }
+        uint32_t cmp = (i & 1) ? 0x0060cec0u : 0x0060ce60u;
+        static uint8_t in[0x200], outL[0x200];
+        memcpy(in, g_mem + ARR, sizeof in);
+        reset(); cpu.fcw = (i % 7 == 3) ? 0x027f : 0x007f; cpu.top = (int32_t)(i & 7);
+        cpu.ebx = 0x11111111u; cpu.ebp = 0x22222222u; cpu.esi = 0x33333333u; cpu.edi = 0x44444444u;
+        PUSH32(cmp); PUSH32(np); PUSH32(ARR); PUSH32(0xC0DE0000u + (uint32_t)i);
+        CPU a = cpu; CPU *s = &a;
+        sub_0060cee0_orig(s);
+        memcpy(outL, g_mem + ARR, sizeof outL); memcpy(g_mem + ARR, in, sizeof in);
+        uint64_t slow0 = g_hull_lifted;
+        sub_0060cee0(&cpu);
+        n++;
+        if (g_hull_lifted != slow0) slow++;
+        int same = a.eax == cpu.eax && a.ebx == cpu.ebx && a.ebp == cpu.ebp && a.esi == cpu.esi && a.edi == cpu.edi
+                   && a.esp == cpu.esp && a.eip == cpu.eip && a.top == cpu.top && !memcmp(outL, g_mem + ARR, sizeof outL);
+        if (!same && bad++ < 8)
+            printf("  differs: #%d %u points, comparator %08x cw %04x: lifted eax %u, runtime eax %u\n",
+                   i, np, cmp, cpu.fcw, a.eax, cpu.eax);
+    }
+    printf("  %d calls, %d of them by the lifted body\n", n, slow);
+    char nm[64]; snprintf(nm, sizeof nm, "shadow outline equivalent (%d inputs)", n);
+    CHKI(nm, (uint32_t)bad, 0u);
+    CHKI("shadow outline: calls by the lifted body", (uint32_t)slow, 0u);
+}
+
+/* --- 10. Spherical-harmonic light (0x4895E0): the runtime's f32x4 version
+ * (runtime/overrides.c, wasm) against the lifted body: the 40 coefficients,
+ * the general registers, eip, the x87 top and condition bits, the flags
+ * unless the lift is FLAGABI's, and the stores at or above esp (its store
+ * over the colour argument).  Inputs: unit directions (some along an axis:
+ * exact zeros), colours and scales of the game's range, coefficients summed
+ * so far (some zero); some with a NaN, an infinity, a tiny or a huge value,
+ * or another control word, which the runtime leaves to the lifted body. */
+void sub_004895e0_orig(CPU *c);
+extern uint64_t g_sh_lifted;
+static uint32_t f2u(float f){ uint32_t u; memcpy(&u, &f, 4); return u; }
+static void sh_tests(void){
+    printf("\n--- 10. Spherical-harmonic light (0x4895E0): runtime vs lifted ---\n");
+    const uint32_t COL = 0x00E40100u;
+    int n = 0, bad = 0, slow = 0, ordinary_slow = 0;
+    for (int i = 0; i < 8000; i++){
+        int special = 0;
+        /* as 0x48ED60 has them: on the stack just above the arguments (or, as
+         * no caller has them, over the arguments: the runtime leaves that to
+         * the lifted body) */
+        const uint32_t OUT = (i % 97 == 50) ? STACK_TOP - 24u + 8u : (i % 5 == 4) ? STACK_TOP + 0x40u : 0x00E40000u;
+        if (i % 97 == 50) special = 1;
+        for (int k = 0; k < 40; k++) MRF32(OUT + 4u * k) = (i % 4 == 0) ? 0.0f : frnd(-3, 3);
+        for (int k = 0; k < 4; k++) MRF32(COL + 4u * k) = (rnd() % 8u == 0) ? 0.0f : frnd(0, k == 3 ? 1.0f : 2.0f);
+        float dx = frnd(-1, 1), dy = frnd(-1, 1), dz = frnd(-1, 1), l = sqrtf(dx * dx + dy * dy + dz * dz) + 1e-6f, sc = frnd(0, 3);
+        dx /= l; dy /= l; dz /= l;
+        if (i % 6 == 1){ dx = 0.0f; dy = 0.0f; dz = (rnd() & 1) ? 1.0f : -1.0f; }
+        if (i % 6 == 2) dx = 0.0f;
+        if (i % 13 == 5){
+            special = 1;
+            switch (rnd() % 4u){
+            case 0: dx = fspecial(); break;
+            case 1: MRF32(COL + 4u * (rnd() % 4u)) = fspecial(); break;
+            case 2: MRF32(OUT + 4u * (rnd() % 40u)) = fspecial(); break;
+            default: sc = fspecial();
+            }
+        }
+        static uint8_t in[0x200], outL[0x200], stk[64], stkL[64];
+        memcpy(in, g_mem + OUT, sizeof in);
+        reset(); cpu.fcw = (i % 9 == 4) ? 0x027f : 0x007f; if (cpu.fcw != 0x007f) special = 1;
+        cpu.top = (int32_t)(i & 7);
+        for (int k = 0; k < 8; k++) cpu.st[k] = 1000.0 + k;
+        cpu.eax = 0xdeadbeefu; cpu.ecx = OUT; cpu.edx = 0x55aa55aau; cpu.ebx = 0x11111111u;
+        cpu.ebp = 0x22222222u; cpu.esi = 0x33333333u; cpu.edi = 0x44444444u; cpu.fsw = 0x0100u;
+        { uint32_t *fl = &cpu.cf; for (int k = 0; k < 7; k++) fl[k] = FTOL_SENT; }
+        PUSH32(f2u(dz)); PUSH32(f2u(dy)); PUSH32(f2u(dx)); PUSH32(f2u(sc)); PUSH32(COL); PUSH32(0xC0DE0000u + (uint32_t)i);
+        uint32_t e = cpu.esp;
+        memcpy(stk, g_mem + e, sizeof stk);
+        CPU a = cpu; CPU *s = &a;
+        sub_004895e0_orig(s);
+        memcpy(outL, g_mem + OUT, sizeof outL); memcpy(stkL, g_mem + e, sizeof stkL);
+        memcpy(g_mem + OUT, in, sizeof in); memcpy(g_mem + e, stk, sizeof stk);
+        uint64_t slow0 = g_sh_lifted;
+        sub_004895e0(&cpu);
+        n++;
+        if (g_sh_lifted != slow0){ slow++; if (!special) ordinary_slow++; }
+        int same = !memcmp(a.r, cpu.r, sizeof a.r) && a.eip == cpu.eip && a.top == cpu.top
+                   && (a.fsw & (FSW_C0 | FSW_C2 | FSW_C3)) == (cpu.fsw & (FSW_C0 | FSW_C2 | FSW_C3))
+                   && !memcmp(outL, g_mem + OUT, sizeof outL) && !memcmp(stkL, g_mem + e, sizeof stkL);
+#ifndef LIFT_FLAGABI
+        same = same && !memcmp(&a.cf, &cpu.cf, 7 * sizeof(uint32_t));
+#endif
+        if (!same && bad++ < 8)
+            printf("  differs: #%d cw %04x: lifted out[0] %08x eax %08x esp %08x, runtime out[0] %08x eax %08x esp %08x\n",
+                   i, cpu.fcw, *(uint32_t *)outL, a.eax, a.esp, MR32(OUT), cpu.eax, cpu.esp);
+    }
+    printf("  %d calls, %d of them by the lifted body\n", n, slow);
+    char nm[64]; snprintf(nm, sizeof nm, "SH light equivalent (%d inputs)", n);
+    CHKI(nm, (uint32_t)bad, 0u);
+    CHKI("SH light: ordinary calls by the lifted body", (uint32_t)ordinary_slow, 0u);
+    CHKI("SH light: special values by the lifted body", (uint32_t)(slow > 0), 1u);
+}
+
+/* --- 11. Spherical-harmonic rotation (0x489BA0): the runtime's f32x4
+ * version (runtime/overrides.c, wasm) against the lifted body: the 40
+ * coefficients, the general registers, eip, the x87 top and condition bits,
+ * the flags unless the lift is FLAGABI's, and the stores at or above esp (its
+ * store over the matrix argument).  Inputs: rotations (some about an axis:
+ * exact zeros and ones), scaled ones, coefficients (some zero); some with a
+ * NaN, an infinity, a tiny or a huge value, or another control word. */
+void sub_00489ba0_orig(CPU *c);
+extern uint64_t g_shrot_lifted;
+static void shrot_tests(void){
+    printf("\n--- 11. Spherical-harmonic rotation (0x489BA0): runtime vs lifted ---\n");
+    const uint32_t OUT = 0x00E60000u, MAT = 0x00E60100u;
+    int n = 0, bad = 0, slow = 0, ordinary_slow = 0;
+    for (int i = 0; i < 8000; i++){
+        int special = 0;
+        for (int k = 0; k < 40; k++) MRF32(OUT + 4u * k) = (i % 4 == 0 && k % 3 == 0) ? 0.0f : frnd(-2, 2);
+        float ax = frnd(-3.2f, 3.2f), ay = frnd(-3.2f, 3.2f), s = (i % 5 == 1) ? frnd(0.5f, 2.0f) : 1.0f;
+        float ca = cosf(ax), sa = sinf(ax), cb = cosf(ay), sb = sinf(ay);
+        float m[12] = { cb * s, sa * sb * s, -ca * sb * s, 0,   0, ca * s, sa * s, 0,   sb * s, -sa * cb * s, ca * cb * s, 0 };
+        if (i % 7 == 2){ float id[12] = { 1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0 }; memcpy(m, id, sizeof m); }
+        for (int k = 0; k < 12; k++) MRF32(MAT + 4u * k) = m[k];
+        if (i % 13 == 5){
+            special = 1;
+            if (rnd() & 1) MRF32(MAT + 4u * (rnd() % 11u)) = fspecial(); else MRF32(OUT + 4u * (rnd() % 40u)) = fspecial();
+        }
+        static uint8_t in[0x200], outL[0x200], stk[64], stkL[64];
+        memcpy(in, g_mem + OUT, sizeof in);
+        reset(); cpu.fcw = (i % 9 == 4) ? 0x027f : 0x007f; if (cpu.fcw != 0x007f) special = 1;
+        cpu.top = (int32_t)(i & 7);
+        for (int k = 0; k < 8; k++) cpu.st[k] = 1000.0 + k;
+        cpu.eax = 0xdeadbeefu; cpu.ecx = OUT; cpu.edx = 0x55aa55aau; cpu.ebx = 0x11111111u;
+        cpu.ebp = 0x22222222u; cpu.esi = 0x33333333u; cpu.edi = 0x44444444u; cpu.fsw = 0x0100u;
+        { uint32_t *fl = &cpu.cf; for (int k = 0; k < 7; k++) fl[k] = FTOL_SENT; }
+        PUSH32(MAT); PUSH32(0xC0DE0000u + (uint32_t)i);
+        uint32_t e = cpu.esp;
+        memcpy(stk, g_mem + e, sizeof stk);
+        CPU a = cpu; CPU *sp = &a;
+        sub_00489ba0_orig(sp);
+        memcpy(outL, g_mem + OUT, sizeof outL); memcpy(stkL, g_mem + e, sizeof stkL);
+        memcpy(g_mem + OUT, in, sizeof in); memcpy(g_mem + e, stk, sizeof stk);
+        uint64_t slow0 = g_shrot_lifted;
+        sub_00489ba0(&cpu);
+        n++;
+        if (g_shrot_lifted != slow0){ slow++; if (!special) ordinary_slow++; }
+        int same = !memcmp(a.r, cpu.r, sizeof a.r) && a.eip == cpu.eip && a.top == cpu.top
+                   && (a.fsw & (FSW_C0 | FSW_C2 | FSW_C3)) == (cpu.fsw & (FSW_C0 | FSW_C2 | FSW_C3))
+                   && !memcmp(outL, g_mem + OUT, sizeof outL) && !memcmp(stkL, g_mem + e, sizeof stkL);
+#ifndef LIFT_FLAGABI
+        same = same && !memcmp(&a.cf, &cpu.cf, 7 * sizeof(uint32_t));
+#endif
+        if (!same && bad++ < 8){
+            int q = 0; while (q < 40 && MR32(OUT + 4u * q) == *(uint32_t *)(outL + 4 * q)) q++;
+            printf("  differs: #%d cw %04x: first coefficient %d lifted %08x runtime %08x; eax %08x/%08x edx %08x/%08x\n",
+                   i, cpu.fcw, q, q < 40 ? *(uint32_t *)(outL + 4 * q) : 0u, q < 40 ? MR32(OUT + 4u * q) : 0u,
+                   a.eax, cpu.eax, a.edx, cpu.edx);
+        }
+    }
+    printf("  %d calls, %d of them by the lifted body\n", n, slow);
+    char nm[64]; snprintf(nm, sizeof nm, "SH rotation equivalent (%d inputs)", n);
+    CHKI(nm, (uint32_t)bad, 0u);
+    CHKI("SH rotation: ordinary calls by the lifted body", (uint32_t)ordinary_slow, 0u);
+    CHKI("SH rotation: special values by the lifted body", (uint32_t)(slow > 0), 1u);
+}
+
 static void heap_tests(void){
     printf("\n--- 5. Guest heap (TLSF + VA manager) ---\n");
     uint32_t ph = H("GetProcessHeap", 0);
@@ -463,6 +654,9 @@ int main(int argc,char**argv){
     ftol_tests();
     cull_tests();
     mmul_tests();
+    hull_tests();
+    sh_tests();
+    shrot_tests();
 
     printf("\n---------------------------------------------\n  PASSED: %d    FAILED: %d\n",pass,fail);
     dispatch_report();

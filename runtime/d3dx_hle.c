@@ -1,7 +1,7 @@
 /* D3DX9 effect library (statically linked into the game) -- HLE work.
  *
  * Measurement (2026-09-23): in a race frame 48% of the guest thread is
- * inside ID3DXEffect::BeginPass (vtable 0x7b6fe8, slot 66 = sub_0066acd2).
+ * inside ID3DXEffect::BeginPass (vtable 0x7b6fe8, slot 64 = sub_0066acd2).
  * Most of that is not D3D calls but the CPU interpreting the state
  * expressions (preshaders):
  *
@@ -81,9 +81,18 @@ static void dx_window(void){
     g_dx_f0 = f;
 }
 
+/* Stage 9: a BeginPass that switches the effect's pass walks the pass
+ * records (0x65AE25) before it applies the new one, and that may change
+ * what a later application of either evaluates: it moves the epoch. */
+extern uint32_t g_fx_epoch;
+static inline void beginpass_note(CPU *c){
+    uint32_t th = MR32(c->esp+4u);
+    if (MR16(th+0x44u) != (MR32(c->esp+8u) & 0xffffu)) g_fx_epoch++;
+}
 #define DX_WRAP(idx, hex)                                                   \
     void sub_##hex##_orig(CPU *c);                                          \
     void sub_##hex(CPU *c){                                                 \
+        if (idx == DX_BEGINPASS) beginpass_note(c);                         \
         if (!dx_on()){ sub_##hex##_orig(c); return; }                       \
         if (idx == DX_BEGINPASS) dx_window();                               \
         int inp = (idx == DX_BEGINPASS || idx == DX_COMMIT);                \
@@ -754,8 +763,18 @@ static inline int n4_red_fast(int kind, uint32_t a0, uint32_t a1, uint32_t a2){
     }
     return -1;
 }
+/* Stage 9 (n5_pass): the pass application being recorded */
+#define PR_CALLS 48
+typedef struct { uint8_t kind; uint32_t a0, a1, a2; } PrCall;
+typedef struct { uint32_t th, a, el, mode, epoch, n; uint8_t ok, bad; PrCall c[PR_CALLS]; } PassRep;
+static PassRep *g_pr_cur;
 static inline uint32_t n4_dev(CPU *c, uint32_t dev, int kind, uint32_t off, uint32_t ret,
                               uint32_t a0, uint32_t a1, uint32_t a2){
+    if (g_pr_cur){
+        PassRep *p = g_pr_cur;
+        if (p->n < PR_CALLS){ PrCall *k = &p->c[p->n++]; k->kind = (uint8_t)kind; k->a0 = a0; k->a1 = a1; k->a2 = a2; }
+        else p->bad = 1;
+    }
     if (n4_dry){
         if (n4_dryn < NDRY){ n4_dryk[n4_dryn][0] = (uint32_t)kind; n4_dryk[n4_dryn][1] = a0;
                              n4_dryk[n4_dryn][2] = a1; n4_dryk[n4_dryn][3] = a2; }
@@ -1160,7 +1179,7 @@ void sub_0066d7d9_orig(CPU *c);
 void sub_0066d7d9(CPU *c){
     uint64_t t0 = dx_on() ? mach_absolute_time() : 0;
     uint32_t sp = c->esp, th = MR32(sp+4u), h = MR32(sp+8u), tex = MR32(sp+12u);
-    if (!n8_init() || (int32_t)h >= 0 || MR32(th+0x3cu) == 3u){ sub_0066d7d9_orig(c); goto out; }
+    if (!n8_init() || (int32_t)h >= 0 || MR32(th+0x3cu) == 3u){ g_fx_epoch++; sub_0066d7d9_orig(c); goto out; }
     {
     n8_set++;
     uint32_t ret = MR32(sp), rec = ~h, d = MR32(rec+4u), r;
@@ -1170,6 +1189,7 @@ void sub_0066d7d9(CPU *c){
     uint32_t o40 = MR32(MR32(MR32(th+0xb0u) + MR32(rec+0x14u)*4u) + 0x40u), ix = MR32(MR32(rec));
     uint32_t e = o40 ? MR32(MR32(o40+8u) + ix*4u) : ix;
     if (tex == MR32(MR32(th+0x18u) + e*24u + 4u)){ r = 0; goto done; }
+    g_fx_epoch++;                                        /* stage 9: the texture changes */
     PUSH32(c->ebp); PUSH32(c->ebx); PUSH32(c->esi); PUSH32(c->edi);
     PUSH32(c->ebp); PUSH32(c->ebx); PUSH32(c->esi); PUSH32(c->edi);   /* 65ccc8's prologue */
     n8_store(c, th, tex, ix, o40);
@@ -1188,7 +1208,7 @@ out:
  * return value.  Does not touch the stack (except push/pop for 664a1f and
  * the device calls). */
 void sub_006691a1(CPU *c); void sub_00668dfd(CPU*);
-static uint64_t n4_obj;
+static uint64_t n4_obj, n4_tex;
 static inline int n4_core(CPU *c, uint32_t th, uint32_t a, uint32_t b, uint32_t eld, uint32_t *res){
     uint32_t P = a*0x64u + MR32(th+0x2cu), R = b*0x64u + MR32(P+4u);
     uint32_t code = MR32(R+0x58u), type = code >> 24, el = eld & 0xffffu;
@@ -1222,6 +1242,20 @@ static inline int n4_core(CPU *c, uint32_t th, uint32_t a, uint32_t b, uint32_t 
         }
         c->ecx = th; PUSH32((eld & 0xffff0000u) | el); PUSH32(rec); PUSH32(0x6693b1u); sub_006691a1(c);
         *res = c->eax; return 1;
+    }
+    if (type == 9u){
+        /* a texture: SetTexture(el, the effect's object table entry for the
+         * parameter), as 669286's 0x669B51.  Mode 2 asks the state manager
+         * first, and a dirty one in mode 4 with no element loops over the
+         * shaders that use it (0x66941A): those stay with the original. */
+        uint32_t mode = MR32(th+0x3cu);
+        if (mode == 2u || (dirty && mode == 4u && el == 0xffffu)) return 0;
+        n4_tex++;
+        if (dirty) MR32(R) = MR32(R+4u);
+        uint32_t o = MR32(MR32(th+0xb0u) + MR32(R+0x1cu)*4u), o40 = MR32(o+0x40u), ix = MR32(MR32(R+8u));
+        if (o40) ix = MR32(MR32(o40+8u) + ix*4u);
+        *res = n4_dev(c, MR32(th+8u), 4, 0x104u, 0x669b8du, el, MR32(MR32(th+0x18u) + ix*24u + 4u), 0);
+        return 1;
     }
     if (type - 1u > 2u) return 0;
     if (dirty && type == 3u && MR32(th+0x3cu) == 4u && el == 0xffffu) return 0;
@@ -1313,12 +1347,15 @@ static void nat_verify(CPU *c, int (*nat)(CPU*), void (*orig)(CPU*), uint32_t th
     }
 }
 static VStat n4vs;
+static uint64_t n4v_type[2], n4v_type_bad[2];      /* [1]: texture states (type 9) */
 static void n4_verify(CPU *c){
     uint32_t th = c->ecx, sp = c->esp;
     uint32_t a = MR16(sp+4u), b = MR16(sp+8u);
     uint32_t P = a*0x64u + MR32(th+0x2cu), R = b*0x64u + MR32(P+4u);
-    uint32_t ext[2] = { R, P };
+    uint32_t ext[2] = { R, P }, ty = MR8(R+0x5bu), bad = (uint32_t)n4vs.bad;
     nat_verify(c, n4_apply, sub_00669286_orig, th, ext, 2, &n4vs, "D3DXN4VERIFY", MR32(R+0x58u));
+    n4v_type[ty == 9u]++;
+    if (n4vs.bad != bad) n4v_type_bad[ty == 9u]++;
 }
 
 void sub_00669286_orig(CPU *c);
@@ -1332,7 +1369,7 @@ void sub_00669286(CPU *c){
         static uint64_t vk;
         if (g_n4_v && (++vk % (uint64_t)g_n4_v) == 0){
             uint32_t ty = MR32(MR16(c->esp+8u)*0x64u + MR32(MR16(c->esp+4u)*0x64u + MR32(c->ecx+0x2cu) + 4u) + 0x58u) >> 24;
-            if (ty - 1u <= 2u){ n4_verify(c); goto n4out; }
+            if (ty - 1u <= 2u || ty == 9u){ n4_verify(c); goto n4out; }
         }
         if (n4_apply(c)){
 n4out:
@@ -1497,6 +1534,77 @@ static inline uint32_t n5_state(CPU *c, uint32_t th, uint32_t aw, uint32_t b, ui
     sub_00669286(c);
     return c->eax;
 }
+/* ---- Stage 9: a pass applied again with nothing changed ----
+ * The game draws every mesh as Set*, CommitChanges, BeginPass, draw,
+ * EndPass.  Among 32 friends' cars (FXTRACE of a frame) 5,196 of the 5,250
+ * BeginPass calls re-applied the pass applied before and 127,541 of the
+ * 128,532 state calls in passes were no-ops; the light streaks alone are
+ * ~1,500 quads, mostly with no effect call between their passes but
+ * CommitChanges.  A pass's application is a function of D3DX's memory and
+ * the device state, and D3DX's memory changes only through calls to an
+ * effect.  g_fx_epoch moves with every effect method the game calls
+ * (wrappers in the dispatch table, below) but CommitChanges (it applies the
+ * states a Set* queued, and that Set* moved it), EndPass (bookkeeping only),
+ * BeginPass unless it switches the effect's pass (0x65AE25 walks the pass
+ * records then), and SetTexture unless it changes a slot.  So when the epoch
+ * has not moved since a pass's last application, applying it again would
+ * evaluate every state to what it holds and make the device calls it made
+ * then (recorded, no-ops included); when each of those is a no-op on the
+ * device now, it changes nothing but D3DX's bookkeeping (dirty flags, the
+ * saved control word) and is skipped.  Recorded only when every device call
+ * went through n4_dev (texture states too, n4_core) and no pass was applied
+ * inside it.  In a run among 32 friends' cars: 3.0 of 9.8 million passes.
+ *   D3DXNATIVE9=0     : off
+ *   D3DXN9VERIFY=<n>  : on 1/n of the skips the pass is applied with every
+ *                       call recorded: all must be no-ops, and the effect
+ *                       object and the pass's records unchanged. */
+uint32_t g_fx_epoch = 1;
+/* The lifted code calls effect methods through the dispatch table (cpu.h
+ * DISPATCH_CALL): their entries there are replaced by a wrapper per vtable
+ * slot (0x7B6FE0, 84 of them) that moves the epoch and calls what the table
+ * held, but for BeginPass, CommitChanges and EndPass.  (With EFXSTAT those
+ * entries are empty and dispatch_indirect, dispatch.c, moves it.) */
+#define EFXW_N 84
+static guest_fn_t g_efxw_next[EFXW_N];
+#define EFXW(k) static void efxw_##k(CPU *c){ g_fx_epoch++; g_efxw_next[k](c); }
+#define EFXW10(t) EFXW(t##0) EFXW(t##1) EFXW(t##2) EFXW(t##3) EFXW(t##4) EFXW(t##5) EFXW(t##6) EFXW(t##7) EFXW(t##8) EFXW(t##9)
+EFXW(0) EFXW(1) EFXW(2) EFXW(3) EFXW(4) EFXW(5) EFXW(6) EFXW(7) EFXW(8) EFXW(9)
+EFXW10(1) EFXW10(2) EFXW10(3) EFXW10(4) EFXW10(5) EFXW10(6) EFXW10(7)
+EFXW(80) EFXW(81) EFXW(82) EFXW(83)
+#define EFXR10(t) efxw_##t##0, efxw_##t##1, efxw_##t##2, efxw_##t##3, efxw_##t##4, efxw_##t##5, efxw_##t##6, efxw_##t##7, efxw_##t##8, efxw_##t##9,
+static void (*const g_efxw[EFXW_N])(CPU *) = {
+    efxw_0, efxw_1, efxw_2, efxw_3, efxw_4, efxw_5, efxw_6, efxw_7, efxw_8, efxw_9,
+    EFXR10(1) EFXR10(2) EFXR10(3) EFXR10(4) EFXR10(5) EFXR10(6) EFXR10(7)
+    efxw_80, efxw_81, efxw_82, efxw_83 };
+#undef EFXW
+#undef EFXW10
+#undef EFXR10
+void d3dx_hle_install(void){
+    for (uint32_t k = 0; k < EFXW_N; k++){
+        uint32_t a = MR32(0x007b6fe0u + 4u * k), o = a - DISPATCH_TEXT_BASE;
+        if (a == 0x0066acd2u || a == 0x0066ac17u || a == 0x0065adcbu) continue;
+        if (a == 0x0066d7d9u) continue;                   /* SetTexture moves it itself when it changes a slot */
+        if (o >= DISPATCH_TEXT_SIZE || !g_dtab[o]) continue;
+        int mine = 0;
+        for (uint32_t q = 0; q < EFXW_N; q++) if (g_dtab[o] == g_efxw[q]) mine = 1;
+        if (mine) continue;                               /* a method in two slots */
+        g_efxw_next[k] = g_dtab[o]; g_dtab[o] = g_efxw[k];
+    }
+}
+#define PR_CAP 128u
+static PassRep g_pr[PR_CAP];
+static int g_n9_on = -1, g_n9_v = 0;
+static uint64_t n9_pass, n9_skip, n9_rec, n9_bad;
+static VStat n9vs;
+extern uint64_t g_com_calls;
+static inline int pr_redundant(const PassRep *p){
+    for (uint32_t i = 0; i < p->n; i++){
+        const PrCall *k = &p->c[i];
+        int f = n4_red_fast(k->kind, k->a0, k->a1, k->a2);
+        if (!f || (f < 0 && !dxn_skip(k->kind, k->a0, k->a1, k->a2))) return 0;
+    }
+    return 1;
+}
 static void n5_pass(CPU *c){
     uint32_t th = c->ecx, sp = c->esp, ret = MR32(sp), aw = MR32(sp+4u), el = MR32(sp+8u);
     uint32_t a = aw & 0xffffu, P = a*0x64u + MR32(th+0x2cu), r = 0;
@@ -1516,6 +1624,34 @@ static void n5_pass(CPU *c){
         else { PUSH32(0x669212u); sub_00666df7(c); }
         r = c->eax; if ((int32_t)r < 0) goto done;
     }
+    if (g_n9_on < 0){
+        const char *e = getenv("D3DXNATIVE9"); g_n9_on = e ? atoi(e) != 0 : 1;
+        const char *v = getenv("D3DXN9VERIFY"); g_n9_v = v ? atoi(v) : 0;
+    }
+    PassRep *pr = NULL;
+    DxRec vr; DxCall vc[64]; uint8_t vd[2048]; int vfy = 0;
+    static uint8_t w0[0x200u + 0x64u * 64u]; uint32_t wP = 0, wn = 0;
+    uint64_t cc = 0, ii = 0;
+    if (g_pr_cur) g_pr_cur->bad = 1;                    /* a pass inside a recorded one */
+    else if (g_n9_on && !(MR8(P+8u) & 8u) && !n4_dry && !g_n4_v && !(g_fxtr && fxtr_now())){
+        uint32_t mode = MR32(th+0x3cu);
+        pr = &g_pr[((th * 0x9E3779B1u) ^ (a * 0x85EBCA77u) ^ el) & (PR_CAP-1u)];
+        n9_pass++;
+        if (pr->ok && pr->th == th && pr->a == a && pr->el == el && pr->mode == mode
+            && pr->epoch == g_fx_epoch && pr_redundant(pr)){
+            static uint64_t vk;
+            if (!g_n9_v || (++vk % (uint64_t)g_n9_v) != 0){ n9_skip++; r = 0; goto done; }
+            vfy = 1;                                     /* apply it, recorded, and compare */
+            wP = MR32(P+4u); wn = MR16(P+0x36u); if (wn > 64u) wn = 64u;
+            memcpy(w0, g_mem + th, 0x200u);
+            if (wn && mem_is_committed(wP + wn*0x64u - 1u)) memcpy(w0 + 0x200u, g_mem + wP, wn*0x64u); else wn = 0;
+            DXREC_INIT(&vr, vc, vd);
+            dxrec_begin(&vr, DXREC_PASS);
+        }
+        pr->th = th; pr->a = a; pr->el = el; pr->mode = mode; pr->n = 0; pr->ok = 0; pr->bad = 0;
+        cc = g_com_calls; ii = n4_issued;
+        g_pr_cur = pr;
+    }
     if (MR32(th+0x3cu) == 4u){
         if (MR8(P+8u) & 1u){
             c->ecx = th; PUSH32(P); PUSH32(0x66922au); sub_00668dfd(c);
@@ -1533,6 +1669,34 @@ static void n5_pass(CPU *c){
     }
     r = 0;
 done:
+    if (pr && g_pr_cur == pr){
+        g_pr_cur = NULL;
+        pr->ok = r == 0 && !pr->bad && g_com_calls - cc == n4_issued - ii;
+        pr->epoch = g_fx_epoch;
+        n9_rec++; if (!pr->ok) n9_bad++;
+        if (vfy){
+            dxrec_end();
+            if (!vr.ok) n9vs.norec++;
+            else {
+                n9vs.runs++;
+                memcpy(w0 + 0x114u, g_mem + th + 0x114u, 8);    /* the control word saved and restored by BeginPass */
+                int dm = memcmp(w0, g_mem + th, 0x200u) || (wn && memcmp(w0 + 0x200u, g_mem + wP, wn*0x64u));
+                if (dm || !vr.allred || r){
+                    if (n9vs.bad++ < 12){
+                        fprintf(stderr, "[D3DXN9VERIFY] effect %08x pass %u: memory=%d, %u calls, not all no-ops=%d, result %08x\n",
+                                th, a, dm, vr.ncall, !vr.allred, r);
+                        for (int q = 0; q < vr.ncall; q++) if (!vr.call[q].red)
+                            fprintf(stderr, "      call made: %s(%x, %x, %x)\n", dxrec_mid_name(vr.call[q].mid),
+                                    vr.call[q].a[0], vr.call[q].a[1], vr.call[q].a[2]);
+                    }
+                    if (dm && n9vs.bad <= 4){
+                        verify_diff(th, 0x200u, w0, th, P, P);
+                        if (wn) verify_diff(wP, wn*0x64u, w0 + 0x200u, th, P, P);
+                    }
+                }
+            }
+        }
+    }
     c->eax = r;
     c->edi = sedi; c->esi = sesi; c->ebx = sebx; c->ebp = sebp;
     c->esp = sp + 12u; c->eip = ret;
@@ -1716,23 +1880,25 @@ __attribute__((constructor)) static void efx_init(void){
 }
 /* FXTRACE: effect method marker (in the same stream as com.c's device call trace) */
 static void efx_trace(CPU *c, int k){
-    static const char *nm[EFX_NM] = { [26]="SetInt", [28]="SetIntArray", [30]="SetFloat",
-        [34]="SetVector", [36]="SetVectorArray", [38]="SetMatrix", [40]="SetMatrixArray",
-        [52]="SetTexture", [60]="SetTechnique", [65]="Begin", [66]="BeginPass",
-        [67]="CommitChanges", [68]="EndPass", [69]="End" };
+    static const char *nm[EFX_NM] = { [24]="SetInt", [26]="SetIntArray", [28]="SetFloat",
+        [30]="SetFloatArray", [32]="SetVector", [34]="SetVectorArray", [36]="SetMatrix",
+        [38]="SetMatrixArray", [50]="SetTexture", [58]="SetTechnique", [63]="Begin",
+        [64]="BeginPass", [65]="CommitChanges", [66]="EndPass", [67]="End" };
     uint32_t sp = c->esp, th = MR32(sp+4u), a1 = MR32(sp+8u), a2 = MR32(sp+12u), a3 = MR32(sp+16u);
     fprintf(stderr, "E %s[%d] %08x %08x", nm[k] ? nm[k] : "?", k, th, a1);
     uint32_t nf = 0, p = a2;
     switch (k){
-    case 26: case 52: case 60: case 65: fprintf(stderr, " %x", a2); break;
-    case 30: { float f; memcpy(&f, &a2, 4); fprintf(stderr, " %g", f); } break;
-    case 28: fprintf(stderr, " n=%u:", a3); for (uint32_t i = 0; i < a3 && i < 64; i++) fprintf(stderr, " %d", (int)MR32(a2+4u*i)); break;
-    case 34: nf = 4; break;
-    case 36: nf = 4u*a3; fprintf(stderr, " n=%u", a3); break;
-    case 38: nf = 16; break;
-    case 40: nf = 16u*a3; fprintf(stderr, " n=%u", a3); break;
+    case 24: case 50: case 58: case 63: fprintf(stderr, " %x", a2); break;
+    case 28: { float f; memcpy(&f, &a2, 4); fprintf(stderr, " %g", f); } break;
+    case 26: fprintf(stderr, " n=%u:", a3);
+        for (uint32_t i = 0; i < a3 && i < 64 && mem_is_committed(a2+4u*i+3u); i++) fprintf(stderr, " %d", (int)MR32(a2+4u*i)); break;
+    case 30: nf = a3; fprintf(stderr, " n=%u", a3); break;
+    case 32: nf = 4; break;
+    case 34: nf = 4u*a3; fprintf(stderr, " n=%u", a3); break;
+    case 36: nf = 16; break;
+    case 38: nf = 16u*a3; fprintf(stderr, " n=%u", a3); break;
     }
-    for (uint32_t i = 0; i < nf && i < 256; i++){
+    for (uint32_t i = 0; i < nf && i < 256 && mem_is_committed(p+4u*i) && mem_is_committed(p+4u*i+3u); i++){
         float f; uint32_t u = MR32(p+4u*i); memcpy(&f, &u, 4);
         fprintf(stderr, "%s%g", (i&3) ? "," : " ", f);
     }
@@ -1763,13 +1929,13 @@ void efx_stat_note(CPU *c, uint32_t addr){
         }
         efx_hstr[k] += str;
     }
-    if (k == 65){                                    /* Begin(this, pPasses, flags) */
+    if (k == 63){                                    /* Begin(this, pPasses, flags) */
         uint32_t f = MR32(c->esp+12u); int j = 0;
         for (; j < efx_nbf; j++) if (efx_bflag[j] == f) break;
         if (j == efx_nbf && efx_nbf < 8) efx_bflag[efx_nbf++] = f;
         if (j < 8) efx_bflag_n[j]++;
     }
-    if (k == 66){                                    /* BeginPass(this, pass) */
+    if (k == 64){                                    /* BeginPass(this, pass) */
         uint64_t p = ((uint64_t)th << 32) | MR32(c->esp+8u);
         int j = 0; for (; j < efx_npair; j++) if (efx_pair[j] == p) break;
         if (j == efx_npair && efx_npair < 4096) efx_pair[efx_npair++] = p;
@@ -1841,12 +2007,17 @@ void d3dx_hle_report(void){
                         "  calls %llu | dirty (664a1f) %llu | device calls made %llu, skipped (no effect) %llu\n",
             (unsigned long long)n4_calls, (unsigned long long)n4_dirty,
             (unsigned long long)n4_issued, (unsigned long long)n4_skipped);
-        fprintf(stderr, "  native pass loop (6691a1, stage 4b): %llu\n", (unsigned long long)n5_calls);
+        fprintf(stderr, "  native pass loop (6691a1, stage 4b): %llu | texture states (type 9): %llu\n", (unsigned long long)n5_calls, (unsigned long long)n4_tex);
+        if (n9_pass) fprintf(stderr, "  repeated passes (stage 9): %llu passes, %llu skipped, %llu applied and recorded (%llu not replayable)\n",
+            (unsigned long long)n9_pass, (unsigned long long)n9_skip, (unsigned long long)n9_rec, (unsigned long long)n9_bad);
+        if (n9vs.runs || n9vs.norec) fprintf(stderr, "  VERIFY-9: %llu skips applied in full, DIFFERENT %llu (not compared %llu)\n",
+            (unsigned long long)n9vs.runs, (unsigned long long)n9vs.bad, (unsigned long long)n9vs.norec);
         fprintf(stderr, "  expression memo: hits %llu, misses %llu, not memoizable %llu (not an expression %llu, no inputs %llu, inputs>2 %llu, >96 bytes %llu)\n",
             (unsigned long long)n4m_hit, (unsigned long long)n4m_miss, (unsigned long long)n4m_big,
             (unsigned long long)n4m_why[0], (unsigned long long)n4m_why[1], (unsigned long long)n4m_why[2], (unsigned long long)n4m_why[3]);
-        if (n4vs.runs) fprintf(stderr, "  VERIFY-4: %llu runs, DIFFERENT %llu (record invalid, not compared: %llu)\n",
-            (unsigned long long)n4vs.runs, (unsigned long long)n4vs.bad, (unsigned long long)n4vs.norec);
+        if (n4vs.runs) fprintf(stderr, "  VERIFY-4: %llu runs, DIFFERENT %llu (record invalid, not compared: %llu); texture states %llu, DIFFERENT %llu\n",
+            (unsigned long long)n4vs.runs, (unsigned long long)n4vs.bad, (unsigned long long)n4vs.norec,
+            (unsigned long long)n4v_type[1], (unsigned long long)n4v_type_bad[1]);
         if (n8_set || n8_tex) fprintf(stderr, "  native SetTexture: %llu | texture slot (65ccc8): %llu | skipped texture AddRef/Release: %llu\n",
             (unsigned long long)n8_set, (unsigned long long)n8_tex, (unsigned long long)n8_refskip);
         if (n7vs.runs || n7_calls) fprintf(stderr, "  native shader applier (668dfd): %llu | VERIFY-7: %llu runs, DIFFERENT %llu (not compared %llu) | object state (types 14/15): %llu\n",

@@ -169,6 +169,10 @@ void dispatch_indirect(CPU *c, uint32_t addr){
     /* EFXSTAT: inventory of the D3DX effect vtable calls (d3dx_hle.c) */
     { extern int g_efx_stat; extern void efx_stat_note(CPU *c, uint32_t addr);
       if (g_efx_stat && addr - 0x650000u < 0x40000u) efx_stat_note(c, addr); }
+    /* with EFXSTAT the effect methods are not in the table: their calls into
+     * D3DX may change an effect (d3dx_hle.c, stage 9's epoch) */
+    { extern uint32_t g_fx_epoch;
+      if (addr - 0x650000u < 0x40000u && addr != 0x0066acd2u && addr != 0x0066ac17u && addr != 0x0065adcbu) g_fx_epoch++; }
     uint32_t off = addr - TEXT_BASE;
     if (off < TEXT_SIZE){
         guest_fn f = g_dtab[off];
