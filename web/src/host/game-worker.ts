@@ -187,6 +187,9 @@ function threadSpawn(arg: number): number {
 // recursion probe is not stable in Chrome (the same context fit 4536 to 7352
 // frames of an interpreted probe function), and frame sizes are not exposed.
 const V8Error = Error as ErrorConstructor & { stackTraceLimit: number };   // V8's knob
+// A trap's stack (the 'trap' message below, "TRAP in thread" in the log) keeps this many frames: V8's default of
+// 10 cut the lifted guest calls off before the caller that mattered.
+V8Error.stackTraceLimit = 100;
 function stackFrames(): number {
   const lim = V8Error.stackTraceLimit;
   V8Error.stackTraceLimit = 1e6;

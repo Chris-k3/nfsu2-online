@@ -301,10 +301,11 @@ async function startGame() {
     }
   }
   // the log is for sharing when asking for help: it names neither the server (a private server's address) nor
-  // more of this browser than its major version and system (the audit's PRIV-5)
-  log.add(`=== NFSU2 web, ${new Date().toISOString()}, game ${loaded!.info.rev}, server ${serverKind()} ===`);
-  log.add(`[app] save folder: OPFS ${SAVE} (/save); canvas ${size.w}x${size.h} device pixels, display ${displayHz} Hz; ${browserBrief()}`);
-  for (const n of r.notes) log.add(`[app] ${n}`);
+  // more of this browser than its major version and system (the audit's PRIV-5).  These session lines stay when
+  // a long game fills the log (logs.ts keep).
+  log.keep(`=== NFSU2 web, ${new Date().toISOString()}, game ${loaded!.info.rev}, server ${serverKind()} ===`);
+  log.keep(`[app] save folder: OPFS ${SAVE} (/save); canvas ${size.w}x${size.h} device pixels, display ${displayHz} Hz; ${browserBrief()}`);
+  for (const n of r.notes) log.keep(`[app] ${n}`);
   const reg = r.env.NFSU2_REGFILE.replace(/^\/save\//, '');
   if (q.get('reg')) {
     await writeFile(SAVE, reg, await (await fetch(q.get('reg')!, { cache: 'no-store' })).text());

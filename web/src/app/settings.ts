@@ -358,6 +358,10 @@ export const APP_DEFAULTS: Readonly<Record<string, string>> = {
   // the WebGPU renderer records frames for the page (runtime/web/gpu_web.c);
   // without it the game draws nothing (the null renderer of the test pages)
   NFSU2_RENDERER: 'webgpu',
+  // for the log players send after a crash: a line per front-end screen change, and every 3600 frames (a minute
+  // at 60 fps) a [status] line with the guest heap, address space and frame times (runtime/autotest.c), but not
+  // the sound's own status every 5 s that NFSU2_STATUS_EVERY also turns on (runtime/web/audio_web.c)
+  NFSU2_FNG_LOG: '1', NFSU2_STATUS_EVERY: '3600', NFSU2_AUDIO_STATUS: '0',
 };
 
 // The mounts are fixed in the browser (web/src/host/io-worker.ts), so

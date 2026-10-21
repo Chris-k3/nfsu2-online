@@ -499,6 +499,7 @@ typedef struct {
     uint32_t period_us;
     int      env; uint32_t att_lvl, att_us, fade_lvl, fade_us;   /* DIENVELOPE */
     int      playing; uint32_t iters; double t0;
+    int      unloaded;                  /* Unload gave its place on the device back (see CreateEffect) */
 } Eff;
 #define NEFF 64
 static Eff g_eff[NEFF];
@@ -702,16 +703,27 @@ static int64_t ff_dev_call(CPU *c, const char *nm, const uint32_t *a){
         if (!dipad_ff_on()) return DIERR_UNSUPPORTED;
         int k = guid_kind(g);
         if (!k || !pp) return DIERR_INVALIDPARAM;
+        /* The game changes a rumble by Unload (0x5bfff0) and a new effect, and
+         * never releases the old one: on Windows Unload frees the effect's
+         * place in the device, so an unloaded effect's slot is taken once
+         * none is free (64 changes in, every CreateEffect failed, and the game
+         * logged two errors every frame from then on). */
         int slot = -1;
         for (int i = 0; i < NEFF; i++) if (!g_eff[i].obj){ slot = i; break; }
-        if (slot < 0) return 0x80040208u;               /* DIERR_DEVICEFULL */
+        for (int i = 0; slot < 0 && i < NEFF; i++) if (g_eff[i].unloaded) slot = i;
+        if (slot < 0){
+            static int said;
+            if (!said++) fprintf(stderr, "[ff] CreateEffect: all %d effects are in use (DIERR_DEVICEFULL)\n", NEFF);
+            return 0x80040208u;                         /* DIERR_DEVICEFULL */
+        }
         uint32_t obj = com_new_dieffect();
         if (!obj) return 0x8007000Eu;                   /* E_OUTOFMEMORY */
         Eff *e = &g_eff[slot];
+        int reused = e->obj != 0;               /* the old object stays, with no slot (eff_of: 0) */
         memset(e, 0, sizeof *e);
         e->obj = obj; e->kind = k; e->gain = 10000u; e->dur_us = FF_INFINITE;
         MR32(obj + 4u) = (uint32_t)slot + 1u;
-        if (ff_log()) fprintf(stderr, "[ff] CreateEffect %s -> #%d 0x%08x\n", ff_name(k), slot, obj);
+        if (ff_log()) fprintf(stderr, "[ff] CreateEffect %s -> #%d 0x%08x%s\n", ff_name(k), slot, obj, reused ? " (an unloaded effect's place)" : "");
         if (peff) eff_set(e, peff, 0x3FFu);
         MR32(pp) = obj;
         return DI_OK;
@@ -775,11 +787,14 @@ uint32_t dipad_effect_call(CPU *c, uint32_t self, const char *nm, int nargs, con
     (void)c; (void)nargs;
     Eff *e = eff_of(self);
     if (!e) return DIERR_INVALIDPARAM;
-    if (!strcmp(nm, "SetParameters")) return eff_set(e, a[1], a[2]);
-    if (!strcmp(nm, "Start")){ eff_start(e, a[1], a[2]); return DI_OK; }
+    /* SetParameters, Start and Download put an unloaded effect back on the device */
+    if (!strcmp(nm, "SetParameters")){ e->unloaded = 0; return eff_set(e, a[1], a[2]); }
+    if (!strcmp(nm, "Start")){ e->unloaded = 0; eff_start(e, a[1], a[2]); return DI_OK; }
     if (!strcmp(nm, "Stop") || !strcmp(nm, "Unload")){
         if (ff_log() && e->playing) fprintf(stderr, "[ff] stop %s #%d\n", ff_name(e->kind), (int)(e - g_eff));
-        e->playing = 0; return DI_OK;
+        e->playing = 0;
+        if (nm[0] == 'U') e->unloaded = 1;
+        return DI_OK;
     }
     if (!strcmp(nm, "GetEffectStatus")){
         uint32_t p = a[1];
@@ -806,7 +821,8 @@ uint32_t dipad_effect_call(CPU *c, uint32_t self, const char *nm, int nargs, con
         }
         return DI_OK;
     }
-    if (!strcmp(nm, "Initialize") || !strcmp(nm, "Download")) return DI_OK;
+    if (!strcmp(nm, "Download")){ e->unloaded = 0; return DI_OK; }
+    if (!strcmp(nm, "Initialize")) return DI_OK;
     return DIERR_UNSUPPORTED;                           /* Escape */
 }
 void dipad_effect_free(uint32_t obj){

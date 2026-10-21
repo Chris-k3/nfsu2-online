@@ -471,9 +471,12 @@ void autotest_note_screen(const char *nm){
     if (!nm) return;
     if (g_screen_frame != g_frame) g_nbatch = 0;
     if (g_nbatch < 8) snprintf(g_batch[g_nbatch++], 64, "%s", nm);
+    /* a screen is often noted twice in a row (its Init Package and the switch to it): logged once (the
+     * browser app logs screens for crash reports, settings.ts APP_DEFAULTS) */
+    int again = !strncmp(g_screen, nm, sizeof g_screen - 1);
     snprintf(g_screen, sizeof g_screen, "%s", nm);
     g_screen_frame = g_frame;
-    if (g_fng_log) fprintf(stderr, "[fng] f=%ld screen %s\n", g_frame, g_screen);
+    if (g_fng_log && !again) fprintf(stderr, "[fng] f=%ld screen %s\n", g_frame, g_screen);
 }
 /* the current front-end screen, or 0 (also for runtime/dinput_pad.c and
  * runtime/discord.c) */
