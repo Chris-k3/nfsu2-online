@@ -12,6 +12,11 @@ pub(crate) const MSG_HELLO: u8 = 1;
 pub(crate) const MSG_PEERS: u8 = 2;
 pub(crate) const MSG_SNAP: u8 = 3;
 pub(crate) const MSG_BYE: u8 = 8;
+pub(crate) const MSG_MAPREQ: u8 = 10;
+pub(crate) const MSG_MAP: u8 = 11;
+/// a MAP entry: x, y (i16 LE, m), heading (u8, 256 a turn); at most MAP_PER of them a datagram (roam_core.h)
+pub(crate) const MAP_ENTRY: usize = 5;
+pub(crate) const MAP_PER: usize = 230;
 pub(crate) const HDR: usize = 16;
 pub(crate) const CRC: usize = 4;
 
@@ -19,8 +24,26 @@ pub(crate) const CRC: usize = 4;
 /// compared, not copied).
 #[derive(Clone, Copy)]
 pub(crate) enum Msg<'a> {
-    Hello { sender: u32, core: u16, status: u8, room: u32, name: &'a [u8] },
-    Snap { sender: u32, status: u8, p: [f64; 3] },
+    Hello {
+        sender: u32,
+        core: u16,
+        status: u8,
+        room: u32,
+        name: &'a [u8],
+    },
+    /// v: the newest state's velocity, 0 where roam_core's decoder would not take it (not finite, 200 m/s or more);
+    /// heading: where its car points, 256 a turn (the game's atan2 of the forward row, roam_game.c)
+    Snap {
+        sender: u32,
+        status: u8,
+        p: [f64; 3],
+        v: [f64; 3],
+        heading: u8,
+    },
+    /// the world map's question (roam_core.h RC_MSG_MAPREQ): req is echoed in the answer
+    MapReq {
+        req: u16,
+    },
     Bye,
     Other,
 }
@@ -35,6 +58,23 @@ fn u32_le(d: &[u8], o: usize) -> u32 {
 
 fn f32_le(d: &[u8], o: usize) -> f64 {
     f32::from_le_bytes([d[o], d[o + 1], d[o + 2], d[o + 3]]) as f64
+}
+
+/// a state's velocity as roam_core.c's get_state takes it (in float: finite, |v|^2 at most 200^2), else 0
+fn velocity(d: &[u8], o: usize) -> [f64; 3] {
+    let v = [0, 4, 8].map(|k| f32::from_le_bytes([d[o + k], d[o + k + 1], d[o + k + 2], d[o + k + 3]]));
+    if v.iter().all(|x| x.is_finite()) && v[0] * v[0] + v[1] * v[1] + v[2] * v[2] <= 200.0 * 200.0 { v.map(f64::from) } else { [0.0; 3] }
+}
+
+/// where a state's car points, 256 a turn: the forward row of its quaternion (i16 x y z w at o, roam_core.c rc_q2m),
+/// atan2(f[1], f[0]) as roam_game.c turns it into the car's heading; 0 for a quaternion of almost nothing
+fn heading(d: &[u8], o: usize) -> u8 {
+    let q = [0, 2, 4, 6].map(|k| i16::from_le_bytes([d[o + k], d[o + k + 1]]) as f64 / 32767.0);
+    let (f0, f1) = (1.0 - 2.0 * (q[1] * q[1] + q[2] * q[2]), 2.0 * (q[0] * q[1] + q[2] * q[3]));
+    if q.iter().map(|x| x * x).sum::<f64>() < 0.25 {
+        return 0;
+    }
+    ((f1.atan2(f0) * 128.0 / std::f64::consts::PI + 0.5).floor() as i64 & 255) as u8
 }
 
 /// One free-roam datagram, or None: the fields the hub needs (HELLO, SNAP, BYE), checked as roam_core.c's decoder
@@ -80,8 +120,9 @@ pub(crate) fn decode(d: &[u8]) -> Option<(u8, u32, Msg<'_>)> {
             if !p.iter().all(|x| x.is_finite()) || p[0].abs() > 20000.0 || p[1].abs() > 20000.0 || p[2].abs() > 2000.0 {
                 return None;
             }
-            Msg::Snap { sender, status, p }
+            Msg::Snap { sender, status, p, v: velocity(d, 38), heading: heading(d, 50) }
         }
+        MSG_MAPREQ if end == HDR + 2 => Msg::MapReq { req: u16_le(d, 16) },
         MSG_BYE => Msg::Bye,
         _ => Msg::Other,
     };
@@ -96,9 +137,9 @@ pub fn decode_roam(d: &[u8]) -> Option<RoamMsg> {
         Msg::Hello { sender, core, status, room, name } => {
             RoamMsg::Hello { sender, core, status, room, name: name.iter().map(|&c| c as char).collect() }
         }
-        Msg::Snap { sender, status, p } => RoamMsg::Snap { sender, status, p },
+        Msg::Snap { sender, status, p, .. } => RoamMsg::Snap { sender, status, p },
         Msg::Bye => RoamMsg::Bye { sender },
-        Msg::Other => RoamMsg::Other { kind, sender },
+        Msg::MapReq { .. } | Msg::Other => RoamMsg::Other { kind, sender },
     })
 }
 
@@ -135,4 +176,36 @@ pub fn encode_peers(sender: u32, seq: u16, list: &[PeerEntry]) -> Vec<u8> {
     let mut b = vec![0u8; peers_len(list.len())];
     write_peers(&mut b, sender, seq, list.iter().copied());
     b
+}
+
+/// the length of a MAP datagram of n entries
+pub(crate) fn map_len(n: usize) -> usize {
+    HDR + 7 + MAP_ENTRY * n + CRC
+}
+
+/// One MAP datagram, part `part` of `nparts` of the answer to question `req` (roam_core.h RC_MSG_MAP) into `b`
+/// (exactly `map_len(n)` bytes long): `total` players past the asker and its peers, these n of them (x, y, heading).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn write_map(b: &mut [u8], sender: u32, seq: u16, req: u16, part: u8, nparts: u8, total: u16, list: &[(i16, i16, u8)]) {
+    let len = b.len();
+    b[..4].copy_from_slice(b"N2FR");
+    b[4] = 1;
+    b[5] = MSG_MAP;
+    b[6..8].copy_from_slice(&(len as u16).to_le_bytes());
+    b[8..12].copy_from_slice(&sender.to_le_bytes());
+    b[12..14].copy_from_slice(&seq.to_le_bytes());
+    b[14..16].copy_from_slice(&[0, 0]);
+    b[16..18].copy_from_slice(&req.to_le_bytes());
+    b[18] = part;
+    b[19] = nparts;
+    b[20..22].copy_from_slice(&total.to_le_bytes());
+    b[22] = list.len() as u8;
+    for (i, &(x, y, h)) in list.iter().enumerate() {
+        let o = 23 + MAP_ENTRY * i;
+        b[o..o + 2].copy_from_slice(&x.to_le_bytes());
+        b[o + 2..o + 4].copy_from_slice(&y.to_le_bytes());
+        b[o + 4] = h;
+    }
+    let crc = crc32fast::hash(&b[..len - CRC]);
+    b[len - CRC..].copy_from_slice(&crc.to_le_bytes());
 }

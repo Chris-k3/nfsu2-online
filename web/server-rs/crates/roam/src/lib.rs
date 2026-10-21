@@ -12,9 +12,15 @@
 //! - hub -> player: every second a PEERS message: the players linked to it, { virtual address, port, id }, at most
 //!   `degree` (32: roam_core's group of 33 with itself), or 7 for a player whose HELLO says core version 1 (its group
 //!   was 8, and it drops a longer list); an empty one says the hub is there.
+//! - player -> hub -> player: when its world map opens, a MAPREQ; the hub answers with MAP datagrams (at most three
+//!   of 230): the other players of its room in free roam, past its links, nearest first, map_max (512) of them at
+//!   most, each its place (x, y in whole metres) and heading (a byte), which the game marks on the map.
 //!
 //! The links, in each room: the pairs of players with a position younger than staleMs (60 s: one in a shop or a race
-//! keeps its links for a while), nearest first, each player at most its degree of them.  Both ends of a link list
+//! keeps its links for a while), nearest first, each player at most its degree of them.  "Nearest" looks ahead: a
+//! pair counts at the nearer of its distance now and its distance once both cars went on look_ms (3 s) at the speeds
+//! their last SNAPs gave, so a car a player heads for is linked (and its car loaded) before it is near, and one left
+//! behind gives way first; parked players count as before.  Both ends of a link list
 //! each other (roam_core takes a player only when both hear each other).  A link stays at least holdMs (5 s), and
 //! after that counts as `keep` (half) its distance: a new link costs a handshake, the car's record and maybe a car
 //! swapped on the screen, so it has to be much nearer to take the place of one (62 simulated players circling within
@@ -85,6 +91,14 @@ pub struct RoamOptions {
     pub cap_up_ms: f64,
     /// under this cap free roam is busy (`crowded()`)
     pub ask_cap: usize,
+    /// how far ahead the links look (ms): a pair counts at the nearer of its distance now and its distance once both
+    /// cars went on this long at their speeds, so a car a player heads for is linked before it is near
+    pub look_ms: f64,
+    /// the world map (MAPREQ): at most this many players a answer, one answer a player every map_gap_ms at most, of
+    /// the players in free roam (or paused there) with a position younger than map_fresh_ms
+    pub map_max: usize,
+    pub map_gap_ms: f64,
+    pub map_fresh_ms: f64,
 }
 
 impl Default for RoamOptions {
@@ -105,6 +119,10 @@ impl Default for RoamOptions {
             cap_down_ms: 5_000.0,
             cap_up_ms: 15_000.0,
             ask_cap: 24,
+            look_ms: 3_000.0,
+            map_max: 512,
+            map_gap_ms: 1_000.0,
+            map_fresh_ms: 5_000.0,
         }
     }
 }

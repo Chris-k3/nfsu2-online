@@ -98,6 +98,45 @@ pub fn snap(sender: u32, pos: [f64; 3]) -> Vec<u8> {
     snap_n(sender, pos, 2, 1)
 }
 
+/// a SNAP of one state with a velocity and a heading (radians, 0 = +x, a turn about z)
+pub fn snap_moving(sender: u32, pos: [f64; 3], v: [f64; 3], heading: f64, status: u8) -> Vec<u8> {
+    let mut d = snap_n(sender, pos, status, 1);
+    let p = &mut d[16..];
+    for k in 0..3 {
+        p[22 + 4 * k..26 + 4 * k].copy_from_slice(&(v[k] as f32).to_le_bytes());
+    }
+    let (z, w) = ((heading / 2.0).sin(), (heading / 2.0).cos());
+    p[34..36].copy_from_slice(&0i16.to_le_bytes());
+    p[38..40].copy_from_slice(&((z * 32767.0).round() as i16).to_le_bytes());
+    p[40..42].copy_from_slice(&((w * 32767.0).round() as i16).to_le_bytes());
+    let len = d.len();
+    let crc = crc32fast::hash(&d[..len - 4]);
+    d[len - 4..].copy_from_slice(&crc.to_le_bytes());
+    d
+}
+
+/// the world map's question (MAPREQ)
+pub fn mapreq(sender: u32, req: u16) -> Vec<u8> {
+    dgram(10, sender, &req.to_le_bytes())
+}
+
+/// a MAP datagram: (req, part, nparts, total, [(x, y, heading)])
+pub type Map = (u16, u8, u8, u16, Vec<(i16, i16, u8)>);
+
+/// the MAP datagram in a frame of the hub's
+pub fn map_of(f: &[u8]) -> Option<Map> {
+    let d = &f[16..];
+    if d[5] != 11 {
+        return None;
+    }
+    let n = d[22] as usize;
+    let e = (0..n).map(|i| {
+        let o = 23 + 5 * i;
+        (i16::from_le_bytes([d[o], d[o + 1]]), i16::from_le_bytes([d[o + 2], d[o + 3]]), d[o + 4])
+    });
+    Some((u16::from_le_bytes([d[16], d[17]]), d[18], d[19], u16::from_le_bytes([d[20], d[21]]), e.collect()))
+}
+
 pub fn bye(sender: u32) -> Vec<u8> {
     dgram(8, sender, &[0])
 }
