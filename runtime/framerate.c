@@ -63,7 +63,7 @@
 #include <pthread.h>
 #include <stdatomic.h>
 
-void guest_sleep_ns(int64_t ns);        /* win32_ext.c: sleeps with the GIL released */
+void guest_sleep_frame_ns(int64_t ns);  /* win32_ext.c: sleeps with the GIL released, retakes it first */
 int  metal_display_hz(void);            /* metal.m: window's screen max fps, 0 = unknown */
 
 enum { FX_TICKS = 1, FX_TIMER = 2, FX_PARTICLES = 4, FX_TRAIL = 8, FX_AUDIO = 16, FX_RTF = 32,
@@ -438,7 +438,7 @@ static int pace(int rate, uint64_t *slept, uint64_t *missed){
     int64_t target = snap(g_last_slot + P, origin, g);
     if (target <= g_last_slot) target += g;
     if (now < target){
-        guest_sleep_ns((int64_t)(target - now));
+        guest_sleep_frame_ns((int64_t)(target - now));
         *slept = (uint64_t)(target - now);
         int n = (int)((double)(target - g_last_slot) / (double)P + 0.5);
         g_last_slot = target;

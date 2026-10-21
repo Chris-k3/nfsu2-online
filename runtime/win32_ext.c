@@ -54,6 +54,8 @@ static WStat g_wstat[64];
 #ifndef __wasm__
 static pthread_mutex_t g_guest = PTHREAD_MUTEX_INITIALIZER;
 #define gil_acquire(who) pthread_mutex_lock(&g_guest)
+#define gil_acquire_frame(who) pthread_mutex_lock(&g_guest)
+#define gil_keep_for_mutex() 0
 #define gil_release()    pthread_mutex_unlock(&g_guest)
 #endif
 extern CPU *g_cur_cpu;
@@ -132,8 +134,9 @@ static void gil_gave(void){
         if (shown < 80){ shown++;
             double audio_time(void);
 #ifdef __wasm__
-            fprintf(stderr, "  [GIL] t=%.3f s  lock held %.1f ms  guest eip=%08x  (host waits %.1f ms)\n",
-                    audio_time(), d/1000.0, tl_cpu ? tl_cpu->eip : 0u, gil_host_wait_ms());
+            fprintf(stderr, "  [GIL] t=%.3f s  lock held %.1f ms  guest eip=%08x tid %u (host waits %.1f ms)\n",
+                    audio_time(), d/1000.0, tl_cpu ? tl_cpu->eip : 0u,
+                    (tl_cpu && tl_cpu->fs_base) ? MR32(tl_cpu->fs_base + 0x24u) : 0u, gil_host_wait_ms());
 #else
             fprintf(stderr, "  [GIL] t=%.3f s  lock held %.1f ms  guest eip=%08x\n",
                     audio_time(), d/1000.0, tl_cpu ? tl_cpu->eip : 0u);
@@ -170,6 +173,7 @@ static double g_gil_rel_ms;                      /* last unlock (written by the 
  * runs only under the lock, and every guest wait (pacer, Sleep, Wait*, the
  * present wait) releases it, so this is the guest thread's CPU time. */
 static _Thread_local double tl_acq_ms, tl_acq_blk, tl_busy_ms; static _Thread_local int tl_holding;
+static _Thread_local int tl_barged;              /* taken ahead of the queue (gil_acquire_frame) */
 static double g_busy_all_ms;                     /* every guest thread (updated by the owner) */
 static double held_busy(double now){ return (now - tl_acq_ms) - (nfsu2_blocked_ms() - tl_acq_blk); }
 static double gil_host_wait_ms(void){ return tl_holding ? nfsu2_blocked_ms() - tl_acq_blk : 0.0; }
@@ -204,7 +208,7 @@ static void gil_acquire(CPU *who){
         return;
     }
     uint32_t me = ticket_take(&g_gil);
-    if (atomic_load(&g_gil.serving) == me){
+    if (ticket_try(&g_gil, me)){
         GilStat *s = gil_stat_for(who); if (s) s->n++; g_gs_tot.n++; g_gs_win.n++;
         tl_acq_ms = nfsu2_now_ms(); tl_acq_blk = nfsu2_blocked_ms(); tl_holding = 1;
         return; }
@@ -216,6 +220,56 @@ static void gil_acquire(CPU *who){
     gil_note(s, t1 - t0, h); gil_note(&g_gs_tot, t1 - t0, h); gil_note(&g_gs_win, t1 - t0, h);
     tl_acq_ms = t1; tl_acq_blk = nfsu2_blocked_ms(); tl_holding = 1;
 }
+/* The frame pacer's thread at its slot boundary (guest_sleep_frame_ns): it
+ * takes a free lock ahead of the queue (ticketlock.h ticket_barge), and while
+ * another thread holds it, it polls instead of sleeping, as it was spinning
+ * on the clock anyway.  Before, it queued behind the threads that came during
+ * its sleep, and one of them still waking up kept the lock idle for up to
+ * 4.6 ms: a missed 120 Hz slot, ~4 times in a 35 s race (Ryzen 5900X,
+ * Chrome 155).  Once per frame only, so the others still have the whole
+ * pacer sleep; a holder still busy after 20 ms (a loading screen's long
+ * call) is queued for as before. */
+uint64_t g_gil_frame_takes, g_gil_frame_queued;
+static void gil_acquire_frame(CPU *who){
+    if (g_gil_use_mx < 0){ const char *e = getenv("NFSU2_GIL"); g_gil_use_mx = e && !strcmp(e, "mutex"); }
+    if (g_gil_use_mx){ gil_acquire(who); return; }
+    g_gil_frame_takes++;
+    if (ticket_barge(&g_gil, 1)){
+        GilStat *s = gil_stat_for(who); if (s) s->n++; g_gs_tot.n++; g_gs_win.n++;
+        tl_acq_ms = nfsu2_now_ms(); tl_acq_blk = nfsu2_blocked_ms(); tl_holding = 1; tl_barged = 1;
+        return; }
+    double t0 = nfsu2_now_ms(), t1 = t0;
+    while (t1 - t0 < 20.0){
+        if (ticket_barge(&g_gil, 256)){
+            t1 = nfsu2_now_ms();
+            double h = t1 - g_gil_rel_ms; if (h < 0) h = 0;
+            GilStat *s = gil_stat_for(who); if (s) s->n++; g_gs_tot.n++; g_gs_win.n++;
+            gil_note(s, t1 - t0, h); gil_note(&g_gs_tot, t1 - t0, h); gil_note(&g_gs_win, t1 - t0, h);
+            tl_acq_ms = t1; tl_acq_blk = nfsu2_blocked_ms(); tl_holding = 1; tl_barged = 1;
+            return; }
+        t1 = nfsu2_now_ms();
+    }
+    g_gil_frame_queued++;
+    gil_acquire(who);
+}
+/* WaitForSingleObject on a free mutex (win32_ext_call): keep the GIL instead
+ * of handing it over, unless another thread queues for it and this one has
+ * held it for 2 ms.  The game thread handed it over at every take of the
+ * sound library's mutex (~119,000 times in a 50 s race), and each hand-over
+ * to a waiting worker risks a late wake-up (ticketlock.h).  Taking every
+ * free mutex outright cut the late frames of a race's warm drive from ~8 to
+ * ~6 a run, but in a heavy free-roam scene (32 friends' cars, 13.5 ms of
+ * game work a frame) the other threads then waited 4 to 10 times longer
+ * (the loader 0.7 -> 8.7 ms on average, p99 33 -> 262 ms): the game thread
+ * let go only at its pacer sleep.  The 2 ms bound keeps their waits near
+ * what the old hand-overs gave.  NFSU2_GIL_KEEP_MS sets it (0: hand over at
+ * every take, as before). */
+static double g_gil_keep_ms = -1;
+static int gil_keep_for_mutex(void){
+    if (g_gil_keep_ms < 0){ const char *e = getenv("NFSU2_GIL_KEEP_MS"); g_gil_keep_ms = e && *e ? atof(e) : 2.0; }
+    if (g_gil_use_mx || !(g_gil_keep_ms > 0) || !tl_holding) return 0;
+    return !ticket_queued(&g_gil) || nfsu2_now_ms() - tl_acq_ms < g_gil_keep_ms;
+}
 static void gil_release(void){
     double now = nfsu2_now_ms();
     if (tl_holding){
@@ -225,6 +279,7 @@ static void gil_release(void){
     }
     g_gil_rel_ms = now;
     if (g_gil_use_mx) pthread_mutex_unlock(&g_gil_mx);
+    else if (tl_barged){ tl_barged = 0; ticket_barge_unlock(&g_gil); }
     else ticket_unlock(&g_gil);
 }
 static double gil_pct(const uint32_t *hist, uint64_t n, double p){   /* upper edge of the bucket, ms */
@@ -243,9 +298,10 @@ static void gil_print(const char *what, const GilStat *s){
 void win32_gil_report(void){
     /* the mutex cannot tell whether anyone took it: there every fair yield
      * released it (and every 32nd napped 50 us) */
-    fprintf(stderr, "  guest lock (%s), queued acquisitions; %llu fair yields %s:\n",
+    fprintf(stderr, "  guest lock (%s), queued acquisitions; %llu fair yields %s; %llu frame-boundary takes, %llu queued after 20 ms:\n",
             g_gil_use_mx > 0 ? "pthread mutex, NFSU2_GIL=mutex" : "FIFO ticket lock", (unsigned long long)g_gil_fair_yields,
-            g_gil_use_mx > 0 ? "released it" : "handed it over");
+            g_gil_use_mx > 0 ? "released it" : "handed it over",
+            (unsigned long long)g_gil_frame_takes, (unsigned long long)g_gil_frame_queued);
     gil_print("all", &g_gs_tot);
     for (int i = 0; i < g_gs_n; i++){ char nm[32]; snprintf(nm, sizeof nm, "tid %u", g_gs[i].tid); gil_print(nm, &g_gs[i]); }
 }
@@ -295,6 +351,11 @@ static void guest_yield_begin(void){ gil_gave(); gil_release(); }
 static void guest_yield_end(void){
     ts_set(TS_GIL, 0);
     gil_acquire(tl_cpu); g_cur_cpu = tl_cpu; gil_took();
+    ts_set(TS_RUN, 0);
+}
+static void guest_yield_end_frame(void){         /* the frame pacer's: gil_acquire_frame */
+    ts_set(TS_GIL, 0);
+    gil_acquire_frame(tl_cpu); g_cur_cpu = tl_cpu; gil_took();
     ts_set(TS_RUN, 0);
 }
 /* Host-side blocking waits inside an HLE call (metal_present) */
@@ -420,16 +481,20 @@ static void sleep_precise_ns(int64_t ns){
     nanosleep(&ts, 0);
 }
 #endif
-void guest_sleep_ns(int64_t ns){
+static void sleep_released(int64_t ns, int frame){
     struct timespec a, b, d;
     guest_yield_begin();
     clock_gettime(CLOCK_MONOTONIC, &a); sleep_precise_ns(ns); clock_gettime(CLOCK_MONOTONIC, &b);
-    guest_yield_end();
+    if (frame) guest_yield_end_frame(); else guest_yield_end();
     clock_gettime(CLOCK_MONOTONIC, &d);
     int64_t sl = (int64_t)(b.tv_sec - a.tv_sec) * 1000000000LL + (b.tv_nsec - a.tv_nsec) - ns;
     int64_t gl = (int64_t)(d.tv_sec - b.tv_sec) * 1000000000LL + (d.tv_nsec - b.tv_nsec);
     g_sleep_late_ns += sl > 0 ? (uint64_t)sl : 0; g_sleep_gil_ns += (uint64_t)gl; g_sleep_n++;
 }
+void guest_sleep_ns(int64_t ns){ sleep_released(ns, 0); }
+/* The frame pacer's sleep to its slot boundary (framerate.c): the guest lock
+ * is taken back ahead of the queue (gil_acquire_frame). */
+void guest_sleep_frame_ns(int64_t ns){ sleep_released(ns, 1); }
 
 /* --- frame rate lock (60 Hz) ---------------------------------------
  * The virtual clock advances EXACTLY 16.667 ms per frame, so the game's
@@ -1411,7 +1476,7 @@ int win32_ext_call(CPU *c, const char *n, uint32_t *out){
                         g_wstat[i].waiter_tid);
           } }
         if(!o){ r=0; }
-        else if (o->kind == OB_MUTEX && tl_noyield && mutex_take_now(o, cur_tid(c))) r=0;   /* WAIT_OBJECT_0 */
+        else if (o->kind == OB_MUTEX && (tl_noyield || gil_keep_for_mutex()) && mutex_take_now(o, cur_tid(c))) r=0;   /* WAIT_OBJECT_0 */
         else if (o->kind == OB_MUTEX){
             /* MUTEX: ownership + RECURSION.  The same thread must be able to
              * take the same mutex again; otherwise the game's CRT wrapper,

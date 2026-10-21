@@ -114,7 +114,15 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
 - **Threads:** the page starts the I/O worker and a pool of 24 game workers (`web/src/host/process.ts`).
   - `wasi thread-spawn` claims a pool slot synchronously. Workers block with `Atomics.wait`; the page's main thread
     never runs wasm and never blocks.
-  - Guest threads still hold the GIL (`win32_ext.c`).
+  - Guest threads still hold the GIL (`win32_ext.c`): a FIFO ticket lock (`runtime/web/ticketlock.h`). A woken
+    worker sometimes runs only 3 to 4.6 ms after its notify (Chrome 155 on Windows 11: about 1 in 1,800 wakes,
+    measured between two plain workers), so every hand-over of the lock to a sleeping thread can cost a 120 Hz slot.
+    The frame pacer therefore takes the lock back at its slot boundary ahead of the queue when nobody holds it
+    (`gil_acquire_frame`), instead of waiting behind a thread still waking up. And `WaitForSingleObject` takes a free
+    mutex without handing the GIL over unless another thread queues and this one has held it for 2 ms (the game
+    thread handed it over at every take of the sound library's mutex). Taking every free mutex outright helped the
+    race a little more, but in a heavy free-roam scene (32 friends' cars, 13.5 ms of game work a frame) the other
+    threads then waited 4 to 10 times longer (the loader 0.7 → 8.7 ms on average, p99 33 → 262 ms).
 - **Stacks:** a Chrome worker's engine stack is about 1 MB and cannot be raised (measured: `--js-flags=--stack-size`
   changes nothing).
   - Lifted frames are small (48–400 B) and indirect tail jumps are real tail calls (`DISPATCH_TAIL`/`dispatch_tail`,
@@ -155,7 +163,10 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
   - A newer version: the module stays loaded while the page is open, through every game it plays. After each game,
     and when the tab is shown again, the page asks for `/game.json?latest` (the query keeps it past the offline
     copies) and, when the server has another revision than the loaded one, says so and offers Reload.
-  - `/save`: OPFS save overlay. Holds saves, `registry.txt`, `settings.ini` and logs. Closing a file the game wrote
+  - `/save`: OPFS save overlay. Holds saves, `registry.txt`, `settings.ini` and logs. Reads look there first, but
+    for the game folder's own folders (`TRACKS`, `CARS`, ...) once until the next write (`runtime/fileio.c`): each
+    look is OPFS calls in the I/O worker, 1.5 to 2 ms an open with the GIL held, and a race streams its track by
+    opening `TRACKS\STREAM*.BUN` again and again, from the game thread too. Closing a file the game wrote
     there posts `{ t: 'saved', path }` to the page (the "Progress saved" note, F9's last save, the end screen). Before
     each Play the page sets every profile still on the game's Save = Prompt to Autosave, once per profile
     (`web/src/app/profile.ts`, settings.ini `autosave`).

@@ -66,8 +66,9 @@ static void rel_normalize(char *rel){
     rel[k] = 0;
 }
 
-static int resolve_in(const char *root, const char *win, char *out, size_t outsz){
-    char rel[1024]; size_t k=0;
+/* the guest path relative to the game folder, '/'-separated and normalized */
+static void rel_of(const char *win, char *rel, size_t relsz){
+    size_t k=0;
     const char *p = win;
     if (p[0] && p[1]==':') p += 2;                       /* drive letter   */
     while (*p=='\\' || *p=='/') p++;
@@ -75,9 +76,13 @@ static int resolve_in(const char *root, const char *win, char *out, size_t outsz
         p += 5; while (*p=='\\'||*p=='/') p++;           /* virtual root   */
     }
     while (p[0]=='.' && (p[1]=='\\'||p[1]=='/')) p += 2;
-    for (; *p && k<sizeof rel-1; p++) rel[k++] = (*p=='\\') ? '/' : *p;
+    for (; *p && k<relsz-1; p++) rel[k++] = (*p=='\\') ? '/' : *p;
     rel[k]=0;
     rel_normalize(rel);
+}
+static int resolve_in(const char *root, const char *win, char *out, size_t outsz){
+    char rel[1024];
+    rel_of(win, rel, sizeof rel);
     if (!rel[0]){ snprintf(out,outsz,"%s",root); return 1; }
 
     snprintf(out, outsz, "%s/%s", root, rel);
@@ -129,9 +134,49 @@ int fileio_resolve_game(const char *win, char *out, size_t outsz){
     struct stat st;
     return resolve_in(g_root, win, out, outsz) && stat(out, &st) == 0 && S_ISREG(st.st_mode);
 }
+/* The save overlay holds what the game wrote (its profile folder) and the
+ * runtime's own files, yet every read looked there first.  In the browser each
+ * step of that is a round trip to the I/O worker and an OPFS call (a stat,
+ * then a listing of the overlay root for the case-insensitive match): ~1.5 to
+ * 2 ms per open with the guest lock held, and a race streams its track by
+ * opening TRACKS\STREAM*.BUN again and again, from the game thread too, which
+ * cost it 120 Hz slots.  So whether the overlay root has a folder of the game
+ * root (TRACKS, CARS, ...; the runtime makes none of those there) is
+ * remembered until the next write-side operation (write_allowed). */
+static unsigned g_ov_gen = 1;
+#define OVC_N 64
+static struct { char name[64]; unsigned gen; signed char game_dir, in_ov; } g_ovc[OVC_N];
+static int g_ovc_n;
+static uint64_t g_ovc_skips;
+static int overlay_cannot_have(const char *win){
+    char rel[1024]; rel_of(win, rel, sizeof rel);
+    char *sl = strchr(rel, '/');
+    if (!sl) return 0;                                   /* a file at the top: always looked up */
+    *sl = 0;
+    if (!rel[0] || strlen(rel) >= sizeof g_ovc[0].name) return 0;
+    int i;
+    for (i = 0; i < g_ovc_n && strcasecmp(g_ovc[i].name, rel); i++) {}
+    if (i == g_ovc_n){
+        if (g_ovc_n == OVC_N) return 0;
+        snprintf(g_ovc[i].name, sizeof g_ovc[i].name, "%s", rel);
+        char p[1100]; struct stat st;
+        snprintf(p, sizeof p, "%s/%s", g_root, rel);
+        g_ovc[i].game_dir = stat(p, &st) == 0 && S_ISDIR(st.st_mode);   /* the game folder never changes */
+        g_ovc[i].gen = 0; g_ovc_n++;
+    }
+    if (!g_ovc[i].game_dir) return 0;
+    if (g_ovc[i].gen != g_ov_gen){
+        char w[1100];
+        g_ovc[i].in_ov = (signed char)resolve_in(g_wroot, rel, w, sizeof w);
+        g_ovc[i].gen = g_ov_gen;
+    }
+    if (g_ovc[i].in_ov) return 0;
+    g_ovc_skips++;
+    return 1;
+}
 /* Read: the write root if the file is there, otherwise the game root. */
 static int resolve(const char *win, char *out, size_t outsz){
-    if (g_wroot[0]){
+    if (g_wroot[0] && !overlay_cannot_have(win)){
         char w[1024];
         if (resolve_in(g_wroot, win, w, sizeof w) && strcmp(w, g_wroot) != 0){
             snprintf(out, outsz, "%s", w); return 1; }
@@ -178,7 +223,7 @@ static int path_under(const char *path, const char *dir){
 static int write_allowed(const char *op, const char *win, const char *host){
     int in_root = path_under(host, g_root) && !(g_wroot[0] && path_under(host, g_wroot));
     int blocked = in_root && g_ro_root;
-    g_wr_ops++;
+    g_wr_ops++; g_ov_gen++;                  /* the overlay may change: forget what it lacked */
     if (in_root) g_wr_in_root++;
     if (blocked) g_wr_blocked++;
     if (g_wr_ops <= 2000)
@@ -306,8 +351,10 @@ int fileio_call(CPU *c, const char *n, uint32_t *out){
         /* Language suffix fallback: this version has the "_fr.vp6" suffix
          * built into the movie path, but the folder holds "_en" files.  If
          * the requested file is missing, try "_en" and the unsuffixed name. */
+        /* (resolve found the path, so it exists: no second stat, which is
+         * another round trip to the I/O worker in the browser) */
         struct stat _st;
-        if (!(flags & O_CREAT) && stat(real, &_st) != 0){
+        if (!(flags & O_CREAT) && !ok){
             char alt[1024]; const char *dot = strrchr(real, '.');
             if (dot && dot - real > 3){
                 size_t base = (size_t)(dot - real);
@@ -647,9 +694,9 @@ void fileio_report(void){
     if (g_overlapped_reads)
         fprintf(stderr,"  file: %llu asynchronous (overlapped) reads\n",
                 (unsigned long long)g_overlapped_reads);
-    fprintf(stderr,"  file: %llu opened, %llu could not be opened, %llu reads, %.1f MB\n",
+    fprintf(stderr,"  file: %llu opened, %llu could not be opened, %llu reads, %.1f MB; %llu save overlay lookups skipped\n",
             (unsigned long long)g_file_open,(unsigned long long)g_file_fail,
-            (unsigned long long)g_file_read,(double)g_bytes_read/1048576.0);
+            (unsigned long long)g_file_read,(double)g_bytes_read/1048576.0, (unsigned long long)g_ovc_skips);
     { int n = 0; for (int k = 1; k < FH_MAX; k++) n += g_fh[k].used;
       fprintf(stderr,"  file: %d handles open now, at most %d (limit %d), table full %llu times\n",
               n, g_fh_peak, FH_MAX - 1, (unsigned long long)g_fh_full); }
