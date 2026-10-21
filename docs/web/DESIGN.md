@@ -215,9 +215,9 @@ The translator (`vsemu.c`, a WGSL backend next to `vs_to_msl`/`ps_to_msl`) and t
 authoritative version is `docs/web/gpu-abi.md`.
 
 ```wgsl
-// group 0: per draw, dynamic offsets
+// group 0: shared by runs of draws, dynamic offsets
 @group(0) @binding(0) var<storage, read> VB : array<u32>;   // vertex pulling: the frame arena or the mirror pool
-@group(0) @binding(1) var<uniform> K : VSPar;               // {stride, tsel, base, pad; c[NK]}  (vs_1_1 uses up to c85)
+@group(0) @binding(1) var<uniform> K : VSWin;               // 64 KB window; the draw's {stride, tsel, base, pad; c[NK]} at row firstInstance
 @group(0) @binding(2) var<uniform> P : PSPar;               // {aref, usec, pad, pad; proj; c[32]; fog}
 // group 1: textures and samplers, cached per tuple
 @group(1) @binding(0..3) t0..t3 : texture_2d<f32>           // texture_cube<f32> for t0 in the cube variant
@@ -227,7 +227,7 @@ struct VOut { @builtin(position) pos: vec4f; @location(0) col0: vec4f; @location
 ```
 
 - **Vertex pulling** as on Metal: no vertex attributes, so a pipeline does not depend on the vertex format. The vertex
-  address is `K.base + vertex_index * K.stride`; `drawIndexed`'s `baseVertex` handles D3D9's `BaseVertexIndex`.
+  address is `base + vertex_index * stride` (the draw's K block header); `drawIndexed`'s `baseVertex` handles D3D9's `BaseVertexIndex`.
 - The fixed-function / pretransformed (`TVert`) path is one hand-written WGSL module over the same ABI.
 - Alpha test is an `override` constant, so there is a no-discard variant when `aref <= 0`, as on Metal for HSR.
 - Everything is triangle lists, because `metal_draw_raw` already unrolls strips and fans on the CPU.

@@ -624,7 +624,9 @@ void metal_draw_tv(const TVert *src, unsigned nverts, unsigned prim, unsigned te
 }
 /* the VS constant block {u32 stride, tsel, base, 0; vec4 c[nk]}, deduplicated
  * against the previous one.  base: byte offset of vertex 0 in the buffer the
- * shader pulls from (raw arena or pool). */
+ * shader pulls from (raw arena or pool).  Blocks are 16-byte aligned: the page
+ * binds the arena in 64 KB windows and finds a block by its row there
+ * (GW_KWIN_ROWS), so a block needs no dynamic offset of its own. */
 static GwDraw *raw_rec(Buf *B, unsigned stride, unsigned base, unsigned tex, int vsid, const float *k, unsigned nk){
     unsigned ksz = 16u + nk * 16u;
     uint32_t hdr[4] = { stride, 0, base, 0 };
@@ -634,7 +636,7 @@ static GwDraw *raw_rec(Buf *B, unsigned stride, unsigned base, unsigned tex, int
         !memcmp(B->kb + B->last_koff, hdr, 16) && !memcmp(B->kb + B->last_koff + 16, k, nk * 16u)){
         koff = B->last_koff;
     } else {
-        koff = (B->kn + 255u) & ~255u;
+        koff = (B->kn + 15u) & ~15u;
         if (koff + ksz > MAXKB){ g_ov_kb++; return NULL; }
         memcpy(B->kb + koff, hdr, 16);
         memcpy(B->kb + koff + 16, k, nk * 16u);

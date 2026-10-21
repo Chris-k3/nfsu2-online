@@ -41,9 +41,9 @@ omitted in the pipeline descriptor.
 ## 2. Bind groups (explicit layouts, shared by every pipeline)
 
 ```
-group 0  (per draw; K and P with dynamic offsets)
+group 0  (shared by runs of draws; K and P with dynamic offsets)
   binding 0  VERTEX    buffer read-only-storage   VB : array<u32>   hasDynamicOffset false
-  binding 1  VERTEX    buffer uniform             K  : VSPar        hasDynamicOffset true   minBindingSize 4112
+  binding 1  VERTEX    buffer uniform             K  : VSWin        hasDynamicOffset true   minBindingSize 65536
   binding 2  FRAGMENT  buffer uniform             P  : PSPar        hasDynamicOffset true   minBindingSize 560
   binding 3  FRAGMENT  buffer uniform             H  : HLPar        hasDynamicOffset false  minBindingSize 656
 group 1  (textures and samplers of stages 0..3)
@@ -56,10 +56,14 @@ group 1  (textures and samplers of stages 0..3)
 
 - Two pipeline layouts: **L2D** = `[G0, G1_2d]` and **LCUBE** = `[G0, G1_cube]`. A pipeline uses LCUBE iff its fragment
   module is a cube twin (`ps ≥ 256`: `ps_<id+256>` or `ps_256`); everything else uses L2D.
-- `setBindGroup(0, g0, [koff, poff])`: the dynamic offsets are in binding order (K, then P) and must be multiples of
-  `minUniformBufferOffsetAlignment` (256). The K window is always **4112 bytes**, so the VS constant buffer needs at
-  least 4112 − 16 bytes of slack after the last block. VB has no dynamic offset: the byte offset of a draw's vertex 0 is
-  `K.base` (§4), because storage-buffer dynamic offsets must be 256-aligned and pool offsets are not.
+- `setBindGroup(0, g0, [kwin, poff])`: the dynamic offsets are in binding order (K, then P) and must be multiples of
+  `minUniformBufferOffsetAlignment` (256). K is a **64 KB window** of the frame's VS constant arena (4096 rows, the
+  default `maxUniformBufferBindingSize`), so the VS constant buffer needs 64 KB of slack after the last block. A draw's
+  block starts at row `kb` of the window, given as the draw's `firstInstance` (§3): consecutive draws share one bind
+  group, and a new one is set only for another vertex source, other PS parameters, or a block past the window
+  (`kb > 3839`, so that the block's 257 rows stay inside it). VB has no dynamic offset: the byte offset of a draw's
+  vertex 0 is the block header's `base` (§4), because storage-buffer dynamic offsets must be 256-aligned and pool
+  offsets are not.
 - VB is the whole buffer the draw reads: the raw-vertex arena (`metal_draw_raw`), the mirror pool (`metal_draw_ix`) or
   the TVert arena (`metal_draw_tv`). A buffer bound as VB needs usage `STORAGE`; the pool also needs `INDEX`.
   `maxStorageBufferBindingSize` is 128 MiB by default; request more at `requestDevice` if the pool can grow beyond it.
@@ -79,13 +83,11 @@ struct VOut {                      // interstage, identical in every module (7 o
   @location(4) uv2: vec4f,   @location(5) uv3: vec4f,
   @location(6) fog: f32,                                        // vertex fog factor, 1 = no fog
 }
-struct VSPar {                     // 4112 bytes, uniform
-  stride: u32,                     //  0  vertex stride in bytes
-  tsel: u32,                       //  4  byte k = TEXCOORDINDEX of stage k (0..3)
-  base: u32,                       //  8  byte offset of this draw's vertex 0 in VB
-  pad: u32,                        // 12  0
-  c: array<vec4f, 256>,            // 16  vertex shader constants c0..c255
-}
+struct VSWin { c: array<vec4f, 4096> }   // 65536 bytes, uniform: the window
+// a draw's block at row kb (= instance_index, the draw's firstInstance), 16-byte aligned in the arena:
+//   row kb      the header, read as bitcast<vec4u>: x = stride (vertex stride in bytes), y = tsel (byte k =
+//               TEXCOORDINDEX of stage k, 0..3), z = base (byte offset of this draw's vertex 0 in VB), w = 0
+//   row kb+1+n  vertex shader constant cn, n = 0..255
 struct PSPar {                     // 560 bytes, uniform (= the Mac's PSPar)
   aref: f32,                       //  0  MDraw.alpha_ref
   usec: f32, pad0: f32, pad1: f32, //  4  0 (HD fields on the Mac)
@@ -104,10 +106,13 @@ struct HLPar {                     // 656 bytes, uniform (gpu_proto.h GwHL)
 - **K header** is what `raw_rec` (`metal.m`) writes, plus `base`: `stride` = the draw's stride, `tsel` = `Σ ((int)proj[k] & 3) << 8k`,
   `base` = `rawoff` (raw arena offset for `metal_draw_raw`, the VB mirror's pool offset for `metal_draw_ix`). Only rows
   `c[0 .. vs_kmax)` need to be written; the shader reads no other row except through relative addressing, which is
-  clamped to `[0, 255]` exactly like the Mac. Constant blocks can stay deduplicated (the header is part of the key).
-- **TVert draws** (`vsid = 0`): bind any K window whose header has `base = 0` (for example a fixed zero block at the
-  start of the K buffer) and draw with `firstVertex = MDraw.first`; `vs_0` reads `VB[base + vertex_index * 112]` and
-  ignores `K.stride` (a TVert is always 112 bytes: pos, col0, col1, t[4], all `f32`, `gfx.h`).
+  clamped to `[0, 255]` exactly like the Mac (rows past `vs_kmax` read whatever the arena holds there, as before).
+  Constant blocks can stay deduplicated (the header is part of the key). The window offset is the uniform's dynamic
+  offset, the row the draw's `firstInstance`: `instance_index` includes `firstInstance` on every backend (WGSL), and
+  the draws are not instanced.
+- **TVert draws** (`vsid = 0`): any K window; draw with `firstVertex = MDraw.first`. `vs_0` reads no K at all:
+  `VB[vertex_index * 112]` from the start of the TVert arena (a TVert is always 112 bytes: pos, col0, col1, t[4], all
+  `f32`, `gfx.h`).
 - **P** is the Mac's per-draw `PSPar` (`metal.m` encoder): the renderer fills it from the MDraw record and the PS constant
   pool, 256-aligned (a 768-byte slot stride is the simplest).
 - **H** is the frame's, not the draw's: bytes `[GW_K_HL, + 656)` of the frame's K arena (`gpu_web.c` keeps the draws'
@@ -117,7 +122,7 @@ struct HLPar {                     // 656 bytes, uniform (gpu_proto.h GwHL)
 
 ## 4. Vertex pulling (game VS modules)
 
-- Vertex address: `a = K.base + vertex_index * K.stride` (u32 arithmetic). `vertex_index` includes `baseVertex` of
+- Vertex address: `a = base + vertex_index * stride` (the block header, §3; u32 arithmetic). `vertex_index` includes `baseVertex` of
   `drawIndexed`, so D3D9 `BaseVertexIndex` is `drawIndexed(count, 1, firstIndex, ix_base)`. `firstVertex` of `draw()`
   also adds to `vertex_index`.
 - Every input register `vN` that the declaration maps is decoded at `a + offset` with the formula below, baked into the
@@ -184,7 +189,7 @@ struct HLPar {                     // 656 bytes, uniform (gpu_proto.h GwHL)
 
 - Registers `r0..r31`, `a0` (`vec4i`), outputs `oPos` = (0,0,0,1), `oD0` = (1,1,1,1), `oD1` = 0, `oT0..oT3` = 0,
   `oFog` = (1,1,1,1) (no fog), all written as on the Mac (`oT4..7` alias `oT0..3` through `& 3`, as `vs_dst_msl` does).
-- Epilogue: `pos = oPos` (no half-pixel offset), `col0/col1 = oD0/oD1` (no clamp), `uvK = oT[(K.tsel >> 8K) & 3]`,
+- Epilogue: `pos = oPos` (no half-pixel offset), `col0/col1 = oD0/oD1` (no clamp), `uvK = oT[(tsel >> 8K) & 3]` (the header's `tsel`),
   `fog = oFog.x`.
 - `vs_0` (TVert): pass-through of the 112-byte record, `fog = 1` (the Mac's `vmain`).
 
@@ -262,8 +267,8 @@ through `vs_0`.
 
 | DESIGN.md §3 | Here | Why |
 |---|---|---|
-| `K = {stride, tsel, base, pad; c[NK]}` | `c` is declared `array<vec4f, 256>` in every module | One struct for all modules, so the layout can fix `minBindingSize = 4112` (no per-draw size validation) and relative addressing never indexes past the declared array; the recorder still uploads only `vs_kmax` rows |
-| group 0 "dynamic offsets" | K and P dynamic, VB not | WebGPU storage dynamic offsets must be 256-aligned; mirror-pool vertex offsets are arbitrary, so the offset is `K.base` |
+| `K = {stride, tsel, base, pad; c[NK]}` | K is a 64 KB window, `array<vec4f, 4096>`; the draw's block `{stride, tsel, base, pad; c[256]}` starts at row `firstInstance` | One bind group for many draws: a per-draw dynamic offset cost ~1,300 `setBindGroup` calls a race frame (page thread and GPU process, ~0.45 ms of CPU per frame on a Ryzen 5900X); the layout still fixes `minBindingSize` (no per-draw size validation), relative addressing never indexes past the window, and the recorder uploads only `vs_kmax` rows. The price: the constant reads use a per-vertex index on the GPU (+3.7 % GPU time per frame, 0.89 → 0.92 ms at 4K) |
+| group 0 "dynamic offsets" | K and P dynamic, VB not | WebGPU storage dynamic offsets must be 256-aligned; mirror-pool vertex offsets are arbitrary, so the offset is the header's `base` |
 | Alpha test as an override "no-discard variant" | `ALPHA_FUNC: u32` (D3DCMP, 8 = no discard) | Same twin, plus room for the full ALPHAFUNC set |
 | `t0..t3`, `s0..s3` | `tex0..tex3`, `smp0..smp3` | Names only (the D3D register names `t#`, `r#` are used for registers); bindings are as in DESIGN |
-| (not in DESIGN) | `PS20_TEXCOORD` override, FF PS cube twin, TVert `base = 0` + `firstVertex` convention | Documented above |
+| (not in DESIGN) | `PS20_TEXCOORD` override, FF PS cube twin, TVert `firstVertex` convention | Documented above |

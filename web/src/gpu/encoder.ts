@@ -20,7 +20,7 @@
 import * as P from './proto';
 import { D, F, Kind, Op } from './proto';
 import { COPY, FF_FS, TVERT_VS } from './wgsl';
-import { createShaderAbi, alphaFunc, PSCUBE, VSPAR_SIZE, PSPAR_SIZE, HLPAR_SIZE } from './shader-abi';
+import { createShaderAbi, alphaFunc, PSCUBE, VSPAR_SIZE, KWIN_SIZE, PSPAR_SIZE, HLPAR_SIZE } from './shader-abi';
 import { unpackDxt } from './dxt';
 
 export interface EncodeStats {
@@ -40,7 +40,6 @@ interface Tex {
 const enum Src { TVert = 0, Raw = 1, Pool = 2 }
 const PSLOT = 768;                 // PSPar (560 bytes) at 256-aligned slots
 const PSPAR_BYTES = PSPAR_SIZE;
-const KBIND = VSPAR_SIZE;          // VSPar binding window: header + c[256]
 
 /** FNV-1a of a shader's text: identifies a module across sessions */
 function fnv(t: string): number {
@@ -114,6 +113,8 @@ export class Encoder {
 
   // stats
   totalDraws = 0; totalPasses = 0; pipelinesMade = 0; missingTarget = 0; noVs = 0; zMismatch = 0; conflicts = 0;
+  /** WebGPU calls made by encodeFrame, by kind (totals; what the GPU process decodes and records) */
+  calls = { pipe: 0, bg0: 0, bg1: 0, bg1New: 0, blend: 0, ix: 0, draw: 0, pass: 0, copy: 0 };
   private seenFmt = new Set<string>();
 
   constructor(device: GPUDevice, memory: WebAssembly.Memory, ctlPtr: number, log: (s: string) => void) {
@@ -438,7 +439,7 @@ export class Encoder {
       const vb = src === Src.TVert ? this.tvBuf : src === Src.Raw ? this.rawBuf : this.pool!;
       g = this.device.createBindGroup({ layout: this.bgl0, entries: [
         { binding: 0, resource: { buffer: vb } },
-        { binding: 1, resource: { buffer: this.kBuf, size: KBIND } },
+        { binding: 1, resource: { buffer: this.kBuf, size: KWIN_SIZE } },
         { binding: 2, resource: { buffer: this.pBuf, size: PSPAR_BYTES } },
         // the frame's other cars' headlights, in its VS constant arena (gpu_proto.h GwHL)
         { binding: 3, resource: { buffer: this.kBuf, offset: P.K_HL, size: HLPAR_SIZE } }] });
@@ -518,7 +519,7 @@ export class Encoder {
     const SV = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST, UV = GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST;
     if (vn) { this.tvBuf = this.grow(this.tvBuf, vn * P.TVERT_BYTES, 'tvert', SV); this.queue.writeBuffer(this.tvBuf, 0, this.u8, u32[fw + F.tv], vn * P.TVERT_BYTES); }
     if (rvn) { const n = (rvn + 3) & ~3; this.rawBuf = this.grow(this.rawBuf, n, 'raw', SV); this.queue.writeBuffer(this.rawBuf, 0, this.u8, u32[fw + F.raw], n); }
-    if (kn) { const n = (kn + 3) & ~3; this.kBuf = this.grow(this.kBuf, n + KBIND, 'vsconst', UV); this.queue.writeBuffer(this.kBuf, 0, this.u8, u32[fw + F.k], n); }
+    if (kn) { const n = (kn + 3) & ~3; this.kBuf = this.grow(this.kBuf, n + KWIN_SIZE, 'vsconst', UV); this.queue.writeBuffer(this.kBuf, 0, this.u8, u32[fw + F.k], n); }
     this.pBuf = this.grow(this.pBuf, (dn + 1) * PSLOT, 'pspar', UV);
     if (this.pStage.length < (dn + 1) * (PSLOT / 4)) this.pStage = new Float32Array((dn + 64) * (PSLOT / 4));
     const ps = this.pStage;
@@ -573,7 +574,7 @@ export class Encoder {
           : { view: this.depthView(0, w, h), depthLoadOp: 'clear', depthClearValue: 1, depthStoreOp: 'discard' },
       });
       if (key === -1) screenTouched = true; else touched.add(key);
-      passes++;
+      passes++; this.calls.pass++;
       if (tr) tr.push(`  pass ${passes}: ${target ? `tex ${target & 0xFFFF}${(target >>> 16) ? ` face ${(target >>> 16) - 1}` : ''}` : 'SCREEN'} ${w}x${h} color ${first ? `clear ${c.toString(16)}` : 'load'}, z ${zv ? `zid ${zid} ${zclear ? `clear ${zval}` : 'load'}` : `none (zid ${zid})`}`);
       cPipe = null; cSrc = -1; cK = -1; cP = -1; b1[0] = -1; cBcol = -1; cIx = '';
       return p;
@@ -590,7 +591,7 @@ export class Encoder {
         if (!sTex || !dTex || sTex === dTex || (tgt && !dt!.rt)) { skipped++; continue; }
         endPass(); curT = -1; curZ = -1;
         if (sTex.width === dTex.width && sTex.height === dTex.height && sTex.format === dTex.format && sTex.depthOrArrayLayers === 1 && dTex.depthOrArrayLayers === 1)
-          enc.copyTextureToTexture({ texture: sTex }, { texture: dTex }, [sTex.width, sTex.height, 1]);
+          { enc.copyTextureToTexture({ texture: sTex }, { texture: dTex }, [sTex.width, sTex.height, 1]); this.calls.copy++; }
         else {
           const sv = sid ? (st!.cube ? st!.tex.createView({ dimension: '2d', baseArrayLayer: 0, arrayLayerCount: 1, baseMipLevel: 0, mipLevelCount: 1 }) : st!.view) : this.screenView!;
           const dv = tgt ? dt!.rtViews[0] : this.screenView!;
@@ -637,7 +638,7 @@ export class Encoder {
       if (pipe === undefined) pipe = this.pipeline(key, blend, psEff, vsid, cull, dm, nd);
       lastKey = key; lastPipe = pipe;
       if (!pipe) { skipped++; if (tr) tr.push(`  #${i} draw skipped: no pipeline (ps ${psEff} vs ${vsid})`); continue; }
-      if (pipe !== cPipe) { p.setPipeline(pipe); cPipe = pipe; }
+      if (pipe !== cPipe) { p.setPipeline(pipe); cPipe = pipe; this.calls.pipe++; }
 
       // PS parameters: a new slot only when they differ from the previous draw's
       const psci = u32[w + D.psci];
@@ -652,14 +653,20 @@ export class Encoder {
       }
       const poff = (pslots - 1) * PSLOT;
 
-      // group 0: vertex source + VS constants + PS parameters
+      // group 0: vertex source + VS constants + PS parameters.  K is a 64 KB window of the
+      // frame's constant arena that many draws share: the draw's block is row kb of it, given
+      // as firstInstance (gpu-abi.md section 3).  A new bind group only for another vertex
+      // source, other PS parameters or a block past the window.
       const isz = u32[w + D.ixIsz];
       const src = isz ? Src.Pool : vsid > 0 ? Src.Raw : Src.TVert;
-      const koff = vsid > 0 ? u32[w + D.koff] : 0;
-      if (src !== cSrc || koff !== cK || poff !== cP) {
-        dyn[0] = koff; dyn[1] = poff;
-        p.setBindGroup(0, this.group0(src), dyn, 0, 2); cSrc = src; cK = koff; cP = poff;
+      const koff = vsid > 0 ? u32[w + D.koff] : -1;
+      if (src !== cSrc || poff !== cP || (koff >= 0 && (cK < 0 || koff < cK || koff - cK > KWIN_SIZE - VSPAR_SIZE))) {
+        // the window starts at this draw's block (256-aligned below it); TVert draws read no K
+        if (koff >= 0) cK = koff & ~255; else if (cK < 0) cK = 0;
+        dyn[0] = cK; dyn[1] = poff;
+        p.setBindGroup(0, this.group0(src), dyn, 0, 2); cSrc = src; cP = poff; this.calls.bg0++;
       }
+      const kb = koff >= 0 ? (koff - cK) >> 4 : 0;
 
       // group 1: textures and samplers (a texture bound as this pass's target samples white)
       const cube = psEff >= PSCUBE;
@@ -676,23 +683,23 @@ export class Encoder {
             { binding: 0, resource: v0.view }, { binding: 1, resource: v1.view }, { binding: 2, resource: v2.view }, { binding: 3, resource: v3.view },
             { binding: 4, resource: this.sampler(s0) }, { binding: 5, resource: this.sampler(s1) },
             { binding: 6, resource: this.sampler(s2) }, { binding: 7, resource: this.sampler(s3) }] });
-          this.bg1.set(k1, g);
+          this.bg1.set(k1, g); this.calls.bg1New++;
         }
-        p.setBindGroup(1, g);
+        p.setBindGroup(1, g); this.calls.bg1++;
         b1[0] = cube ? 1 : 0; b1[1] = v0.serial; b1[2] = v1.serial; b1[3] = v2.serial; b1[4] = v3.serial;
         b1[5] = s0; b1[6] = s1; b1[7] = s2; b1[8] = s3;
       }
       const bcol = u32[w + D.bcol];
-      if (bcol !== cBcol) { p.setBlendConstant({ r: ((bcol >>> 16) & 255) / 255, g: ((bcol >>> 8) & 255) / 255, b: (bcol & 255) / 255, a: (bcol >>> 24) / 255 }); cBcol = bcol; }
+      if (bcol !== cBcol) { p.setBlendConstant({ r: ((bcol >>> 16) & 255) / 255, g: ((bcol >>> 8) & 255) / 255, b: (bcol & 255) / 255, a: (bcol >>> 24) / 255 }); cBcol = bcol; this.calls.blend++; }
 
       if (isz) {
         const fmt: GPUIndexFormat = isz === 4 ? 'uint32' : 'uint16';
-        if (fmt !== cIx) { p.setIndexBuffer(this.pool!, fmt); cIx = fmt; }
-        p.drawIndexed(count, 1, u32[w + D.ixIb] / isz, i32[w + D.ixBase], 0);
-      } else if (vsid > 0) p.draw(count, 1, 0, 0);
+        if (fmt !== cIx) { p.setIndexBuffer(this.pool!, fmt); cIx = fmt; this.calls.ix++; }
+        p.drawIndexed(count, 1, u32[w + D.ixIb] / isz, i32[w + D.ixBase], kb);
+      } else if (vsid > 0) p.draw(count, 1, 0, kb);
       else p.draw(count, 1, u32[w + D.first], 0);
-      draws++;
-      if (tr) tr.push(`  #${i} ${isz ? `ix${isz * 8} ib ${u32[w + D.ixIb]} base ${i32[w + D.ixBase]}` : vsid > 0 ? 'raw' : `tvert ${u32[w + D.first]}`} n ${count} vs ${vsid} ps ${psid}${psEff !== psid ? `->${psEff}` : ''} blend ${blend.toString(16)} depth ${(depth & 63).toString(16)}${realZ ? '' : '(off)'} cull ${cull} aref ${aref.toFixed(3)} bcol ${bcol.toString(16)} tex ${t0}${v0.serial === 0 && t0 ? '(white)' : ''},${t1},${t2},${t3} smp ${s0.toString(16)} koff ${koff} poff ${poff}`);
+      draws++; this.calls.draw++;
+      if (tr) tr.push(`  #${i} ${isz ? `ix${isz * 8} ib ${u32[w + D.ixIb]} base ${i32[w + D.ixBase]}` : vsid > 0 ? 'raw' : `tvert ${u32[w + D.first]}`} n ${count} vs ${vsid} ps ${psid}${psEff !== psid ? `->${psEff}` : ''} blend ${blend.toString(16)} depth ${(depth & 63).toString(16)}${realZ ? '' : '(off)'} cull ${cull} aref ${aref.toFixed(3)} bcol ${bcol.toString(16)} tex ${t0}${v0.serial === 0 && t0 ? '(white)' : ''},${t1},${t2},${t3} smp ${s0.toString(16)} koff ${koff} kb ${kb} poff ${poff}`);
     }
     endPass();
     if (tr) {

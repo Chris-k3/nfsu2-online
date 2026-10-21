@@ -7,7 +7,7 @@
 //
 //   /test/shadercheck.html?opfs=<dir>/<sub>   the dump in OPFS (default shadercheck/shaders)
 //   &cross                                    also every game VS (ids < 1000) x every game PS
-import { ALPHA_ALWAYS, ALPHA_GREATEREQUAL, createShaderAbi, isCubePs, type ShaderAbi } from '../gpu/shader-abi';
+import { ALPHA_ALWAYS, ALPHA_GREATEREQUAL, KWIN_SIZE, HLPAR_SIZE, createShaderAbi, isCubePs, type ShaderAbi } from '../gpu/shader-abi';
 
 const q = new URLSearchParams(location.search);
 const pre = document.createElement('pre'); document.body.append(pre);
@@ -48,13 +48,15 @@ async function vsDiff(device: GPUDevice, name: string, code: string, vec: ArrayB
   const vbBytes = new Uint8Array(vec, 16, nv * stride);
   const consts = new Float32Array(vec, 16 + nv * stride, 1024);
   const want = new Float32Array(vec, 16 + nv * stride + 4096, nv * 29);
-  const head = code.match(/@vertex fn (vs_\d+)\(@builtin\(vertex_index\) vid: u32\) -> VOut \{/);
+  const head = code.match(/@vertex fn (vs_\d+)\(@builtin\(vertex_index\) vid: u32, @builtin\(instance_index\) iid: u32\) -> VOut \{/);
   if (!head) { failures.push(`${name}: no vertex entry point`); return; }
-  const cs = code.replace(head[0], 'fn vsfn(vid: u32) -> VOut {') + `
+  // the draw's K block at row KB of the window, as the renderer passes it in firstInstance
+  const KB = 37;
+  const cs = code.replace(head[0], 'fn vsfn(vid: u32, iid: u32) -> VOut {') + `
 @group(0) @binding(3) var<storage, read_write> OUTV: array<f32>;
 @compute @workgroup_size(64) fn cs(@builtin(global_invocation_id) g: vec3u) {
   if (g.x >= arrayLength(&OUTV) / 29u) { return; }
-  let o = vsfn(g.x);
+  let o = vsfn(g.x, ${KB}u);
   let b = g.x * 29u;
   for (var c = 0u; c < 4u; c++) {
     OUTV[b + c] = o.pos[c]; OUTV[b + 4u + c] = o.col0[c]; OUTV[b + 8u + c] = o.col1[c];
@@ -71,10 +73,13 @@ async function vsDiff(device: GPUDevice, name: string, code: string, vec: ArrayB
   const vb = device.createBuffer({ size: vbSize, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
   const vbCopy = new Uint8Array(vbSize); vbCopy.set(vbBytes);
   device.queue.writeBuffer(vb, 0, vbCopy);
-  const k = new ArrayBuffer(4112);
-  new Uint32Array(k, 0, 4).set([stride, 0x03020100, 0, 0]);          // tsel: stage k reads oTk
-  new Float32Array(k, 16, 1024).set(consts);
-  const kb = device.createBuffer({ size: 4112, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  // a 64 KB window (KWIN_SIZE) with the block at row KB; the rows around it hold other values,
+  // so a shader that read outside its block would differ from the CPU
+  const k = new ArrayBuffer(KWIN_SIZE);
+  new Float32Array(k).fill(-7.25);
+  new Uint32Array(k, KB * 16, 4).set([stride, 0x03020100, 0, 0]);    // tsel: stage k reads oTk
+  new Float32Array(k, KB * 16 + 16, 1024).set(consts);
+  const kb = device.createBuffer({ size: KWIN_SIZE, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   device.queue.writeBuffer(kb, 0, k);
   const out = device.createBuffer({ size: nv * 29 * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
   const rd = device.createBuffer({ size: nv * 29 * 4, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
@@ -242,15 +247,19 @@ var<private> KILL: u32;
   device.queue.writeBuffer(ib, 0, inputs);
   const ob = mk(np * 20, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
   const rd = mk(np * 20, GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST);
+  // the lit pixel shaders also read H, the other cars' headlights: none (n = 0), as the
+  // reference interpreter has no such term (a web-only addition, gpu-abi.md section 3)
+  const hb = /@group\(0\) @binding\(3\)/.test(code) ? mk(HLPAR_SIZE, GPUBufferUsage.UNIFORM) : null;
   const bg = device.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries: [
-    { binding: 2, resource: { buffer: pb } }, { binding: 4, resource: { buffer: ib } }, { binding: 5, resource: { buffer: ob } }] });
+    { binding: 2, resource: { buffer: pb } }, { binding: 4, resource: { buffer: ib } }, { binding: 5, resource: { buffer: ob } },
+    ...(hb ? [{ binding: 3, resource: { buffer: hb } }] : [])] });
   const enc = device.createCommandEncoder();
   const pass = enc.beginComputePass(); pass.setPipeline(pipe); pass.setBindGroup(0, bg); pass.dispatchWorkgroups(Math.ceil(np / 64)); pass.end();
   enc.copyBufferToBuffer(ob, 0, rd, 0, np * 20);
   device.queue.submit([enc.finish()]);
   await rd.mapAsync(GPUMapMode.READ);
   const got = new Float32Array(rd.getMappedRange().slice(0)); rd.unmap();
-  pb.destroy(); ib.destroy(); ob.destroy(); rd.destroy();
+  pb.destroy(); ib.destroy(); ob.destroy(); rd.destroy(); hb?.destroy();
   const aref = new Float32Array(vec, 16, 1)[0];
   const TOL = 1e-3;                         // relative, as for the colours below
   let bad = 0;

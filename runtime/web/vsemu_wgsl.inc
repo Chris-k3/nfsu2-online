@@ -49,10 +49,14 @@ static const char W_VOUT[] =
     "  @location(2) uv0: vec4f, @location(3) uv1: vec4f, @location(4) uv2: vec4f, @location(5) uv3: vec4f,\n"
     "  @location(6) fog: f32,\n"
     "}\n";
+/* K is a 64 KB window of the frame's VS constant arena, bound once for many
+ * draws; a draw's block {stride, tsel, base, pad; c[0..255]} starts at row
+ * kb = instance_index (the draw's firstInstance), so a draw no longer needs a
+ * bind group of its own (gpu-abi.md section 3). */
 static const char W_VSPAR[] =
-    "struct VSPar { stride: u32, tsel: u32, base: u32, pad: u32, c: array<vec4f, 256> }\n"
+    "struct VSWin { c: array<vec4f, " WSTR(GW_KWIN_ROWS) "> }\n"
     "@group(0) @binding(0) var<storage, read> VB: array<u32>;\n"
-    "@group(0) @binding(1) var<uniform> K: VSPar;\n";
+    "@group(0) @binding(1) var<uniform> K: VSWin;\n";
 /* Byte-addressed little-endian loads from the vertex buffer at any alignment
  * (a misaligned u32 combines two words).  The same text is used by the pull
  * test module, so the compute test checks exactly what the VS modules run. */
@@ -183,14 +187,15 @@ static void w_reg(WCtx *x, char *o, size_t cap, unsigned tok, unsigned rel){
                 if (RT(rel) == R_LOOP) comp = 0;
                 else comp = SWCH[SWIZ(rel) & 3u];
             }
-            if (comp){ x->a0 = 1; snprintf(o, cap, "K.c[clamp(a0.%c + %d, 0, 255)]", comp, idx); }
-            else     { x->aL = 1; snprintf(o, cap, "K.c[clamp(aL + %d, 0, 255)]", idx); }
+            if (comp){ x->a0 = 1; snprintf(o, cap, "K.c[kb + 1u + u32(clamp(a0.%c + %d, 0, 255))]", comp, idx); }
+            else     { x->aL = 1; snprintf(o, cap, "K.c[kb + 1u + u32(clamp(aL + %d, 0, 255))]", idx); }
             return;
         }
         if (idx >= 0 && idx < 256 && (p->defmask[idx >> 5] & (1u << (idx & 31)))){
             x->cdef[idx >> 5] |= 1u << (idx & 31);
             snprintf(o, cap, "c%d", idx);
-        } else snprintf(o, cap, "%s.c[%d]", vs ? "K" : "P", idx & (vs ? 255 : 31));
+        } else if (vs) snprintf(o, cap, "K.c[kb + %du]", (idx & 255) + 1);   /* row 0 of the block is its header */
+        else snprintf(o, cap, "P.c[%d]", idx & 31);
         return; }
     default: x->Z = 1; snprintf(o, cap, "Z"); return;
     }
@@ -601,7 +606,7 @@ int vs_to_wgsl(const VSProg *p, int id, const int decl[16][2], char *out, size_t
                 char row[48];
                 if (ty2 == R_TEMP){ x.r |= 1u << (nn2 & 31); snprintf(row, sizeof row, "r%d", nn2 & 31); }
                 else if (ty2 == R_INPUT){ x.v |= 1u << (nn2 & 15); snprintf(row, sizeof row, "v%d", nn2 & 15); }
-                else snprintf(row, sizeof row, "K.c[%d]", nn2 & 255);
+                else snprintf(row, sizeof row, "K.c[kb + %du]", (nn2 & 255) + 1);
                 wb_put(&eb, "%sdot((%s)%s, (%s)%s)", rr ? ", " : "", s0, sw2, row, sw2);
             }
             for (int rr = rows; rr < 4; rr++) wb_put(&eb, ", %s", rr == 3 ? "1.0" : "0.0");
@@ -642,8 +647,12 @@ int vs_to_wgsl(const VSProg *p, int id, const int decl[16][2], char *out, size_t
     wb_put(&ob, "// vs_%d: vs_%u_%u, %u instructions, vs_kmax %d\n", id, p->version >> 8, p->version & 0xFF,
            p->n, vs_kmax(p));
     wb_put(&ob, "%s%s%s%s", W_VOUT, W_VSPAR, W_PULL, W_TPICK);
-    wb_put(&ob, "@vertex fn vs_%d(@builtin(vertex_index) vid: u32) -> VOut {\n", id);
-    wb_put(&ob, "  let B = K.base + vid * K.stride;\n");
+    wb_put(&ob, "@vertex fn vs_%d(@builtin(vertex_index) vid: u32, @builtin(instance_index) iid: u32) -> VOut {\n", id);
+    /* kb <= GW_KWIN_ROWS - 257 (the renderer's window choice): every row
+     * below, relative addressing's clamp included, stays inside the window */
+    wb_put(&ob, "  let kb = iid;\n"
+                "  let KH = bitcast<vec4u>(K.c[kb]);\n"
+                "  let B = KH.z + vid * KH.x;\n");
     w_decls(&ob, &x, 32);
     for (int i = 0; i < 16; i++)
         if ((x.v & (1u << i)) && !(vdecl & (1u << i)))
@@ -660,10 +669,10 @@ int vs_to_wgsl(const VSProg *p, int id, const int decl[16][2], char *out, size_t
     wb_put(&ob, "  var o: VOut;\n"
                 "  o.pos = oPos;\n"
                 "  o.col0 = oD0; o.col1 = oD1;\n"
-                "  o.uv0 = tpick(K.tsel & 3u, oT0, oT1, oT2, oT3);\n"
-                "  o.uv1 = tpick((K.tsel >> 8u) & 3u, oT0, oT1, oT2, oT3);\n"
-                "  o.uv2 = tpick((K.tsel >> 16u) & 3u, oT0, oT1, oT2, oT3);\n"
-                "  o.uv3 = tpick((K.tsel >> 24u) & 3u, oT0, oT1, oT2, oT3);\n"
+                "  o.uv0 = tpick(KH.y & 3u, oT0, oT1, oT2, oT3);\n"
+                "  o.uv1 = tpick((KH.y >> 8u) & 3u, oT0, oT1, oT2, oT3);\n"
+                "  o.uv2 = tpick((KH.y >> 16u) & 3u, oT0, oT1, oT2, oT3);\n"
+                "  o.uv3 = tpick((KH.y >> 24u) & 3u, oT0, oT1, oT2, oT3);\n"
                 "  o.fog = oFog.x;\n"
                 "  return o;\n}\n");
     if (ob.ok) rc = (int)ob.n;
@@ -681,10 +690,11 @@ int wgsl_tvert_module(char *out, size_t cap){
     wb_put(&ob, "// vs_0: TVert pass-through (CPU-transformed vertices, metal.m vmain)\n");
     wb_put(&ob, "%s%s", W_VOUT, W_VSPAR);
     /* TVert (gfx.h): pos xyzw, oD0, oD1, t[4][4]: 28 f32 = 112 bytes.  The
-     * renderer draws with firstVertex = MDraw.first and K.base = 0. */
+     * renderer draws with firstVertex = MDraw.first from the start of the
+     * TVert arena: no K block. */
     wb_put(&ob, "fn ld4(w: u32) -> vec4f { return bitcast<vec4f>(vec4u(VB[w], VB[w + 1u], VB[w + 2u], VB[w + 3u])); }\n");
     wb_put(&ob, "@vertex fn vs_0(@builtin(vertex_index) vid: u32) -> VOut {\n"
-                "  let w = (K.base >> 2u) + vid * 28u;\n"
+                "  let w = vid * 28u;\n"
                 "  var o: VOut;\n"
                 "  o.pos = ld4(w);\n"
                 "  o.col0 = ld4(w + 4u); o.col1 = ld4(w + 8u);\n"

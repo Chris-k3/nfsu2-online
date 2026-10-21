@@ -68,6 +68,8 @@ export interface RendererWindow {
   /** GPU time per frame (gpuTiming), ms: p50, p95, p99, max; empty when off */
   gpuMs: number[];
   drawsAvg: number; passesAvg: number;
+  /** WebGPU calls per frame by kind (Encoder.calls) */
+  callsAvg: Record<string, number>;
 }
 
 export interface Renderer {
@@ -186,7 +188,7 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
   let frames = 0, encMsTotal = 0, encMsLast = 0, drawsLast = 0, passesLast = 0, directFrames = 0;
   // the benchmark window (Renderer.window): per-frame samples, bounded
   const WIN_MAX = 1 << 17;
-  let winEnc: number[] = [], winGpu: number[] = [], winDraws = 0, winPasses = 0;
+  let winEnc: number[] = [], winGpu: number[] = [], winDraws = 0, winPasses = 0, winCalls = { ...enc.calls };
   const dumpWaiters: { name: string; resolve: (b: Blob) => void }[] = [];
   const pending = new Set<Promise<unknown>>();
 
@@ -419,8 +421,10 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
         return [q(0.5), q(0.95), q(0.99), s[s.length - 1]];
       };
       const n = winEnc.length;
-      const w: RendererWindow = { frames: n, encodeMs: pct(winEnc), gpuMs: pct(winGpu), drawsAvg: n ? winDraws / n : 0, passesAvg: n ? winPasses / n : 0 };
-      if (reset) { winEnc = []; winGpu = []; winDraws = 0; winPasses = 0; }
+      const callsAvg: Record<string, number> = {};
+      for (const [k, v] of Object.entries(enc.calls)) callsAvg[k] = n ? +((v - winCalls[k as keyof typeof winCalls]) / n).toFixed(1) : 0;
+      const w: RendererWindow = { frames: n, encodeMs: pct(winEnc), gpuMs: pct(winGpu), drawsAvg: n ? winDraws / n : 0, passesAvg: n ? winPasses / n : 0, callsAvg };
+      if (reset) { winEnc = []; winGpu = []; winDraws = 0; winPasses = 0; winCalls = { ...enc.calls }; }
       return w;
     },
     dump: (name: string) => new Promise<Blob>(resolve => dumpWaiters.push({ name, resolve })),

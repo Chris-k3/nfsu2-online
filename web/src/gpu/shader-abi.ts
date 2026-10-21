@@ -3,8 +3,11 @@
 // the override constants.  The renderer and the shader check both build their
 // pipelines from here, so the check validates exactly what the game will run.
 
-/** VSPar: {stride, tsel, base, pad} + 256 vec4f; the K binding window is always this big. */
+/** A draw's VS constant block: {stride, tsel, base, pad} + 256 vec4f (the rows it may read). */
 export const VSPAR_SIZE = 4112;
+/** The K binding: a 64 KB window of the frame's VS constant arena (gpu_proto.h GW_KWIN_ROWS rows); a draw's
+ *  block starts at row firstInstance of it, at most KWIN_SIZE - VSPAR_SIZE bytes in. */
+export const KWIN_SIZE = 65536;
 /** PSPar: {aref, usec, pad0, pad1}, proj, 32 vec4f, fog. */
 export const PSPAR_SIZE = 560;
 /** HLPar (gpu_proto.h GwHL): the other cars' headlights, {n, s, o, pad} + 8 x {mat4x4f, vec4f}. */
@@ -48,7 +51,7 @@ export function createShaderAbi(device: GPUDevice): ShaderAbi {
     label: 'abi.group0',
     entries: [
       { binding: 0, visibility: V, buffer: { type: 'read-only-storage', hasDynamicOffset: false } },
-      { binding: 1, visibility: V, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: VSPAR_SIZE } },
+      { binding: 1, visibility: V, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: KWIN_SIZE } },
       { binding: 2, visibility: F, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: PSPAR_SIZE } },
       { binding: 3, visibility: F, buffer: { type: 'uniform', hasDynamicOffset: false, minBindingSize: HLPAR_SIZE } },
     ],

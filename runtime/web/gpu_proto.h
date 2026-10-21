@@ -20,7 +20,7 @@
 #include <stddef.h>
 
 #define GW_MAGIC   0x55504757u          /* "WGPU" */
-#define GW_VERSION 2u                   /* 2: the headlights block in the K arena (GwHL) */
+#define GW_VERSION 3u                   /* 2: the headlights block in the K arena (GwHL); 3: K blocks 16-byte aligned, bound in windows */
 #define GW_NBUF    2                    /* record buffers: one being written, one handed off */
 
 /* GwDraw.kind */
@@ -41,7 +41,7 @@ typedef struct {
     uint32_t psci;        /* index of the PS constant block in the frame's pool */
     int32_t  vsid;        /* GPU vertex shader id (0 = TVert path) */
     uint32_t rawoff;      /* raw arena byte offset (raw draw) or pool offset of vertex 0 (indexed) */
-    uint32_t koff;        /* VS constant block offset in the K arena (256-aligned) */
+    uint32_t koff;        /* VS constant block offset in the K arena (16-byte aligned) */
     float    proj[4];     /* per stage: TEXCOORDINDEX + 16 * projection mode */
     uint32_t smp[4];      /* packed sampler keys (com.c smp_push) */
     uint32_t blit_src;    /* GW_BLIT: source texture id (0 = back buffer) */
@@ -154,6 +154,12 @@ typedef struct { float t[16]; float col[4]; } GwHLight;
 typedef struct { uint32_t n; float s, o, pad; GwHLight l[GW_HL_MAX]; } GwHL;
 #define GW_K_HL     256u
 #define GW_HL_BYTES 656u
+
+/* The page binds the VS constant arena (K) in windows of GW_KWIN_ROWS rows of
+ * 16 bytes: 64 KB, the default maxUniformBufferBindingSize.  A draw's block
+ * (16-byte header + c[0..255]) starts at row firstInstance of its window, so
+ * consecutive draws share one bind group (gpu-abi.md section 3). */
+#define GW_KWIN_ROWS 4096u
 
 /* Layout word: changes whenever a struct above changes shape. */
 #define GW_LAYOUT ((uint32_t)(sizeof(GwDraw) | sizeof(GwFrame) << 8 | (sizeof(GwCtl) & 0xFFF) << 16) ^ (GW_VERSION << 28))
