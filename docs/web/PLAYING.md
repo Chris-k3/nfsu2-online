@@ -240,8 +240,10 @@ Good to know:
   Nothing is checked and nothing is kept: there are no accounts. Type a password you use nowhere else: the game
   sends it to the server only lightly scrambled (the server never reads it).
 - **Kept on the server:** only race results per name (Rankings) and your EA Messenger friends list (names). Never
-  a password: the server does not read it. Players you block stay blocked while you are online; the block is not
+  your password: the server does not read it. Players you block stay blocked while you are online; the block is not
   kept after that.
+- **Game passwords:** the game asks for the password of a game created with one, and only the same password joins
+  it. The server keeps no copy of it, only a check value for that game while it is open, and never shows or logs it.
 - **Others see** your name, your game, your chat and your results, never your real address.
 - **Every track is open** when you create a game, either direction, whatever your career has unlocked, and a new
   game starts at **2 laps** (the game's own default was 3; Options, Laps changes it). The same goes for the game's
@@ -260,8 +262,7 @@ Good to know:
   browser.
 - **EA Messenger:** Search finds players on this server; Send Message works. To become friends, both send a
   friend request (the other's request shows the asker in your list: open them, Send Friend Request).
-- **Not yet:** game passwords (a password game is joined like an open one); the points table after a ranked race
-  stays empty (the race still counts in Rankings).
+- **Not yet:** the points table after a ranked race stays empty (the race still counts in Rankings).
 - **Who is on:** Online on the start page shows how many play on this server now, and how many of them are in Online
   mode (in its menus or racing). Only the two numbers: no names.
 - Turning it off: Online, Online mode on the start page (the game then cannot connect).

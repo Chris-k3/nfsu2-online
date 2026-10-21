@@ -15,7 +15,8 @@
 //! Secrets: the login messages carry PASS (the account password, XOR-masked or encrypted, both reversible: as good
 //! as plain text), REGKEY (the CD key) and PSES (a checksum of the player's game files).  [`parse_fields`] takes a
 //! test of keys to skip, and the lobby skips [`SECRET_KEYS`] for every message: their values are never decoded, so
-//! nothing after the parser can keep or log one.  [`redact_body`] is for the dev-only frame trace (trace.rs).
+//! nothing after the parser can keep or log one.  The one exception is PASS in gcre and gjoi, which is a game's own
+//! password there (the lobby keeps only a digest of it).  [`redact_body`] is for the dev-only frame trace (trace.rs).
 
 use std::borrow::Cow;
 
@@ -24,7 +25,8 @@ use nfsu2_util::{js, json};
 
 use crate::jsx;
 
-/// keys whose values the server never reads: the account password, the CD key, the file checksum
+/// keys whose values the server never reads: the account password, the CD key, the file checksum (but PASS in gcre
+/// and gjoi: a game's password)
 pub const SECRET_KEYS: [&str; 3] = ["PASS", "REGKEY", "PSES"];
 
 pub const HDR: usize = 12;

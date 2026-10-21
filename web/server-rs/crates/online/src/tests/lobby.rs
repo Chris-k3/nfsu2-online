@@ -3,8 +3,8 @@
 //! bytes; PASS, REGKEY and PSES never kept), personas (one holder per name, the LKEY the buddy login gets), the config
 //! blob, rooms and chat (with the flood mute), the game list, a game from creation to the race start (+ses with every
 //! player's virtual address, the same AUTH for all), the countdown of a start before every player is ready and the kick
-//! of those still not ready, the lobby link closing at the start without ending the race, leaving and deleting, the
-//! buddy login, and the limits.
+//! of those still not ready, the lobby link closing at the start without ending the race, game passwords, leaving and
+//! deleting, the buddy login, and the limits.
 
 use super::world::{C, Opts, World, ip};
 use crate::aries::{Fields, V, encode_fields};
@@ -195,6 +195,101 @@ fn a_game() {
     assert_eq!(w.c(a2).l("gsea").g("COUNT"), "0", "a started race is not listed");
     w.advance(31.0 * 60_000.0);
     assert_eq!(w.core.lobby.games.len(), 0, "forgotten after raceMs");
+}
+
+// game passwords: listed with the password bit, asked for on every join (by name or id), in no reply, log or record
+#[test]
+fn game_passwords() {
+    const PASSWORD: u32 = 1 << 16;
+    let mut w = world();
+    let cs: Vec<C> = ["Alpha", "Bravo", "Charlie"]
+        .iter()
+        .enumerate()
+        .map(|(i, n)| {
+            let g = w.client(&format!("10.77.0.{}", i + 2));
+            w.login(g, n)
+        })
+        .collect();
+    let (a, b, c) = (cs[0], cs[1], cs[2]);
+    let sys = |m: &super::world::M| m.g("SYSFLAGS").parse::<u32>().unwrap();
+    let pw = "Room Secret:%=42";
+    // the game's gcre: the password, SYSFLAGS without the bit (SPEED2.EXE 0x58d580)
+    w.send(a, "gcre", fields![("NAME", "Locked"), ("SYSFLAGS", 0), ("PASS", pw), ("PARAMS", "TRACK=4011")]);
+    assert_eq!(sys(w.c(a).l("gcre")) & PASSWORD, PASSWORD);
+    let id: u64 = w.c(a).l("gcre").g("IDENT").parse().unwrap();
+    w.send(b, "gsea", fields![("START", 0), ("COUNT", 20)]);
+    assert_eq!(sys(w.c(b).l("+gam")) & PASSWORD, PASSWORD, "listed as a game with a password");
+    // a join refused leaves the player in its own game
+    w.send(b, "gcre", fields![("NAME", "Other"), ("PARAMS", "TRACK=4011")]);
+    let other: u64 = w.c(b).l("gcre").g("IDENT").parse().unwrap();
+    let in_game = |w: &World, name: &str| {
+        let s = w.core.lobby.sessions.iter().find(|s| w.core.lobby.s(**s).persona.as_deref() == Some(name)).unwrap();
+        w.core.lobby.s(*s).game
+    };
+    for f in [
+        fields![("NAME", "Locked")],
+        fields![("IDENT", id), ("PASS", "")],
+        fields![("NAME", "Locked"), ("PASS", "wrong")],
+        fields![("IDENT", id), ("PASS", pw.to_lowercase())],
+    ] {
+        w.advance(1000.0);
+        w.send(b, "gjoi", f);
+        assert_eq!(w.c(b).l("gjoi").code, "pass");
+        assert_eq!(w.core.lobby.games[&id].players.len(), 1);
+        assert_eq!(in_game(&w, "Bravo"), Some(other));
+    }
+    // a gset clears no password, the creator's or a player's
+    w.send(a, "gset", fields![("SYSFLAGS", 0), ("PASS", "")]);
+    w.advance(1000.0);
+    w.send(b, "gjoi", fields![("IDENT", id), ("PASS", pw)]);
+    assert_eq!(w.c(b).l("gjoi").code, "");
+    assert_eq!(w.c(b).l("gjoi").g("COUNT"), "2");
+    assert!(!w.core.lobby.games.contains_key(&other), "Bravo's own game ended as Bravo left it");
+    w.send(b, "gset", fields![("SYSFLAGS", 0), ("PASS", "")]);
+    w.send(c, "gjoi", fields![("NAME", "Locked")]);
+    assert_eq!(w.c(c).l("gjoi").code, "pass");
+    w.send(c, "gjoi", fields![("NAME", "Locked"), ("PASS", pw)]);
+    assert_eq!(w.c(c).l("gjoi").code, "");
+    // a join into the game one is in changes nothing (the creator's does not end it)
+    w.send(a, "gjoi", fields![("NAME", "Locked"), ("PASS", pw)]);
+    assert_eq!(w.c(a).l("gjoi").g("COUNT"), "3");
+    w.advance(1000.0);
+    w.send(b, "gjoi", fields![("IDENT", id), ("PASS", pw)]);
+    let g = &w.core.lobby.games[&id];
+    assert_eq!(g.players.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["Alpha", "Bravo", "Charlie"]);
+    assert_eq!(g.sys_flags & PASSWORD, PASSWORD);
+    // the password: in no record, log line or message
+    assert!(!format!("{g:?}").contains(pw));
+    assert!(!w.text().join("\n").contains(pw));
+    for x in [a, b, c] {
+        for m in &w.c(x).msgs {
+            assert!(!m.f.has("PASS") && !m.f.has("PASSWORD"), "{} has a password field", m.kind);
+        }
+        // (as sent or escaped: "Room Secret%3a%25%3d42")
+        assert!(!w.c(x).raw.windows(11).any(|r| r == b"Room Secret"));
+    }
+}
+
+// game passwords: an empty one is none, and the bit alone (from a creator, not the game) makes no password game
+#[test]
+fn game_passwords_open() {
+    const PASSWORD: u32 = 1 << 16;
+    let mut w = world();
+    let (ga, gb) = (w.client("10.77.0.2"), w.client("10.77.0.3"));
+    let a = w.login(ga, "Alpha");
+    let b = w.login(gb, "Bravo");
+    for (name, f) in [("Empty", fields![("PASS", "")]), ("Bit", fields![("SYSFLAGS", PASSWORD)])] {
+        let mut gf = fields![("NAME", name), ("PARAMS", "TRACK=4011")];
+        gf.extend(f);
+        w.send(a, "gcre", gf);
+        assert_eq!(w.c(a).l("gcre").g("SYSFLAGS").parse::<u32>().unwrap() & PASSWORD, 0, "{name}");
+        w.advance(1000.0);
+        w.send(b, "gjoi", fields![("NAME", name)]);
+        assert_eq!(w.c(b).l("gjoi").code, "", "{name}");
+        w.send(b, "glea", vec![]);
+        w.send(a, "gdel", vec![]);
+        w.advance(1000.0);
+    }
 }
 
 // the game list: every open game but a private one, the Filter's games first

@@ -28,8 +28,10 @@
 //! (it logs in again and reports the result: rank).  A started game therefore outlives its players' sessions, for
 //! `race_ms` at most.
 //!
-//! Never read: PASS (the password), REGKEY (the CD key), PSES (a checksum of the player's files): aries.rs passes
-//! over their values.  Never relayed: the game's MID (its adapter address).  Every address in a reply is the
+//! Never read: PASS (the account password), REGKEY (the CD key), PSES (a checksum of the player's files): aries.rs
+//! passes over their values.  PASS in gcre and gjoi is a game's own password instead (SPEED2.EXE 0x58d5d0,
+//! 0x58d7bb): read there, and kept only as a digest under a key of the game's own (RoomPassword), never in a reply,
+//! the log or a file.  Never relayed: the game's MID (its adapter address).  Every address in a reply is the
 //! browser's virtual one, which the switch wrote into the frame.
 //!
 //! What one client can make the lobby do to the others (the Online audit, ONL-2, ONL-5, ONL-7, ONL-9): sessions are
@@ -50,12 +52,13 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
+use hmac::{Hmac, Mac};
 use indexmap::{IndexMap, IndexSet};
 use md5::Md5;
 use nfsu2_util::{js, rand};
 use sha2::{Digest, Sha256};
 
-use crate::aries::{FieldMap, Fields, FrameReader, MAX_FRAME, V, encode_fields, encode_frame};
+use crate::aries::{FieldMap, Fields, FrameReader, MAX_FRAME, V, encode_fields, encode_frame, is_secret};
 use crate::core::Core;
 use crate::jsx::{self, clean_text, day, lower, valid_name};
 use crate::stats::{RACE_TYPES, Race, RacePlayer, decode_result};
@@ -179,7 +182,9 @@ pub fn config_fields() -> Fields {
 
 /// OPFLAG bit of a player who is ready (gset USERFLAGS, server.dll)
 const READY: u32 = 1 << 27;
-/// SYSFLAGS bits of a game with a password and of a started one
+/// SYSFLAGS bits of a game with a password and of a started one.  The password bit is the server's: the game's gcre
+/// never sets it (only RANKED, 0x58d580), and its game list asks for the password of a game that has it before it
+/// joins (0x4f1713); a wrong one is "pass" (0x49ebc3, 0x55911e)
 const PASSWORD: u32 = 1 << 16;
 const ACTIVE: u32 = 1 << 19;
 /// SYSFLAGS bit of a ranked game (Options: Game Type Ranked; the game then asks for 3 players at least, and its
@@ -279,6 +284,7 @@ pub struct Game {
     pub min_size: f64,
     pub cust_flags: u32,
     pub sys_flags: u32,
+    pub password: Option<RoomPassword>,
     pub params: String,
     pub players: Vec<Player>,
     /// when the race started (0: not started)
@@ -287,6 +293,33 @@ pub struct Game {
     reports: Vec<(u32, String)>,
     result: Option<String>,
     pub ranked: bool,
+}
+
+/// a game's password as the lobby keeps it: an HMAC under a random key of the game's own, so that what the game
+/// holds is no password and tells nothing of the same password in another game
+#[derive(Clone, Debug)]
+pub struct RoomPassword {
+    key: [u8; 32],
+    tag: [u8; 32],
+}
+
+impl RoomPassword {
+    fn new(pass: &str) -> RoomPassword {
+        let mut key = [0; 32];
+        rand::fill(&mut key);
+        let mut tag = [0; 32];
+        tag.copy_from_slice(&Self::mac(&key, pass).finalize().into_bytes());
+        RoomPassword { key, tag }
+    }
+    fn mac(key: &[u8; 32], pass: &str) -> Hmac<Sha256> {
+        let mut m = Hmac::<Sha256>::new_from_slice(key).expect("any key length");
+        m.update(pass.as_bytes());
+        m
+    }
+    /// the same password (compared in constant time)
+    pub fn matches(&self, pass: &str) -> bool {
+        Self::mac(&self.key, pass).verify_slice(&self.tag).is_ok()
+    }
 }
 
 pub struct Room {
@@ -762,8 +795,12 @@ impl Core {
             if !four_printable(&m.kind) {
                 return self.ldrop(s, "not the lobby protocol (a message kind that is not 4 letters)");
             }
-            // PASS, REGKEY, PSES: never decoded (None)
-            let f = FieldMap::parse(&m.body);
+            // PASS, REGKEY, PSES: never decoded (None); but PASS in gcre and gjoi, a game's password
+            let f = if m.kind == "gcre" || m.kind == "gjoi" {
+                FieldMap::parse_with(&m.body, |k| k != "PASS" && is_secret(k))
+            } else {
+                FieldMap::parse(&m.body)
+            };
             self.message(s, &m.kind, &f);
         }
         if let Some(e) = self.lobby.s(s).reader.error.clone() {
@@ -1716,6 +1753,8 @@ impl Core {
             }
         }
         let sys_flags = jsx::to_uint32(f.num("SYSFLAGS", 0.0)) & !ACTIVE;
+        let pass = f.str("PASS");
+        let password = (!pass.is_empty()).then(|| RoomPassword::new(pass));
         let l = self.lobby.l;
         let size = |k: &str, def: f64| l.game_size.min(2f64.max(jsx::to_int32(f.num(k, def)) as f64));
         let id = self.lobby.next_game;
@@ -1732,8 +1771,8 @@ impl Core {
             max_size: size("MAXSIZE", 4.0),
             min_size: size("MINSIZE", 2.0),
             cust_flags: jsx::to_uint32(f.num("CUSTFLAGS", 0.0)),
-            // a password of the game's own: not kept, so a passworded game is listed as an open one
-            sys_flags: sys_flags & !PASSWORD,
+            sys_flags: (sys_flags & !PASSWORD) | if password.is_some() { PASSWORD } else { 0 },
+            password,
             params: jsx::slice16(f.str("PARAMS"), 256).to_string(),
             players: vec![self.member(s)],
             started: 0.0,
@@ -1820,9 +1859,6 @@ impl Core {
         if !self.lobby.sm(s).acts.take(now, 1.0) {
             return self.lsend(s, "gjoi", &[], "full");
         }
-        if self.lobby.s(s).game.is_some() {
-            self.game_leave(s, None);
-        }
         let ident = f.num("IDENT", f64::NAN);
         let by_id = (ident.is_finite() && ident >= 0.0 && ident.fract() == 0.0)
             .then_some(ident as u64)
@@ -1834,6 +1870,19 @@ impl Core {
         }
         if x.players.len() as f64 >= x.max_size {
             return self.lsend(s, "gjoi", &[], "full");
+        }
+        if x.password.as_ref().is_some_and(|p| !p.matches(f.str("PASS"))) {
+            return self.lsend(s, "gjoi", &[], "pass");
+        }
+        // a join refused leaves the player where it was; one into the game it is in changes nothing
+        match self.lobby.s(s).game {
+            Some(cur) if cur == g => {
+                let gf = self.game_fields(g, vec![]);
+                return self.lsend(s, "gjoi", &gf, "");
+            }
+            // a game the player never left (a crash, a back key)
+            Some(_) => self.game_leave(s, None),
+            None => {}
         }
         let m = self.member(s);
         let x = self.lobby.games.get_mut(&g).expect("live");
