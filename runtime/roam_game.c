@@ -2681,6 +2681,20 @@ static void assign(CPU *c, int64_t host){
     }
 }
 
+/* a different world: every slot of the old one is gone */
+static void world_changed(CPU *c, uint32_t w){
+    if (g_world_seen){
+        int any = 0; for (int k = 0; k < NSLOT; k++) if (g_sl[k].st != SL_FREE || g_sl[k].car) any = 1;
+        if (any || g_npending) rlog("[roam] f=%ld world 0x%08x -> 0x%08x: friends' cars gone with it\n", rh_frame(), g_world_seen, w);
+        world_gone();
+        flush_unloads(c);                           /* before the next world loads its own cars */
+        memset(&g_tag, 0, sizeof g_tag);            /* never touch the old HUD's objects */
+        memset(&g_mm, 0, sizeof g_mm);              /* (nor its minimap's: the next HUD may be at its address) */
+        g_pass.first = g_pass.end = 0;            /* its triggers too */
+    }
+    g_world_seen = w;
+}
+
 void roam_game_frame(CPU *c){
     if (!g_inited) init_once(c);
     if (!O.on) return;
@@ -2688,19 +2702,7 @@ void roam_game_frame(CPU *c){
     int64_t host = roam_plat_now_us();
     int in_roam = roaming();
     uint32_t w = world();
-    /* a different world: every slot of the old one is gone */
-    if (w != g_world_seen){
-        if (g_world_seen){
-            int any = 0; for (int k = 0; k < NSLOT; k++) if (g_sl[k].st != SL_FREE || g_sl[k].car) any = 1;
-            if (any || g_npending) rlog("[roam] f=%ld world 0x%08x -> 0x%08x: friends' cars gone with it\n", rh_frame(), g_world_seen, w);
-            world_gone();
-            flush_unloads(c);                           /* before the next world loads its own cars */
-            memset(&g_tag, 0, sizeof g_tag);            /* never touch the old HUD's objects */
-            memset(&g_mm, 0, sizeof g_mm);              /* (nor its minimap's: the next HUD may be at its address) */
-            g_pass.first = g_pass.end = 0;            /* its triggers too */
-        }
-        g_world_seen = w;
-    }
+    if (w != g_world_seen) world_changed(c, w);
     if (g_npending && (!w || in_roam)) flush_unloads(c);      /* the old world's cars are gone */
     /* sync clock */
     float wdt = rd32(G_FLOW) == 6u ? MRF32(G_WORLDDT) : 0.f;
@@ -3409,6 +3411,64 @@ static struct { uint32_t name, count; const char *what; int said; } g_pools[] = 
     { 0x00790b18u, 256, "minimap visuals" },                       /* "MinimapEntity" */
     { 0x00790b08u, 256, "minimap icons" },                         /* "MinimapElements" */
 };
+/* The Cars pool's extra memory.  A track load adds the difference between
+ * its size (0x7FA9D4 table, free roam's raised to O.carpool_kb) and the
+ * startup size (+0x68) to the pool as one block (0x610750: car loader +0x6C,
+ * +0x70), and the track's unload (0x580EF0, when the next track is another
+ * one: a URL or drag race, a cover shoot, the front end) gives it back
+ * (0x63A6F0): it unloads the loader's unused rides, takes the block out of
+ * the pool (0x43F9E0) and frees it.  That removal only works when the block
+ * is one free block again; when it is not, it does nothing and the block is
+ * freed anyway, with the pool's free list still running through it, and the
+ * next track load walked into it (0x43FA50: "memory access out of bounds",
+ * or a hang; the 2026-10-21 crash reports, races entered from free roam
+ * with every friend's car slot in use).  After free roam with friends the
+ * block is not free again: friends' rides (still held then: the World is
+ * gone, 0x5815C0 runs first, but roam_game_frame unloads them only on the
+ * next frame) and about 23 MB more that stay in the pool after every ride
+ * is unloaded.  So: friends' rides go first, the loader's unused rides go
+ * as the game's own loop would, and the block is given back only when it
+ * has become one free block; otherwise it stays in the pool (still recorded
+ * at +0x6C), and the next track load adds nothing while base and block
+ * cover its size (roam_game_pool_grow).  The pool then keeps free roam's
+ * size through races and the front end.  roam.c, on the guest thread:
+ * 1 = run the game's own 0x63A6F0. */
+#define FN_LOADER_FREE  0x0063a000u   /* thiscall CarLoader (entry, 1): an unused ride's models out (0x63A6F0's loop) */
+static int extra_is_free(uint32_t p, uint32_t x, uint32_t xn){
+    uint32_t head = p + 4u, b = MR32(head);
+    for (int n = 0; b != head && ok(b, 0x10) && n < 1000000; n++, b = MR32(b))
+        if (b == x) return MR32(b + 8u) == xn;
+    return 0;
+}
+int roam_game_loader_release(CPU *c){
+    if (!g_inited || !O.on) return 1;
+    uint32_t p = rd32(G_CARS_POOL), x = rd32(G_CARLOADER + 0x6cu), xn = rd32(G_CARLOADER + 0x70u);
+    if (!x || !ok(p, 0x40)) return 1;
+    uint32_t w = world();
+    if (!w && (g_world_seen || g_npending)){
+        rlog("[roam] f=%ld the car loader gives back its extra memory: friends' rides go first\n", rh_frame());
+        if (g_world_seen) world_changed(c, 0);
+        else flush_unloads(c);
+    }
+    uint32_t head = G_CARLOADER + 0x58u, e = rd32(head);
+    for (int n = 0; e && e != head && n < 4 * RIDE_ENTRIES; n++){
+        uint32_t nx = rd32(e), a2[2] = { e, 1 };
+        rh_call(c, FN_LOADER_FREE, G_CARLOADER, 0, 2, a2);
+        e = nx;
+    }
+    if (extra_is_free(p, x, xn)) return 1;
+    rlog("[roam] f=%ld the car pool's extra %u KB is still in use (%.2f of %.2f MB used): it stays in the pool\n", rh_frame(),
+         xn / 1024u, MR32(p + 0x28u) / 1048576.0, MR32(p + 0x24u) / 1048576.0);
+    return 0;
+}
+/* roam.c: a track load's 0x610750 (thiscall CarLoader, size): 1 = let it add
+ * the difference to the startup size; 0 = the pool has that size already
+ * (with an extra block it kept, roam_game_loader_release) */
+int roam_game_pool_grow(uint32_t size){
+    uint32_t base = rd32(G_CARLOADER + 0x68u), x = rd32(G_CARLOADER + 0x6cu), xn = x ? rd32(G_CARLOADER + 0x70u) : 0;
+    if (x && size <= base + xn) return 0;
+    return 1;
+}
 uint32_t roam_game_pool(uint32_t name, uint32_t count){
     for (unsigned i = 0; i < sizeof g_pools / sizeof g_pools[0]; i++){
         if (name != g_pools[i].name || count >= g_pools[i].count || !env_int("NFSU2_ROAM", 0, 0, 1)) continue;

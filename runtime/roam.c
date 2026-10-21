@@ -612,6 +612,22 @@ void sub_00440df0(CPU *c){
     MR32(c->esp + 8u) = roam_game_pool(MR32(c->esp + 12u), MR32(c->esp + 8u));
     sub_00440df0_orig(c);
 }
+/* CarLoader: give back the memory a track load added to the Cars pool
+ * (thiscall, no arguments), only once it is free again; and a track load's
+ * addition to it (thiscall, the track's size), only when the pool is smaller
+ * (roam_game.c, roam_game_loader_release, roam_game_pool_grow) */
+void sub_0063a6f0_orig(CPU *c);
+int roam_game_loader_release(CPU *c);
+void sub_0063a6f0(CPU *c){
+    if (roam_game_loader_release(c)) sub_0063a6f0_orig(c);
+    else POP32(c->eip);
+}
+void sub_00610750_orig(CPU *c);
+int roam_game_pool_grow(uint32_t size);
+void sub_00610750(CPU *c){
+    if (roam_game_pool_grow(MR32(c->esp + 4u))) sub_00610750_orig(c);
+    else { POP32(c->eip); c->esp += 4u; }
+}
 void sub_005eba30_orig(CPU *c);   /* Car::SetDriverType(this, type) */
 void sub_005eba30(CPU *c){
     if (G.on && c->ecx == G.car && probe())
