@@ -35,6 +35,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { WebSocket, WebSocketServer } from 'ws';
 import { makeTestCerts, startCfSim } from './cf-sim.mjs';
+import { serverCommand } from '../tools/server-cmd.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '../..');
@@ -127,7 +128,7 @@ const upgrade = (p, extra = {}) => req('GET', p, { headers: { Upgrade: 'websocke
 
 // ---- a server under test ----
 async function startServer(args, { expectExit = false, env = {}, state = fs.mkdtempSync(path.join(TMP, 'state-')) } = {}) {
-  const c = spawn(process.execPath, [SERVER, ...(args.includes('--data') ? [] : ['--data', DATA]), '--state', state, ...args], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env } });
+  const c = spawn(...serverCommand(SERVER, [...(args.includes('--data') ? [] : ['--data', DATA]), '--state', state, ...args]), { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env } });
   let out = '';
   c.stdout.on('data', d => { out += d; }); c.stderr.on('data', d => { out += d; });
   const exited = new Promise(r => c.on('exit', code => r(code)));

@@ -1,0 +1,218 @@
+//! A connection's reader: its messages, as lan.mjs's handlers took them (`attach`'s resume wait, `admit`'s
+//! 'message', 'ping' and 'pong'), each frame routed here, on the reader's own core.
+
+use std::sync::Arc;
+use std::sync::atomic::Ordering::Relaxed;
+use std::time::Duration;
+
+use bytes::Bytes;
+use nfsu2_util::{mono_ms, now_ms};
+use nfsu2_ws::{Message, ReadError, WsReader};
+use serde_json::{Map, Value};
+use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::time::Instant;
+
+use crate::conn::{Conn, Out};
+use crate::text::parse_json;
+use crate::{AttachCtx, Cut, KIND_BUNDLE, LanSwitch, Peer};
+
+pub(crate) async fn read_loop<R>(sw: Arc<LanSwitch>, conn: Arc<Conn>, mut r: R, pre: Bytes, ctx: Arc<AttachCtx>)
+where
+    R: AsyncRead + Unpin + Send,
+{
+    let mut peer = conn.peer.lock().clone();
+    // a resume: the hello first (the welcome follows it), within resumeWaitMs
+    let mut wait = (ctx.resume && peer.is_none()).then(|| Instant::now() + Duration::from_millis(sw.o.resume_wait_ms));
+    let mut ws = WsReader::new(&mut r, pre, sw.o.max_payload);
+    // one wait for the kill token for the connection's life (a new one each message registered with the token and
+    // left it again: two locks a message)
+    let killed = conn.kill.cancelled();
+    tokio::pin!(killed);
+    loop {
+        let m = {
+            let next = ws.next();
+            tokio::pin!(next);
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = &mut killed => return,
+                    m = &mut next => break m,
+                    _ = tokio::time::sleep_until(wait.unwrap_or_else(Instant::now)), if wait.is_some() => {
+                        // no hello in time: a fresh address (and the message being read is an ordinary one)
+                        wait = None;
+                        peer = sw.admit(&conn, &ctx, None);
+                    }
+                }
+            }
+        };
+        match m {
+            Ok(Message::Text(b)) => {
+                if wait.take().is_some() {
+                    peer = sw.admit(&conn, &ctx, first_hello(&sw, &b));
+                } else if let Some(p) = peer.as_ref().filter(|_| conn.open()) {
+                    sw.on_message(p, true, b);
+                }
+            }
+            Ok(Message::Binary(b)) => {
+                if wait.take().is_some() {
+                    peer = sw.admit(&conn, &ctx, None);
+                } else if let Some(p) = peer.as_ref().filter(|_| conn.open()) {
+                    sw.on_message(p, false, b);
+                    // the Online host behind (nfsu2_util::Backlog): what this client sends it waits in its socket.  (A
+                    // load first, not a swap: free roam's messages never feed the host, and a swap is a locked write
+                    // on each of them; only this reader sets and clears the flag.)
+                    if p.fed_online.load(Relaxed) {
+                        p.fed_online.store(false, Relaxed);
+                        if sw.online_backlog.over() {
+                            tokio::select! {
+                                biased;
+                                _ = &mut killed => return,
+                                _ = sw.online_backlog.room() => {}
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(Message::Ping(d)) => {
+                // answered here (the library's own answer is off), under the rate and while the queue has room
+                if peer.as_ref().filter(|_| conn.open()).is_some_and(|p| !sw.flood(p) && sw.room(p, Cut::Slow)) {
+                    conn.push(Out::Pong(d));
+                }
+            }
+            Ok(Message::Pong(d)) => {
+                // only a pong carrying the payload of the switch's last ping says the client is there
+                if let Some(p) = &peer {
+                    let ours = {
+                        let mut last = p.ping.lock();
+                        let ours = last.as_ref().is_some_and(|x| x[..] == d[..]);
+                        if ours {
+                            *last = None;
+                        }
+                        ours
+                    };
+                    if ours {
+                        p.alive.store(true, Relaxed);
+                    } else {
+                        sw.flood(p);
+                    }
+                }
+            }
+            Ok(Message::Close(code, reason)) => {
+                conn.close_received(code, reason);
+                break;
+            }
+            Err(ReadError::Protocol { code, .. }) => {
+                conn.protocol_error(code);
+                break;
+            }
+            Err(ReadError::Closed) => return,
+        }
+    }
+    // after a close frame (or a broken one) nothing more is read as messages: what comes is drained until the client
+    // ends the connection, or the close timer does
+    drop(ws);
+    let mut scratch = vec![0u8; 4096];
+    loop {
+        tokio::select! {
+            biased;
+            _ = &mut killed => return,
+            n = r.read(&mut scratch) => match n {
+                Ok(0) | Err(_) => return,
+                Ok(_) => {}
+            },
+        }
+    }
+}
+
+/// a resume's first message: a hello, when it is one
+fn first_hello(sw: &LanSwitch, b: &Bytes) -> Option<Map<String, Value>> {
+    if b.len() > sw.o.max_text {
+        return None;
+    }
+    match parse_json(b) {
+        Some(Value::Object(m)) if m.get("t").and_then(Value::as_str) == Some("hello") => Some(m),
+        _ => None,
+    }
+}
+
+impl LanSwitch {
+    /// lan.mjs `flood()`: a control frame over ctlRate cuts the connection (no browser sends any)
+    pub(crate) fn flood(&self, p: &Peer) -> bool {
+        if p.ctl.lock().ctl.take_at(mono_ms(), 1.0) {
+            return false;
+        }
+        self.cut(p, Cut::Flood);
+        true
+    }
+
+    /// lan.mjs's 'message' handler of an admitted connection
+    fn on_message(&self, peer: &Arc<Peer>, text: bool, data: Bytes) {
+        peer.alive.store(true, Relaxed);
+        peer.last_in.store(now_ms(), Relaxed);
+        let n = data.len();
+        let o = &self.o;
+        if text {
+            if n > o.max_text || !peer.ctl.lock().texts.take_at(mono_ms(), 1.0) {
+                self.stats.limited.inc();
+                return;
+            }
+            let Some(Value::Object(m)) = parse_json(&data) else { return };
+            match m.get("t").and_then(Value::as_str) {
+                Some("hello") => self.hello(peer, &m),
+                Some("lan") => {
+                    let on = nfsu2_util::json::is_num(m.get("on"), 1.0);
+                    peer.lan.store(if on { crate::LAN_ON } else { crate::LAN_OFF }, Relaxed);
+                }
+                Some("ping") => {
+                    if let Some(id) = m.get("id").and_then(nfsu2_util::json::safe_integer) {
+                        self.send(peer, Out::Text(Bytes::from(format!(r#"{{"t":"pong","id":{id}}}"#))));
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+        if n < 12 {
+            return;
+        }
+        if data[0] == KIND_BUNDLE {
+            if n > o.max_bundle {
+                self.stats.limited.inc();
+                return;
+            }
+            self.stats.bundles_in.inc();
+            // each entry as a frame of its own; a broken entry, or one over the budgets, ends the bundle
+            let mut at = 4;
+            while at + 4 <= n {
+                let k = data[at] as usize;
+                let len = u16::from_be_bytes([data[at + 2], data[at + 3]]) as usize;
+                let f = at + 4 + 4 * k;
+                let end = f + len;
+                if len < 12 || len > o.max_frame || end > n || data[f] == KIND_BUNDLE {
+                    self.stats.limited.inc();
+                    return;
+                }
+                let frame = data.slice(f..end);
+                let routed = if k == 0 {
+                    self.route(peer, &frame, std::iter::once(be32(&frame, 8)))
+                } else {
+                    self.route(peer, &frame, (0..k).map(|j| be32(&data, at + 4 + 4 * j)))
+                };
+                if !routed {
+                    return;
+                }
+                at = end;
+            }
+            return;
+        }
+        if n > o.max_frame {
+            self.stats.limited.inc();
+            return;
+        }
+        self.route(peer, &data, std::iter::once(be32(&data, 8)));
+    }
+}
+
+fn be32(b: &[u8], at: usize) -> u32 {
+    u32::from_be_bytes([b[at], b[at + 1], b[at + 2], b[at + 3]])
+}

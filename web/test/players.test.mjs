@@ -15,6 +15,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { WebSocket } from 'ws';
 import * as esbuild from 'esbuild';
+import { serverCommand } from '../tools/server-cmd.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DATA = process.env.NFSU2_DATA || path.join(os.homedir(), 'projects/nsfu2/Need for Speed - Underground 2');
@@ -24,7 +25,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function server(port, extra = []) {
   const st = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'nfsu2-players-test-'));
-  const srv = spawn(process.execPath, [path.join(HERE, '../server/server.mjs'), '--data', DATA, '--http-port', String(port), '--state', st, ...extra],
+  const srv = spawn(...serverCommand(path.join(HERE, '../server/server.mjs'), ['--data', DATA, '--http-port', String(port), '--state', st, ...extra]),
     { stdio: ['ignore', 'pipe', 'pipe'] });
   await new Promise((res, rej) => {
     let out = '';

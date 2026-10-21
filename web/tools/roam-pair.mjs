@@ -47,6 +47,7 @@ import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { makeTestCerts } from '../test/cf-sim.mjs';
+import { serverCommand } from './server-cmd.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const argv = process.argv.slice(2);
@@ -101,9 +102,9 @@ let server = null;
 const serverLog = fs.createWriteStream(path.join(OUT, 'server.log'), { flags: 'a' });
 async function startServer() {
   const certs = HTTPS ? makeTestCerts(path.join(OUT, 'certs')) : null;
-  const c = spawn(process.execPath, [path.join(REPO, 'web/server/server.mjs'), '--data', DATA,
+  const c = spawn(...serverCommand(path.join(REPO, 'web/server/server.mjs'), ['--data', DATA,
     ...(certs ? ['--port', String(HTTPS_PORT), '--tls-cert', certs.cert, '--tls-key', certs.key] : []),
-    '--http-port', String(HTTP_PORT), '--dev', ...(PLAY ? ['--artifacts', OUT] : [])], { stdio: ['ignore', 'pipe', 'pipe'] });
+    '--http-port', String(HTTP_PORT), '--dev', ...(PLAY ? ['--artifacts', OUT] : [])]), { stdio: ['ignore', 'pipe', 'pipe'] });
   c.stdout.pipe(serverLog, { end: false }); c.stderr.pipe(serverLog, { end: false });
   await new Promise((res, rej) => {
     let out = '';

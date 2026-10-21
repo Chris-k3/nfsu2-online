@@ -23,6 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocket } from 'ws';
 import { encodeFrame, FrameReader, fieldMap } from '../server/online/aries.mjs';
 import { lanFrame } from '../server/online/vhost.mjs';
+import { serverCommand } from './server-cmd.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const argv = process.argv.slice(2);
@@ -39,8 +40,8 @@ const pct = (a, p) => { if (!a.length) return null; const s = [...a].sort((x, y)
 
 let server = null;
 if (OWN) {
-  server = spawn(process.execPath, [path.join(REPO, 'web/server/server.mjs'), '--data', DATA, '--http-port', String(HTTP_PORT), '--port', '0',
-    '--dev', '--max-peers', '250', '--state', path.join(OUT, 'state')], { stdio: ['ignore', 'pipe', 'pipe'] });
+  server = spawn(...serverCommand(path.join(REPO, 'web/server/server.mjs'), ['--data', DATA, '--http-port', String(HTTP_PORT), '--port', '0',
+    '--dev', '--max-peers', '250', '--state', path.join(OUT, 'state')]), { stdio: ['ignore', 'pipe', 'pipe'] });
   const log = fs.createWriteStream(path.join(OUT, 'server.log'));
   server.stdout.pipe(log); server.stderr.pipe(log);
   await new Promise((res, rej) => { let o = ''; server.stdout.on('data', d => { o += d; if (o.includes('access')) res(); }); server.on('exit', c => rej(new Error(`server exited ${c}`))); });

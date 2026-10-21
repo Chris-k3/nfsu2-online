@@ -191,6 +191,41 @@ disk and a 1 Gbit/s port with a few TB of traffic a month.
 
   A self-built image has no revision label: build it and the module from the same checkout.
 
+## The server in Rust
+
+The Rust port of the server (`web/server-rs`, its `README.md`) spreads the work over the VPS's cores, where the Node
+server does everything on one thread, which about 600 players in free roam fill
+([Multiplayer over the internet](#multiplayer-over-the-internet)). Its image takes the Node image's place and nothing
+else changes: the same options and `NFSU2_*` environment, mounts, health check and user (uid 1000), and the same
+files in the state volume, so either server takes over the other's.
+
+- **From GitHub's registry:** `.github/workflows/image-rs.yml` builds `ghcr.io/th0mk/nfsu2-web-rs` for amd64 and
+  arm64 on the same pushes and with the same tags as the Node image (`latest`, `sha-<commit>`, the versions): about
+  7 MB to download. It is a package of its own: make it public too, or log in ([The image](#the-image)).
+- **Switching:** one line in `/srv/nfsu2/.env`, then `cd /srv/nfsu2 && docker compose pull && docker compose up -d`.
+
+  ```sh
+  NFSU2_IMAGE=ghcr.io/th0mk/nfsu2-web-rs:sha-<commit>
+  ```
+
+  The compose files (and your `COMPOSE_FILE`: `compose.443.yml`, `compose.tunnel.yml`), the game folder, the module
+  and the state volume `nfsu2-web_state` stay as they are. The ETag key, the switch's addresses and the Online
+  records carry over: no browser downloads the game data again, and the pages reconnect as after an update.
+- **The module must come from the image's commit**, as with the Node image: `nfsu2-web-rs:sha-<commit>` holds the
+  page of `nfsu2-web:sha-<commit>`.
+- **Switching back:** the old `NFSU2_IMAGE` line (`ghcr.io/th0mk/nfsu2-web:sha-<commit>`, or none for `latest`),
+  then `docker compose up -d`. The state volume serves either.
+- **Built yourself:** `docker build -f web/server-rs/Dockerfile --platform linux/amd64 -t nfsu2-web-rs .`, then
+  `docker save` and `NFSU2_IMAGE=nfsu2-web-rs` as in [The image](#the-image). The binary is cross-compiled, so arm64
+  needs no emulation either.
+- **What differs:** `UV_THREADPOOL_SIZE` means nothing to it; `NFSU2_THREADS` sets its worker threads (by default
+  half the cores, 2 to 8). Its console has the Node server's lines.
+
+Tested 2026-10-21 on Docker Desktop (WSL), the images built from the checkout: amd64 and arm64 built; the amd64 one
+run as `compose.yml` runs the server (a read-only root, no capabilities, `no-new-privileges`) was `healthy` within
+6 s; the Node image, then this one, then the Node image again on one state volume kept the ETag key (the module's
+and the data manifest's ETags stayed the same). The published image and a real VPS: **UNVERIFIED**.
+
 ## Copying the game
 
 - **Only the game.** The `rsync` line lists what the server serves; nothing else of the folder needs to be on the

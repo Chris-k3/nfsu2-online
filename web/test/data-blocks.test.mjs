@@ -19,6 +19,7 @@ import zlib from 'node:zlib';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { pickEncoding } from '../server/headers.mjs';
+import { serverCommand } from '../tools/server-cmd.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PORT = +(process.env.NFSU2_TEST_BLOCKS_PORT || 8532);
@@ -43,8 +44,8 @@ fs.writeFileSync(path.join(TMP, 'game.wasm'), Buffer.alloc(8));
 
 async function server() {
   const st = path.join(TMP, 'state');
-  const srv = spawn(process.execPath, [path.join(HERE, '../server/server.mjs'), '--data', DATA, '--http-port', String(PORT), '--state', st,
-    '--wasm', path.join(TMP, 'game.wasm')], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const srv = spawn(...serverCommand(path.join(HERE, '../server/server.mjs'), ['--data', DATA, '--http-port', String(PORT), '--state', st,
+    '--wasm', path.join(TMP, 'game.wasm')]), { stdio: ['ignore', 'pipe', 'pipe'] });
   await new Promise((res, rej) => {
     let out = '';
     const t = setTimeout(() => rej(new Error('server did not start: ' + out)), 15000);

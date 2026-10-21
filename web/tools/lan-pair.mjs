@@ -45,6 +45,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { serverCommand } from './server-cmd.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const argv = process.argv.slice(2);
@@ -115,9 +116,8 @@ function url(i) {
 let server = null;
 const serverLog = fs.createWriteStream(path.join(OUT, 'server.log'), { flags: 'a' });
 async function startServer() {
-  const c = spawn(process.execPath, [path.join(REPO, 'web/server/server.mjs'), '--data', DATA,
-    '--http-port', String(HTTP_PORT), '--dev', '--artifacts', OUT, ...(opt('impair', '') ? ['--lan-impair', opt('impair', '')] : [])],
-    { stdio: ['ignore', 'pipe', 'pipe'] });
+  const c = spawn(...serverCommand(path.join(REPO, 'web/server/server.mjs'), ['--data', DATA,
+    '--http-port', String(HTTP_PORT), '--dev', '--artifacts', OUT, ...(opt('impair', '') ? ['--lan-impair', opt('impair', '')] : [])]), { stdio: ['ignore', 'pipe', 'pipe'] });
   c.stdout.pipe(serverLog, { end: false }); c.stderr.pipe(serverLog, { end: false });
   await new Promise((res, rej) => {
     let out = '';

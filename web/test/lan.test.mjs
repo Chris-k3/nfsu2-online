@@ -32,6 +32,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
 import * as esbuild from 'esbuild';
 import * as P from '../src/net/proto.ts';
+import { serverCommand } from '../tools/server-cmd.mjs';
 const { LanSwitch, LAN_WSS_OPTIONS } = await import(process.env.NFSU2_TEST_LAN ? path.resolve(process.env.NFSU2_TEST_LAN) : '../server/lan.mjs');
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -250,7 +251,7 @@ const DATA = process.env.NFSU2_DATA || path.join(os.homedir(), 'projects/nsfu2/N
 test('server.mjs: /lan accepts its own pages and tools, refuses other sites; an address only back to its token', { skip: !fs.existsSync(path.join(DATA, 'SPEED2.EXE')) && 'no game folder' }, async () => {
   const hport = +(process.env.NFSU2_TEST_PORT || 8528);
   const st = fs.mkdtempSync(path.join(process.env.TMPDIR || '/tmp', 'lantest-'));
-  const srv = spawn(process.execPath, [path.join(HERE, '../server/server.mjs'), '--data', DATA, '--http-port', String(hport), '--state', st],
+  const srv = spawn(...serverCommand(path.join(HERE, '../server/server.mjs'), ['--data', DATA, '--http-port', String(hport), '--state', st]),
     { stdio: ['ignore', 'pipe', 'pipe'] });
   try {
     await new Promise((res, rej) => {

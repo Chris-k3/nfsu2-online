@@ -29,6 +29,7 @@ import crypto from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { WebSocket } from 'ws';
+import { serverCommand } from '../tools/server-cmd.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '../..');
@@ -44,7 +45,7 @@ const ssl = (...a) => execFileSync('openssl', a, { stdio: ['ignore', 'pipe', 'pi
 const HOST = 'nfsu2.test';
 
 async function startServer(args, { env = {}, state = fs.mkdtempSync(path.join(TMP, 'state-')), execArgv = [], expectExit = false } = {}) {
-  const c = spawn(process.execPath, [...execArgv, SERVER, '--data', DATA, '--state', state, ...args], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env } });
+  const c = spawn(...serverCommand(SERVER, ['--data', DATA, '--state', state, ...args], execArgv), { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env } });
   let out = '';
   c.stdout.on('data', d => { out += d; }); c.stderr.on('data', d => { out += d; });
   const exited = new Promise(r => c.on('exit', code => r(code)));
