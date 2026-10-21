@@ -178,6 +178,8 @@ Good to know:
   with the game's own sounds, as you hear your own: the nitrous going on and off, letting it out while standing or
   off the throttle, each wheel's pump and valve and a landing, louder the nearer they are. A player on an older
   version sees the body move but not the wheels, and no nitrous, and hears none of it.
+- **Tyre smoke:** when you slide, spin your wheels or do a burnout, the others see the smoke from your tyres, as the
+  game draws it for any car. Between players on different versions, neither sees the other's.
 - **Headlights:** the other players' headlights light the road in front of their cars, as yours do, a little dimmer
   and in their own colour; in Online and LAN races too. Display, more: Other cars' headlights (All cars: AI racers and
   traffic too; Off: only yours, as in the original game). The Windows plugin draws only your own.

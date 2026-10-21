@@ -1022,16 +1022,36 @@ static void t_statex(void){
     e = rc_decode(ob, on, &d);
     CHECK(e == RC_OK && d.u.snap.s[0].ext && d.u.snap.s[0].nos == 150 && fabsf(d.u.snap.s[0].wz[0] - 0.187f) < 1e-6f &&
           !d.u.snap.s[0].hyd && !d.u.snap.s[0].thumps && !d.u.snap.s[1].ext, "the first version 4 form decodes, without hydraulics (e %d)", e);
-    /* a newer core's longer extension: its own fields skipped */
+    /* the wheels' slip: only while a wheel slides (half a step of slip or more) */
     memset(&m, 0, sizeof m); m.h.type = RC_MSG_SNAP; m.h.sender = 5; m.h.flags = RC_HF_STATEX; m.u.snap.status = RC_ST_ROAM; m.u.snap.n = 1;
-    m.u.snap.s[0].q[3] = 1; m.u.snap.s[0].ext = 1; m.u.snap.s[0].nos = 7; m.u.snap.s[0].wz[2] = 0.25f;
+    s = &m.u.snap.s[0]; s->q[3] = 1; s->ext = 1; s->nos = 7; s->wz[2] = 0.25f;
+    s->slip[0] = 0.24f; s->slip[3] = -0.2f; s->surf[0] = 1; s->surf[2] = 8;
     n = rc_encode(&m, b, sizeof b);
+    CHECK(n == 16 + 6 + 52 + 12 + 4 && b[22 + 52] == RC_STATEX_HYD - 1, "no wheel slides: the extension without slip (%d bytes)", n);
+    s->slip[4] = 21.7f; s->slip[5] = -6.3f; s->slip[6] = 500.f; s->slip[7] = __builtin_nanf(""); s->slip[1] = -63.4f;
+    n = rc_encode(&m, b, sizeof b);
+    x = b + 22 + 52;
+    CHECK(n == 16 + 6 + 52 + 24 + 4 && x[0] == 23 && (int8_t)x[12] == 0 && (int8_t)x[13] == -127 && x[14] == 1 && (int8_t)x[15] == 0 &&
+          (int8_t)x[16] == 0 && (int8_t)x[18] == 43 && (int8_t)x[19] == -13 && x[20] == 8 && (int8_t)x[21] == 127 && (int8_t)x[22] == 0,
+          "a wheel slides: each wheel's slip in half m/s (clamped, NaN 0) and its surface (%d bytes)", n);
+    e = rc_decode(b, n, &d);
+    CHECK(e == RC_OK && d.u.snap.s[0].slipx && d.u.snap.s[0].slip[4] == 21.5f && d.u.snap.s[0].slip[5] == -6.5f && d.u.snap.s[0].slip[6] == 63.5f &&
+          d.u.snap.s[0].slip[1] == -63.5f && d.u.snap.s[0].surf[2] == 8 && d.u.snap.s[0].nos == 7, "the slip decodes (e %d)", e);
+    /* a newer core's longer extension: its own fields skipped */
     uint8_t lb[RC_MAX_DGRAM]; memcpy(lb, b, (size_t)n - 4);
     lb[22 + 52] = RC_STATEX_BYTES - 1 + 3; lb[n - 4] = 0xAA; lb[n - 3] = 0xBB; lb[n - 2] = 0xCC;
     int ln = n + 3; lb[6] = (uint8_t)ln; lb[7] = (uint8_t)(ln >> 8);
     uint32_t c = rc_crc32(lb, (uint32_t)ln - 4); for (int k = 0; k < 4; k++) lb[ln - 4 + k] = (uint8_t)(c >> (8 * k));
     e = rc_decode(lb, ln, &d);
-    CHECK(e == RC_OK && d.u.snap.s[0].ext && d.u.snap.s[0].nos == 7 && d.u.snap.s[0].wz[2] == 0.25f, "a longer extension is read, its rest skipped (e %d)", e);
+    CHECK(e == RC_OK && d.u.snap.s[0].ext && d.u.snap.s[0].nos == 7 && d.u.snap.s[0].wz[2] == 0.25f && d.u.snap.s[0].slip[4] == 21.5f,
+          "a longer extension is read, its rest skipped (e %d)", e);
+    /* what a core before the slip reads of it: the hydraulics, the rest skipped (as its own decoder did) */
+    memcpy(lb, b, (size_t)(22 + 52 + 12)); lb[22 + 52 + 12] = 0xAA; lb[22 + 52 + 13] = 0xBB; lb[22 + 52 + 14] = 0xCC;
+    lb[22 + 52] = RC_STATEX_HYD - 1 + 3; ln = 22 + 52 + 12 + 3 + 4; lb[6] = (uint8_t)ln; lb[7] = (uint8_t)(ln >> 8);
+    c = rc_crc32(lb, (uint32_t)ln - 4); for (int k = 0; k < 4; k++) lb[ln - 4 + k] = (uint8_t)(c >> (8 * k));
+    e = rc_decode(lb, ln, &d);
+    CHECK(e == RC_OK && d.u.snap.s[0].ext && d.u.snap.s[0].nos == 7 && !d.u.snap.s[0].slipx && d.u.snap.s[0].slip[4] == 0,
+          "between the hydraulics and the slip: no slip, the rest skipped (e %d)", e);
     lb[22 + 52] = 4; c = rc_crc32(lb, (uint32_t)ln - 4); for (int k = 0; k < 4; k++) lb[ln - 4 + k] = (uint8_t)(c >> (8 * k));
     CHECK(rc_decode(lb, ln, &d) == RC_E_FIELD, "an extension shorter than this core's fields is bad");
     m.h.flags = 0; n = rc_encode(&m, b, sizeof b);
@@ -1048,6 +1068,7 @@ static void t_statex(void){
         for (int i = 0; i < 3; i++){
             rc_state st; memset(&st, 0, sizeof st); st.q[3] = 1; st.t_us = (uint32_t)g_now; st.p[0] = (float)i;
             st.ext = 1; st.nos = 60; st.hyd = 0x36; st.thumps = 3; for (int w = 0; w < 4; w++) st.wz[w] = 0.1f * (float)(w + 1);
+            st.slip[6] = 12.f; st.slip[7] = -3.5f; st.surf[3] = 15;
             rc_set_status(&g_n[i], RC_ST_ROAM); rc_push_state(&g_n[i], &st, g_now);
         }
         net_run(g_now + 10000, 3);
@@ -1064,8 +1085,10 @@ static void t_statex(void){
     int ok1 = k1 >= 0 && rc_interp_peek(&g_n[1].peer[k1].mo, g_n[1].peer[k1].mo.t[g_n[1].peer[k1].mo.n - 1], 250000, &P);
     CHECK(ok1 && P.ext && P.nos == 60 && P.hyd == 0x36 && P.thumps == 3 && fabsf(P.wz[0] - 0.1f) < 1e-6f && fabsf(P.wz[3] - 0.4f) < 1e-6f,
           "the newer peer's pose has the wheel heights, the nitrous and the hydraulics (%d %d %x %u %g)", P.ext, P.nos, P.hyd, P.thumps, (double)P.wz[3]);
+    CHECK(ok1 && P.slipx && P.slip[6] == 12.f && P.slip[7] == -3.5f && P.surf[3] == 15 && P.slip[0] == 0,
+          "...and the wheels' slip and surfaces (%d %g %g %u)", P.slipx, (double)P.slip[6], (double)P.slip[7], P.surf[3]);
     int ok2 = k2 >= 0 && rc_interp_peek(&g_n[2].peer[k2].mo, g_n[2].peer[k2].mo.t[g_n[2].peer[k2].mo.n - 1], 250000, &P);
-    CHECK(ok2 && !P.ext && !P.nos && !P.hyd && !P.thumps, "the older peer's pose has none");
+    CHECK(ok2 && !P.ext && !P.nos && !P.hyd && !P.thumps && !P.slipx && P.slip[6] == 0, "the older peer's pose has none");
 }
 
 int main(int argc, char **argv){

@@ -109,8 +109,14 @@
 #define CAR_PHYS        0x34u         /* Car: its physics (+CAR_HYD + 4 k: wheel k's hydraulics, 0x5ED470, in physics mode 1) */
 #define CAR_HYD         0x74u
 #define CAR_BUMP        0x408u        /* u8[4]: wheel k landed this frame (the hydraulics' landing, 0x47DD40) */
+#define CAR_WSPIN       0x330u        /* float[4]: each wheel's turning speed (rad/s) */
+#define CAR_GROUND      0x390u        /* u8[4]: wheel k is on the ground */
+#define CAR_SURF        0x394u        /* u32[4]: the surface under wheel k (the table at 0x800EE0, N_SURF of them) */
+#define CAR_SLIP        0x3b4u        /* float[4][2]: wheel k's slip along it and across it (m/s): smoke from 5 on a road (0x5F5730) */
+#define N_SURF          29u
 #define CAR_SOUND       0x968u        /* Car: its sound state: +0x30 the car, +0x20 its children (each +0x50 the next) */
 #define VT_SFX_NOS      0x0078ac58u   /* CARSFX_Nitrous (vtable): its update 0x484F20 sounds a car's nitrous */
+#define VT_SFX_SKIDS    0x0078ae48u   /* CARSFX_Skids (vtable, 0x473A70): the skid sound, from the wheels' slip (0x46EA50) */
 #define FN_CAR_SETRIDE  0x00601110u   /* thiscall (RideInfo*) */
 #define FN_BODY_DISABLE 0x005930f0u   /* DynamicCollisionBody (car +0x3C): ++[+0x17] */
 #define FN_TYPE_BY_HASH 0x00610130u   /* cdecl (hash) -> CarTypeInfo* or 0 */
@@ -404,7 +410,17 @@ static int local_state(rc_state *s){
     for (uint32_t w = 0; w < 4; w++) landed |= MR8(car + CAR_BUMP + w) != 0;
     if (landed && !g_landed) g_thumps++;
     g_landed = landed; s->thumps = g_thumps;
-    if (g_sync_paused > 1){ for (int i = 0; i < 3; i++){ s->v[i] = 0; s->w[i] = 0; } s->speed = 0; s->rpm = 0; }
+    /* each wheel's slip and surface, for friends' tyre smoke, dirt and skid
+     * sounds (slip_pose): the physics' own (mode 1), on the ground only */
+    if (MR32(car + 0x28u) == 1)
+        for (uint32_t w = 0; w < 4; w++){
+            if (!MR8(car + CAR_GROUND + w)) continue;
+            float a = MRF32(car + CAR_SLIP + 8u * w), b = MRF32(car + CAR_SLIP + 8u * w + 4u);
+            uint32_t sf = MR32(car + CAR_SURF + 4u * w);
+            s->slip[2 * w] = __builtin_isfinite(a) ? a : 0.f; s->slip[2 * w + 1] = __builtin_isfinite(b) ? b : 0.f;
+            s->surf[w] = sf < N_SURF ? (uint8_t)sf : 0;
+        }
+    if (g_sync_paused > 1){ for (int i = 0; i < 3; i++){ s->v[i] = 0; s->w[i] = 0; } s->speed = 0; s->rpm = 0; for (int i = 0; i < 8; i++) s->slip[i] = 0; }
     for (int i = 0; i < 3; i++) if (!__builtin_isfinite(s->p[i]) || !__builtin_isfinite(s->v[i])) return 0;
     /* the stamp clock may run a little faster than the world (it is pulled
      * to the host clock): velocities per stamp second, so the receiver's
@@ -695,6 +711,7 @@ static void soft_park(CPU *c, uint32_t car){
     MRF32(car + 0x42cu) = 0; MRF32(car + 0x430u) = 0;
     MR32(car + CAR_NOS + 0x420u) = 0;                                    /* no nitrous (nos_pose) */
     for (uint32_t w = 0; w < 4; w++) MRF32(car + CAR_SUSP + 4u * w) = 0.f;   /* the wheels at rest (wheels_pose) */
+    for (uint32_t i = 0; i < 8; i++) MRF32(car + CAR_SLIP + 4u * i) = 0.f;   /* no slip: no smoke (slip_pose) */
     gcall0(c, FN_CAR_SECTION, car);
 }
 /* A race's end blinks its AI racers out: FinishRacer (0x606CB0) with its
@@ -1265,7 +1282,7 @@ static void wheels_pose(Slot *s, const rc_pose *P, float dt){
     for (uint32_t w = 0; w < 4; w++){
         float r = phok ? MRF32(ph + 0x20u + 0x30u * w) : 0.f;
         if (!(r > 0.05f && r < 2.f)) r = 0.33f;
-        float d = v / r * dt;                                        /* at most 100 m/s: a few turns per frame */
+        float d = (v + P->slip[2 * w]) / r * dt;                     /* (a spinning wheel's slip: a burnout turns it) at most 100 m/s: a few turns per frame */
         if (!__builtin_isfinite(d) || d > 32.f || d < -32.f) d = 0.f;
         float a = s->spin[w] - d;
         while (a > 3.14159265f) a -= 6.28318531f;
@@ -1318,6 +1335,21 @@ static void nos_pose(CPU *c, Slot *s, const rc_pose *P){
     rh_call(c, FN_CAR_FX, car, 0, 4, a);
     if (race && rd32(race) <= 3u){ a[0] = FX_PURGE; rh_call(c, FN_CAR_FX, car, 0, 4, a); }
 }
+/* A friend's wheels' slip and surfaces (from a sender whose wheels slide;
+ * 0 otherwise, and from an older one always): the game makes the tyre smoke,
+ * the dirt thrown up and the skid sound of any car from them (0x5F5730:
+ * smoke from 5 m/s of slip on a road, by the surface's entry in the table at
+ * 0x800EE0; the skid sound 0x46EA50), but only its physics writes them, and
+ * a friend's car runs without (physics mode 0): its slip stayed 0, and it
+ * slid and spun its wheels without smoke.  The surfaces only come with a
+ * slip; between slides each wheel keeps the last */
+static void slip_pose(Slot *s, const rc_pose *P){
+    uint32_t car = s->car;
+    for (uint32_t w = 0; w < 4; w++){
+        MRF32(car + CAR_SLIP + 8u * w) = P->slip[2 * w]; MRF32(car + CAR_SLIP + 8u * w + 4u) = P->slip[2 * w + 1];
+        if (P->slipx && P->surf[w] < N_SURF) MR32(car + CAR_SURF + 4u * w) = P->surf[w];
+    }
+}
 static void apply_pose(CPU *c, Slot *s, const rc_pose *P, float dt){
     uint32_t car = s->car;
     float f[3], l[3], u[3];
@@ -1334,7 +1366,7 @@ static void apply_pose(CPU *c, Slot *s, const rc_pose *P, float dt){
     MRF32(car + 0x42cu) = P->speed; MRF32(car + 0x430u) = P->speed; MRF32(car + 0x440u) = P->rpm;
     MR32(car + 0x434u) = (uint32_t)(int32_t)P->gear;
     uint32_t ph = MR32(car + 0x20u);
-    if (ok(ph, 0xc0)) for (uint32_t w = 0; w < 4; w++){ float r = MRF32(ph + 0x20u + 0x30u * w); if (r > 0.05f) MRF32(car + 0x330u + 4u * w) = P->speed / r; }
+    if (ok(ph, 0xc0)) for (uint32_t w = 0; w < 4; w++){ float r = MRF32(ph + 0x20u + 0x30u * w); if (r > 0.05f) MRF32(car + CAR_WSPIN + 4u * w) = (P->speed + P->slip[2 * w]) / r; }
     uint32_t ctl = MR32(car + 0x30u);
     if (ok(ctl, 0x220)){
         MRF32(ctl + 0x20cu) = P->throttle; MRF32(ctl + 0x214u) = P->brake;
@@ -1346,6 +1378,7 @@ static void apply_pose(CPU *c, Slot *s, const rc_pose *P, float dt){
     wheels_pose(s, P, dt);
     MR16(car + CAR_STEER) = (uint16_t)(int16_t)(int)(s->steer * 10430.378f);      /* the spinners' steering (wheels_pose) */
     nos_pose(c, s, P);
+    slip_pose(s, P);
     s->pose_frames++;
 }
 
@@ -2979,6 +3012,22 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
             rlog("[roam] f=%ld mp models: slot %d %s: %d of %d shop parts have their models:%s\n", f, k, s->name, ch, cn, list);
         }
         rlog("[roam] f=%ld mp models: %d of %d shop parts of friends' cars have their models\n", f, have, n);
+        return 1;
+    }
+    if (!strcasecmp(sub, "sounds")){
+        /* "mp sounds K": slot K's car's sound state (CAR_SOUND; an AI
+         * racer's, or none) and its children's vtables, the nitrous's and
+         * the skids' named */
+        int k = atoi(a1); uint32_t car = k >= 0 && k < NSLOT ? g_sl[k].car : 0, st = ok(car, 0x9e0) ? rd32(car + CAR_SOUND) : 0;
+        char list[300] = {0}; int at = 0, n = 0;
+        if (ok(st, 0x100) && rd32(st + 0x30u) == car)
+            for (uint32_t ch = rd32(st + 0x20u); ok(ch, 0x100) && n < 64; ch = rd32(ch + 0x50u), n++){
+                uint32_t vt = rd32(ch);
+                if (at < (int)sizeof list - 24) at += snprintf(list + at, sizeof list - (size_t)at, " %08x%s", vt,
+                                                               vt == VT_SFX_NOS ? "(nitrous)" : vt == VT_SFX_SKIDS ? "(skids)" : "");
+            }
+        rlog("[roam] f=%ld mp sounds: slot %d car 0x%08x, sound state 0x%08x%s, %d children:%s\n", f, k, car, st,
+             ok(st, 0x100) && rd32(st + 0x30u) == car ? "" : " (none of its own)", n, list);
         return 1;
     }
     if (!strcasecmp(sub, "carpoke") || !strcasecmp(sub, "carpeek")){

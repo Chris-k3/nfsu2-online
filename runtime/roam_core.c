@@ -200,13 +200,22 @@ static void put_state(rc_w *w, const rc_state *s){
     rc_put8(w, (uint8_t)s->gear);
     rc_put8(w, s->bits);
 }
-/* the extension (RC_HF_STATEX): a state without one has the length 0 */
+/* a wheel's slip on the wire: int8 steps of RC_SLIP_STEP, at most 127 */
+static int8_t q_slip(float f){ int32_t v = f_round(f_clamp(f, -1000.f, 1000.f) / RC_SLIP_STEP); return (int8_t)(v > 127 ? 127 : v < -127 ? -127 : v); }
+/* the extension (RC_HF_STATEX): a state without one has the length 0; the
+ * slip and surfaces only while a wheel slides (all slips 0 on the wire
+ * otherwise: the shorter form, as before) */
 static void put_statex(rc_w *w, const rc_state *s){
     if (!s->ext){ rc_put8(w, 0); return; }
-    rc_put8(w, RC_STATEX_BYTES - 1);
+    int slides = 0;
+    for (int i = 0; i < 8; i++) slides |= q_slip(s->slip[i]) != 0;
+    rc_put8(w, (slides ? RC_STATEX_BYTES : RC_STATEX_HYD) - 1);
     for (int i = 0; i < 4; i++) rc_put16(w, (uint16_t)q16(f_clamp(s->wz[i], -32.f, 32.f), 1000.f));
     rc_put8(w, s->nos);
     rc_put8(w, s->hyd); rc_put8(w, s->thumps);
+    if (slides) for (int i = 0; i < 4; i++){
+        rc_put8(w, (uint8_t)q_slip(s->slip[2 * i])); rc_put8(w, (uint8_t)q_slip(s->slip[2 * i + 1])); rc_put8(w, s->surf[i]);
+    }
 }
 static int get_statex(rc_r *r, rc_state *s){
     uint32_t n = rc_get8(r);
@@ -217,14 +226,22 @@ static int get_statex(rc_r *r, rc_state *s){
     for (int i = 0; i < 4; i++) s->wz[i] = (float)(int16_t)rc_get16(r) / 1000.f;
     s->nos = (uint8_t)rc_get8(r);
     uint32_t k = RC_STATEX_V4 - 1;
-    if (n >= RC_STATEX_BYTES - 1){ s->hyd = (uint8_t)rc_get8(r); s->thumps = (uint8_t)rc_get8(r); k = RC_STATEX_BYTES - 1; }
+    if (n >= RC_STATEX_HYD - 1){ s->hyd = (uint8_t)rc_get8(r); s->thumps = (uint8_t)rc_get8(r); k = RC_STATEX_HYD - 1; }
+    if (n >= RC_STATEX_BYTES - 1){
+        for (int i = 0; i < 4; i++){
+            s->slip[2 * i] = (float)(int8_t)rc_get8(r) * RC_SLIP_STEP; s->slip[2 * i + 1] = (float)(int8_t)rc_get8(r) * RC_SLIP_STEP;
+            s->surf[i] = (uint8_t)rc_get8(r);
+        }
+        s->slipx = 1; k = RC_STATEX_BYTES - 1;
+    }
     r->n += n - k;                                                  /* a newer core's fields */
     s->ext = 1;
     return RC_OK;
 }
 static int get_state(rc_r *r, rc_state *s){
-    s->ext = 0; s->nos = 0; s->hyd = 0; s->thumps = 0;
-    for (int i = 0; i < 4; i++) s->wz[i] = 0;
+    s->ext = 0; s->nos = 0; s->hyd = 0; s->thumps = 0; s->slipx = 0;
+    for (int i = 0; i < 4; i++){ s->wz[i] = 0; s->surf[i] = 0; }
+    for (int i = 0; i < 8; i++) s->slip[i] = 0;
     s->t_us = rc_get32(r);
     for (int i = 0; i < 3; i++) s->p[i] = rc_getf(r);
     for (int i = 0; i < 3; i++) s->v[i] = rc_getf(r);
@@ -518,12 +535,18 @@ static void lerp_rest(const rc_state *a, const rc_state *b, float u, rc_pose *o)
     o->gear = n->gear; o->bits = n->bits;
     o->ext = n->ext; o->nos = n->nos; o->hyd = n->hyd; o->thumps = n->thumps;
     for (int i = 0; i < 4; i++) o->wz[i] = a->ext && b->ext ? a->wz[i] + u * (b->wz[i] - a->wz[i]) : n->wz[i];
+    o->slipx = n->slipx;
+    for (int i = 0; i < 4; i++) o->surf[i] = n->surf[i];
+    for (int i = 0; i < 8; i++) o->slip[i] = a->slipx && b->slipx ? a->slip[i] + u * (b->slip[i] - a->slip[i]) : n->slip[i];
 }
 static void from_state(const rc_state *s, rc_pose *o){
     for (int i = 0; i < 3; i++){ o->p[i] = s->p[i]; o->v[i] = s->v[i]; o->w[i] = s->w[i]; }
     for (int i = 0; i < 4; i++){ o->q[i] = s->q[i]; o->wz[i] = s->wz[i]; }
     o->steer = s->steer; o->throttle = s->throttle; o->brake = s->brake; o->rpm = s->rpm; o->speed = s->speed;
     o->gear = s->gear; o->bits = s->bits; o->ext = s->ext; o->nos = s->nos; o->hyd = s->hyd; o->thumps = s->thumps;
+    o->slipx = s->slipx;
+    for (int i = 0; i < 4; i++) o->surf[i] = s->surf[i];
+    for (int i = 0; i < 8; i++) o->slip[i] = s->slip[i];
 }
 int rc_interp_peek(const rc_interp *ip, int64_t rt, int64_t cap_us, rc_pose *o){
     memset(o, 0, sizeof *o); o->q[3] = 1;
