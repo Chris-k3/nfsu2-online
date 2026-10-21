@@ -1,4 +1,4 @@
-# Free-roam multiplayer, friends' cars with the rim shops' rims (rim_packs):
+# Free-roam multiplayer, friends' cars with the rim shops' rims (part_packs):
 # one player in the new career's prologue free roam among 13 parked
 # web/tools/roam-crowd.mjs players whose 350Zs have a BBS rim front and rear,
 # all of them in cars of our own (slots 3 and up, paint slots 5 and up).

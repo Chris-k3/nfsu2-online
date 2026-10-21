@@ -120,6 +120,7 @@
 #define FN_RIDE_PARTSON 0x0061bcd0u   /* thiscall (): UpdatePartsEnabled */
 #define FN_RIDE_SETPART 0x00631d20u   /* thiscall (slot, part) -> the part it had: SetPart, then UpdatePartsEnabled */
 #define G_SLOTKIND      0x00802960u   /* u32[RC_PART_SLOTS]: a ride slot's parts' kind (CarPart +4; NewGetCarPart) */
+#define G_SLOTNAMES     0x00802decu   /* {char *name, u32}[]: a ride slot's name ("SPOILER" for 0xC) */
 #define FN_PART_ATTR    0x0061b500u   /* thiscall CarPart (attribute hash, 0) -> its value */
 #define FN_PART_NAME    0x00610000u   /* thiscall CarPart () -> its name */
 #define FN_HASH         0x0043db50u   /* cdecl (string) -> the game's hash of it */
@@ -451,6 +452,20 @@ static int local_cfg(uint8_t *out, int cap, char *tname){
 }
 
 /* ---- building a remote ride ---------------------------------------------------------------- */
+/* the part of car type `type` in ride slot sl with this key and owner, as
+ * the CarPartDB has it (NewGetCarPart; parts of other owners may share the
+ * key), or 0 */
+static uint32_t find_part(CPU *c, uint32_t type, uint32_t sl, uint32_t key, uint32_t owner){
+    uint32_t owners = rd32(G_PARTOWNERS), prev = 0;
+    for (int tries = 0; tries < 6; tries++){
+        uint32_t a[5] = { type, sl, key, prev, 0xffffffffu };
+        uint32_t p = rh_call(c, FN_GETCARPART, G_CARPARTDB, 0, 5, a);
+        if (!p || !ok(p, 0xe)) return 0;
+        if (!owners || rd32(owners + 4u * MR8(p + 7u)) == owner) return p;
+        prev = p;
+    }
+    return 0;
+}
 /* Decode a car-look record into the RideInfo at ride (0x8F0 bytes of guest
  * memory) with skin slot n: RideInfo::Init, stock parts, then each slot of
  * the record looked up by its key in the CarPartDB (NewGetCarPart, owner
@@ -499,19 +514,13 @@ static int build_ride(CPU *c, const rc_carcfg *cc, uint32_t ride, uint32_t skin,
         gcall1(c, FN_RIDE_SKINS, ride, skin);
         return missing < 0 ? 0 : 0;
     }
-    uint32_t owners = rd32(G_PARTOWNERS);
     uint32_t want[RC_PART_SLOTS] = {0}; uint8_t named[RC_PART_SLOTS] = {0};
+    char miss[48] = {0}; int at = 0;
     for (int k = 0; k < cc->n_parts; k++){
-        uint32_t sl = cc->part[k].slot, prev = 0, found = 0;
+        uint32_t sl = cc->part[k].slot, found = find_part(c, type, sl, cc->part[k].key, cc->part[k].owner);
         named[sl] = 1;
-        for (int tries = 0; tries < 6; tries++){
-            uint32_t a[5] = { type, sl, cc->part[k].key, prev, 0xffffffffu };
-            uint32_t p = rh_call(c, FN_GETCARPART, G_CARPARTDB, 0, 5, a);
-            if (!p || !ok(p, 0xe)) break;
-            if (!owners || rd32(owners + 4u * MR8(p + 7u)) == cc->part[k].owner){ found = p; break; }
-            prev = p;
-        }
-        if (found) want[sl] = found; else missing++;
+        if (found) want[sl] = found;
+        else { missing++; if (at < (int)sizeof miss - 8) at += snprintf(miss + at, sizeof miss - (size_t)at, " 0x%x", sl); }
     }
     for (uint32_t sl = 0; sl < RC_PART_SLOTS; sl++){
         if (named[sl] && want[sl]) MR32(ride + 0x590u + 4u * sl) = want[sl];
@@ -521,7 +530,7 @@ static int build_ride(CPU *c, const rc_carcfg *cc, uint32_t ride, uint32_t skin,
     for (int i = 0; i < 4; i++) MR8(ride + 4u + (uint32_t)i) = cc->ride_b[i];
     gcall0(c, FN_RIDE_PARTSON, ride);
     gcall1(c, FN_RIDE_SKINS, ride, skin);
-    if (missing > 0) snprintf(why, (size_t)whylen, "%d part(s) not in this game, stock parts instead", missing);
+    if (missing > 0) snprintf(why, (size_t)whylen, "%d part(s) not in this game (slot%s), stock parts instead", missing, miss);
     return missing;
 }
 
@@ -547,8 +556,8 @@ static int build_ride(CPU *c, const rc_carcfg *cc, uint32_t ride, uint32_t skin,
 #define PLAT_SZ         0x20u         /* platform record: +0x18 the D3D texture */
 static struct { uint32_t hash, ti; } g_tex[3 * NSLOT]; static int g_ntex;
 static uint8_t g_texbits[0x2000u / 8u];       /* hash & 0x1fff of every g_tex: the override's quick no */
-#ifndef ROAM_HOST_WIN
 static uint32_t bhash(const char *s){ uint32_t h = 0xffffffffu; for (; *s; s++) h = h * 33u + (uint8_t)*s; return h; }  /* bStringHash 0x43DB50 */
+#ifndef ROAM_HOST_WIN
 static int8_t g_skin_ok[NSLOT + SKIN_GAME];   /* paint slot n: 1 its textures are there, -1 they could not be made */
 #endif
 uint32_t roam_game_texture(uint32_t h){
@@ -859,8 +868,8 @@ static void release(CPU *c, int k, const char *why){
     g_releases++;
     if (s->h_new){ unload_later(s->h_new); s->h_new = 0; s->pending_cfg = 0; }
     /* not made yet: forget it.  A car made whose first look cannot load now
-     * (begin_load right after finish_create: a friend's shop rims waiting
-     * for rim_packs) goes on below: it stays ours, parked on its first ride
+     * (begin_load right after finish_create: a friend's shop parts waiting
+     * for part_packs) goes on below: it stays ours, parked on its first ride
      * with h_orig kept, and the next try loads onto it */
     if (s->st == SL_CREATING && !s->car){
         if (s->h_orig) unload_later(s->h_orig);
@@ -944,14 +953,14 @@ static int racer_number(uint32_t w){
  * record (a racer number of its own, paint slot 5 and up), its ride loaded
  * through the CarLoader, then CreateCar (finish_create); the friend's ride
  * follows as for an opponent car */
-static int rim_packs(CPU *c);
+static int part_packs(CPU *c);
 static int begin_create(CPU *c, int k){
     Slot *s = &g_sl[k];
     uint32_t w = world(), opp = 0;
     for (int i = 0; w && i < 22 && !opp; i++){ uint32_t car = ai_car(w, i); if (car && game_opponent(car)) opp = car; }
     uint32_t orec = opp ? rd32(opp + 0x14u) : 0;
     if (!ok(orec, REC_SZ) || !g_gmem) return 0;
-    rim_packs(c);                                                /* (their loading starts; begin_load waits for them) */
+    part_packs(c);                                               /* (their loading starts; begin_load waits for them) */
     if (!skin_textures(c, slot_skin(k))) return 0;
     if (!pool_room(c, s, 0)) return 0;
     int rn = racer_number(w);
@@ -1010,62 +1019,98 @@ static int finish_create(CPU *c, int k){
             car, out ? "outside the car index" : "indexed", n0, MR32(w + 0x10u), MR32(w + 0x14u), MR32(w + 0x18u));
     return 1;
 }
-/* Aftermarket rims (parts of the owner "WHEELS", the rim shops') have models
- * of their own, in a pack per brand, CARS\WHEELS\GEOMETRY_<BRAND>.BIN, and
- * the car loader streams a ride's rim models from there into the cars pool
- * (0x633650, 0x63A920), as it streams the car's own from its car's pack.
- * The model streamer has those packs in the front end only, where the shops
- * are: going into the world, the game keeps the models the player's car
- * uses (the streamer's HIBERNATING pack, 0x48DAE0) and unloads the packs
- * (0x581A20).  So a friend's aftermarket rims had nothing to stream from:
- * the load finished without them, the car's render info found no rim models
- * (0x634800: +0x17A8 + 0x20 x the ride slot, 0x1D front, 0x1E rear) and the
- * car was drawn without tyres and rims, its brake discs only.  The first
- * friend's car in free roam loads the brand packs again, for the session,
- * as the front end does (0x57F030 mode 1: each pack's header, a few KB; the
- * pack loader counts its loads, so the front end's own load and unload of
- * them stay a pair), and a ride with such rims waits until their headers
- * are in (at most RIMPACK_WAIT_US). */
+/* The shops' parts that fit any car have models of their own, in packs all
+ * cars share: spoilers, roof scoops, side mirrors, exhaust tips, brake
+ * calipers and the trunk's audio in the game's eleven at G_PARTPACKS
+ * (CARS\SPOILER\GEOMETRY.BIN, ...; a part's owner is its pack's folder,
+ * bStringHash("SPOILER")), and the rim shops' rims (owner "WHEELS") in a
+ * pack per brand, CARS\WHEELS\GEOMETRY_<BRAND>.BIN.  The car loader streams
+ * a ride's models from those packs into the cars pool (0x63A920; the rims'
+ * 0x633650), as it streams the car's own from its car's pack.  The model
+ * streamer has those packs in the front end only, where the shops are:
+ * going into the world, the game keeps the models the player's car uses
+ * (the streamer's HIBERNATING pack, 0x48DAE0) and unloads the packs
+ * (0x581A20).  So a friend's shop parts had nothing to stream from: the load
+ * finished without them, the car's render info found no models for them
+ * (0x634800: +0x17A8 + 0x20 x the ride slot) and the car was drawn without
+ * its spoiler, roof scoop, side mirrors, exhaust tips and calipers, and with
+ * shop rims without tyres and rims, its brake discs only.  The first
+ * friend's car in free roam loads the packs again, for the session, as the
+ * front end does (0x57F030 mode 1: each pack's header, a few KB; the pack
+ * loader counts its loads, so the front end's own load and unload of them
+ * stay a pair), and a ride with such parts waits until their headers are
+ * in (at most PARTPACK_WAIT_US). */
 #define FN_PACK_LOAD    0x004941c0u   /* cdecl (file, 0, 0, 0): a model pack for the streamer (one load more of a loaded one) */
 #define FN_PACK_FIND    0x0048ce80u   /* thiscall G_STREAMER (file) -> the pack: +0x8A busy, +0xA0 its models (0: the header is not in) */
 #define G_STREAMER      0x0082dbc8u
+#define G_PARTPACKS     0x0086658cu   /* char *[N_PARTPACKS]: the shared part packs, CARS\<owner>\GEOMETRY.BIN (0x77D850) */
+#define N_PARTPACKS     11
 #define FN_PART_NEXT    0x0061b670u   /* thiscall G_CARPARTDB (car hash, slot, 0, previous part, -1) -> the next part */
 #define FN_PART_NAME    0x00610000u   /* thiscall CarPart -> its name */
 #define RIM_BRANDS      0xa6e1b733u   /* the rim brands: the parts of slot 0x43 of this car hash (0x57F030) */
 #define OWNER_WHEELS    0x83347c07u   /* bStringHash("WHEELS"): an aftermarket rim's owner (0x633650) */
 #define CRI_RIMS        0x1b48u       /* CarRenderInfo: the front rims' model (slot 0x1D's first), +0x20 the rear's (0x6174F4 draws them) */
-#define RIMPACK_WAIT_US 10000000
-static uint32_t g_rimpack[40]; static int g_nrimpack = -1, g_rimpack_ok;   /* -1: not loaded yet */
-static int64_t g_rimpack_t0;
+#define CRI_MODELS      0x17a8u       /* CarRenderInfo: each ride slot's models, 0x20 bytes per slot (two of four LODs) */
+#define PARTPACK_WAIT_US 10000000
+static uint32_t g_pack[48]; static int g_npack = -1, g_packs_ok;   /* -1: not loaded yet */
+static int64_t g_packs_t0;
+static uint32_t g_packowner[N_PARTPACKS]; static int g_npackowner = -1;
 static void gstr(uint32_t a, const char *s, uint32_t cap);
-static int rim_packs(CPU *c){
-    if (g_rimpack_ok) return 1;
+/* a part of one of the shared packs */
+static int shared_owner(uint32_t owner){
+    if (owner == OWNER_WHEELS) return 1;
+    if (g_npackowner < 0){
+        g_npackowner = 0;
+        for (uint32_t i = 0; i < N_PARTPACKS; i++){
+            char nm[64]; cstr(rd32(G_PARTPACKS + 4u * i), nm, sizeof nm);
+            char *a = nm; while (*a && *a != '\\') a++;              /* CARS\<owner>\GEOMETRY.BIN */
+            char *b = *a ? ++a : a; while (*b && *b != '\\') b++;
+            if (!*b || b == a) continue;
+            *b = 0; g_packowner[g_npackowner++] = bhash(a);
+        }
+    }
+    for (int i = 0; i < g_npackowner; i++) if (g_packowner[i] == owner) return 1;
+    return 0;
+}
+static void load_pack(CPU *c, uint32_t file, const char *path){
+    uint32_t z[4] = { file, 0, 0, 0 };
+    rh_call(c, FN_PACK_LOAD, 0, 0, 4, z);
+    uint32_t pk = gcall1(c, FN_PACK_FIND, G_STREAMER, file);
+    if (pk) g_pack[g_npack++] = pk;
+    else rlog("[roam] f=%ld %s did not load\n", rh_frame(), path);
+}
+static int part_packs(CPU *c){
+    if (g_packs_ok) return 1;
     if (!g_gmem) return 0;
-    if (g_nrimpack < 0){
-        g_nrimpack = 0; g_rimpack_t0 = roam_plat_now_us();
+    if (g_npack < 0){
+        g_npack = 0; g_packs_t0 = roam_plat_now_us();
+        const int cap = (int)(sizeof g_pack / sizeof g_pack[0]);
+        char path[96];
+        for (uint32_t i = 0; i < N_PARTPACKS; i++){
+            uint32_t file = rd32(G_PARTPACKS + 4u * i);
+            cstr(file, path, sizeof path);
+            if (path[0]) load_pack(c, file, path);
+        }
+        int shared = g_npack;
         uint32_t fn = g_gmem + 0xa0u, part = 0;
-        for (int i = 0; i < 64 && g_nrimpack < (int)(sizeof g_rimpack / sizeof g_rimpack[0]); i++){
+        for (int i = 0; i < 64 && g_npack < cap; i++){
             uint32_t a[5] = { RIM_BRANDS, 0x43u, 0, part, 0xffffffffu };
             if (!(part = rh_call(c, FN_PART_NEXT, G_CARPARTDB, 0, 5, a))) break;
-            char nm[40], path[96]; cstr(gcall0(c, FN_PART_NAME, part), nm, sizeof nm);
+            char nm[40]; cstr(gcall0(c, FN_PART_NAME, part), nm, sizeof nm);
             if (!nm[0]) continue;
             snprintf(path, sizeof path, "CARS\\WHEELS\\GEOMETRY_%s.BIN", nm);
             gstr(fn, path, 0x60u);
-            uint32_t z[4] = { fn, 0, 0, 0 };
-            rh_call(c, FN_PACK_LOAD, 0, 0, 4, z);
-            uint32_t pk = gcall1(c, FN_PACK_FIND, G_STREAMER, fn);
-            if (pk) g_rimpack[g_nrimpack++] = pk;
-            else rlog("[roam] f=%ld %s did not load\n", rh_frame(), path);
+            load_pack(c, fn, path);
         }
-        rlog("[roam] f=%ld friends' rims: %d rim brands' packs loaded\n", rh_frame(), g_nrimpack);
+        rlog("[roam] f=%ld friends' shop parts: %d shared packs and %d rim brands' packs loaded\n", rh_frame(), shared, g_npack - shared);
     }
     int in = 0;
-    for (int i = 0; i < g_nrimpack; i++) in += ok(g_rimpack[i], 0xc0) && !MR8(g_rimpack[i] + 0x8au) && MR32(g_rimpack[i] + 0xa0u);
-    if (in < g_nrimpack && roam_plat_now_us() - g_rimpack_t0 < RIMPACK_WAIT_US) return 0;
-    if (in < g_nrimpack) rlog("[roam] f=%ld friends' rims: %d of %d packs in after %.0f s, going on without the others\n", rh_frame(), in,
-                              g_nrimpack, RIMPACK_WAIT_US / 1e6);
-    else rlog("[roam] f=%ld friends' rims: the packs are in after %.1f s\n", rh_frame(), (roam_plat_now_us() - g_rimpack_t0) / 1e6);
-    g_rimpack_ok = 1;
+    for (int i = 0; i < g_npack; i++) in += ok(g_pack[i], 0xc0) && !MR8(g_pack[i] + 0x8au) && MR32(g_pack[i] + 0xa0u);
+    if (in < g_npack && roam_plat_now_us() - g_packs_t0 < PARTPACK_WAIT_US) return 0;
+    if (in < g_npack) rlog("[roam] f=%ld friends' shop parts: %d of %d packs in after %.0f s, going on without the others\n", rh_frame(), in,
+                           g_npack, PARTPACK_WAIT_US / 1e6);
+    else rlog("[roam] f=%ld friends' shop parts: the packs are in after %.1f s\n", rh_frame(), (roam_plat_now_us() - g_packs_t0) / 1e6);
+    g_packs_ok = 1;
     return 1;
 }
 /* start loading peer's ride for slot k */
@@ -1073,9 +1118,9 @@ static int begin_load(CPU *c, int k, const uint8_t *cfg, int len, uint32_t gen){
     Slot *s = &g_sl[k];
     rc_carcfg cc;
     if (rc_carcfg_decode(cfg, len, &cc) != RC_OK) return 0;
-    int rims = 0;
-    for (int i = 0; i < cc.n_parts; i++) rims |= (cc.part[i].slot == 0x1du || cc.part[i].slot == 0x1eu) && cc.part[i].owner == OWNER_WHEELS;
-    if (!rim_packs(c) && rims) return 0;                         /* (the packs start loading with the first friend) */
+    int in = part_packs(c), shop = 0;                            /* (the packs start loading with the first friend) */
+    for (int i = 0; i < cc.n_parts; i++) shop |= shared_owner(cc.part[i].owner);
+    if (!in && shop) return 0;
     uint32_t skin = slot_skin(k);
     if (!skin_textures(c, skin)) return 0;
     if (!pool_room(c, s, cc.type_name)) return 0;
@@ -2894,7 +2939,7 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
     }
     if (!strcasecmp(sub, "rims")){
         /* "mp rims": each shown friend's car's rims, the shops' or its own,
-         * and whether its render info has their models (rim_packs) */
+         * and whether its render info has their models (part_packs) */
         int n = 0, have = 0;
         for (int k = 0; k < NSLOT; k++){
             Slot *s = &g_sl[k];
@@ -2907,6 +2952,33 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
                     shop ? "the shops'" : "its own", fr ? "yes" : "NO", re ? "yes" : "NO");
         }
         rlog("[roam] f=%ld mp rims: %d of %d friends' cars with the shops' rims have their models\n", f, have, n);
+        return 1;
+    }
+    if (!strcasecmp(sub, "models")){
+        /* "mp models": each shown friend's car's parts from the shared packs
+         * (part_packs) that have a model, and whether its render info has
+         * their first (CRI_MODELS; the trunk's audio, 0x23-0x2E, is not
+         * there), by the ride slot's name (G_SLOTNAMES) */
+        int n = 0, have = 0;
+        for (int k = 0; k < NSLOT; k++){
+            Slot *s = &g_sl[k];
+            if (s->st != SL_ACTIVE || s->hidden || !ok(s->car, 0x9e0)) continue;
+            uint32_t ride = rd32(s->car + 0x10u), ri = rd32(s->car + 0x554u), owners = rd32(G_PARTOWNERS);
+            if (!ok(ride, 0x8f0) || !ok(ri, CRI_MODELS + 0x20u * 0x3fu) || !owners) continue;
+            char list[400] = {0}; int cn = 0, ch = 0, at = 0;
+            for (uint32_t sl = 0; sl < 0x3fu; sl++){
+                uint32_t p = rd32(ride + 0x590u + 4u * sl);
+                if ((sl >= 0x23u && sl <= 0x2eu) || !ok(p, 0xe) || MR16(p + 0xcu) == 0xffffu) continue;   /* (+0xC: its model's name, 0x634800) */
+                if (!shared_owner(rd32(owners + 4u * MR8(p + 7u)))) continue;
+                int m = MR32(ri + CRI_MODELS + 0x20u * sl) != 0;
+                char nm[24]; cstr(rd32(G_SLOTNAMES + 8u * sl), nm, sizeof nm);
+                cn++; ch += m;
+                if (at < (int)sizeof list - 40) at += snprintf(list + at, sizeof list - (size_t)at, " %s %s", nm, m ? "yes" : "NO");
+            }
+            n += cn; have += ch;
+            rlog("[roam] f=%ld mp models: slot %d %s: %d of %d shop parts have their models:%s\n", f, k, s->name, ch, cn, list);
+        }
+        rlog("[roam] f=%ld mp models: %d of %d shop parts of friends' cars have their models\n", f, have, n);
         return 1;
     }
     if (!strcasecmp(sub, "carpoke") || !strcasecmp(sub, "carpeek")){
@@ -2982,7 +3054,8 @@ static void run_job(CPU *c, const char *job){
          * bytes, +0x38 how many; a part's kind, +4, is G_SLOTKIND's for the
          * slot), with "spinner" only the spinners that fit the car (type
          * SPINNER and the car type's size: the spinner shop's list,
-         * 0x539960); "mp setpart SLOT N [spinner]": the
+         * 0x539960); "here": a car of the player's car type can have it
+         * (find_part, as a friend's look is built); "mp setpart SLOT N [spinner]": the
          * N-th of them on the player's ride (RideInfo::SetPart), as a shop
          * would but without loading the car again: its look has it, so
          * friends' games show it */
@@ -3002,8 +3075,10 @@ static void run_job(CPU *c, const char *job){
                 if (only && !(spin && fits)) continue;
                 char nm[48] = {0}; uint32_t np = rh_call(c, FN_PART_NAME, p, 0, 0, 0);
                 if (np) cstr(np, nm, sizeof nm);
-                if (!set) rlog("[roam] f=%ld mp parts %x: #%u 0x%08x %s key %08x owner %08x level %u%s%s\n", f, slot, n, p, nm, key,
-                               owners ? rd32(owners + 4u * MR8(p + 7u)) : 0u, (uint32_t)MR8(p + 5u) >> 5, spin ? " spinner" : "", fits ? " fits" : "");
+                uint32_t own = owners ? rd32(owners + 4u * MR8(p + 7u)) : 0u;
+                int here = !set && ride0 && find_part(c, MR32(ride0), slot, key, own) == p;
+                if (!set) rlog("[roam] f=%ld mp parts %x: #%u 0x%08x %s key %08x owner %08x level %u%s%s%s\n", f, slot, n, p, nm, key,
+                               own, (uint32_t)MR8(p + 5u) >> 5, spin ? " spinner" : "", fits ? " fits" : "", here ? " here" : "");
                 else if (n == want){
                     uint32_t ride = rd32(player_car() + 0x10u), a[2] = { slot, p };
                     uint32_t old = ok(ride, 0x8f0) ? rh_call(c, FN_RIDE_SETPART, ride, 0, 2, a) : 0u;

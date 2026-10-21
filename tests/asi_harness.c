@@ -262,7 +262,7 @@ static int st_unload(void *u, xvm *vm, uint32_t a, uint32_t *r){ (void)u; (void)
 /* Car::SetRideInfo(ride): rebuilds the render info (textures) -> remember the ride */
 static int st_setride(void *u, xvm *vm, uint32_t a, uint32_t *r){
     (void)a; Eng *e = eng_of(u); e->setride_last = xvm_rd32(vm, r[XR_ESP] + 4); e->setrides++; r[XR_EAX] = 0; return 4; }
-/* the rim brands' model packs (roam_game.c rim_packs): loading one reads a
+/* the shared part packs (roam_game.c part_packs): loading one reads a
  * file -> nothing, and the streamer has none of them, so no ride waits */
 #define FN_PACK_LOAD      0x004941c0u
 #define FN_PACK_FIND      0x0048ce80u
