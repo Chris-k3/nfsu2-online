@@ -10,6 +10,7 @@
 //     --size WxH        canvas size in device pixels (default 1800x1098)
 //     --script PATH     input script (default /tests/web/scripts/perf_drive.txt = hfr_drive.txt with "log cpu_begin" at
 //                       15 s and "log cpu_end" at 45 s of race time; needs "log race_loaded"/"log drive_end")
+//                       (perf_nodump.txt: the same without the frame dumps, for counting late frames)
 //     --env K=V         extra game environment (repeatable)
 //     --js-flags S      V8 flags for Chrome (experiments only: a player's Chrome has none)
 //     --chrome-arg A    extra Chrome argument (repeatable)
@@ -19,6 +20,10 @@
 //                       (Profiler domain on each worker target; wasm names from the name section)
 //     --prof-from S     start the profile S seconds after race_loaded (default 0)
 //     --interval US     profiler sampling interval in microseconds (default 250)
+//     --trace S         record a Chrome trace of every process for S seconds from --prof-from (Tracing domain:
+//                       the GPU process's Dawn and compositor work, the page's tasks); <mode>-<i>.trace.json and a
+//                       self-time summary per thread, -trace.txt
+//     --trace-cats LIST the trace's categories (default: toplevel, gpu, the Dawn and compositor ones, v8)
 //     --cpu-from S      take the first per-thread CPU snapshot S seconds after race_loaded (default 0), so the
 //                       instructions/cycles per frame cover the warm part only
 //     --wasm LIST       module(s) to compare: name=/url,name=/url (default game=/game.wasm); every run of every
@@ -35,20 +40,24 @@
 // (NFSU2_PACE_SPIN=0: the pacer sleeps without spinning, so the counters see the work alone; the guest busy
 // times of the race's first ~1,700 frames compare well too, later the runs drift apart.)
 // Every run writes <mode>-<i>.log (the console), .json (the parsed numbers) and, with --cpuprofile,
-// .cpuprofile + -prof.txt; summary.md/summary.json hold the table.
+// .cpuprofile + -prof.txt (and -page.cpuprofile, the page's main thread); summary.md/summary.json hold the table.
 //
 // Numbers, per run:
+//   CPU time per racing frame (macOS and Windows) of the game thread, the page's main thread (the WebGPU
+//   encoder), the GPU process and the whole renderer process, from per-thread CPU snapshots at cpu_begin and
+//   cpu_end; on Windows the game thread's includes the frame pacer's spin (win32_ext.c sleep_precise_ns);
 //   guest busy ms per racing frame (runtime/web/gcpu.c NFSU2_GCPU_FRAMES=1: lock held minus host waits), for the whole
 //   race, its first 15 s (V8 still tiering up) and the rest ("warm"), p50/p95/p99/max;
 //   [hfr] race fps, missed 120 Hz slots and slots/frame (paced modes; the intro NIS runs at 30 by design);
 //   present intervals > 1.5 periods in the warm drive (paced modes);
 //   renderer encode ms per frame on the page thread and GPU ms (timestamp queries) in the race window;
-//   machine load: 1-minute load average sampled every 5 s during the run (min/mean/max), plus uptime before/after.
+//   machine load: the 1-minute load average (macOS) or the busy cores (elsewhere) sampled every 5 s during the
+//   run (min/mean/max), plus uptime before/after.
 import { chromium } from 'playwright';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dist, pct } from './stats.mjs';
 import WebSocket from 'ws';
@@ -57,7 +66,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const argv = process.argv.slice(2);
 const o = { base: 'http://localhost:8625', fps: 'uncapped,120', runs: 2, headed: false, size: '1800x1098',
   script: '/tests/web/scripts/perf_drive.txt', env: [], jsFlags: '', chromeArgs: [], profile: '', warmup: 0, cpuprofile: false,
-  profFrom: 0, cpuFrom: 0, interval: 250, run: '', timeout: 400, wasm: 'game=/game.wasm' };
+  profFrom: 0, cpuFrom: 0, interval: 250, run: '', timeout: 400, wasm: 'game=/game.wasm', trace: 0,
+  traceCats: 'toplevel,gpu,gpu.dawn,disabled-by-default-gpu.dawn,gpu.service,viz,cc,benchmark,disabled-by-default-gpu.decoder,v8' };
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i], v = () => argv[++i];
   if (a === '--base') o.base = v(); else if (a === '--fps') o.fps = v(); else if (a === '--runs') o.runs = +v();
@@ -66,6 +76,7 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--profile') o.profile = path.resolve(v()); else if (a === '--warmup') o.warmup = +v();
   else if (a === '--cpuprofile') o.cpuprofile = true; else if (a === '--prof-from') o.profFrom = +v();
   else if (a === '--interval') o.interval = +v(); else if (a === '--cpu-from') o.cpuFrom = +v(); else if (a === '--wasm') o.wasm = v(); else if (a === '--run') o.run = v(); else if (a === '--timeout') o.timeout = +v();
+  else if (a === '--trace') o.trace = +v(); else if (a === '--trace-cats') o.traceCats = v();
   else { console.error(`unknown option ${a}`); process.exit(2); }
 }
 const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
@@ -93,7 +104,18 @@ function urlFor(fps, spec) {
   return `${base}/test/play.html?${q}`;
 }
 
-const load1 = () => { try { return +execFileSync('sysctl', ['-n', 'vm.loadavg'], { encoding: 'utf8' }).replace(/[{}]/g, '').trim().split(/\s+/)[0]; } catch { return NaN; } };
+// the machine's load: the 1-minute load average on macOS; elsewhere the busy cores since the last sample
+// (os.cpus() times: Windows has no load average), this run's own Chrome included in both
+let cpusLast = null;
+const load1 = () => {
+  if (process.platform === 'darwin') { try { return +execFileSync('sysctl', ['-n', 'vm.loadavg'], { encoding: 'utf8' }).replace(/[{}]/g, '').trim().split(/\s+/)[0]; } catch { return NaN; } }
+  const c = os.cpus().map(x => [x.times.user + x.times.nice + x.times.sys + x.times.irq, x.times.idle]), z = cpusLast;
+  cpusLast = c;
+  if (!z || z.length !== c.length) return NaN;
+  let busy = 0, all = 0;
+  c.forEach(([b, i], k) => { busy += b - z[k][0]; all += b + i - z[k][0] - z[k][1]; });
+  return all > 0 ? busy / all * c.length : NaN;
+};
 const uptime = () => { try { return execFileSync('uptime', { encoding: 'utf8' }).trim(); } catch { return ''; } };
 
 // ---- DevTools CPU profiler on the page's dedicated workers (flat CDP sessions over a raw socket) ----
@@ -123,6 +145,7 @@ async function profilerFor(port) {
   const page = targetInfos.find(t => t.type === 'page' && t.url.includes('/test/play.html'));
   const { sessionId } = await cdp.send('Target.attachToTarget', { targetId: page.targetId, flatten: true });
   await cdp.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }, sessionId);
+  workers.set(sessionId, { title: 'page', url: page.url });     // the page's main thread: the renderer's encoder
   return {
     async start() {
       for (const s of workers.keys()) {
@@ -166,15 +189,106 @@ function analyse(prof, interval) {
     avgIntervalUs: dts.length ? dts.reduce((a, b) => a + b, 0) / dts.length : interval, self: top(self, 80), incl: top(incl, 80) };
 }
 
-// ---- per-thread CPU time of this run's Chrome renderer (web/tools/threadcpu.c, built on first use) ----
-// macOS only (Mach thread info); elsewhere the CPU columns stay empty and the guest busy times still count
-const MAC = process.platform === 'darwin';
+// ---- Chrome trace of every process (Tracing domain on the browser target) ----
+async function tracerFor(port) {
+  const cdp = await Cdp.connect(port);
+  const events = [];
+  let done; const complete = new Promise(r => { done = r; });
+  cdp.handlers.push(m => { if (m.method === 'Tracing.dataCollected') for (const e of m.params.value) events.push(e); else if (m.method === 'Tracing.tracingComplete') done(); });
+  return {
+    start: () => cdp.send('Tracing.start', { transferMode: 'ReportEvents', traceConfig: { recordMode: 'recordContinuously',
+      includedCategories: o.traceCats.split(','), enableSampling: false } }),
+    async stop() { await cdp.send('Tracing.end'); await complete; cdp.ws.close(); return events; },
+  };
+}
+// self time per thread and event name: complete (X) and begin/end (B/E) slices nested by a stack per thread
+function traceSummary(events, frames) {
+  const tname = new Map(), pname = new Map(), per = new Map();
+  for (const e of events) {
+    if (e.ph !== 'M') continue;
+    if (e.name === 'thread_name') tname.set(`${e.pid}:${e.tid}`, e.args.name);
+    if (e.name === 'process_name') pname.set(e.pid, e.args.name);
+  }
+  const byThread = new Map();
+  for (const e of events) if (e.ph === 'X' || e.ph === 'B' || e.ph === 'E') {
+    const k = `${e.pid}:${e.tid}`; if (!byThread.has(k)) byThread.set(k, []); byThread.get(k).push(e);
+  }
+  let t0 = Infinity, t1 = -Infinity;
+  for (const [k, evs] of byThread) {
+    evs.sort((a, b) => a.ts - b.ts || (a.ph === 'E' ? -1 : 0) - (b.ph === 'E' ? -1 : 0) || (b.dur ?? 0) - (a.dur ?? 0));
+    const self = new Map(), stack = [];
+    // a slice ends at ts + dur (X) or at its E; an X slice is closed when a later event starts after its end
+    const close = (until) => { while (stack.length && stack[stack.length - 1].end !== undefined && stack[stack.length - 1].end <= until) {
+      const s = stack.pop(); self.set(s.name, (self.get(s.name) ?? 0) + (s.end - s.start) - s.kids); if (stack.length) stack[stack.length - 1].kids += s.end - s.start; } };
+    for (const e of evs) {
+      t0 = Math.min(t0, e.ts); t1 = Math.max(t1, e.ts + (e.dur ?? 0));
+      close(e.ts);
+      if (e.ph === 'X') stack.push({ name: e.name, start: e.ts, end: e.ts + (e.dur ?? 0), kids: 0 });
+      else if (e.ph === 'B') stack.push({ name: e.name, start: e.ts, end: undefined, kids: 0 });
+      else { for (let i = stack.length - 1; i >= 0; i--) if (stack[i].end === undefined) { stack[i].end = e.ts; break; } close(e.ts); }
+    }
+    close(Infinity);
+    const tot = [...self.values()].reduce((a, b) => a + b, 0);
+    per.set(k, { name: `${pname.get(+k.split(':')[0]) ?? '?'}/${tname.get(k) ?? k}`, tot, self });
+  }
+  const span = (t1 - t0) / 1e3, out = [`trace: ${events.length} events over ${(span / 1000).toFixed(2)} s, ${frames} frames`];
+  for (const t of [...per.values()].sort((a, b) => b.tot - a.tot).slice(0, 14)) {
+    out.push('', `${t.name}: ${(t.tot / 1e3).toFixed(0)} ms in slices (${(t.tot / 1e3 / (frames || 1)).toFixed(3)} ms/frame)`);
+    for (const [n, us] of [...t.self].sort((a, b) => b[1] - a[1]).slice(0, 16)) out.push(`  ${(us / 1e3 / (frames || 1)).toFixed(3).padStart(8)} ms/frame  ${(100 * us / t.tot).toFixed(1).padStart(5)} %  ${n}`);
+  }
+  return out.join('\n') + '\n';
+}
+
+// ---- per-thread CPU time of this run's Chrome processes ----
+// macOS: web/tools/threadcpu.c (built on first use; Mach thread info and counters).  Windows:
+// web/tools/threadcpu-win.ps1, one PowerShell server for the whole bench (thread times, cycle counts,
+// Chrome's thread names; no instruction counts).  Elsewhere the CPU columns stay empty and the guest
+// busy times still count.
+const MAC = process.platform === 'darwin', WIN = process.platform === 'win32';
 const TMP = MAC ? '/private/tmp/nsfu2-web-perf' : path.join(os.tmpdir(), 'nsfu2-web-perf');
 fs.mkdirSync(TMP, { recursive: true });
 const TCPU = path.join(TMP, 'threadcpu/threadcpu');
 if (MAC && !fs.existsSync(TCPU)) { fs.mkdirSync(path.dirname(TCPU), { recursive: true }); execFileSync('clang', ['-O2', '-o', TCPU, path.join(ROOT, 'web/tools/threadcpu.c')]); }
-function threadCpu(dir) {
+let winCpu = null;
+function winSnap(dir) {
+  if (!winCpu) {
+    // a copy on the local disk: PowerShell refuses unsigned scripts from a network path (\\wsl.localhost)
+    const ps1 = path.join(TMP, 'threadcpu-win.ps1');
+    fs.copyFileSync(path.join(ROOT, 'web/tools/threadcpu-win.ps1'), ps1);
+    const proc = spawn('pwsh', ['-NoProfile', '-NonInteractive', '-File', ps1], { stdio: ['pipe', 'pipe', 'inherit'] });
+    winCpu = { proc, waiters: [], lines: [], rest: '' };
+    proc.stdout.setEncoding('utf8');
+    proc.stdout.on('data', d => {
+      const parts = (winCpu.rest + d).split('\n'); winCpu.rest = parts.pop();
+      for (const l of parts.map(s => s.trim())) {
+        if (!l.startsWith('END ')) { if (l) winCpu.lines.push(l); continue; }
+        const lines = winCpu.lines; winCpu.lines = [];
+        winCpu.waiters.shift()?.({ lines, t: +l.slice(4) });
+      }
+    });
+    proc.on('error', e => { console.error(`threadcpu-win: ${e}`); for (const w of winCpu.waiters.splice(0)) w(null); });
+    proc.unref(); proc.stdout.unref?.();
+  }
+  return new Promise(res => { winCpu.waiters.push(res); winCpu.proc.stdin.write(`snap ${dir}\n`); });
+}
+/** every thread of the run's Chrome processes: { m: Map, t: epoch ms of the snapshot }, or null */
+async function threadCpu(dir) {
+  if (WIN) {
+    const s = await winSnap(dir);
+    if (!s || !s.lines.length) return null;
+    const m = new Map();
+    for (const l of s.lines) {
+      const [pid, id, ns, name, type, cns] = l.split(' ');
+      // the cycle count is exact; the thread times only advance on clock ticks
+      m.set(`${pid}:${id}`, { pid: +pid, type, name, ns: +cns || +ns, pi: NaN, pc: NaN, pn: NaN, ei: NaN, ec: NaN, en: NaN });
+    }
+    return { m, t: s.t };
+  }
   if (!MAC) return null;
+  const m = threadCpuMac(dir);
+  return m ? { m, t: Date.now() } : null;
+}
+function threadCpuMac(dir) {
   const ps = execFileSync('ps', ['-axo', 'pid=,ppid=,command='], { encoding: 'utf8', maxBuffer: 1 << 26 }).split('\n')
     .map(l => /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(l)).filter(Boolean).map(m => ({ pid: +m[1], ppid: +m[2], cmd: m[3] }));
   const br = ps.find(p => p.cmd.includes(`--user-data-dir=${dir}`) && !p.cmd.includes('--type='));
@@ -214,7 +328,7 @@ async function runOnce(fps, label, timed, wasm = variants[0].url) {
   const url = urlFor(fps, wasm);
   const port = 9500 + (process.pid % 400);
   const args = ['--enable-unsafe-webgpu', ...(o.jsFlags ? [`--js-flags=${o.jsFlags}`] : []), ...o.chromeArgs,
-    ...(o.cpuprofile && timed ? [`--remote-debugging-port=${port}`] : [])];
+    ...((o.cpuprofile || o.trace) && timed ? [`--remote-debugging-port=${port}`] : [])];
   // always a persistent context with a known directory: it finds this run's Chrome processes for the
   // per-thread CPU times (a fresh, deleted directory unless --profile keeps one)
   const dir = o.profile || fs.mkdtempSync(path.join(TMP, 'chprof-'));
@@ -225,18 +339,25 @@ async function runOnce(fps, label, timed, wasm = variants[0].url) {
   let cpu0 = null, cpu1 = null, f0 = 0, f1 = 0, tw0 = 0, tw1 = 0, cpuE = null, twE = 0, mark0 = null, mark1 = null, mt0 = 0, mt1 = 0;
   const up0 = uptime(), t0 = Date.now();
   const lt = setInterval(() => loads.push(load1()), 5000); loads.push(load1());
-  let prof = null, profStarted = null, profStop = null;
+  let prof = null, profStarted = null, profStop = null, traceDone = null, traceF0 = 0, traceF1 = 0;
   let raceAt = 0;
   const onLine = async t => {
     // the CPU window: cpu_begin .. cpu_end when the script has them (a fixed stretch of race time)
-    if (timed && t.includes(' LOG cpu_begin')) { mark0 = threadCpu(dir); mt0 = Date.now(); }
-    if (timed && t.includes(' LOG cpu_end') && mark0 && !mark1) { mark1 = threadCpu(dir); mt1 = Date.now(); }
+    // (snapshots are asynchronous on Windows: each keeps the time it was taken)
+    if (timed && t.includes(' LOG cpu_begin')) { const s = await threadCpu(dir); if (s) { mark0 = s.m; mt0 = s.t; } }
+    if (timed && t.includes(' LOG cpu_end') && mark0 && !mark1) { const s = await threadCpu(dir); if (s) { mark1 = s.m; mt1 = s.t; } }
     if (timed && t.includes(' LOG race_loaded')) {
       const f = +(/ f=(\d+) /.exec(t)?.[1] ?? 0);
-      if (o.cpuFrom) { cpuE = threadCpu(dir); twE = Date.now(); }      // the early window: race_loaded .. +cpuFrom
-      setTimeout(() => { cpu0 = threadCpu(dir); tw0 = Date.now(); f0 = o.cpuFrom ? 0 : f; }, o.cpuFrom * 1000);
+      if (o.cpuFrom) { const s = await threadCpu(dir); if (s) { cpuE = s.m; twE = s.t; } }      // the early window: race_loaded .. +cpuFrom
+      setTimeout(async () => { const s = await threadCpu(dir); if (s) { cpu0 = s.m; tw0 = s.t; f0 = o.cpuFrom ? 0 : f; } }, o.cpuFrom * 1000);
     }
-    if (timed && t.includes(' LOG drive_end') && cpu0 && !cpu1) { cpu1 = threadCpu(dir); tw1 = Date.now(); f1 = o.cpuFrom ? 0 : +(/ f=(\d+) /.exec(t)?.[1] ?? 0); }
+    if (timed && t.includes(' LOG drive_end') && cpu0 && !cpu1) { const f = o.cpuFrom ? 0 : +(/ f=(\d+) /.exec(t)?.[1] ?? 0), s = await threadCpu(dir); if (s) { cpu1 = s.m; tw1 = s.t; f1 = f; } }
+    if (o.trace && timed && t.includes(' LOG race_loaded')) setTimeout(async () => {
+      try {
+        const tr = await tracerFor(port); await tr.start(); traceF0 = Date.now(); lines.push(`[bench] trace started`);
+        traceDone = new Promise(r => setTimeout(async () => { traceF1 = Date.now(); r(await tr.stop()); }, o.trace * 1000));
+      } catch (e) { lines.push(`[bench] trace failed: ${e}`); }
+    }, o.profFrom * 1000);
     if (!o.cpuprofile || !timed) return;
     if (t.includes(' LOG race_loaded')) {
       raceAt = Date.now();
@@ -252,6 +373,7 @@ async function runOnce(fps, label, timed, wasm = variants[0].url) {
   try { await page.waitForFunction(() => document.title === 'DONE', null, { timeout: o.timeout * 1000, polling: 1000 }); }
   catch { timedOut = true; lines.push('[bench] TIMEOUT'); }
   const profiles = profStop ? await profStop : [];
+  const traceEvents = traceDone ? await traceDone : null;
   clearInterval(lt); loads.push(load1());
   const wall = (Date.now() - t0) / 1000, up1 = uptime();
   await browser.close();
@@ -268,16 +390,24 @@ async function runOnce(fps, label, timed, wasm = variants[0].url) {
   } else if (cpu0 && cpu1) r.cpu = cpuDelta(cpu0, cpu1, f1 - f0, tw1 - tw0);
   if (cpuE && cpu0) { const t00 = +(/\[gcpuf0\] ([\d.]+)/.exec(log)?.[1] ?? NaN);
     r.cpuEarly = cpuDelta(cpuE, cpu0, r.frameT.filter(x => t00 + x >= twE && t00 + x < tw0).length, tw0 - twE); }
-  Object.assign(r, { label, fps, wall, timedOut, load: { min: Math.min(...loads), mean: loads.reduce((a, b) => a + b, 0) / loads.length, max: Math.max(...loads) }, uptimeBefore: up0, uptimeAfter: up1 });
+  const ld = loads.filter(x => !Number.isNaN(x));
+  Object.assign(r, { label, fps, wall, timedOut, load: { min: Math.min(...ld), mean: ld.reduce((a, b) => a + b, 0) / ld.length, max: Math.max(...ld) }, uptimeBefore: up0, uptimeAfter: up1 });
   if (profiles.length) {
     const an = profiles.map(p => ({ title: p.title, ...analyse(p.profile, o.interval) })).sort((a, b) => b.lifted - a.lifted);
     r.profile = { from: o.profFrom, workers: an.map(a => ({ title: a.title, busy: a.busy, samples: a.samples, spanMs: a.spanMs })), main: an[0] };
     fs.writeFileSync(path.join(OUT, `${label}.cpuprofile`), JSON.stringify(profiles.find(p => p.title === an[0].title).profile));
+    const pg = profiles.find(p => p.title === 'page');
+    if (pg) fs.writeFileSync(path.join(OUT, `${label}-page.cpuprofile`), JSON.stringify(pg.profile));
     const txt = [`main guest worker ${an[0].title}: ${an[0].busy} working of ${an[0].samples} samples over ${(an[0].spanMs / 1000).toFixed(1)} s (interval ${an[0].avgIntervalUs.toFixed(0)} us); waiting: ${JSON.stringify(an[0].waits)}`,
       '', 'self:', ...an[0].self.map(x => `  ${(100 * x.share).toFixed(2).padStart(6)} %  ${x.f}`),
       '', 'inclusive:', ...an[0].incl.map(x => `  ${(100 * x.share).toFixed(2).padStart(6)} %  ${x.f}`),
       '', 'other workers:', ...an.slice(1).filter(a => a.busy).map(a => `  ${a.title}: ${a.busy} busy samples; top self ${a.self.slice(0, 5).map(x => `${x.f} ${(100 * x.share).toFixed(1)}%`).join(', ')}`)];
     fs.writeFileSync(path.join(OUT, `${label}-prof.txt`), txt.join('\n') + '\n');
+  }
+  if (traceEvents) {
+    const t00 = +(/\[gcpuf0\] ([\d.]+)/.exec(log)?.[1] ?? NaN), fr = r.frameT.filter(x => t00 + x >= traceF0 && t00 + x < traceF1).length;
+    fs.writeFileSync(path.join(OUT, `${label}.trace.json`), JSON.stringify({ traceEvents }));
+    fs.writeFileSync(path.join(OUT, `${label}-trace.txt`), traceSummary(traceEvents, fr));
   }
   fs.writeFileSync(path.join(OUT, `${label}.json`), JSON.stringify(r, null, 1));
   return r;
@@ -308,9 +438,9 @@ function parse(log) {
 }
 
 const f2 = x => (x === undefined || Number.isNaN(x)) ? '-' : x.toFixed(2);
-const row = r => `| ${r.label} | ${r.exit} | ${Number.isNaN(r.loadMs) ? '-' : (r.loadMs / 1000).toFixed(2)} | ${r.cpu ? `${f2(r.cpu.mainPerFrame)} (${(100 * r.cpu.mainUtil).toFixed(0)} %)` : '-'} | ${r.cpu ? `${f2(r.cpu.minsPerFrame)} / ${(100 * r.cpu.eShare).toFixed(0)} %` : '-'}${r.cpuEarly ? ` (early ${f2(r.cpuEarly.minsPerFrame)})` : ''} | ${f2(r.load.min)}–${f2(r.load.max)} (${f2(r.load.mean)}) | ${r.race.n} | ${f2(r.race.p50)} / ${f2(r.race.p95)} / ${f2(r.race.p99)} / ${f2(r.race.max)} | ${f2(r.early.p50)} / ${f2(r.early.p95)} | ${f2(r.warm.p50)} / ${f2(r.warm.p95)} / ${f2(r.warm.p99)} | ${r.hfr ? `${f2(r.hfr.fps)} / ${r.hfr.missed} / ${r.hfr.slotsPerFrame.toFixed(3)}` : '-'} | ${r.late ? `${r.late.late}/${r.late.intervals}` : '-'} | ${r.renderer ? `${f2(r.renderer.encodeMs[0])} / ${f2(r.renderer.encodeMs[1])}` : '-'} | ${r.renderer?.gpuMs?.length ? `${f2(r.renderer.gpuMs[0])} / ${f2(r.renderer.gpuMs[1])}` : '-'} |`;
-const HEAD = ['| run | exit | race load s | game thread CPU ms/frame (CPU/wall) | M instructions/frame / E-core time | load 1-min min–max (mean) | race frames | busy ms p50 / p95 / p99 / max | first 15 s p50 / p95 | warm p50 / p95 / p99 | [hfr] fps / missed slots / slots per frame | warm late frames | encode ms p50 / p95 | GPU ms p50 / p95 |',
-  '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|'];
+const row = r => `| ${r.label} | ${r.exit} | ${Number.isNaN(r.loadMs) ? '-' : (r.loadMs / 1000).toFixed(2)} | ${r.cpu ? `${f2(r.cpu.mainPerFrame)} (${(100 * r.cpu.mainUtil).toFixed(0)} %)` : '-'} | ${r.cpu ? `${f2(r.cpu.pageMs / r.cpu.frames)} / ${f2(r.cpu.gpuProcMs / r.cpu.frames)} / ${f2(r.cpu.rendererMs / r.cpu.frames)}` : '-'} | ${r.cpu ? `${f2(r.cpu.minsPerFrame)} / ${(100 * r.cpu.eShare).toFixed(0)} %` : '-'}${r.cpuEarly ? ` (early ${f2(r.cpuEarly.minsPerFrame)})` : ''} | ${f2(r.load.min)}–${f2(r.load.max)} (${f2(r.load.mean)}) | ${r.race.n} | ${f2(r.race.p50)} / ${f2(r.race.p95)} / ${f2(r.race.p99)} / ${f2(r.race.max)} | ${f2(r.early.p50)} / ${f2(r.early.p95)} | ${f2(r.warm.p50)} / ${f2(r.warm.p95)} / ${f2(r.warm.p99)} | ${r.hfr ? `${f2(r.hfr.fps)} / ${r.hfr.missed} / ${r.hfr.slotsPerFrame.toFixed(3)}` : '-'} | ${r.late ? `${r.late.late}/${r.late.intervals}` : '-'} | ${r.renderer ? `${f2(r.renderer.encodeMs[0])} / ${f2(r.renderer.encodeMs[1])}` : '-'} | ${r.renderer?.gpuMs?.length ? `${f2(r.renderer.gpuMs[0])} / ${f2(r.renderer.gpuMs[1])}` : '-'} |`;
+const HEAD = ['| run | exit | race load s | game thread CPU ms/frame (CPU/wall) | page thread / GPU process / renderer CPU ms/frame | M instructions/frame / E-core time | load 1-min min–max (mean) | race frames | busy ms p50 / p95 / p99 / max | first 15 s p50 / p95 | warm p50 / p95 / p99 | [hfr] fps / missed slots / slots per frame | warm late frames | encode ms p50 / p95 | GPU ms p50 / p95 |',
+  '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|'];
 
 console.log(`bench ${path.relative(ROOT, OUT)}: rev ${rev}, modes ${modes.join(',')}, ${o.runs} run(s) each, ${o.headed ? 'headed' : 'headless'} ${W}x${H}${o.jsFlags ? `, js-flags ${o.jsFlags}` : ''}${o.profile ? `, profile ${o.profile}` : ''}${o.cpuprofile ? ', cpuprofile' : ''}`);
 console.log(`machine: ${os.cpus().length} cores, ${uptime()}`);
@@ -336,3 +466,4 @@ const sum = [`bench ${path.basename(OUT)} — rev ${rev}, ${o.headed ? 'headed' 
 fs.writeFileSync(path.join(OUT, 'summary.md'), sum);
 fs.writeFileSync(path.join(OUT, 'summary.json'), JSON.stringify({ rev, opts: o, results }, null, 1));
 console.log('\n' + sum);
+winCpu?.proc.stdin.end();
