@@ -27,12 +27,17 @@
  *    roam_game_texture).  A slot's car gets the player's ride (streamed
  *    in through the CarLoader, then Car::SetRideInfo), no brain and no
  *    physics, and its pose is written every frame from the core's
- *    interpolation.  Solid cars (the default) keep their collision body,
+ *    interpolation.  Solid cars (the default) have their collision body
+ *    while they are near the player's car (SOLID_M: no other can touch it
+ *    this frame; two friends' cars never need to touch each other, as each
+ *    is where its player put it, but the game tested every pair of them),
  *    except while they are ghosts: from the moment they appear (or jump,
  *    or the player's car does) until they are clear of the player's car,
  *    so nobody is shoved out of a car that appeared inside theirs, and
- *    while they are passable: paused, standing for a minute, or near a door
- *    (soft_update), so nobody walls off a shop or the garage; they are
+ *    while they are passable: paused, standing for a minute, near a door,
+ *    or the player at the new career's start (soft_update), so nobody walls
+ *    off a shop or the garage; a friend's car at that start is not shown at
+ *    all (at_spawn): every new player appears on that spot.  They are
  *    drawn where the friend is now (predicted by half the round trip), so
  *    a contact is at the same spot on both screens.  Ghost cars
  *    (NFSU2_ROAM_COLLIDE=0) have no collision body and are drawn a little in
@@ -166,6 +171,11 @@
 #define MAX_CARS        NSLOT
 #endif
 #define CLEAR_M         6.f           /* a ghost becomes solid once its centre is this far from the player's car's */
+#define SOLID_M         20.f          /* ...and has its body only this near it (cars touch from ~5 m; a frame at 20 fps and 160 m/s closing is 8) */
+#define SPAWN_X         1695.3f       /* the new career's start, where every new player appears (the airport's car park) */
+#define SPAWN_Y         (-883.6f)
+#define SPAWN_Z         24.1f
+#define SPAWN_M         5             /* a car this near it is not shown to others, and the player there is passable */
 #define JUMP_M          5.f           /* a friend's car drawn this far from where it was last frame is a ghost again */
 #define IDLE_MPS        1.f           /* a car slower than this stands */
 #define IDLE_US         60000000      /* a car that has stood this long is passable */
@@ -265,7 +275,7 @@ static int env_int(const char *k, int def, int lo, int hi){
     return (int)x;
 }
 static struct {
-    int on, test, collide, max_cars, rate, delay_ms, extrap_ms, carpool_kb, labels;
+    int on, test, collide, max_cars, rate, delay_ms, extrap_ms, carpool_kb, labels, spawn_m;
     int test_owncars;                         /* NFSU2_ROAM_TEST_OWNCARS (test aid): friends only in cars of our own (slots 3 and up) */
     int test_outside;                         /* NFSU2_ROAM_TEST_OUTSIDE (test aid): every car of our own outside the car index */
     char name[RC_NAME_MAX + 1], room[64];
@@ -692,19 +702,26 @@ static void body_set(CPU *c, uint32_t car, int solid){
     else if (solid && MR8(body + 0x17u) != 0) MR8(body + 0x17u) = 0;
 }
 /* a shown friend's car: solid unless it is a ghost or passable, and a ghost
- * until it is clear of the player's car */
+ * until it is clear of the player's car.  Its body only while it is near the
+ * player's car: the game's collision step (0x5FFA50 in World::DoTimestep)
+ * tests every body against the others near it (0x5B5050, the box test
+ * 0x595040), friends' cars against each other too, which two cars posed by
+ * us never need; 32 of them crossing each other's paths took 3-4.5 ms a
+ * frame (a crowd round the new career's start, roam-crowd --spread 10) */
 static void body_update(CPU *c, int k){
     Slot *s = &g_sl[k];
     uint32_t me = player_car();
-    if (O.collide && s->ghost && ok(me, 0x70)){
+    int near = 0;
+    if (O.collide && ok(me, 0x70)){
         float dx = MRF32(s->car + 0x60u) - MRF32(me + 0x60u), dy = MRF32(s->car + 0x64u) - MRF32(me + 0x64u),
-              dz = MRF32(s->car + 0x68u) - MRF32(me + 0x68u);
-        if (dx * dx + dy * dy + dz * dz > CLEAR_M * CLEAR_M){
+              dz = MRF32(s->car + 0x68u) - MRF32(me + 0x68u), d2 = dx * dx + dy * dy + dz * dz;
+        if (s->ghost && d2 > CLEAR_M * CLEAR_M){
             s->ghost = 0;
             if (!s->soft) rlog("[roam] f=%ld slot %d: %s's car is solid now\n", rh_frame(), k, s->name);
         }
+        near = d2 < SOLID_M * SOLID_M;
     }
-    body_set(c, s->car, O.collide && !s->ghost && !s->soft);
+    body_set(c, s->car, O.collide && !s->ghost && !s->soft && near);
 }
 static void ghost_all(void){ for (int k = 0; k < NSLOT; k++) g_sl[k].ghost = 1; }
 /* Passable cars.  A friend's car has no physics of its own here: it is
@@ -717,8 +734,10 @@ static void ghost_all(void){ for (int k = 0; k < NSLOT; k++) g_sl[k].ghost = 1; 
  * 14; every career has them all, where the events' triggers, type 13, lead
  * somewhere or not by the player's career).  Every rule holds for the pair,
  * so both screens agree on whether two cars touch.  Passable no longer, the
- * car is a ghost until it is clear of the player's car, as when it appears. */
-enum { SOFT_PAUSED = 1, SOFT_IDLE = 2, SOFT_DOOR = 4 };
+ * car is a ghost until it is clear of the player's car, as when it appears.
+ * A player at the new career's start is not shown to others (at_spawn), so
+ * there friends' cars are passable for the player too. */
+enum { SOFT_PAUSED = 1, SOFT_IDLE = 2, SOFT_DOOR = 4, SOFT_SPAWN = 8 };
 static struct {
     int      n;
     float    box[MAX_DOORS][4];               /* min x, min y, max x, max y (the trigger's +0x20) */
@@ -749,8 +768,17 @@ static int near_door(float x, float y){
     }
     return 0;
 }
+/* The new career's start: every new player's car appears there (all on one
+ * spot, cars inside cars), stands through the prologue's first seconds, and
+ * an idle tab's stays.  Players arrive and wait there all the time, so a
+ * friend's car within NFSU2_ROAM_SPAWN_M (5 m; 0: none) of it is not shown,
+ * as a friend's in a shop */
+static int at_spawn(const float *p){
+    float dx = p[0] - SPAWN_X, dy = p[1] - SPAWN_Y, dz = p[2] - SPAWN_Z, r = (float)O.spawn_m;
+    return dx * dx + dy * dy + dz * dz < r * r;
+}
 /* the player's own reasons, once a frame: paused (a second, as a friend's
- * pause counts), standing, near a door */
+ * pause counts), standing, near a door, at the new career's start */
 static void soft_me(int64_t host, uint8_t status){
     doors_read();
     if (status != RC_ST_PAUSED) g_pass.paused_since = 0;
@@ -759,9 +787,12 @@ static void soft_me(int64_t host, uint8_t status){
     if (v >= IDLE_MPS && status != RC_ST_PAUSED) g_pass.idle_since = 0;
     else if (!g_pass.idle_since) g_pass.idle_since = host;
     uint32_t me = player_car();
+    float at[3] = { 0.f, 0.f, 0.f };
+    if (ok(me, 0x70)) rd3(me + 0x60u, at);
     g_pass.me = (g_pass.paused_since && host - g_pass.paused_since >= 1000000 ? SOFT_PAUSED : 0) |
                  (g_pass.idle_since && host - g_pass.idle_since >= IDLE_US ? SOFT_IDLE : 0) |
-                 (ok(me, 0x70) && near_door(MRF32(me + 0x60u), MRF32(me + 0x64u)) ? SOFT_DOOR : 0);
+                 (ok(me, 0x70) && near_door(at[0], at[1]) ? SOFT_DOOR : 0) |
+                 (ok(me, 0x70) && at_spawn(at) ? SOFT_SPAWN : 0);
 }
 /* a shown friend's car's reasons, the player's added; leaving them makes it a ghost */
 static void soft_update(Slot *s, const rc_pose *pose, int64_t host){
@@ -2435,6 +2466,7 @@ static void init_once(CPU *c){
     O.collide = env_int("NFSU2_ROAM_COLLIDE", 1, 0, 1);
 #endif
     O.labels = env_int("NFSU2_ROAM_LABELS", 1, 0, 1);
+    O.spawn_m = env_int("NFSU2_ROAM_SPAWN_M", SPAWN_M, 0, 1000);
     O.test_owncars = env_int("NFSU2_ROAM_TEST_OWNCARS", 0, 0, 1);
     O.test_outside = env_int("NFSU2_ROAM_TEST_OUTSIDE", 0, 0, 1);
     O.max_cars = env_int("NFSU2_ROAM_MAX_CARS", MAX_CARS, 0, MAX_CARS);
@@ -2481,8 +2513,8 @@ static void init_once(CPU *c){
     g_frame0 = rh_frame();
     char ids[16];
     rlog("[roam] free-roam multiplayer ON: id %08x, port %d, %d configured peer(s), room \"%s\", up to %d players, "
-                    "%d remote cars, %d Hz, %s%s\n", cf.self_id, port, np, O.room, maxp, O.max_cars, O.rate,
-            O.collide ? "solid cars" : "ghost cars", O.test ? ", test harness (loopback only)" : "");
+                    "%d remote cars, %d Hz, %s, none shown within %d m of the new career's start%s\n", cf.self_id, port, np, O.room, maxp,
+            O.max_cars, O.rate, O.collide ? "solid cars" : "ghost cars", O.spawn_m, O.test ? ", test harness (loopback only)" : "");
     (void)ids;
 }
 
@@ -2807,6 +2839,9 @@ void roam_game_frame(CPU *c){
                                                   (int64_t)O.extrap_ms * 1000, &v->pose);
                 }
                 else v->have_pose = rc_interp_peek(&p->mo, p->mo.t[p->mo.n - 1], 0, &v->pose);
+                /* at the new career's start: not shown, as in a shop (its slot
+                 * waits a minute, or goes to a friend who needs one) */
+                if (v->have_pose && at_spawn(v->pose.p)) v->visible = 0;
             }
             float dx = v->pose.p[0] - g_lp[0], dy = v->pose.p[1] - g_lp[1];
             v->dist = v->have_pose ? rc_sqrtf(dx*dx + dy*dy) : 1e9f;
@@ -3006,9 +3041,12 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
                     sqrt((double)(dx * dx + dy * dy)), car ? MR16(car + 0x40cu) : 0, car ? MR8(car + 0x5c0u) : 0, car ? MR8(car + 0x550u) : 0,
                     car ? MR32(car + 0x24u) : 0, car ? MR32(car + 0x28u) : 0, car ? MR32(car + 0x554u) : 0, car ? (int16_t)MR16(car + 8u) : -1,
                     car ? (double)MRF32(car + 0x50u) : 0, car ? (double)MRF32(car + 0x54u) : 0, car ? (double)MRF32(car + 0x58u) : 0);
-            if (car) rlog("[roam]     %s%s%s%s%s\n", g_sl[k].soft ? "passable:" : g_sl[k].ghost ? "a ghost" : "solid",
+            uint32_t body = car ? rd32(car + 0x3cu) : 0;
+            if (car) rlog("[roam]     %s%s%s%s%s%s; collision body %s\n", g_sl[k].soft ? "passable:" : g_sl[k].ghost ? "a ghost" : "solid",
                           g_sl[k].soft & SOFT_PAUSED ? " paused" : "", g_sl[k].soft & SOFT_IDLE ? " standing" : "",
-                          g_sl[k].soft & SOFT_DOOR ? " near a door" : "", g_sl[k].soft && g_sl[k].ghost ? " (then a ghost)" : "");
+                          g_sl[k].soft & SOFT_DOOR ? " near a door" : "", g_sl[k].soft & SOFT_SPAWN ? " at the start" : "",
+                          g_sl[k].soft && g_sl[k].ghost ? " (then a ghost)" : "",
+                          !ok(body, 0x20) ? "none" : MR8(body + 0x17u) ? "off" : "on");
             if (car) rlog("[roam]     nitrous %u%% (the game sounds it: %s), wheels at %.3f %.3f %.3f %.3f m in the car, front spinners at %.2f rad turning %.2f rad/s, "
                           "blinked out %u (blink from %u)\n",
                           nos_left(car), game_sounds_nos(car) ? "yes" : "no", (double)MRF32(car + 0x168u), (double)MRF32(car + 0x1a8u), (double)MRF32(car + 0x1e8u),

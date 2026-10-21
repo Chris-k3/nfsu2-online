@@ -77,6 +77,9 @@ const COMMON = {
   NFSU2_SAVEDIR: '/save', NFSU2_READONLY_DATA: '1', NOMOVIES: '1', SNDSYNC: '0', GPUVS: '1', NFSU2_FNG_LOG: '1',
   NFSU2_STATUS_EVERY: '1200', NFSU2_DISCORD: '0', NFSU2_ROAM: '1', NFSU2_ROAM_POSELOG: '/save/pose.csv',
   ROAM_DRIVE_FRAMES: opt('drive', '3600'), ROAM_WATCH_FRAMES: opt('watch', '2400'),
+  // the pairs' scripts start both players on the new career's start, car inside car, and see each other there: the
+  // game hides cars on that spot (roam_game.c at_spawn) unless told otherwise (--env NFSU2_ROAM_SPAWN_M=5 tests that)
+  NFSU2_ROAM_SPAWN_M: '0',
 };
 for (const kv of opts('env')) COMMON[kv.slice(0, kv.indexOf('='))] = kv.slice(kv.indexOf('=') + 1);
 
