@@ -1825,7 +1825,21 @@ static void arrows_update(CPU *c, uint32_t w){
  * as it opens (rc_ask_map: the RC_MAP_MAX nearest past our peers, where they
  * were in the last half second), and each one's marker is made from a
  * stand-in for a car when the answer comes (0x4B0740 reads only the car's
- * +0x60/+0x64 and its heading +0x40C), a frame or a few later. */
+ * +0x60/+0x64 and its heading +0x40C), a frame or a few later.
+ *
+ * Each marker is one more object of the package, and FEng draws a package's
+ * objects through two arrays of a fixed size: the renderer's list of the
+ * objects to draw (0x51A970 adds each one whose colour has any alpha, hidden
+ * or not: renderer +0x110 the count, +0x114 1024 entries; the radix sort
+ * 0x5114F0 takes the 0x2000 bytes after them as its other half, so more
+ * would garble both) and the level sorter's nodes (0x51B850, one for each
+ * object drawn: 512 in the game, RH_FE_NODES here; an object past them is
+ * not drawn).  The map has 235 objects of its own (173 drawn at the new
+ * career's start), so 512 markers more took the nodes from its shop and
+ * event icons and the player's own arrow.
+ * The markers stay within both (wm_room): the package's objects are counted
+ * first, all of them (the zoom shows and hides markers), and the farthest
+ * players are left out. */
 #define WM_PACKAGE      "UI_InGame_WorldMap.fng"
 #define VT_WM_SCREEN    0x00797f20u   /* InGameWorldMapScreen's vtable; +4 its package's name */
 #define WM_MAP          0x4cu         /* the screen's WorldMap: +4/+8 its markers' list (+0 next, +4 previous) */
@@ -1837,6 +1851,8 @@ static void arrows_update(CPU *c, uint32_t w){
 #define PKG_SCREEN      0x40u         /* FEPackage: +0x40 an object whose +0x14 is the package's screen */
 #define WM_ASK_US       1500000       /* no answer from the hub in this time: asked again, WM_ASKS times at most */
 #define WM_ASKS         3
+#define FE_LIST_MAX     1024          /* the FE renderer's list of a package's objects to draw */
+#define WM_SPARE        16            /* objects left to the package itself */
 static struct { int done, said, copies, asks, others; uint32_t map, gen, fake; int64_t asked; } g_wm;
 static struct { int16_t x, y; uint8_t heading; } g_wm_e[RC_MAP_MAX];
 /* the open map's screen, 0 while it is not made (or not this screen) */
@@ -1860,10 +1876,23 @@ static int wm_mark(CPU *c, uint32_t map, uint32_t pkg, uint32_t car){
     MR32(tail) = m; MR32(head + 4u) = m; MR32(m + 4u) = tail; MR32(m) = head;
     return 1;
 }
-/* a copy of AIRACERINDICATOR_0 for each car marker without an object */
-static int wm_dress(CPU *c, uint32_t map, uint32_t pkg){
+/* the objects of a package FEng could draw: every one in its list and its
+ * groups' (type 5: +0x64 the first), groups themselves aside */
+static int fe_objects(uint32_t first, int depth){
+    int n = 0, k = 0;
+    for (uint32_t o = rd32(first); ok(o, 0x5c) && k < 4096; o = rd32(o + 4u), k++)
+        n += rd32(o + 0x18u) != 5u ? 1 : depth < 8 ? fe_objects(o + 0x64u, depth + 1) : 0;
+    return n;
+}
+/* how many objects more the map's package can take */
+static int wm_room(uint32_t pk){
+    int room = (RH_FE_NODES < FE_LIST_MAX ? RH_FE_NODES : FE_LIST_MAX) - WM_SPARE - fe_objects(pk + 0x4cu, 0);
+    return room > 0 ? room : 0;
+}
+/* a copy of AIRACERINDICATOR_0 for each car marker without an object, at most max */
+static int wm_dress(CPU *c, uint32_t map, uint32_t pkg, int max){
     uint32_t o0 = 0; int copies = 0;
-    for (uint32_t e = rd32(map + 4u), i = 0; e && e != map + 4u && i < 4096 && ok(e, WM_MARK_SZ); e = rd32(e), i++){
+    for (uint32_t e = rd32(map + 4u), i = 0; e && e != map + 4u && i < 4096 && copies < max && ok(e, WM_MARK_SZ); e = rd32(e), i++){
         if (MR32(e + 8u) != WM_CAR || MR32(e + 0xcu)) continue;
         char nm[24]; snprintf(nm, sizeof nm, "ROAM_MAPCAR_%d", g_wm.copies);
         if (!o0) o0 = wm_find(c, pkg, "AIRACERINDICATOR_0");
@@ -1894,7 +1923,7 @@ static void map_update(CPU *c, uint32_t w, int64_t host){
             if (!wm_mark(c, map, pkg, s->car)) break;
             n++;
         }
-        int copies = wm_dress(c, map, pkg);
+        int copies = wm_dress(c, map, pkg, wm_room(pk));
         if (n || copies) gcall0(c, FN_WM_PLACE, map);
         rlog("[roam] f=%ld world map open: %u car markers, %d of them friends' cars outside the car index; %d copies of AIRACERINDICATOR_0\n",
                 rh_frame(), MR32(G_WM_COUNT), n, copies);
@@ -1914,18 +1943,19 @@ static void map_update(CPU *c, uint32_t w, int64_t host){
     if (n < 0) return;
     g_wm.asks = -1;
     if (!g_wm.fake){ uint32_t sz = 0x410u; g_wm.fake = rh_call(c, FN_MALLOC, 0, 0, 1, &sz); if (!ok(g_wm.fake, 0x410u)) g_wm.fake = 0; }
-    int made = 0;
+    int room = wm_room(pk), made = 0;                                  /* the nearest ones (the hub's order) */
+    if (n > room) n = room;
     for (int i = 0; g_wm.fake && i < n; i++){
         MRF32(g_wm.fake + 0x60u) = (float)g_wm_e[i].x; MRF32(g_wm.fake + 0x64u) = (float)g_wm_e[i].y;
         MR16(g_wm.fake + 0x40cu) = (uint16_t)(g_wm_e[i].heading << 8);
         if (!wm_mark(c, map, pkg, g_wm.fake)) break;
         made++;
     }
-    int copies = made ? wm_dress(c, map, pkg) : 0;
+    int copies = made ? wm_dress(c, map, pkg, room) : 0;
     if (made) gcall0(c, FN_WM_PLACE, map);
     g_wm.others = made;
-    rlog("[roam] f=%ld world map: %d other players in free roam marked (the hub knows %d past your friends), %d copies more\n",
-            rh_frame(), made, total, copies);
+    rlog("[roam] f=%ld world map: %d other players in free roam marked (the hub knows %d past your friends; room for %d), %d copies more\n",
+            rh_frame(), made, total, room, copies);
 }
 
 /* ---- per-frame --------------------------------------------------------------------------------- */
@@ -3089,6 +3119,9 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
         }
         rlog("[roam] f=%ld mp map: %d markers, %d of them cars', %d of those drawn; %d other players' (from the hub)\n", f, n, cars, drawn,
                 g_wm.others);
+        /* the level sorter's most nodes in one package so far (0x50B430): RH_FE_NODES when objects went undrawn */
+        rlog("[roam] f=%ld mp map: the package has %d objects, room for %d more; FEng drew %u objects of one package at most (%d nodes)\n",
+                f, fe_objects(pk + 0x4cu, 0), wm_room(pk), rd32(0x00838490u), RH_FE_NODES);
         return 1;
     }
     if (!strcasecmp(sub, "waitpeers") || !strcasecmp(sub, "waitcars") || !strcasecmp(sub, "waitsolid") || !strcasecmp(sub, "waithidden")){

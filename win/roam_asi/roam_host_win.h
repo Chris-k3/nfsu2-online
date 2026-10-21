@@ -42,6 +42,7 @@ uint64_t    roam_win_ns(void);
 #define rh_frame()       roam_win_frame_no()
 #define rh_heap_mb()     0u
 #define rh_hud_marker(x, y) ((void)(x), (void)(y))   /* the HUD as the game shows it */
+#define RH_FE_NODES      512             /* the game's own level sorter (0x536520's 0x1000 bytes): nothing patched here */
 #define rh_ns()          roam_win_ns()
 /* no horn here: the companion neither sounds one nor plays friends', nor
  * their nitrous and hydraulics (carsfx.c) */

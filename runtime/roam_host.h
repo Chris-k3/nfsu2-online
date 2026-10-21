@@ -30,6 +30,8 @@
  *                           a frame of friends' nitrous and hydraulics, heard
  *                           (carsfx.h's carsfx_begin, ...)
  *   ROAM_HOST_SCRIPT        defined when the input-script commands exist
+ *   RH_FE_NODES             the most objects FEng draws of one package (its
+ *                           level sorter's nodes)
  */
 #ifndef ROAM_HOST_H
 #define ROAM_HOST_H
@@ -49,7 +51,8 @@ void ws_hud_marker(float *x, float *y);  /* widescreen.c */
 
 #define ROAM_HOST_SCRIPT 1
 #define ROAM_HOOK_RET    0x00581475u     /* the return address guest calls see */
-#define GPTR(a)          (g_mem + (uint32_t)(a))
+#define RH_FE_NODES      1024            /* objects FEng draws of one package: overrides.c's level sorter (the game: 512) */
+#define GPTR(a)         (g_mem + (uint32_t)(a))
 #define rh_committed(a)  mem_is_committed(a)
 #define rlog(...)        fprintf(stderr, __VA_ARGS__)
 #define rh_opt(k)        getenv(k)

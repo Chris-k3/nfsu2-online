@@ -714,6 +714,29 @@ void sub_00559c90(CPU *c){
     sub_00559c90_orig(c);
 }
 
+/* --- sub_0050b410: FEng's level sorter, more than 512 objects a package ---
+ * The FE renderer draws a package (the package loop sub_00536520) by
+ * gathering its objects into a list of 1024 (renderer +0x114), sorting it,
+ * and handing each object to the level sorter (sub_0051b850), which hangs it
+ * in one of 256 depth buckets on an 8-byte node of the array sub_0050b410
+ * (cdecl: package, nodes, bytes) gives it: 0x1000 bytes of the package
+ * loop's stack, 512 nodes.  An object past them is not drawn.  The game's
+ * own packages fit in that; free roam's world map does not (a marker for
+ * each player in free roam besides the map's own 235 objects, roam_game.c),
+ * and lost its shop and event icons to the markers.  Every
+ * package gets 1024 nodes instead, as many as its list holds (roam_host.h
+ * RH_FE_NODES); the packages are drawn one after another, and
+ * sub_0050b430 lets go of the nodes after each. */
+#define FE_NODES 1024u
+void sub_0050b410_orig(CPU *c);
+void sub_0050b410(CPU *c){
+    uint32_t gheap_alloc(int heap, uint32_t n, int zero);
+    static uint32_t nodes;
+    sub_0050b410_orig(c);
+    if (!nodes) nodes = gheap_alloc(1, FE_NODES * 8u, 1);
+    if (nodes){ MR32(0x00838494u) = nodes; MR32(0x0083848cu) = FE_NODES; }
+}
+
 /* --- sub_0073b900: the tick of the music's event system -------------------
  * The event system (the EA Trax player: tracks, pause, fades) guards its
  * state with a plain word, [0x8b7bc0]: the tick sets it while it runs, and
