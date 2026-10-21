@@ -47,6 +47,8 @@ export interface NetOptions extends CommonOptions {
   name: string;
   /** a line for the player from the game (a friend joined, left, went into a race) */
   notice?: (text: string, who?: string) => void;
+  /** the server's LAN took this page back after the link was lost (a server restart, as for a deploy) */
+  back?: () => void;
 }
 
 /** What an attach call returns.  Everything but detach is optional. */

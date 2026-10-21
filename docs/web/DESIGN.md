@@ -161,9 +161,16 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
     manifest are brought up to date too, so the copies are one version), the copies when it fails, answers 5xx or
     keeps the start page waiting 4 s, and then for 30 s first. Nothing else passes through it. At Play the page asks
     the server (`/players`, 2 s); without an answer the movies are off for that game unless all of them are cached.
-  - A newer version: the module stays loaded while the page is open, through every game it plays. After each game,
-    and when the tab is shown again, the page asks for `/game.json?latest` (the query keeps it past the offline
-    copies) and, when the server has another revision than the loaded one, says so and offers Reload.
+  - A newer version: the module stays loaded while the page is open, through every game it plays, and a page can
+    start from the offline copies of the version before (a deploy restarts the server while its players reload). The
+    page asks for `/game.json?latest` (the query keeps it past the offline copies) once the module has loaded, when
+    the server answers again, when the tab is shown, after each game, at Play, every 5 minutes while the tab is
+    visible (in a game too) and within 30 s of the game's link to the server coming back. On another revision than
+    the loaded one: with nothing on the start page a reload would lose (no game ran in the page, no dialog, no field
+    being typed in, no game data downloading) the page reloads by itself, after telling the service worker the
+    server answers (so the reload is not the copies'); in a game it says so over the game once; otherwise it offers
+    Reload, and Play reloads too. sessionStorage names the revision a reload was for, so one that came back without
+    it only offers it. A page with test settings in its address only offers it.
   - `/save`: OPFS save overlay. Holds saves, `registry.txt`, `settings.ini` and logs. Reads look there first, but
     for the game folder's own folders (`TRACKS`, `CARS`, ...) once until the next write (`runtime/fileio.c`): each
     look is OPFS calls in the I/O worker, 1.5 to 2 ms an open with the GIL held, and a race streams its track by
@@ -267,7 +274,8 @@ struct VOut { @builtin(position) pos: vec4f; @location(0) col0: vec4f; @location
   `web/test/module.test.mjs` the module's address (`/game.wasm?v=`) and what caches may keep.
 - `node web/tools/offline-test.mjs` checks offline mode with the real game folder and a server it starts and stops:
   the copies kept, Play to the title screen with the server gone, behind a proxy answering 502, and with a server
-  that never answers, then online again.
+  that never answers, then online again, and a deploy (the page from the copies reloads by itself into the new
+  version once the server answers).
 - `node web/tools/run-page.mjs <url> <ms>` drives Chrome 155 (`channel: 'chrome'`, headless, WebGPU works) and streams
   the console.
 - Test page: `/test/hostcheck.html?wasm=/game.wasm&pages=16384&arg=/data/SPEED2.EXE&env=K=V&...&save=<opfs dir>&fresh`

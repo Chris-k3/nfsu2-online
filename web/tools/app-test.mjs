@@ -17,9 +17,12 @@
 //   readonly  that second tab's Settings are read-only; Play reads settings.ini again
 //   retry     a failed game.wasm download is its own check, retried by itself and by Retry; a new build
 //             between /game.json and /game.wasm (409) is no failure: the page asks /game.json again
-//   update    the server on the loaded version: nothing offered after a game or when the tab is shown again;
-//             on another one: offered then (with the log's note once a game ran), offline mode's copy of
-//             /game.json untouched, and Reload loads the new page and module
+//   update    the server on the loaded version: nothing said in a game when the tab is shown again; on another
+//             one: a word over the game, offered when it ends (with the log's note), offline mode's copy of
+//             /game.json untouched, Reload loads the new page and module, and a test page only offers it
+//   autoupdate a player's page (no test settings): a new version with nothing on the page to lose reloads it by
+//             itself, and the page says so; with a field being typed in it is offered, and Play reloads; a reload
+//             that did not bring the version offers it, and is not repeated by itself
 //   enterlink Enter in a focused field stays in the field, not the game; Enter on the page plays
 //   late      Stop right after Play: whatever attaches after the end is detached at once, and
 //             every WebGPU device made for it is destroyed (also when the game ended before it
@@ -434,14 +437,16 @@ try {
     const rev = await p.evaluate(() => window.__nfsu2.checks().find(c => c.id === 'module').label.split(' ').pop());
     await p.click('#play');
     await p.waitForFunction(() => !!window.__nfsu2.session, null, { timeout: 30000, polling: 5 });
-    await p.evaluate(() => window.__nfsu2.session.terminate());
-    await waitPhase(p, ['exited'], 30000);
+    // in a game: nothing while the server has the loaded version; another one: a word over the game, offered at its end
     await shown();
     await p.waitForTimeout(1500);
     const same = { ...await state(), asked };
     deployed = 'upd0000';
     await shown();
     await p.waitForFunction(() => !!window.__nfsu2.newer(), null, { timeout: 10000 }).catch(() => {});
+    const inGame = await p.evaluate(() => ({ newer: window.__nfsu2.newer(), toast: document.querySelector('#toast').hidden ? null : document.querySelector('#toast').textContent }));
+    await p.evaluate(() => window.__nfsu2.session.terminate());
+    await waitPhase(p, ['exited'], 30000);
     const offered = { ...await state(), asked };
     await shot(p, 'update-offer.png');
     // Reload: the server's version is the page's again, and a new one offered before any game has no note on the log
@@ -456,10 +461,68 @@ try {
     await p.waitForFunction(() => !!window.__nfsu2.newer(), null, { timeout: 10000 }).catch(() => {});
     const beforeGame = await state();
     const ok = same.asked >= 2 && !same.newer && !same.reloadShown && same.line === null &&
-      offered.newer === 'upd0000' && offered.reloadShown && /new version/.test(offered.line ?? '') && /Download the log first/.test(offered.line ?? '') &&
+      inGame.newer === 'upd0000' && /new version/.test(inGame.toast ?? '') &&
+      offered.newer === 'upd0000' && offered.reloadShown && /Reload this page/.test(offered.line ?? '') && /Download the log first/.test(offered.line ?? '') &&
       (offered.kept === null || offered.kept === rev) && !reloaded.newer && !reloaded.reloadShown &&
       beforeGame.newer === 'upd0001' && beforeGame.reloadShown && !/Download the log/.test(beforeGame.line ?? '');
-    report('update', ok, { rev, same, offered, reloaded, beforeGame });
+    report('update', ok, { rev, same, inGame, offered, reloaded, beforeGame });
+    await c2.close();
+  }
+
+  // ------------------------------------------------------- autoupdate --
+  if (want('autoupdate')) {
+    // a player's page (no test settings in the address); no service worker, so the routes see /game.json too
+    const c2 = await browser.newContext({ viewport: { width: 1280, height: 800 }, serviceWorkers: 'block' });
+    const p = watch(await c2.newPage(), 'AU');
+    // deployed: the server's answer to the page's question; served: the version /game.json names to a page loading
+    let deployed = null, served = null, asked = 0, loads = 0;
+    await p.route('**/game.json?latest', async route => {
+      asked++;
+      const r = await route.fetch(), info = await r.json();
+      await route.fulfill({ response: r, json: deployed ? { ...info, rev: deployed } : info });
+    });
+    await p.route(u => u.pathname === '/game.json' && !u.search, async route => {
+      const r = await route.fetch(), info = await r.json();
+      await route.fulfill({ response: r, json: served ? { ...info, rev: served } : info });
+    });
+    p.on('load', () => loads++);
+    const state = () => p.evaluate(() => ({ rev: window.__nfsu2.checks().find(c => c.id === 'module')?.label.split(' ').pop(),
+      newer: window.__nfsu2.newer(), tried: window.__nfsu2.tried(), reloadShown: !document.querySelector('#reload').hidden,
+      line: document.querySelector('#newer').hidden ? null : document.querySelector('#newer').textContent,
+      key: sessionStorage.getItem('nfsu2-update') }));
+    const shown = () => p.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await open(p, '');
+    await p.waitForTimeout(1500);                                  // the question once the module has loaded
+    const first = { ...await state(), asked };
+    // a deploy, and nothing on the page to lose: it reloads by itself into the new version, and says so
+    deployed = served = 'upd0002';
+    await Promise.all([p.waitForEvent('load', { timeout: 15000 }), shown()]);
+    await waitPhase(p, ['ready'], 60000);
+    await p.waitForTimeout(1500);
+    const auto = { ...await state(), loads };
+    // another one while a field has the focus: offered, not reloaded, and Play reloads.  That reload does not bring
+    // it (the page still gets upd0002): offered, and the page does not reload by itself again
+    await settingsReady(p);
+    await p.focus('#set-roam_name');
+    deployed = 'upd0003';
+    await shown();
+    await p.waitForFunction(() => !!window.__nfsu2.newer(), null, { timeout: 10000 }).catch(() => {});
+    await p.waitForTimeout(1000);
+    const typing = { ...await state(), loads };
+    await shot(p, 'autoupdate-offer.png');
+    await p.evaluate(() => document.activeElement.blur());
+    await Promise.all([p.waitForEvent('load', { timeout: 15000 }), p.click('#play')]);
+    await waitPhase(p, ['ready'], 60000);
+    await p.waitForFunction(() => !!window.__nfsu2.newer(), null, { timeout: 10000 }).catch(() => {});
+    await shown();
+    await p.waitForTimeout(3000);
+    const notBrought = { ...await state(), loads };
+    const ok = first.asked >= 1 && !first.newer && first.line === null &&
+      auto.loads === 2 && auto.rev === 'upd0002' && !auto.newer && auto.key === null && !auto.reloadShown && /reloaded for the new version/.test(auto.line ?? '') &&
+      typing.loads === 2 && typing.newer === 'upd0003' && typing.reloadShown && /Play reloads/.test(typing.line ?? '') &&
+      notBrought.loads === 3 && notBrought.rev === 'upd0002' && notBrought.newer === 'upd0003' && notBrought.tried === 'upd0003' &&
+      notBrought.key === 'upd0003' && notBrought.reloadShown && /Reload this page/.test(notBrought.line ?? '');
+    report('autoupdate', ok, { first, auto, typing, notBrought });
     await c2.close();
   }
 

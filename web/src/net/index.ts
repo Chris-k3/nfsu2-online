@@ -62,6 +62,8 @@ export interface NetOptions {
   /** a line for the player: from the game (NET_KIND_NOTICE: a friend joined, left, went into a race; who: the
    *  friend's name the text starts with), or the server full */
   onNotice?: (text: string, who?: string) => void;
+  /** the switch welcomed this page again after the link was lost (a server restart, as for a deploy) */
+  onBack?: () => void;
   /** milliseconds between pings to the switch (default 2000) */
   pingMs?: number;
   /** milliseconds no mailbox wants the switch before the page lets it go (default 10000) */
@@ -237,6 +239,8 @@ class Link implements NetLink {
   private pings = new Map<number, number>();
   private pingSeq = 0;
   private failed = 0;
+  /** the link went without the page letting it go (onclose): the next welcome is onBack */
+  private lost = false;
   private lastDownLog = -Infinity;
   /** the switch refused us as full (close 1013 "LAN full"): told once, and again when a place frees up */
   private full = false;
@@ -394,6 +398,7 @@ class Link implements NetLink {
       if (this.closed) return;
       const was = this.state;
       this.state = 'offline'; this.setPage(P.NET_PAGE_OFFLINE);
+      this.lost = true;
       if (e.code === 1013 && !this.full) {
         this.full = true;
         this.log('the server is full (LAN full); trying again until a place frees up');
@@ -423,6 +428,7 @@ class Link implements NetLink {
       for (const ep of this.eps()) { this.publishPeers(ep); this.publishOnline(ep); }
       this.log(`on the virtual LAN as ${this.vip}${this.st.connections > 1 ? (again ? ' (the same address again)' : ' (a new address)') : ''}`);
       if (this.full) { this.full = false; this.o.onNotice?.('A place on the server freed up: you can play with others now'); }
+      if (this.lost) { this.lost = false; this.o.onBack?.(); }
       this.resolveOnline(this.vip);
     } else if (m.t === 'peers' && Array.isArray(m.peers)) {
       const old = this.peerMap;

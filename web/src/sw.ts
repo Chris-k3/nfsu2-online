@@ -10,7 +10,9 @@
 // server down: a failed request, a 5xx from a proxy in front of it, or no
 // answer to the page within NAV_WAIT_MS), the copies answer, and for
 // OFFLINE_MS after that they answer first, so one start uses one set of them.
-// After every start page that came from the server, the files it loads only
+// A page that finds the server again and reloads for its newer version (a
+// deploy restarts the server, so its players' pages may start from the copies:
+// shell.ts) says so first ('online'): that start is the server's.  After every start page that came from the server, the files it loads only
 // later (the workers, the list of game files) are brought up to date too, so
 // the copies are one version.  Nothing else is touched: the game data, /lan,
 // /players, the test pages go to the network as they always did.
@@ -109,6 +111,11 @@ self.addEventListener('activate', e => {
     for (const k of await caches.keys()) if (k.startsWith('nfsu2-offline-') && k !== CACHE) await caches.delete(k);
     await self.clients.claim();
   })());
+});
+self.addEventListener('message', e => {
+  if (e.data !== 'online') return;
+  offlineUntil = 0;
+  e.ports[0]?.postMessage('online');
 });
 self.addEventListener('fetch', e => {
   const key = keyOf(e.request);

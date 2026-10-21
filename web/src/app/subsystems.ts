@@ -39,7 +39,7 @@ export const attachInput: AttachInput = (proc, element, o) =>
   inputAttach(proc, element, { log: o.log, viewRect: o.viewRect, toggleFullscreen: o.toggleFullscreen });
 
 export const attachNet: AttachNet = (proc, o) => {
-  const link = netAttach(proc, { name: o.name, log: o.log, onNotice: o.notice });
+  const link = netAttach(proc, { name: o.name, log: o.log, onNotice: o.notice, onBack: o.back });
   const friends = () => link.peers.filter(p => !p.self);
   return {
     detach: () => link.close(),

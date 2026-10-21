@@ -243,6 +243,8 @@ async function askRoam() {
 
 async function play() {
   if ($<HTMLButtonElement>('#play').disabled || session || starting) return;
+  if (byPlay()) { await reloadFor(newer!, 'Play', false); return; }
+  if (updated) { updated = false; showNewer(); }
   starting = true; updatePlay();
   try { await startGame(); } finally { starting = false; updatePlay(); }
 }
@@ -251,8 +253,20 @@ async function startGame() {
   // settings.ini as it is now (another tab or the raw editor may have changed it,
   // and the Mac app reads it at every launch); a short read, well inside the click's
   // user activation, which full screen needs (after the free-roam question, its
-  // button's click is the activation)
-  await Promise.race([loadSettings().catch(e => log.add(`[app] settings.ini not read again: ${e}`)), new Promise(r => setTimeout(r, 1000))]);
+  // button's click is the activation).  Beside it the server's version once more
+  // (a deploy since the page last asked): no game starts on a version it replaced.
+  const [, rev] = await Promise.all([
+    Promise.race([loadSettings().catch(e => log.add(`[app] settings.ini not read again: ${e}`)), new Promise(r => setTimeout(r, 1000))]),
+    offline || testPage() ? null : serverRev(1000),
+  ]);
+  if (rev && rev !== loaded!.info.rev && rev !== tried) {
+    newer = rev; updated = false;
+    // before a game ran here nothing is lost; after one, the offer with its word on the log first (the next Play reloads)
+    if (phase !== 'exited') { await reloadFor(rev, 'Play', false); return; }
+    log.add(`[app] the server has game ${rev} now, this page ${loaded!.info.rev}: offered at Play`);
+    showNewer();
+    return;
+  }
   await askRoam();
   const pre = resolved();
   // inside the click: things that need a user gesture.  The context runs at the
@@ -349,7 +363,7 @@ async function startGame() {
     // longer than the game), and a closure from this function would keep its
     // scope, and with it this game, reachable
     session = await GameSession.start({
-      module: loaded!.module, info: loaded!.info, saveDir: SAVE, env: r.env, canvas, stage, audio, displayHz, netName, notice, onSaved,
+      module: loaded!.module, info: loaded!.info, saveDir: SAVE, env: r.env, canvas, stage, audio, displayHz, netName, notice, netBack, onSaved,
       artifacts: q.get('artifacts') ?? undefined, dumpScale: q.get('dumpscale') ? +q.get('dumpscale')! : undefined,
       toggleFullscreen, log: logLine, onFatal: stopFatal,
     });
@@ -390,6 +404,8 @@ function setReach(ok: boolean) {
   log.add(ok ? '[app] the server answers again' : '[app] the server does not answer: offline');
   if (!ok) settings.setStatus('Not connected to the server: free roam and Online need it.');
   evaluate();
+  // the page may have started from offline mode's copies while the server was away (a deploy restarts it)
+  if (ok) void checkNewer();
 }
 /** Offline mode (sw.ts) keeps the page, its scripts, the module and the list of game files in this browser.  Asked
  *  for once the module has loaded, so a first visit downloads the module once (the copy is the HTTP cache's). */
@@ -664,6 +680,8 @@ async function loadModule() {
     moduleLoading = false;
     setCheck({ id: 'module', label: `Game module ${loaded.info.rev}`, state: 'ok', detail: `${fmtBytes(loaded.info.size)}, ready.` });
     keepForOffline();
+    afterUpdate();
+    void checkNewer();
   } catch (e) {
     moduleFails++;
     const wait = Math.min(30, 2 ** moduleFails);
@@ -679,29 +697,110 @@ async function loadModule() {
 // The module stays loaded while the page is open, through every game it plays,
 // so a page left open plays the version it loaded first even once the server
 // has a newer one (a player's log of 2026-10-20: one page, open from 07:50 to
-// 11:10 UTC, ran four games on it).  After each game, and when the tab is
-// shown again, the page asks the server which version it has; when that is
-// not the loaded one, it says so and offers Reload, which brings the page and
-// the module of the new version together.
+// 11:10 UTC, ran four games on it).  A page can also start from offline mode's
+// copies (sw.ts) of the version before: a deploy restarts the server, its
+// players reload, and the server is away for a moment.  So the page asks the
+// server which version it has: once the module has loaded, when the server
+// answers again, when the tab is shown, after each game, at Play, every 5
+// minutes while the tab is visible (during a game too), and when the game's
+// link to the server comes back after losing it (a restart).  When that is not
+// the loaded one:
+//   nothing here a reload would lose (no game ran in this page, no question
+//     open, no field being typed in, no game data downloading): the page
+//     reloads by itself, which brings the page and the module of the new
+//     version together, and says so;
+//   a game runs: a word over it, once; the start page offers it when it ends;
+//   else the start page offers it (Reload), and Play reloads too: after a game
+//     with a word on its log, which the reload clears (found only at Play: the
+//     offer comes first, and the next Play reloads).
+// sessionStorage names the version a reload was for: a reload that still came
+// back without it offers it, and is not repeated by itself.  A test page (the
+// address's test settings) only offers it: its tool drives it.
+const NEWER_EVERY_MS = 5 * 60_000, UPDATE_KEY = 'nfsu2-update';
 let newer: string | null = null;
+/** the version a reload of this tab was for and did not bring */
+let tried: string | null = null;
+/** this page came from a reload for the version it has (the start page says so until Play) */
+let updated = false;
+let asking = false;
+const testPage = () => TEST_PARAMS.some(k => q.has(k));
+/** Play reloads for the newer version (not for one a reload did not bring, nor offline: the copies would answer) */
+const byPlay = () => !!newer && newer !== tried && !offline && !testPage();
+
 async function checkNewer() {
-  if (!loaded || newer || session || starting || offline) return;
+  if (!loaded || newer || offline || asking) return;
+  asking = true;
   const rev = await serverRev(5000);
+  asking = false;
   if (!rev || rev === loaded.info.rev || newer) return;
-  newer = rev;
-  log.add(`[app] the server has game ${rev} now, this page ${loaded.info.rev}: Reload offered`);
+  newer = rev; updated = false;
+  const playing = !!session || starting;
+  if (!playing && calm() && await reloadFor(rev, 'nothing on the page to lose', true)) return;
+  log.add(`[app] the server has game ${rev} now, this page ${loaded.info.rev}: ${playing ? 'said over the game, offered when it ends' : 'Reload offered'}`);
+  if (playing) toast('A new version of the game is on the server. Quit when it suits you: the start page offers it, and your saves stay.', 10000);
   showNewer();
 }
-/** the offer; once a game has run here, with a word on its log (only in this page: a reload clears it) */
+/** nothing on the start page a reload would lose, and no tool driving it */
+function calm(): boolean {
+  const a = document.activeElement;
+  return phase !== 'exited' && newer !== tried && !testPage() && !download.running && !document.querySelector('dialog[open]') &&
+    !a?.matches('textarea, input:not([type=radio]):not([type=checkbox])');
+}
+/** the game's link to the server came back after losing it (a server restart, as for a deploy): asked within 30 s,
+ *  spread out, so that a restarted server's players do not all ask at once */
+function netBack() { setTimeout(() => void checkNewer(), Math.random() * 30_000); }
+/** Reload for the server's version rev.  sessionStorage names it (afterUpdate); by itself only then (false: not
+ *  reloaded), at Play either way. */
+async function reloadFor(rev: string, why: string, byItself: boolean): Promise<boolean> {
+  let marked = false;
+  try { sessionStorage.setItem(UPDATE_KEY, rev); marked = true; } catch { /* no storage here */ }
+  if (byItself && !marked) return false;
+  log.add(`[app] the server has game ${rev} now, this page ${loaded!.info.rev}: reloading (${why})`);
+  await reload();
+  return true;
+}
+/** after a reload for a new version: whether it brought it */
+function afterUpdate() {
+  let want: string | null = null;
+  try { want = sessionStorage.getItem(UPDATE_KEY); } catch { /* no storage here */ }
+  if (!want || !loaded) return;
+  if (want === loaded.info.rev) {
+    try { sessionStorage.removeItem(UPDATE_KEY); } catch { /* no storage here */ }
+    updated = true;
+    log.add(`[app] reloaded for game ${want}: this page has it`);
+  } else {
+    tried = want;
+    log.add(`[app] reloaded for game ${want}, but this page has ${loaded.info.rev}: offered, not reloaded for again`);
+  }
+  showNewer();
+}
+/** the offer (once a game has run here, with a word on its log: only in this page, a reload clears it), or that
+ *  this page is the new version */
 function showNewer() {
   const line = $('#newer');
-  line.textContent = !newer ? '' : 'A new version of the game is on the server. Reload this page to play it: your saves and settings stay.' +
-    (lastExit ? ' Download the log first if you want to keep it: the reload clears it.' : '');
-  line.hidden = $('#reload').hidden = !newer;
+  line.textContent = newer ? (byPlay() ? 'A new version of the game is on the server: Play reloads this page with it. Your saves and settings stay.'
+    : 'A new version of the game is on the server. Reload this page to play it: your saves and settings stay.') +
+    (lastExit ? ' Download the log first if you want to keep it: the reload clears it.' : '')
+    : updated ? 'This page reloaded for the new version of the game. Your saves and settings stayed.' : '';
+  line.hidden = !newer && !updated;
+  $('#reload').hidden = !newer;
 }
 async function reload() {
   await saves.settled();              // a rename or restore the Saves section is writing ends first
+  await swOnline();
   location.reload();
+}
+/** Offline mode's copies answer first for a while after the server did not (sw.ts); it answers now, so the start
+ *  after this reload is the server's.  An older service worker does not answer: 0.5 s at most. */
+function swOnline(): Promise<void> {
+  const sw = navigator.serviceWorker?.controller;
+  if (!sw) return Promise.resolve();
+  return new Promise(res => {
+    const ch = new MessageChannel();
+    ch.port1.onmessage = () => res();
+    sw.postMessage('online', [ch.port2]);
+    setTimeout(res, 500);
+  });
 }
 
 // ----------------------------------------------------------------- boot --
@@ -770,6 +869,7 @@ export async function boot() {
   window.addEventListener('beforeunload', e => { if (session) { e.preventDefault(); e.returnValue = ''; } });
   document.addEventListener('fullscreenchange', () => { if (!isFullscreen() && session) toast('Full screen left. F9 has it in the menu.', 3000); });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') void checkNewer(); });
+  setInterval(() => { if (document.visibilityState === 'visible') void checkNewer(); }, NEWER_EVERY_MS);
 
   setCheck(checkBrowser());
   setCheck(checkIsolation());
@@ -797,7 +897,7 @@ export async function boot() {
   (window as any).__nfsu2 = {
     get phase() { return phase; }, get lastExit() { return lastExit; }, get fps() { return { game: fps.gameFps, page: fps.pageFps, source: $('#fps').dataset.source }; },
     get session() { return session; }, log, save: SAVE, download: () => download.status, offline: () => offline, displayHz: () => displayHz, retryModule: () => loadModule(),
-    newer: () => newer,
+    newer: () => newer, tried: () => tried,
     env: () => resolved().env, settingsText: () => settingsText, checks: () => [...checks.values()],
     fpsMode: (m?: FpsMode) => { if (m && FPS_MODES.includes(m)) fps.set(m); return fps.mode; },
     quitTimes: { forcedCloseMaxMs: FORCED_CLOSE_MAX_MS, stopAfterMs: STOP_AFTER_MS },

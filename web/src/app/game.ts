@@ -26,6 +26,8 @@ export interface SessionOptions {
   netName: string | null;
   /** free roam: a line for the player (a friend joined, left, went into a race) */
   notice?(text: string, who?: string): void;
+  /** the server's LAN took the game back after the link was lost (a server restart, as for a deploy) */
+  netBack?(): void;
   /** the game finished writing a file of the save overlay (path relative to /save) */
   onSaved?(path: string): void;
   /** tests: where frame dumps go, and their scale */
@@ -95,7 +97,7 @@ export class GameSession {
       ...common, stage: o.stage, toggleFullscreen: o.toggleFullscreen, viewRect: () => s.viewRect(),
     })).then(i => { s.input = i; });
     if (o.netName !== null)
-      void attach('network', () => attachNet(s.proc, { ...common, name: o.netName!, notice: o.notice })).then(n => { s.net = n; });
+      void attach('network', () => attachNet(s.proc, { ...common, name: o.netName!, notice: o.notice, back: o.netBack })).then(n => { s.net = n; });
     return s;
   }
 

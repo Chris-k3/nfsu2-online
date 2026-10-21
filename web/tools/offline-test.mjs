@@ -8,6 +8,11 @@
 //   proxy502  a proxy in front of a stopped server (every answer 502): the same, from the copies
 //   silent    a server that takes the connection and never answers: the page after NAV_WAIT_MS, from the copies
 //   back      the server again: the page is online, from the server
+//   deploy    the server restarts with a new version while the page reloads: the page comes from the copies (the
+//             old version), and once the server answers it reloads by itself into the new one, inside the service
+//             worker's offline window
+// On Windows (the server in WSL) the steps stop at proxy502: WSL's mirrored networking holds the port on Windows'
+// side for 25 s and more after the server ended, so nothing there can stand on it (2026-10-21).
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -29,8 +34,8 @@ fs.rmSync(OUT, { recursive: true, force: true });
 fs.mkdirSync(OUT, { recursive: true });
 
 let server = null;
-async function startServer() {
-  server = spawn(...serverCommand(['--data', DATA, '--http-port', String(PORT), '--dev', '--state', path.join(OUT, 'state'), '--wasm', WASM]),
+async function startServer(wasm = WASM) {
+  server = spawn(...serverCommand(['--data', DATA, '--http-port', String(PORT), '--dev', '--state', path.join(OUT, 'state'), '--wasm', wasm]),
     { stdio: ['ignore', 'pipe', 'pipe'] });
   await new Promise((res, rej) => {
     let out = '';
@@ -90,6 +95,15 @@ async function toTitle() {
 }
 const state = () => page.evaluate(() => ({ phase: window.__nfsu2.phase, offline: window.__nfsu2.offline(), sub: document.querySelector('#status-sub').textContent,
   controlled: !!navigator.serviceWorker.controller }));
+const loadedRev = () => page.evaluate(() => window.__nfsu2.checks().find(c => c.id === 'module')?.label.split(' ').pop());
+/** a deploy's module: this one under another rev (the page tells versions by rev) */
+function deployed() {
+  const dir = path.join(OUT, 'deployed'), info = JSON.parse(fs.readFileSync(WASM.replace(/\.wasm$/, '.json'), 'utf8'));
+  fs.mkdirSync(dir, { recursive: true });
+  fs.copyFileSync(WASM, path.join(dir, 'nfsu2.wasm'));
+  fs.writeFileSync(path.join(dir, 'nfsu2.json'), JSON.stringify({ ...info, rev: `${info.rev}-deployed` }));
+  return { wasm: path.join(dir, 'nfsu2.wasm'), rev: `${info.rev}-deployed` };
+}
 
 try {
   // ------------------------------------------------------------- kept --
@@ -157,6 +171,25 @@ try {
     await page.waitForFunction(() => !window.__nfsu2.offline(), null, { timeout: 20000 }).catch(() => {});
     const st = await state();
     report('back', st.phase === 'ready' && !st.offline && st.sub === 'Press Play or Enter to start.', { pageToReadyMs: ms, ...st });
+  }
+
+  // ----------------------------------------------------------- deploy --
+  {
+    const next = deployed(), before = await loadedRev();
+    await stopServer();
+    const t0 = Date.now();
+    await open();
+    await page.waitForFunction(() => window.__nfsu2.offline(), null, { timeout: 10000 }).catch(() => {});
+    const copies = { rev: await loadedRev(), ...await state() };
+    await startServer(next.wasm);
+    // the start page asks the server at once when the browser says it is online (players.ts), else within 15 s
+    await page.evaluate(() => window.dispatchEvent(new Event('online')));
+    const got = await page.waitForFunction(r => window.__nfsu2?.phase === 'ready' && window.__nfsu2.checks().find(c => c.id === 'module')?.label.endsWith(r),
+      next.rev, { timeout: 60000, polling: 250 }).then(() => true, () => false);
+    const ms = Date.now() - t0;
+    const st = { rev: await loadedRev(), ...await state(), line: await page.evaluate(() => document.querySelector('#newer').hidden ? null : document.querySelector('#newer').textContent) };
+    report('deploy', copies.rev === before && copies.offline && got && st.rev === next.rev && !st.offline && st.controlled &&
+      /reloaded for the new version/.test(st.line ?? '') && ms < 30000, { before, copies, msFromCopies: ms, after: st });
   }
 } catch (e) {
   report('run', false, String(e?.stack ?? e));
