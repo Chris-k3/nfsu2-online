@@ -201,7 +201,7 @@ export function attachInput(proc: GameProcess, element: HTMLElement, opts: Input
   }
   function onPointerMove(e: PointerEvent) {
     if (detached) return;
-    if (e.pointerType === 'touch') { if (e.pointerId === finger && !fingerUp) push(IEV_MOUSE_MOVE, 0, 0, flagsOf(e), [], ...pos(e)); return; }
+    if (e.pointerType === 'touch') { if (e.pointerId === finger) push(IEV_MOUSE_MOVE, 0, 0, flagsOf(e), [], ...pos(e)); return; }
     const [x, y] = pos(e);
     push(IEV_MOUSE_MOVE, 0, 0, flagsOf(e), [], x, y);
     if ((e.buttons & 31) !== buttons) syncButtons(e);
@@ -224,42 +224,24 @@ export function attachInput(proc: GameProcess, element: HTMLElement, opts: Input
   }
 
   // ---- touch: one finger is the mouse ------------------------------------------------
-  // The game reads its mouse once a frame, so the cursor goes to the finger first
-  // and the button follows TAP_MS later: the menu has its highlight under the
-  // finger before the click picks.  The release comes TAP_MS after the press at
-  // the earliest, so the shortest tap still shows the game a pressed button.
-  const TAP_MS = 50;
-  let finger = -1, fingerUp = false, fingerFlags = 0, pressedAt = 0, fingerTimer = 0;   // pressedAt 0: not pressed yet
+  // A tap is a move, a press and a release within a frame or two; the game
+  // takes mouse changes one a frame (runtime/web/input_web.c), so it sees the
+  // cursor arrive, then the button go down, then up, however slow its frames.
+  let finger = -1;
   function onFingerDown(e: PointerEvent) {
     if (!e.isPrimary) return;
-    if (finger !== -1) fingerDone(true);                   // the last tap's release was still to come
-    finger = e.pointerId; fingerUp = false; fingerFlags = flagsOf(e); pressedAt = 0;
-    push(IEV_MOUSE_MOVE, 0, 0, fingerFlags, [], ...pos(e));
-    fingerTimer = setTimeout(fingerPress, TAP_MS) as unknown as number;
+    finger = e.pointerId;
+    push(IEV_MOUSE_MOVE, 0, 0, flagsOf(e), [], ...pos(e));
+    push(IEV_MOUSE_DOWN, 0, 0, flagsOf(e), [], 0);
+    buttons |= 1;
     if (document.activeElement !== element && element.tabIndex >= 0) element.focus({ preventScroll: true });
     e.preventDefault();
   }
-  function fingerPress() {
-    if (detached || finger === -1) return;
-    push(IEV_MOUSE_DOWN, 0, 0, fingerFlags, [], 0);
-    buttons |= 1; pressedAt = performance.now();
-    if (fingerUp) fingerTimer = setTimeout(fingerDone, TAP_MS) as unknown as number;
-  }
   function onFingerUp(e: PointerEvent) {
-    if (e.pointerId !== finger || fingerUp) return;
-    fingerUp = true;
-    if (!pressedAt) return;                                // fingerPress releases it
-    const wait = pressedAt + TAP_MS - performance.now();
-    if (wait > 0) fingerTimer = setTimeout(fingerDone, wait) as unknown as number; else fingerDone();
-  }
-  /** the finger's button released (now: pressed first if it was not yet) and the finger forgotten */
-  function fingerDone(now = false) {
-    clearTimeout(fingerTimer);
-    if (!detached && finger !== -1) {
-      if (!pressedAt && now) push(IEV_MOUSE_DOWN, 0, 0, fingerFlags, [], 0);
-      if (pressedAt || now) { push(IEV_MOUSE_UP, 0, 0, fingerFlags, [], 0); buttons &= ~1; }
-    }
-    finger = -1; fingerUp = false; pressedAt = 0;
+    if (e.pointerId !== finger) return;
+    finger = -1;
+    push(IEV_MOUSE_UP, 0, 0, flagsOf(e), [], 0);
+    buttons &= ~1;
   }
   function onWheel(e: WheelEvent) {
     if (detached) return;
@@ -372,7 +354,7 @@ export function attachInput(proc: GameProcess, element: HTMLElement, opts: Input
       // whatever the game holds is let go (it may outlive the page's input, e.g. a test page)
       push(IEV_RELEASE_ALL, 0, 0, 0, [], 0, IREASON_PAGE);
       if (h) Atomics.compareExchange(h, IM_ATTACHED, 1, 0);   // only our own claim (2 = the C ns* driver)
-      detached = true; quitPending = 0; cancelAnimationFrame(raf); clearInterval(timer); clearTimeout(fingerTimer);
+      detached = true; quitPending = 0; cancelAnimationFrame(raf); clearInterval(timer);
       pads?.dispose(); pads = null; synth = null;
       h = null; u8 = null; i32 = null; synF32 = null;     // no view of the old process's memory stays reachable
       kbTarget.removeEventListener('keydown', onKeyDown as EventListener, { capture: true });

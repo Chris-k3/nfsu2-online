@@ -238,9 +238,63 @@ static void key_up(const InEv *e){
 }
 
 /* ---- mouse (metal.m) ------------------------------------------------------- */
-static _Atomic int g_mouse_x = 640, g_mouse_y = 360;
-static _Atomic int g_mouse_dx = 0, g_mouse_dy = 0, g_mouse_dz = 0;
+static _Atomic int g_mouse_x = 640, g_mouse_y = 360;   /* the pointer now (the WM_ messages, the page) */
+static _Atomic int g_mouse_dz = 0;
 static _Atomic unsigned g_mouse_btn = 0;
+static uint64_t mono_us(void){ struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return (uint64_t)t.tv_sec * 1000000u + (uint64_t)t.tv_nsec / 1000u; }
+
+/* What the game sees of the mouse: one change a frame.  The game reads the
+ * mouse once a frame (GetDeviceState, GetCursorPos), never its events, so two
+ * changes inside one frame are one to it: a click whose press and release
+ * fall between two frames never happened, and a press in the frame of a move
+ * picks what the menu highlighted before the move.  A tap on a phone is a
+ * move, a press and a release within about 100 ms, which one slow frame takes
+ * whole: the cursor moved, nothing was picked.  So the input thread queues
+ * the changes and the game takes them a frame at a time: the moves up to the
+ * next button change, or that button change.  Moving alone comes as soon as
+ * before; a press right after a move comes a frame later.  Changes older than
+ * a second (the game did not read the mouse, as in a race) are taken at once,
+ * not played back one a frame. */
+enum { MS_MOVE, MS_BTN };
+typedef struct { int kind, x, y, dx, dy; unsigned btn; uint64_t us; } MouseStep;
+#define MOUSE_STEPS 64
+static MouseStep g_ms[MOUSE_STEPS];
+static int g_ms_head, g_ms_n;
+static int g_view_x = 640, g_view_y = 360, g_view_dx, g_view_dy;   /* what the game has taken */
+static unsigned g_view_btn;
+static long g_view_frame = -1;
+static pthread_mutex_t g_ms_mx = PTHREAD_MUTEX_INITIALIZER;
+static void step_take(void){                  /* g_ms_mx held */
+    const MouseStep *s = &g_ms[g_ms_head];
+    if (s->kind == MS_MOVE){ g_view_x = s->x; g_view_y = s->y; g_view_dx += s->dx; g_view_dy += s->dy; }
+    else g_view_btn = s->btn;
+    g_ms_head = (g_ms_head + 1) % MOUSE_STEPS; g_ms_n--;
+}
+static void mouse_step(MouseStep s){          /* the input thread, the autotest's click */
+    s.us = mono_us();
+    pthread_mutex_lock(&g_ms_mx);
+    MouseStep *last = g_ms_n ? &g_ms[(g_ms_head + g_ms_n - 1) % MOUSE_STEPS] : 0;
+    if (s.kind == MS_MOVE && last && last->kind == MS_MOVE){
+        last->x = s.x; last->y = s.y; last->dx += s.dx; last->dy += s.dy;
+    } else {
+        if (g_ms_n == MOUSE_STEPS) step_take();
+        g_ms[(g_ms_head + g_ms_n) % MOUSE_STEPS] = s; g_ms_n++;
+    }
+    pthread_mutex_unlock(&g_ms_mx);
+}
+/* the game reads the mouse (guest thread): the next change, once a frame */
+static void mouse_take(void){
+    long f = metal_frames();
+    uint64_t now = mono_us();
+    pthread_mutex_lock(&g_ms_mx);
+    while (g_ms_n && now - g_ms[g_ms_head].us > 1000000u) step_take();
+    if (f != g_view_frame){
+        g_view_frame = f;
+        if (g_ms_n && g_ms[g_ms_head].kind == MS_BTN) step_take();
+        else while (g_ms_n && g_ms[g_ms_head].kind == MS_MOVE) step_take();
+    }
+    pthread_mutex_unlock(&g_ms_mx);
+}
 /* the HUD is narrowed on a wider screen (x) and lowered on a narrower one
  * (y), widescreen.c; the pointer maps into that area */
 static _Atomic int g_ui_asp = 10000, g_ui_asp_y = 10000;
@@ -250,13 +304,18 @@ void metal_set_ui_aspect(float ax, float ay){
     atomic_store(&g_ui_asp, (int)lroundf(ax * 10000.f));
     atomic_store(&g_ui_asp_y, (int)lroundf(ay * 10000.f));
 }
-void metal_mouse_add(int dx, int dy){ atomic_fetch_add(&g_mouse_dx, dx); atomic_fetch_add(&g_mouse_dy, dy); }
+void metal_mouse_add(int dx, int dy){
+    pthread_mutex_lock(&g_ms_mx); g_view_dx += dx; g_view_dy += dy; pthread_mutex_unlock(&g_ms_mx);
+}
 void metal_fill_mouse(unsigned char *dst, unsigned n){
     if (n < 20) return;
-    int dx = atomic_exchange(&g_mouse_dx, 0);
-    int dy = atomic_exchange(&g_mouse_dy, 0);
+    mouse_take();
+    pthread_mutex_lock(&g_ms_mx);
+    int dx = g_view_dx, dy = g_view_dy;
+    unsigned b = g_view_btn;
+    g_view_dx = g_view_dy = 0;
+    pthread_mutex_unlock(&g_ms_mx);
     int dz = atomic_exchange(&g_mouse_dz, 0);
-    unsigned b = atomic_load(&g_mouse_btn);
     memcpy(dst + 0, &dx, 4);
     memcpy(dst + 4, &dy, 4);
     memcpy(dst + 8, &dz, 4);
@@ -269,8 +328,11 @@ void metal_get_cursor(int *x, int *y){
           int n2 = sscanf(e, "%d,%d@%d,%d,%d", &ax, &ay, &f2, &bx, &by);
           if (n2 == 5 && metal_frames() >= f2){ ax = bx; ay = by; }
           if (x) *x = ax; if (y) *y = ay; return; } }
-    if (x) *x = atomic_load(&g_mouse_x);
-    if (y) *y = atomic_load(&g_mouse_y);
+    mouse_take();
+    pthread_mutex_lock(&g_ms_mx);
+    if (x) *x = g_view_x;
+    if (y) *y = g_view_y;
+    pthread_mutex_unlock(&g_ms_mx);
 }
 static uint32_t mouse_mk(int flags){
     unsigned b = atomic_load(&g_mouse_btn);
@@ -286,12 +348,17 @@ static void mouse_button(int b, int down, int flags){
     unsigned bit = 1u << b, was = atomic_load(&g_mouse_btn) & bit;
     if (down) atomic_fetch_or(&g_mouse_btn, bit); else atomic_fetch_and(&g_mouse_btn, ~bit);
     if (!!was == !!down) return;
+    mouse_step((MouseStep){ .kind = MS_BTN, .btn = atomic_load(&g_mouse_btn) });
     static const uint32_t dn[3] = {0x0201u, 0x0204u, 0x0207u};     /* WM_L/R/MBUTTONDOWN */
     if (b < 3) kbd_post(down ? dn[b] : dn[b] + 1u, mouse_mk(flags), mouse_lp());
 }
 static void mouse_release_all(void){
     for (int b = 0; b < 8; b++) mouse_button(b, 0, 0);
     atomic_store(&g_mouse_btn, 0u);
+    /* a focus loss: the game lets go at once, no click still to come is played */
+    pthread_mutex_lock(&g_ms_mx);
+    g_ms_n = 0; g_view_btn = 0; g_view_x = atomic_load(&g_mouse_x); g_view_y = atomic_load(&g_mouse_y);
+    pthread_mutex_unlock(&g_ms_mx);
 }
 /* position in the shown image (1/65536 of its size) -> the game's client
  * area, narrowed to the HUD's area as metal.m's mouse_from_point does; the
@@ -303,16 +370,17 @@ static void mouse_move(const InEv *e){
     double ax = atomic_load(&g_ui_asp) / 10000.0, ay = atomic_load(&g_ui_asp_y) / 10000.0;
     double nx = ((double)e->a / 65536.0 - (1.0 - ax) * 0.5) / ax;
     double ny = ((double)e->b / 65536.0 - (1.0 - ay) * 0.5) / ay;
+    int dx = 0, dy = 0;
     if (g_last_nx >= -0.5){
         g_frac_dx += (nx - g_last_nx) * lw; g_frac_dy += (ny - g_last_ny) * lh;
-        int dx = (int)g_frac_dx, dy = (int)g_frac_dy;
+        dx = (int)g_frac_dx; dy = (int)g_frac_dy;
         g_frac_dx -= dx; g_frac_dy -= dy;
-        if (dx || dy){ atomic_fetch_add(&g_mouse_dx, dx); atomic_fetch_add(&g_mouse_dy, dy); }
     }
     g_last_nx = nx; g_last_ny = ny;
     double x = nx * lw, y = ny * lh;
     if (x < 0.0) x = 0.0; else if (x > lw - 1.0) x = lw - 1.0;
     if (y < 0.0) y = 0.0; else if (y > lh - 1.0) y = lh - 1.0;
+    mouse_step((MouseStep){ .kind = MS_MOVE, .x = (int)x, .y = (int)y, .dx = dx, .dy = dy });
     atomic_store(&g_mouse_x, (int)x); atomic_store(&g_mouse_y, (int)y);
     atomic_store(&MH(IM_MOUSE_X), (uint32_t)(int)x); atomic_store(&MH(IM_MOUSE_Y), (uint32_t)(int)y);
     kbd_post_mousemove(mouse_mk(e->flags), mouse_lp());
@@ -322,7 +390,6 @@ static void mouse_move(const InEv *e){
  * scripts click Host LAN Server and Select Car).  The button goes up about
  * 8 frames later, from the input thread, as the Mac's posted click does. */
 static _Atomic uint64_t g_click_up_us;
-static uint64_t mono_us(void){ struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return (uint64_t)t.tv_sec * 1000000u + (uint64_t)t.tv_nsec / 1000u; }
 void metal_request_click(double x, double y){
     InEv e; memset(&e, 0, sizeof e);
     e.a = (int32_t)lround(x * 65536.0); e.b = (int32_t)lround(y * 65536.0);
