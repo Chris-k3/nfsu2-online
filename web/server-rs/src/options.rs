@@ -6,7 +6,7 @@
 //!        [--tls-cert <pem> --tls-key <pem> [--port 8443] [--bind <address>] | --behind-proxy --host <name>[,<name>...]]
 //!        [--host <name>[,<name>...]] [--state <dir>]
 //!        [--trusted-proxies cloudflare,<ip>,<cidr>,...] [--real-ip-header x-forwarded-for|cf-connecting-ip]
-//!        [--max-peers 128] [--online on|off] [--roam-hub on|off] [--vault-gb 10] [--access-log]
+//!        [--max-peers 128] [--online on|off] [--roam-hub on|off] [--vault-gb 50] [--access-log]
 //!        [--dev [--artifacts <dir>] [--lan-impair <spec>] [--online-trace <file>]]
 //!
 //! Options with a value can also come from the environment as NFSU2_<OPTION> (NFSU2_DATA, NFSU2_PORT,
@@ -73,7 +73,7 @@ pub struct Options {
     pub online: bool,
     /// free roam's hub (nfsu2-roam): each player's peers are the players nearest to it; on unless --roam-hub off
     pub roam_hub: bool,
-    /// keyphrase saves (nfsu2-vault, /vault): the gigabytes they may take in all, 0 for none (--vault-gb, 10 unless
+    /// keyphrase saves (nfsu2-vault, /vault): the gigabytes they may take in all, 0 for none (--vault-gb, 50 unless
     /// given)
     pub vault_gb: f64,
     /// a test aid: the lobby protocol's messages, decoded and with every secret redacted, into a file (nfsu2-online's
@@ -290,7 +290,7 @@ pub fn parse(argv: &[String], env: &dyn Fn(&str) -> Option<String>, repo: &str, 
     let online_trace = resolve_if("--online-trace")?;
     // (an empty NFSU2_VAULT_GB, as compose passes one that is not set, is the default)
     let vault_gb = match arg("--vault-gb", "") {
-        Some(v) if nfsu2_util::js::trim(&v).is_empty() => 10.0,
+        Some(v) if nfsu2_util::js::trim(&v).is_empty() => 50.0,
         Some(v) => js_to_number(&v),
         None => f64::NAN,
     };
@@ -603,9 +603,9 @@ mod tests {
         assert_eq!(o.tls, Tls::None);
         assert_eq!(o.bind, "::");
         assert!(!o.bind_set && !o.hsts_ok && o.online && o.roam_hub);
-        assert_eq!(o.vault_gb, 10.0);
+        assert_eq!(o.vault_gb, 50.0);
         // an empty NFSU2_VAULT_GB (compose passes one when .env has none) is the default; 0 is none
-        assert_eq!(s.parse(&[], &[("NFSU2_VAULT_GB", "")]).unwrap().vault_gb, 10.0);
+        assert_eq!(s.parse(&[], &[("NFSU2_VAULT_GB", "")]).unwrap().vault_gb, 50.0);
         assert_eq!(s.parse(&[], &[("NFSU2_VAULT_GB", "140")]).unwrap().vault_gb, 140.0);
         assert_eq!(s.parse(&["--vault-gb", "0.5"], &[]).unwrap().vault_gb, 0.5);
         assert_eq!(s.parse(&["--vault-gb", "0"], &[("NFSU2_VAULT_GB", "140")]).unwrap().vault_gb, 0.0);

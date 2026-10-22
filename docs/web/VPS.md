@@ -131,7 +131,7 @@ sees a keyphrase, a key or a save, and its files name no player.
 - **Where:** `vault/` in the state folder (the state volume): one file per keyphrase, `vault/<3 hex>/<64 hex>`,
   with the current version and the copy of an earlier day. A player's saves without screenshots are 6 to 14 KB:
   100,000 players take about 1.5 to 3 GB on the disk, both copies counted.
-- **How much room:** `NFSU2_VAULT_GB` in `.env` (`--vault-gb`; 10 when it is not set). New keyphrases stop at 90 % of
+- **How much room:** `NFSU2_VAULT_GB` in `.env` (`--vault-gb`; 50 when it is not set). New keyphrases stop at 90 % of
   it, and any save that would grow a file stops at all of it; what is kept stays readable. Give it what the disk can
   spare, leaving room for the rest (150 GB free: `NFSU2_VAULT_GB=140`). It counts 4 KB blocks, as ext4 takes them;
   each keyphrase also takes one inode (`df -i`). `0` turns keyphrase saves off, and the page then does not offer
