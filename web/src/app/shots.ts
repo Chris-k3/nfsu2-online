@@ -1,8 +1,8 @@
 // The screenshots part of the Saves section.  F12 while the game runs saves the
 // next frame as a PNG at the top of the save folder (shell.ts screenshot,
 // saveScreenshot here), so a backup carries it with the saves.  Shown newest
-// first, four to a row; two rows until "+N" shows them all.  One opens in the
-// #shot-view dialog to page through (the arrow keys too), download or delete.
+// first, four to a row, the newest eight.  One opens in the #shot-view dialog
+// to page through all of them (the arrow keys too), download or delete.
 // Thumbnails are made one at a time (a 4K PNG takes about 0.1 s to decode) and
 // kept while the page lives.  TGA files (what the game's own F12 wrote before
 // the page took the key, black in this port, and the PC game's) are decoded
@@ -19,7 +19,7 @@ export interface ShotsDeps {
   changed(): void;
 }
 
-/** two rows of four; past that the eighth tile is "+N" */
+/** two rows of four, the newest; the dialog pages through the rest */
 const SHOWN = 8;
 const THUMB_W = 384;
 const MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', bmp: 'image/bmp', tga: 'image/x-tga' };
@@ -98,7 +98,6 @@ async function encode(bmp: ImageBitmap, type: string): Promise<Blob> {
 
 export class ScreenshotsPart {
   private shots: Entry[] = [];
-  private all = false;                       // "+N" pressed: every one shown
   /** thumbnails: key -> object URL of a small JPEG, null when the file cannot be drawn */
   private thumbs = new Map<string, Promise<string | null>>();
   private queue: Promise<unknown> = Promise.resolve();
@@ -110,10 +109,6 @@ export class ScreenshotsPart {
 
   constructor(private root: HTMLElement, private deps: ShotsDeps) {
     this.dlg = root.ownerDocument.querySelector<HTMLDialogElement>('#shot-view')!;
-    root.querySelector<HTMLButtonElement>('#shots-fewer button')!.onclick = () => {
-      this.all = false; this.render();
-      root.querySelector<HTMLButtonElement>('#shots .more')?.focus();
-    };
     this.dlg.addEventListener('click', e => {
       const a = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-act]')?.dataset.act;
       if (a === 'newer') this.step(-1); else if (a === 'older') this.step(1);
@@ -149,8 +144,7 @@ export class ScreenshotsPart {
     const n = this.shots.length;
     this.root.querySelector<HTMLElement>('#shots-info')!.hidden = n > 0;
     const ul = this.root.querySelector<HTMLUListElement>('#shots')!;
-    const cut = !this.all && n > SHOWN ? SHOWN - 1 : n;
-    ul.replaceChildren(...this.shots.slice(0, cut).map((s, i) => {
+    ul.replaceChildren(...this.shots.slice(0, SHOWN).map((s, i) => {
       const b = this.tile(s);
       b.setAttribute('aria-label', `Screenshot, ${when(s.mtime)}`);
       b.title = when(s.mtime);
@@ -158,15 +152,6 @@ export class ScreenshotsPart {
       const li = document.createElement('li'); li.append(b);
       return li;
     }));
-    if (cut < n) {
-      const b = this.tile(this.shots[cut]);
-      b.classList.add('more');
-      b.setAttribute('aria-label', `Show all ${n} screenshots`);
-      b.append(Object.assign(document.createElement('span'), { textContent: `+${n - cut}` }));
-      b.onclick = () => { this.all = true; this.render(); this.root.querySelectorAll<HTMLButtonElement>('#shots .shot')[cut]?.focus(); };
-      const li = document.createElement('li'); li.append(b); ul.append(li);
-    }
-    this.root.querySelector<HTMLElement>('#shots-fewer')!.hidden = !(this.all && n > SHOWN);
   }
 
   /** a tile with the screenshot's thumbnail, once it is made (its kind in words if it cannot be drawn) */

@@ -232,8 +232,8 @@ summary:hover { color: var(--text); }
 .profiles li > .text-btn { height: 24px; }            /* a row stays as tall as its name */
 .profiles li.renaming { flex-direction: column; align-items: stretch; gap: 8px; }
 .profiles li.renaming .msg { margin-top: 0; }
-/* the screenshots (shots.ts): four to a row, each cut to 16:9, the game's glow on the one pointed at; "+N" over
- * the eighth until all are shown */
+/* the screenshots (shots.ts): four to a row, each cut to 16:9, the game's glow on the one pointed at; the newest
+ * eight, the dialog pages through the rest */
 .shots { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
 .shots:empty { display: none; }
 .shot {
@@ -242,11 +242,8 @@ summary:hover { color: var(--text); }
 }
 .shot img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .shot:hover { border-color: var(--lime); box-shadow: 0 0 12px var(--lime-glow); }
-.shot.more { cursor: pointer; }
-.shot.more span, .shot .kind { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
-.shot.more span { background: rgba(0, 0, 0, 0.6); color: var(--lime); font: italic 700 20px/28px var(--font); }
+.shot .kind { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
 .shot .kind { color: var(--edge); font: italic 700 14px/20px var(--font); }     /* a file the page cannot draw */
-#shots-fewer { margin-top: 8px; }
 #cache-info { font-variant-numeric: tabular-nums; }
 #data-bar { margin: 0 0 16px; }
 .msg { font-size: 14px; line-height: 20px; margin-top: 12px; }
