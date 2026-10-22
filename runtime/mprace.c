@@ -76,6 +76,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <time.h>
 
 long autotest_frame(void);
 const char *autotest_top_fng(void);
@@ -166,7 +167,9 @@ void dispatch_indirect(CPU *c, uint32_t addr);
 #define S_SERVERSEL     0x00790428u   /* "UI_PC_LAN_ServerSelect.fng" */
 #define S_LANNAME       0x0079909cu   /* "UI_PC_LAN.fng" */
 #define HOOK_MAINLOOP   0x00581475u
-#define STEP_FRAMES     (60 * 120)    /* frames (at 60) a phase may take before the trip gives up: out and into the LAN */
+/* The trip's waits are in its clock's ticks, 60 a second (clk): real time while the game runs; they were game
+ * frames, which at 120 fps passed twice as fast (a player's results gone in 4 s, the room's waits halved) */
+#define STEP_FRAMES     (60 * 120)    /* ticks a phase may take before the trip gives up: out and into the LAN */
 #define ROOM_FRAMES     (60 * 90)     /* the host's wait for the others in its room */
 #define BACK_FRAMES     (60 * 240)    /* back to the career */
 #define MP_PRIZE_N      4
@@ -188,6 +191,15 @@ static struct {
     const char *step;                              /* where the trip is, for the player (mprace_step) */
 } M;
 
+/* the trip's clock in ticks of 1/60 s: real time, advanced once a frame (clk_step) by at most 0.1 s, so that a game
+ * parked meanwhile (its tab in the background: no frames) does not run out the trip's waits */
+static uint64_t g_clk_us, g_clk_last;
+static void clk_step(void){
+    struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+    uint64_t us = (uint64_t)ts.tv_sec * 1000000u + (uint64_t)ts.tv_nsec / 1000u, d = g_clk_last && us > g_clk_last ? us - g_clk_last : 0;
+    g_clk_us += d > 100000u ? 100000u : d; g_clk_last = us;
+}
+static long clk(void){ return (long)(g_clk_us / 16667u); }
 static int okm(uint32_t a, uint32_t n){ return a && mem_is_committed(a) && mem_is_committed(a + n); }
 static uint32_t rd(uint32_t a){ return okm(a, 3) ? MR32(a) : 0; }
 static uint32_t call(CPU *c, uint32_t fn, uint32_t ecx, int n, const uint32_t *arg){
@@ -232,13 +244,13 @@ static void fail(const char *why){
     if (M.goal == G_CAREER_GOAL) return;
     snprintf(M.why, sizeof M.why, "%s", why);
     mlog("FAILED: %s: back to the career", why); state_log("failed");
-    M.goal = G_CAREER_GOAL; M.phase = MPR_BACK; M.since = autotest_frame();
+    M.goal = G_CAREER_GOAL; M.phase = MPR_BACK; M.since = clk();
     M.step = "Back to free roam";
 }
 static void to_phase(int ph){
     static const char *const nm[] = { "idle", "out of free roam", "in the LAN menus", "racing", "back to the career", "done", "failed" };
     if (ph != M.phase) fprintf(stderr, "[mprace] f=%ld %s -> %s\n", autotest_frame(), nm[M.phase], nm[ph]);
-    M.phase = ph; M.since = autotest_frame();
+    M.phase = ph; M.since = clk();
 }
 
 int mprace_start(const MpRace *r){
@@ -353,7 +365,7 @@ static void step_race(CPU *c, long f){
         char w[120];
         if (wait) snprintf(w, sizeof w, "%s", M.r.host ? "the LAN server did not start" : "the host's game did not answer");
         else snprintf(w, sizeof w, "the game said \"%s\"", t);
-        fprintf(stderr, "[mprace] f=%ld a dialog: \"%s\" (%u buttons: %08x %08x %08x, label %08x): the trip ends\n", f, t, nb, m1, m2, m3,
+        fprintf(stderr, "[mprace] f=%ld a dialog: \"%s\" (%u buttons: %08x %08x %08x, label %08x): the trip ends\n", autotest_frame(), t, nb, m1, m2, m3,
                 rd(G_DLG_LABEL3));
         dlg_answer(nb == 1 ? m3 : m2);                                            /* OK, or No / Cancel */
         fail(w);
@@ -429,7 +441,7 @@ static void step_race(CPU *c, long f){
             /* the career car, as the car select's Career category picks it */
             MR32(G_QR_CAR) = rd(G_CAREER_CAR); MR32(G_QR_CARCAT) = 4;
             M.carset = 1;
-            fprintf(stderr, "[mprace] f=%ld the career car 0x%08x\n", f, rd(G_CAREER_CAR));
+            fprintf(stderr, "[mprace] f=%ld the career car 0x%08x\n", autotest_frame(), rd(G_CAREER_CAR));
         }
         autotest_tap(K_RET, 6); M.next = f + 120;                               /* Lobby: the first item */
         return;
@@ -454,7 +466,7 @@ static void step_race(CPU *c, long f){
         int32_t r = (int32_t)call(c, FN_GJOI, G_LOBBY, 4, a);
         if (r >= 0){ uint32_t st = 0x12; call(c, FN_LANSTATE, G_NET, 1, &st); }
         char nm[40]; for (int i = 0; i < 36; i++) nm[i] = (char)MR8(rec + 4u + (uint32_t)i); nm[36] = 0;
-        fprintf(stderr, "[mprace] f=%ld join the game %s: %d\n", f, nm, r);
+        fprintf(stderr, "[mprace] f=%ld join the game %s: %d\n", autotest_frame(), nm, r);
         M.next = f + 240;
         return;
     }
@@ -485,7 +497,7 @@ static void step_race(CPU *c, long f){
             if (memcmp(now, M.room, sizeof now)){
                 memcpy(M.room, now, sizeof now);
                 fprintf(stderr, "[mprace] f=%ld the room: %u in the game, %d ready, counting down %u, can start %u; flags %08x %08x %08x %08x %08x %08x\n",
-                        f, n, ready, now[1], now[2], now[4], now[5], now[6], now[7], now[8], now[9]);
+                        autotest_frame(), n, ready, now[1], now[2], now[4], now[5], now[6], now[7], now[8], now[9]);
             }
         }
         int all = n >= (uint32_t)M.r.players && ready == (int)n - 1 && n >= 2;
@@ -494,7 +506,7 @@ static void step_race(CPU *c, long f){
             uint32_t one = 1; call(c, FN_READY, G_LOBBY, 1, &one); MR8(G_START_CLR) = 0;
             call(c, FN_START, ctx, 0, 0);
             M.started = 1;
-            fprintf(stderr, "[mprace] f=%ld start the race: %u in the game, %d ready%s\n", f, n, ready, all ? "" : " (the rest: the game's countdown)");
+            fprintf(stderr, "[mprace] f=%ld start the race: %u in the game, %d ready%s\n", autotest_frame(), n, ready, all ? "" : " (the rest: the game's countdown)");
         }
         if (f - M.step_at > ROOM_FRAMES + 60 * 30 && !M.started) fail("nobody came into the game");
         return;
@@ -517,7 +529,7 @@ static int step_racing(long f){
         }
         if (first || (M.place && !M.logged_place)){
             M.logged_place = M.place != 0;
-            fprintf(stderr, "[mprace] f=%ld the results: place %d, prize $%d%s\n", f, M.place, M.prize, first ? "" : " (our row came later)");
+            fprintf(stderr, "[mprace] f=%ld the results: place %d, prize $%d%s\n", autotest_frame(), M.place, M.prize, first ? "" : " (our row came later)");
             /* the rows as the game has them (our car's id; each row's car and how it ended: 1 finished) */
             uint32_t pl = rd(G_PLAYER1), car = pl ? rd(pl + 4u) : 0, n = rd(G_RESULTS_N);
             fprintf(stderr, "[mprace]   our car %04x;", okm(car, 0xc) ? (unsigned)MR16(car + 0xau) : 0xffffu);
@@ -531,8 +543,15 @@ static int step_racing(long f){
         if (f - M.results_at > 60 * (M.r.host ? 12 : 8)){ autotest_tap(K_RET, 6); M.goal = G_CAREER_GOAL; M.step = "Back to free roam"; to_phase(MPR_BACK); M.next = f + 120; }
         return 1;
     }
-    /* the player left the race (its pause menu's Quit to LAN Main Menu): no results */
-    if (rd(G_FLOW) == 3u && !M.results_at){ mlog("the race was left: not finished%s", ""); M.goal = G_CAREER_GOAL; M.step = "Back to free roam"; to_phase(MPR_BACK); }
+    /* the menus again: the player left the race (its pause menu's Quit to LAN Main Menu: no results), or the
+     * results with their own Continue, before ours (the game's room came up, and the trip waited there for
+     * good): back */
+    if (rd(G_FLOW) == 3u){
+        if (M.results_at && !M.place){ M.place = results_place(); M.prize = M.place >= 1 && M.place <= MP_PRIZE_N ? k_prize[M.place - 1] : 0; }
+        if (M.results_at) fprintf(stderr, "[mprace] f=%ld the results left by the player: place %d, prize $%d\n", autotest_frame(), M.place, M.prize);
+        else mlog("the race was left: not finished%s", "");
+        M.goal = G_CAREER_GOAL; M.step = "Back to free roam"; to_phase(MPR_BACK);
+    }
     return 1;
 }
 
@@ -595,7 +614,7 @@ static void step_back(CPU *c, long f){
             if (M.prize > 0){
                 uint32_t b = rd(G_CAREER + C_BANK);
                 MR32(G_CAREER + C_BANK) = b + (uint32_t)M.prize;
-                fprintf(stderr, "[mprace] f=%ld the prize: $%d into the bank ($%u -> $%u)%s\n", f, M.prize, b, b + (uint32_t)M.prize,
+                fprintf(stderr, "[mprace] f=%ld the prize: $%d into the bank ($%u -> $%u)%s\n", autotest_frame(), M.prize, b, b + (uint32_t)M.prize,
                         rd(G_SNAPSHOT) ? "" : "; the game's autosave is off: saved at the next save");
             }
             M.paid = 1;
@@ -620,8 +639,9 @@ static uint32_t gstr_tmp(CPU *c, const char *s){
 }
 
 void mprace_frame(CPU *c){
+    clk_step();
     if (M.phase == MPR_IDLE || M.phase == MPR_DONE || M.phase == MPR_FAILED){ M.owns = 0; return; }
-    long f = autotest_frame();
+    long f = clk();
     /* the player's input is ours out of free roam and back, not in the race, not on its results */
     M.owns = M.phase == MPR_OUT || M.phase == MPR_LAN || (M.phase == MPR_BACK && !on("UI_PostRaceResults.fng"));
     if (step_racing(f)) return;

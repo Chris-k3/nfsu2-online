@@ -45,14 +45,14 @@ export class LobbyPanel {
   /** gone with the game */
   clear() { this.show('{}'); }
 
-  /** the panel's place: on the right, under the game's Bank box (its right edge, y -198 to -168 in the HUD's units
-   *  from the middle of the picture; one unit is u px), out to the edge of a wide HUD with hud = wide, as the radar's
-   *  side (shell.ts placeNotices); v: the game's picture on the page */
+  /** the panel's place: under the game's Bank box, its right edge on the box's (x 299, y -198 to -168 in the HUD's
+   *  units from the middle of the picture; one unit is u px), out to the edge of a wide HUD with hud = wide, as the
+   *  radar's side (shell.ts placeNotices); v: the game's picture on the page */
   place(v: { x: number; y: number; w: number; h: number }, wide: boolean) {
     const u = Math.min(v.w / 640, v.h / 480), e169 = 320 * (16 / 9 * 0.75 - 1);
     const out = wide ? Math.min(Math.max(320 * (v.w / v.h * 0.75 - 1), 0), e169) * 109 / e169 : 0;
     const s = this.panel.style;
-    s.left = `${v.x + v.w / 2 + (304 + out) * u}px`;
+    s.left = `${v.x + v.w / 2 + (299 + out) * u}px`;
     s.top = `${v.y + v.h / 2 - 158 * u}px`;
     s.setProperty('--u', `${u}px`);
     this.cover.style.setProperty('--u', `${u}px`);
