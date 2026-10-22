@@ -5,7 +5,10 @@
  *   roam_hubwire peers <hex>      a PEERS datagram decoded: "ok <n> a.b.c.d:port:id ..." or "err <code>"
  *   roam_hubwire map <hex>...     a session that hears the hub (10.77.0.253:47210) asks for the world map
  *                                 ("ask <hex>": its MAPREQ) and takes these datagrams from the hub; then
- *                                 "map <gen> <total> <n> x,y,h ..." (what it holds) */
+ *                                 "map <gen> <total> <n> x,y,h ..." (what it holds)
+ *   roam_hubwire lobby            a race lobby's advert to the hub (to 0), as roam_core encodes it, in hex
+ *   roam_hubwire lobbies <hex>... a session that takes race lobbies asks for the world map as above and takes
+ *                                 these datagrams; then "lobbies <gen> <n> x,y,race,n,max,state ..." */
 #include "roam_core.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,10 +32,10 @@ int main(int argc, char **argv){
     rc_msg m; memset(&m, 0, sizeof m);
     m.h.sender = 0x1234ABCDu; m.h.seq = 7;
     uint8_t b[RC_MAX_DGRAM]; int n;
-    if (!strcmp(argv[1], "map")){
+    if (!strcmp(argv[1], "map") || !strcmp(argv[1], "lobbies")){
         rc_config c; memset(&c, 0, sizeof c);
         c.self_id = 0x1234ABCDu; c.port = 47210; c.max_players = RC_MAX_PLAYERS; c.rate_hz = 20;
-        c.hub_ip = 0x0A4D00FDu; c.hub_port = 47210;
+        c.hub_ip = 0x0A4D00FDu; c.hub_port = 47210; c.lobbies = !strcmp(argv[1], "lobbies");
         rc_io io; memset(&io, 0, sizeof io); io.send = sent;
         rc_session_init(&S, &c, &io);
         int64_t t = 1000000;
@@ -42,6 +45,13 @@ int main(int argc, char **argv){
         rc_receive(&S, 0x0A4D00FDu, 47210, b, n, t += 1000);
         if (!rc_ask_map(&S, t += 1000)){ printf("not asked\n"); return 0; }
         for (int i = 2; i < argc; i++){ unhex(argv[i], b, &n); rc_receive(&S, 0x0A4D00FDu, 47210, b, n, t += 1000); }
+        if (c.lobbies){
+            printf("lobbies %u %d", S.lobbies_gen, S.lobbies_n);
+            for (int i = 0; i < S.lobbies_n; i++) printf(" %d,%d,%u,%u,%u,%u", S.lobbies_e[i].x, S.lobbies_e[i].y, S.lobbies_e[i].race,
+                                                     S.lobbies_e[i].n, S.lobbies_e[i].max, S.lobbies_e[i].state);
+            printf("\n");
+            return 0;
+        }
         printf("map %u %u %d", S.map_gen, S.map_total, S.map_n);
         for (int i = 0; i < S.map_n; i++) printf(" %d,%d,%u", S.map_e[i].x, S.map_e[i].y, S.map_e[i].heading);
         printf("\n");
@@ -73,6 +83,11 @@ int main(int argc, char **argv){
             s->t_us = 1000000u - 50000u * (uint32_t)k; s->q[3] = 1;
             s->p[0] = 1695.25f - (float)k; s->p[1] = -883.5f; s->p[2] = 24.125f; s->v[0] = 20.f;
         }
+    } else if (!strcmp(argv[1], "lobby")){
+        m.h.type = RC_MSG_LOBBY;
+        rc_lobby *l = &m.u.lobby;
+        l->op = RC_LOBBY_ADVERT; l->state = RC_LS_OPEN; l->max = 6; l->to = 0; l->lobby = 0xA1B2C3D4u; l->race = 0x0BADF00Du;
+        l->x = -1234; l->y = 567; l->n = 2; l->ids[0] = 0x1234ABCDu; l->ids[1] = 0x55u;
     } else if (!strcmp(argv[1], "bye")){
         m.h.type = RC_MSG_BYE; m.u.bye.reason = 0;
     } else return 2;

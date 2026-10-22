@@ -14,6 +14,16 @@ pub(crate) const MSG_SNAP: u8 = 3;
 pub(crate) const MSG_BYE: u8 = 8;
 pub(crate) const MSG_MAPREQ: u8 = 10;
 pub(crate) const MSG_MAP: u8 = 11;
+pub(crate) const MSG_LOBBY: u8 = 12;
+pub(crate) const MSG_LOBBIES: u8 = 13;
+/// HELLO's flag: this player takes race lobbies (roam_core.h RC_HF_LOBBY)
+pub(crate) const HF_LOBBY: u16 = 0x0080;
+/// a LOBBY's ops (roam_core.h RC_LOBBY_*) the hub keeps: the host's advert and its end
+pub(crate) const LOBBY_ADVERT: u8 = 1;
+pub(crate) const LOBBY_CLOSE: u8 = 5;
+/// a LOBBIES entry: x, y (i16 LE, m), race (u32 LE), players, most players, state (u8); at most LOBBIES_MAX of them
+pub(crate) const LOBBIES_ENTRY: usize = 11;
+pub(crate) const LOBBIES_MAX: usize = 96;
 /// a MAP entry: x, y (i16 LE, m), heading (u8, 256 a turn); at most MAP_PER of them a datagram (roam_core.h)
 pub(crate) const MAP_ENTRY: usize = 5;
 pub(crate) const MAP_PER: usize = 230;
@@ -30,6 +40,8 @@ pub(crate) enum Msg<'a> {
         status: u8,
         room: u32,
         name: &'a [u8],
+        /// its flags say it takes race lobbies (HF_LOBBY)
+        lobbies: bool,
     },
     /// v: the newest state's velocity, 0 where roam_core's decoder would not take it (not finite, 200 m/s or more);
     /// heading: where its car points, 256 a turn (the game's atan2 of the forward row, roam_game.c)
@@ -43,6 +55,19 @@ pub(crate) enum Msg<'a> {
     /// the world map's question (roam_core.h RC_MSG_MAPREQ): req is echoed in the answer
     MapReq {
         req: u16,
+    },
+    /// a race lobby (roam_core.h RC_MSG_LOBBY), checked as roam_core.c's lobby_ok: what the hub keeps of one sent to
+    /// it (to 0)
+    Lobby {
+        op: u8,
+        to: u32,
+        lobby: u32,
+        race: u32,
+        x: i16,
+        y: i16,
+        n: u8,
+        max: u8,
+        state: u8,
     },
     Bye,
     Other,
@@ -105,7 +130,7 @@ pub(crate) fn decode(d: &[u8]) -> Option<(u8, u32, Msg<'_>)> {
             if !name.iter().all(|c| (0x20..=0x7e).contains(c)) {
                 return None;
             }
-            Msg::Hello { sender, core, status, room, name }
+            Msg::Hello { sender, core, status, room, name, lobbies: u16_le(d, 14) & HF_LOBBY != 0 }
         }
         MSG_SNAP => {
             if end < 22 + 52 {
@@ -123,6 +148,32 @@ pub(crate) fn decode(d: &[u8]) -> Option<(u8, u32, Msg<'_>)> {
             Msg::Snap { sender, status, p, v: velocity(d, 38), heading: heading(d, 50) }
         }
         MSG_MAPREQ if end == HDR + 2 => Msg::MapReq { req: u16_le(d, 16) },
+        MSG_LOBBY => {
+            // op arg state max, to, lobby, race, x y, t, n, a reserved byte, then n ids (roam_core.c rc_encode)
+            if end < HDR + 24 {
+                return None;
+            }
+            let (op, arg, state, max, n) = (d[16], d[17], d[18], d[19], d[38] as usize);
+            if !(1..6).contains(&op) || arg >= 5 || state >= 3 || !(2..=6).contains(&max) || n > max as usize || end != HDR + 24 + 4 * n {
+                return None;
+            }
+            let ids: Vec<u32> = (0..n).map(|i| u32_le(d, HDR + 24 + 4 * i)).collect();
+            let (lobby, race) = (u32_le(d, 24), u32_le(d, 28));
+            if lobby == 0 || race == 0 || ids.iter().enumerate().any(|(i, &v)| v == 0 || ids[..i].contains(&v)) {
+                return None;
+            }
+            Msg::Lobby {
+                op,
+                to: u32_le(d, 20),
+                lobby,
+                race,
+                x: u16_le(d, 32) as i16,
+                y: u16_le(d, 34) as i16,
+                n: n as u8,
+                max,
+                state,
+            }
+        }
         MSG_BYE => Msg::Bye,
         _ => Msg::Other,
     };
@@ -134,12 +185,12 @@ pub fn decode_roam(d: &[u8]) -> Option<RoamMsg> {
     let (kind, sender, m) = decode(d)?;
     Some(match m {
         // the name is printable ASCII (checked): latin1 is the bytes as they are
-        Msg::Hello { sender, core, status, room, name } => {
+        Msg::Hello { sender, core, status, room, name, .. } => {
             RoamMsg::Hello { sender, core, status, room, name: name.iter().map(|&c| c as char).collect() }
         }
         Msg::Snap { sender, status, p, .. } => RoamMsg::Snap { sender, status, p },
         Msg::Bye => RoamMsg::Bye { sender },
-        Msg::MapReq { .. } | Msg::Other => RoamMsg::Other { kind, sender },
+        Msg::MapReq { .. } | Msg::Lobby { .. } | Msg::Other => RoamMsg::Other { kind, sender },
     })
 }
 
@@ -176,6 +227,37 @@ pub fn encode_peers(sender: u32, seq: u16, list: &[PeerEntry]) -> Vec<u8> {
     let mut b = vec![0u8; peers_len(list.len())];
     write_peers(&mut b, sender, seq, list.iter().copied());
     b
+}
+
+/// the length of a LOBBIES datagram of n entries
+pub(crate) fn lobbies_len(n: usize) -> usize {
+    HDR + 3 + LOBBIES_ENTRY * n + CRC
+}
+
+/// One LOBBIES datagram, the open race lobbies of the asker's room with the answer to its map question `req`
+/// (roam_core.h RC_MSG_LOBBIES) into `b` (exactly `lobbies_len(n)` bytes long): (x, y, race, players, most, state)
+pub(crate) fn write_lobbies(b: &mut [u8], sender: u32, seq: u16, req: u16, list: &[(i16, i16, u32, u8, u8, u8)]) {
+    let len = b.len();
+    b[..4].copy_from_slice(b"N2FR");
+    b[4] = 1;
+    b[5] = MSG_LOBBIES;
+    b[6..8].copy_from_slice(&(len as u16).to_le_bytes());
+    b[8..12].copy_from_slice(&sender.to_le_bytes());
+    b[12..14].copy_from_slice(&seq.to_le_bytes());
+    b[14..16].copy_from_slice(&[0, 0]);
+    b[16..18].copy_from_slice(&req.to_le_bytes());
+    b[18] = list.len() as u8;
+    for (i, &(x, y, race, n, max, state)) in list.iter().enumerate() {
+        let o = 19 + LOBBIES_ENTRY * i;
+        b[o..o + 2].copy_from_slice(&x.to_le_bytes());
+        b[o + 2..o + 4].copy_from_slice(&y.to_le_bytes());
+        b[o + 4..o + 8].copy_from_slice(&race.to_le_bytes());
+        b[o + 8] = n;
+        b[o + 9] = max;
+        b[o + 10] = state;
+    }
+    let crc = crc32fast::hash(&b[..len - CRC]);
+    b[len - CRC..].copy_from_slice(&crc.to_le_bytes());
 }
 
 /// the length of a MAP datagram of n entries

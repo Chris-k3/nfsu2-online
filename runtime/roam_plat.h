@@ -48,6 +48,9 @@ int      roam_bcast_targets(const roam_if *ifs, int n, uint32_t *out, int max);
 int      roam_plat_guard(int test_mode, uint32_t ip, int is_broadcast);
 typedef struct { uint64_t sent, sent_bytes, recv, recv_bytes, blocked, send_err, impair_drop, impair_dup; } roam_plat_stats;
 void     roam_plat_get_stats(roam_plat_stats *out);
+/* a message over the game ("<name><what>", as the joins and leaves): the
+ * page shows it (web); elsewhere a log line.  With the session lock held */
+void     roam_plat_notice(const char *name, const char *what);
 const char *roam_ip_str(uint32_t ip, char *buf);   /* buf >= 16 */
 
 #endif

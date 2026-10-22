@@ -221,14 +221,17 @@ for (const x of inst) {
   for (const f of FETCH) {
     try {
       const b64 = await x.page.evaluate(async ([dir, name]) => {
-        const root = await navigator.storage.getDirectory();
-        const u8 = new Uint8Array(await (await (await (await root.getDirectoryHandle(dir)).getFileHandle(name)).getFile()).arrayBuffer());
+        const parts = name.split('/');
+        let d = await (await navigator.storage.getDirectory()).getDirectoryHandle(dir);
+        for (const p of parts.slice(0, -1)) d = await d.getDirectoryHandle(p);
+        const u8 = new Uint8Array(await (await (await d.getFileHandle(parts.at(-1))).getFile()).arrayBuffer());
         let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode(...u8.subarray(i, i + 0x8000));
         return btoa(s);
       }, [`roam-${x.name}`, f]);
       const buf = Buffer.from(b64, 'base64');
-      fs.writeFileSync(path.join(OUT, `${x.name}.${f}`), buf);
-      console.log(`roam-pair: ${x.name}.${f} ${buf.length} bytes`);
+      const as = `${x.name}.${f.replaceAll('/', '_')}`;
+      fs.writeFileSync(path.join(OUT, as), buf);
+      console.log(`roam-pair: ${as} ${buf.length} bytes`);
     } catch (e) { console.log(`roam-pair: no ${f} from ${x.name}: ${e}`); }
   }
   x.log.end();

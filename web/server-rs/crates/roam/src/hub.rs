@@ -22,6 +22,22 @@ const DEGREE_V1: usize = 7;
 /// no slot, no place in a room
 const NONE: u32 = u32::MAX;
 
+/// a race lobby a player hosts (roam_core.h RC_MSG_LOBBY, an advert to the hub): its id, the race, where it starts,
+/// its players, the most it takes and its state
+#[derive(Clone, Copy, Debug)]
+struct HubLobby {
+    id: u32,
+    race: u32,
+    x: i16,
+    y: i16,
+    n: u8,
+    max: u8,
+    state: u8,
+}
+
+/// an advert older than this is a lobby gone (its host sends one every second)
+const LOBBY_STALE_MS: f64 = 3000.0;
+
 /// a link: the player it is to, and since when
 #[derive(Clone, Copy, Debug)]
 struct Link {
@@ -48,6 +64,10 @@ struct Player {
     heading: u8,
     pos_at: f64,
     seen: f64,
+    /// its HELLO says it takes race lobbies (its map questions get the room's lobbies too)
+    lobbies: bool,
+    /// the race lobby it hosts, as its last advert to the hub had it, and when that came
+    lobby: Option<(HubLobby, f64)>,
     /// its links after the last tick (a HELLO of another start of the game empties them)
     links: Vec<Link>,
     /// its place in `order`
@@ -395,6 +415,8 @@ impl Hub {
                     heading: 0,
                     pos_at: 0.0,
                     seen: 0.0,
+                    lobbies: false,
+                    lobby: None,
                     links: Vec::new(),
                     at: 0,
                 })
@@ -407,7 +429,7 @@ impl Hub {
         p.hub_port = dport;
         let mut ask = None;
         match m {
-            Msg::Hello { sender, core, status, room, name } => {
+            Msg::Hello { sender, core, status, room, name, lobbies } => {
                 // another start of the game on the same endpoint
                 if p.id != sender {
                     p.links.clear();
@@ -420,6 +442,7 @@ impl Hub {
                     p.name.extend(name.iter().map(|&c| c as char));
                 }
                 p.degree = if core >= 2 { degree } else { degree.min(DEGREE_V1) };
+                p.lobbies = lobbies;
             }
             Msg::Snap { sender, status, p: pos, v, heading } if sender == p.id => {
                 p.p = Some(pos);
@@ -429,6 +452,11 @@ impl Hub {
                 p.status = status;
             }
             Msg::MapReq { req } if sender == p.id => ask = Some(req),
+            Msg::Lobby { op, to: 0, lobby, race, x, y, n, max, state } if sender == p.id => match op {
+                wire::LOBBY_ADVERT => p.lobby = Some((HubLobby { id: lobby, race, x, y, n, max, state }, now)),
+                wire::LOBBY_CLOSE if p.lobby.is_some_and(|(l, _)| l.id == lobby) => p.lobby = None,
+                _ => {}
+            },
             _ => {}
         }
         if let Some(req) = ask {
@@ -477,6 +505,40 @@ impl Hub {
             (self.send)(vip, Bytes::from(f));
         }
         self.map_at.insert(vip, now);
+        self.lobbies(slot, req, now);
+    }
+
+    /// With the world map's answer, to a player that takes race lobbies: the open lobbies of its room (any player's,
+    /// its own too, an advert younger than LOBBY_STALE_MS), nearest first, LOBBIES_MAX at most, in one datagram
+    fn lobbies(&mut self, slot: u32, req: u16, now: f64) {
+        let Some(p) = self.player(slot) else { return };
+        if !p.lobbies {
+            return;
+        }
+        let (room, at) = (p.room, p.p.unwrap_or_default());
+        let mut near: Vec<(u64, (i16, i16, u32, u8, u8, u8))> = Vec::new();
+        for &q in &self.order {
+            let Some(o) = self.player(q) else { continue };
+            let Some((l, t)) = o.lobby else { continue };
+            if o.room != room || now - t > LOBBY_STALE_MS {
+                continue;
+            }
+            let d = distance(&at, &[l.x as f64, l.y as f64, at[2]]);
+            near.push((order_key(d), (l.x, l.y, l.race, l.n, l.max, l.state)));
+        }
+        near.sort_by_key(|e| e.0);
+        near.truncate(wire::LOBBIES_MAX);
+        let list: Vec<(i16, i16, u32, u8, u8, u8)> = near.into_iter().map(|e| e.1).collect();
+        let (vip, port, hub_port) = (p.vip, p.port, p.hub_port);
+        let mut f = vec![0u8; F_DATA + wire::lobbies_len(list.len())];
+        f[0] = KIND_UDP;
+        f[4..8].copy_from_slice(&ROAM_HUB_VIP.to_be_bytes());
+        f[8..12].copy_from_slice(&vip.to_be_bytes());
+        f[12..14].copy_from_slice(&hub_port.to_be_bytes());
+        f[14..16].copy_from_slice(&port.to_be_bytes());
+        wire::write_lobbies(&mut f[F_DATA..], self.id, self.seq, req, &list);
+        self.seq = self.seq.wrapping_add(1);
+        (self.send)(vip, Bytes::from(f));
     }
 
     /// browser `vip` left the switch

@@ -267,6 +267,18 @@ static int get_state(rc_r *r, rc_state *s){
 /* ---- messages ------------------------------------------------------------------- */
 static int printable(const char *s, uint32_t n){ for (uint32_t i = 0; i < n; i++) if ((uint8_t)s[i] < 0x20 || (uint8_t)s[i] >= 0x7F) return 0; return 1; }
 
+/* a LOBBY message's fields: a known op, state and reason, an id for the
+ * lobby, a race, 2 to RC_LOBBY_MAX players at most and no more in it, no
+ * player twice and none 0 */
+static int lobby_ok(const rc_lobby *l){
+    if (l->op < 1 || l->op >= RC_LOBBY__N || l->state >= RC_LS__N || l->arg >= RC_LL__N || !l->lobby || !l->race) return 0;
+    if (l->max < 2 || l->max > RC_LOBBY_MAX || l->n > l->max) return 0;
+    for (int i = 0; i < l->n; i++){
+        if (!l->ids[i]) return 0;
+        for (int j = 0; j < i; j++) if (l->ids[j] == l->ids[i]) return 0;
+    }
+    return 1;
+}
 int rc_encode(const rc_msg *m, uint8_t *out, int cap){
     rc_w w; rc_w_init(&w, out, (uint32_t)(cap < RC_MAX_DGRAM ? cap : RC_MAX_DGRAM));
     rc_put8(&w, RC_MAGIC0); rc_put8(&w, RC_MAGIC1); rc_put8(&w, RC_MAGIC2); rc_put8(&w, RC_MAGIC3);
@@ -319,6 +331,19 @@ int rc_encode(const rc_msg *m, uint8_t *out, int cap){
         if (m->u.map.nparts < 1 || m->u.map.nparts > RC_MAP_PARTS || m->u.map.part >= m->u.map.nparts || m->u.map.n > RC_MAP_PER) return -1;
         rc_put16(&w, m->u.map.req); rc_put8(&w, m->u.map.part); rc_put8(&w, m->u.map.nparts);
         rc_put16(&w, m->u.map.total); rc_put8(&w, m->u.map.n); rc_putb(&w, m->u.map.data, (uint32_t)m->u.map.n * RC_MAP_ENTRY);
+        break;
+    case RC_MSG_LOBBY: {
+        const rc_lobby *l = &m->u.lobby;
+        if (!lobby_ok(l)) return -1;
+        rc_put8(&w, l->op); rc_put8(&w, l->arg); rc_put8(&w, l->state); rc_put8(&w, l->max);
+        rc_put32(&w, l->to); rc_put32(&w, l->lobby); rc_put32(&w, l->race);
+        rc_put16(&w, (uint16_t)l->x); rc_put16(&w, (uint16_t)l->y); rc_put16(&w, l->t_ms); rc_put8(&w, l->n);
+        rc_put8(&w, 0);                                                   /* reserved */
+        for (int i = 0; i < l->n; i++) rc_put32(&w, l->ids[i]);
+        break; }
+    case RC_MSG_LOBBIES:
+        if (m->u.lobbies.n > RC_LOBBIES_MAX) return -1;
+        rc_put16(&w, m->u.lobbies.req); rc_put8(&w, m->u.lobbies.n); rc_putb(&w, m->u.lobbies.data, (uint32_t)m->u.lobbies.n * RC_LOBBIES_ENTRY);
         break;
     default: return -1;
     }
@@ -416,6 +441,25 @@ int rc_decode(const uint8_t *buf, int len, rc_msg *m){
         if (m->u.map.nparts < 1 || m->u.map.nparts > RC_MAP_PARTS || m->u.map.part >= m->u.map.nparts || m->u.map.n > RC_MAP_PER) return RC_E_FIELD;
         if (!r_have(&r, (uint32_t)m->u.map.n * RC_MAP_ENTRY)) return RC_E_SHORT;
         m->u.map.data = r.p + r.n; r.n += (uint32_t)m->u.map.n * RC_MAP_ENTRY;
+        break;
+    case RC_MSG_LOBBY: {
+        rc_lobby *l = &m->u.lobby;
+        l->op = (uint8_t)rc_get8(&r); l->arg = (uint8_t)rc_get8(&r); l->state = (uint8_t)rc_get8(&r); l->max = (uint8_t)rc_get8(&r);
+        l->to = rc_get32(&r); l->lobby = rc_get32(&r); l->race = rc_get32(&r);
+        l->x = (int16_t)rc_get16(&r); l->y = (int16_t)rc_get16(&r); l->t_ms = (uint16_t)rc_get16(&r); l->n = (uint8_t)rc_get8(&r);
+        (void)rc_get8(&r);
+        if (r.err) return RC_E_SHORT;
+        if (l->n > RC_LOBBY_MAX) return RC_E_FIELD;
+        for (int i = 0; i < l->n; i++) l->ids[i] = rc_get32(&r);
+        if (r.err) return RC_E_SHORT;
+        if (!lobby_ok(l)) return RC_E_FIELD;
+        break; }
+    case RC_MSG_LOBBIES:
+        m->u.lobbies.req = (uint16_t)rc_get16(&r); m->u.lobbies.n = (uint8_t)rc_get8(&r);
+        if (r.err) return RC_E_SHORT;
+        if (m->u.lobbies.n > RC_LOBBIES_MAX) return RC_E_FIELD;
+        if (!r_have(&r, (uint32_t)m->u.lobbies.n * RC_LOBBIES_ENTRY)) return RC_E_SHORT;
+        m->u.lobbies.data = r.p + r.n; r.n += (uint32_t)m->u.lobbies.n * RC_LOBBIES_ENTRY;
         break;
     default: return RC_E_TYPE;
     }
@@ -734,6 +778,47 @@ int rc_take_duel(rc_session *s, uint32_t *from, uint8_t *op, uint8_t *arg, uint3
     s->n_duel_in--;
     return 1;
 }
+int rc_send_lobby(rc_session *s, const rc_lobby *l){
+    if (s->closed || !s->conf.lobbies) return 0;
+    rc_msg m; hdr(s, &m, RC_MSG_LOBBY);
+    m.u.lobby = *l;
+    uint32_t before = s->tx;
+    if (!l->to){
+        if (!s->conf.hub_ip || !s->hub_heard_us) return 0;
+        tx_to(s, s->conf.hub_ip, s->conf.hub_port, &m);
+        return s->tx != before;
+    }
+    for (int i = 0; i < RC_TABLE; i++){
+        rc_peer *p = &s->peer[i];
+        if (p->state != RC_PS_EST || p->id != l->to || !p->lobbies) continue;
+        tx(s, p, &m);
+        return s->tx != before;
+    }
+    return 0;
+}
+int rc_take_lobby(rc_session *s, uint32_t *from, rc_lobby *l){
+    if (!s->n_lobby_in) return 0;
+    *from = s->lobby_in[0].from; *l = s->lobby_in[0].l;
+    for (int k = 1; k < s->n_lobby_in; k++) s->lobby_in[k - 1] = s->lobby_in[k];
+    s->n_lobby_in--;
+    return 1;
+}
+/* the hub's open lobbies, with the answer to our last map question */
+static void lobbies_from_hub(rc_session *s, const rc_msg *m){
+    /* (the MAP before it has answered the question already: map_asked_us is 0 by now) */
+    if (!s->map_req || m->u.lobbies.req != s->map_req || m->u.lobbies.req == s->lobbies_req || !s->conf.lobbies) return;
+    s->lobbies_req = m->u.lobbies.req;
+    int n = 0;
+    for (int k = 0; k < m->u.lobbies.n; k++){
+        const uint8_t *e = m->u.lobbies.data + (size_t)k * RC_LOBBIES_ENTRY;
+        uint32_t race = (uint32_t)e[4] | (uint32_t)e[5] << 8 | (uint32_t)e[6] << 16 | (uint32_t)e[7] << 24;
+        if (!race || e[9] < 2 || e[9] > RC_LOBBY_MAX || e[8] > e[9] || e[10] >= RC_LS__N) continue;
+        s->lobbies_e[n].x = (int16_t)(e[0] | e[1] << 8); s->lobbies_e[n].y = (int16_t)(e[2] | e[3] << 8);
+        s->lobbies_e[n].race = race; s->lobbies_e[n].n = e[8]; s->lobbies_e[n].max = e[9]; s->lobbies_e[n].state = e[10];
+        n++;
+    }
+    s->lobbies_n = n; s->lobbies_gen++;
+}
 int rc_ask_map(rc_session *s, int64_t now){
     if (s->closed || !s->conf.hub_ip || !s->hub_heard_us || !hub_mode(s, now)) return 0;
     rc_msg m; hdr(s, &m, RC_MSG_MAPREQ);
@@ -829,6 +914,7 @@ static void fill_hello(rc_session *s, rc_msg *m, const rc_peer *to){
     hdr(s, m, RC_MSG_HELLO);
     m->h.flags = RC_HF_STATEX;
     if (s->conf.duels) m->h.flags |= RC_HF_DUELS;
+    if (s->conf.lobbies) m->h.flags |= RC_HF_LOBBY;
     if (!to) m->h.flags |= RC_HF_ALL;
     m->u.hello.core_ver = RC_CORE_VER; m->u.hello.platform = s->conf.platform; m->u.hello.status = s->status;
     m->u.hello.listen_port = s->conf.port; m->u.hello.cfg_rev = s->cfg_rev; m->u.hello.room = s->conf.room;
@@ -933,6 +1019,7 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
          * (the hub lists us on theirs at the same time), and stays while it
          * is listed (rc_tick drops the others) */
         if (m.h.type == RC_MSG_MAP){ map_part(s, &m); return; }
+        if (m.h.type == RC_MSG_LOBBIES){ lobbies_from_hub(s, &m); return; }
         if (m.h.type != RC_MSG_PEERS) return;
         s->hub_heard_us = now; s->hub_lists++;
         for (int k = 0; k < m.u.peers.n; k++){
@@ -996,6 +1083,7 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
         memcpy(p->name, m.u.hello.name, sizeof p->name);
         p->platform = m.u.hello.platform; p->status = m.u.hello.status; p->cfg_rev_seen = m.u.hello.cfg_rev;
         p->core_ver = m.u.hello.core_ver; p->duels = (m.h.flags & RC_HF_DUELS) != 0;
+        p->lobbies = (m.h.flags & RC_HF_LOBBY) != 0;
         p->statex = (m.h.flags & RC_HF_STATEX) != 0;
         int heard = 0;
         for (int k = 0; k < m.u.hello.n_seen; k++) if (m.u.hello.seen[k] == s->conf.self_id) heard = 1;
@@ -1095,6 +1183,12 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
         s->duel_in[s->n_duel_in].from = m.h.sender; s->duel_in[s->n_duel_in].op = m.u.duel.op;
         s->duel_in[s->n_duel_in].arg = m.u.duel.arg; s->duel_in[s->n_duel_in].duel = m.u.duel.duel;
         s->n_duel_in++;
+        break;
+    case RC_MSG_LOBBY:
+        if (p->state != RC_PS_EST || m.u.lobby.to != s->conf.self_id || !s->conf.lobbies) return;
+        if (s->n_lobby_in == RC_LOBBY_INBOX){ s->lobby_dropped++; return; }
+        s->lobby_in[s->n_lobby_in].from = m.h.sender; s->lobby_in[s->n_lobby_in].l = m.u.lobby;
+        s->n_lobby_in++;
         break;
     case RC_MSG_BYE: {
         int k = 0;

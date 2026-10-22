@@ -5,7 +5,7 @@
  * network game can be created on any track, either direction, whatever the
  * profile has unlocked; and a new game starts at 2 laps instead of 3.  Career,
  * Quick Race, cars and parts keep the game's own unlocks.  A game takes up to
- * 6 players in every mode but drag, as the game's own Street X does; drag
+ * 6 players in every mode but drag, as the game's own URL races do; drag
  * keeps one car per lane.
  *
  * The game (SPEED2.EXE v1.2 NA, static reading):
@@ -25,9 +25,9 @@
  *    takes the host's (0x601d20).
  *  - Max Players is the byte [0x850080] (MAXPLYS, the gcre MAXSIZE), its
  *    least [0x850081] = 2, 3 for a ranked game ([0x850098]).  The option's
- *    constructor 0x4b3110 sets it to the mode's most: 6 for Street X (mode
- *    [0x850088] = 4), 3 for drag (2) on track 4402, which has three lanes,
- *    else 4.  Its arrows 0x4b3190 step it between the two, wrapping round,
+ *    constructor 0x4b3110 sets it to the mode's most: 6 for URL (mode
+ *    [0x850088] = 4; Street X is 0xA), 3 for drag (2) on track 4402, which
+ *    has three lanes, else 4.  Its arrows 0x4b3190 step it between the two, wrapping round,
  *    and its vtable +0xc (0x4b3220) shows it.  The race coordinator
  *    ([0x890118]) has 6 racer entries, and the start grid (0x5eb5d0) lines up
  *    any number of cars in two columns where a track has fewer start markers.
@@ -38,7 +38,7 @@
 #define MASK_NET    0x1f8u         /* 0x5156f0's mask bits of a network race */
 #define G_NET_MAX   0x00850080u    /* byte: Max Players */
 #define G_NET_MIN   0x00850081u    /* byte: its least */
-#define G_NET_MODE  0x00850088u    /* int: 2 drag, 4 Street X */
+#define G_NET_MODE  0x00850088u    /* int: 0 circuit, 1 sprint, 2 drag, 3 drift, 4 URL, 0xA Street X */
 #define MODE_DRAG   2u
 #define NET_MOST    6u             /* the race coordinator's racer entries */
 #define MSG_LEFT    0x9120409eu

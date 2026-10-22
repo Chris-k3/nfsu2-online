@@ -21,8 +21,8 @@
 #include <stddef.h>
 
 #define RC_PROTO_VER     1          /* header byte 4; a different value is ignored */
-#define RC_CORE_VER      4          /* HELLO: implementation revision (2: lists of up to RC_MAX_PEERS; 3: RC_MSG_DUEL;
-                                       4: state extensions, RC_HF_STATEX) */
+#define RC_CORE_VER      5          /* HELLO: implementation revision (2: lists of up to RC_MAX_PEERS; 3: RC_MSG_DUEL;
+                                       4: state extensions, RC_HF_STATEX; 5: race lobbies, RC_HF_LOBBY) */
 #define RC_MAGIC0        0x4E       /* "N2FR" */
 #define RC_MAGIC1        0x32
 #define RC_MAGIC2        0x46
@@ -56,6 +56,10 @@
 #define RC_MAP_PER       230        /* entries per MAP datagram at most */
 #define RC_MAP_PARTS     3          /* MAP datagrams per answer at most */
 #define RC_MAP_MAX       512        /* entries per answer at most (the hub's nearest) */
+#define RC_LOBBY_MAX     6          /* players in a race lobby: the game's network race takes 6 */
+#define RC_LOBBY_INBOX   16         /* LOBBY messages held for the game side */
+#define RC_LOBBIES_ENTRY 11         /* a LOBBIES entry: x, y (int16, m), race (u32), n, max, state (u8) */
+#define RC_LOBBIES_MAX   96         /* entries per LOBBIES datagram (the hub's nearest) */
 
 /* message types (header byte 5) */
 enum { RC_MSG_HELLO = 1, RC_MSG_PEERS = 2, RC_MSG_SNAP = 3, RC_MSG_CFG = 4, RC_MSG_CFG_REQ = 5,
@@ -66,7 +70,26 @@ enum { RC_MSG_HELLO = 1, RC_MSG_PEERS = 2, RC_MSG_SNAP = 3, RC_MSG_CFG = 4, RC_M
         * our peers; n entries of RC_MAP_ENTRY bytes: the ones nearest to us,
         * past our peers, RC_MAP_MAX at most).  A hub before them ignores a
         * MAPREQ, and only a core that asked gets a MAP */
-       RC_MSG_MAPREQ = 10, RC_MSG_MAP = 11 };
+       RC_MSG_MAPREQ = 10, RC_MSG_MAP = 11,
+       /* a multiplayer race from free roam (roam_game.c mp_*): LOBBY between
+        * players (op RC_LOBBY_*), only to a peer whose HELLO carries
+        * RC_HF_LOBBY; the host's ADVERT also to the hub (to 0), which keeps
+        * the open lobbies of each room and answers a MAPREQ of such a core
+        * with one LOBBIES datagram after its MAP (req echoed; n entries of
+        * RC_LOBBIES_ENTRY bytes, nearest first: where each lobby's race
+        * starts, its race, players, most players and state) */
+       RC_MSG_LOBBY = 12, RC_MSG_LOBBIES = 13 };
+/* LOBBY ops.  lobby: the host's id for it (nonzero); race: the career race's
+ * name hash (race record +8, the same table in every game); x, y: where it
+ * starts (m); ids: the players in it, the host first */
+enum { RC_LOBBY_ADVERT = 1,         /* host -> each peer (and the hub): the lobby as it is now; again every second */
+       RC_LOBBY_JOIN = 2,           /* player -> host: let me in */
+       RC_LOBBY_LEAVE = 3,          /* player -> host: I am out; host -> player: you are out (arg: RC_LL_*) */
+       RC_LOBBY_START = 4,          /* host -> each player in it: the race begins in t ms (ids: who races) */
+       RC_LOBBY_CLOSE = 5,          /* host -> each peer (and the hub): the lobby is gone (arg: RC_LL_*) */
+       RC_LOBBY__N };
+enum { RC_LL_LEFT = 1, RC_LL_FULL = 2, RC_LL_GONE = 3, RC_LL_STARTED = 4, RC_LL__N };
+enum { RC_LS_OPEN = 0, RC_LS_STARTING = 1, RC_LS_RACING = 2, RC_LS__N };
 /* DUEL ops: an outrun between two players (roam_game.c).  Only to a peer
  * whose HELLO carries RC_HF_DUELS: an older core counts the type as bad */
 enum { RC_DUEL_OFFER = 1,           /* I challenge you (duel: a new id) */
@@ -101,6 +124,9 @@ enum { RC_PLAT_MAC = 1, RC_PLAT_WIN = 2, RC_PLAT_TOOL = 3 };
 /* header flags (HELLO): this player takes outrun challenges (RC_MSG_DUEL);
  * an older core sends none and ignores them */
 #define RC_HF_DUELS      0x0010
+/* header flags (HELLO): this player takes race lobbies (RC_MSG_LOBBY, and
+ * from the hub RC_MSG_LOBBIES); an older core sends none and ignores them */
+#define RC_HF_LOBBY      0x0080
 /* header flags (HELLO): to everyone, not to one peer (the beacon, the hub):
  * it names at most RC_PEERS_V1 of the ids its sender hears, so a full list
  * without ours does not say the sender no longer hears us (its HELLOs to us
@@ -175,6 +201,17 @@ typedef struct {
     uint16_t seq, flags;
 } rc_hdr;
 
+/* a LOBBY message (RC_LOBBY_* op; 24 bytes and 4 per player on the wire) */
+typedef struct {
+    uint8_t  op, arg, state, max;  /* state RC_LS_*, max: the most players it takes (2 .. RC_LOBBY_MAX) */
+    uint32_t to;                   /* the player it is for; 0: the hub */
+    uint32_t lobby, race;
+    int16_t  x, y;                 /* where the race starts (m) */
+    uint16_t t_ms;                 /* START: in this many ms */
+    uint8_t  n;                    /* players in it */
+    uint32_t ids[RC_LOBBY_MAX];    /* the host first */
+} rc_lobby;
+
 typedef struct {
     rc_hdr h;
     union {
@@ -189,6 +226,8 @@ typedef struct {
         struct { uint8_t op, arg; uint32_t to, duel; } duel;      /* to: the player it is for */
         struct { uint16_t req; } mapreq;
         struct { uint16_t req, total; uint8_t part, nparts, n; const uint8_t *data; } map;   /* data: n entries */
+        rc_lobby lobby;
+        struct { uint16_t req; uint8_t n; const uint8_t *data; } lobbies;   /* data: n entries */
     } u;
 } rc_msg;
 
@@ -316,6 +355,7 @@ typedef struct {
     uint32_t hub_ip;
     uint16_t hub_port;
     int      duels;                /* we take outrun challenges (HELLO says so: RC_HF_DUELS) */
+    int      lobbies;              /* we take race lobbies (HELLO says so: RC_HF_LOBBY) */
 } rc_config;
 
 enum { RC_PS_FREE = 0, RC_PS_CANDIDATE = 1, RC_PS_HEARD = 2, RC_PS_EST = 3 };
@@ -332,7 +372,8 @@ typedef struct {
     uint8_t  platform, status;
     uint16_t core_ver;             /* its HELLO's (0 until one came): below 2 it reads lists of RC_PEERS_V1 at most */
     uint8_t  duels;                /* its HELLO says it takes outrun challenges (RC_HF_DUELS) */
-    uint8_t  statex;               /* its HELLO says it reads state extensions (RC_HF_STATEX) */
+    uint8_t  lobbies;              /* its HELLO says it takes race lobbies (RC_HF_LOBBY) */
+    uint8_t  statex;              /* its HELLO says it reads state extensions (RC_HF_STATEX) */
     uint16_t cfg_rev_seen;         /* what the peer announces */
     int      hears_us, lost;
     int      hears_miss;           /* with the hub: one HELLO without our id forgiven (hub mode only) */
@@ -393,6 +434,15 @@ typedef struct {
     uint8_t   map_asm[RC_MAP_PARTS * RC_MAP_PER * RC_MAP_ENTRY];
     uint32_t  map_gen;  int map_n;  uint16_t map_total;
     struct { int16_t x, y; uint8_t heading; } map_e[RC_MAP_PARTS * RC_MAP_PER];
+    /* LOBBY messages for us (to our id) from established peers, oldest
+     * first, until the game side takes them (rc_take_lobby) */
+    struct { uint32_t from; rc_lobby l; } lobby_in[RC_LOBBY_INBOX];
+    int       n_lobby_in;
+    uint32_t  lobby_dropped;       /* the inbox was full */
+    /* the hub's open lobbies of our room, with the answer to our last map
+     * question (lobbies_gen +1 for each) */
+    uint32_t  lobbies_gen;  int lobbies_n;  uint16_t lobbies_req;   /* (the question they answered) */
+    struct { int16_t x, y; uint32_t race; uint8_t n, max, state; } lobbies_e[RC_LOBBIES_MAX];
 } rc_session;
 
 void rc_session_init(rc_session *s, const rc_config *cfg, const rc_io *io);
@@ -419,6 +469,11 @@ int  rc_take_duel(rc_session *s, uint32_t *from, uint8_t *op, uint8_t *arg, uint
 /* asks the hub (while it answers) for the world map's other players; 1 when
  * asked.  The answer is in map_e[0 .. map_n) once map_gen changes */
 int  rc_ask_map(rc_session *s, int64_t now_us);
+/* a LOBBY message to the established peer with id l->to, if its HELLO said
+ * it takes them, or (to 0) to the hub while it answers; 1 when sent */
+int  rc_send_lobby(rc_session *s, const rc_lobby *l);
+/* the oldest LOBBY message for us not taken yet; 1 when there was one */
+int  rc_take_lobby(rc_session *s, uint32_t *from, rc_lobby *l);
 const char *rc_status_name(int st);
 
 #endif

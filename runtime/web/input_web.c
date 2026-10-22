@@ -376,7 +376,19 @@ static void lifecycle_poll(void){
 }
 
 /* ---- the input thread --------------------------------------------------------- */
+/* a multiplayer race's trip drives the game by itself (mprace.c): the
+ * player's keys, mouse and pad are not passed on meanwhile (releases and
+ * focus still are: nothing stays held) */
+int mprace_owns_input(void);
+static int g_muted;
 static void handle(const InEv *e){
+    int mute = mprace_owns_input();
+    if (mute != g_muted){
+        g_muted = mute;
+        if (mute) release_all("a multiplayer race's trip drives the game", 1);
+        fprintf(stderr, "[key] the player's input %s\n", mute ? "muted: the game drives itself to the multiplayer race" : "back");
+    }
+    if (mute && (e->type == IEV_KEY_DOWN || e->type == IEV_KEY_TAP || e->type == IEV_MOUSE_MOVE || e->type == IEV_MOUSE_DOWN || e->type == IEV_WHEEL)) return;
     switch (e->type){
     case IEV_KEY_DOWN: key_down(e); break;
     case IEV_KEY_UP:   key_up(e); break;
@@ -893,6 +905,7 @@ int gamepad_read(PadState *s){
     if (syn) *s = g_syn;                         /* the script's pad wins while connected */
     pthread_mutex_unlock(&g_pad_mx);
     if (!syn) read_real(s);
+    if (!syn && mprace_owns_input()){ int con = s->connected; memset(s, 0, sizeof *s); s->connected = con; }   /* (handle above) */
     stick_dz(&s->axis[PAD_AXIS_LX], &s->axis[PAD_AXIS_LY], dz);
     stick_dz(&s->axis[PAD_AXIS_RX], &s->axis[PAD_AXIS_RY], dz);
     s->axis[PAD_AXIS_LT] = trig_dz(s->axis[PAD_AXIS_LT], tdz);

@@ -266,6 +266,7 @@ static void notice(const char *name, const char *what){
     if (n > (int)sizeof t - 1) n = (int)sizeof t - 1;
     if (MB && n > 0) tx_push(NET_KIND_NOTICE, 0, 0, (const uint8_t *)t, n);
 }
+void roam_plat_notice(const char *name, const char *what){ notice(name, what); }
 static uint8_t place(const rc_peer *p){ return p->status == RC_ST_PAUSED ? RC_ST_ROAM : p->status; }
 /* we are in free roam and the friend's car was within NEAR_M of ours (on the
  * ground) when last seen: SNAPs come only from free roam, so its newest state

@@ -89,10 +89,10 @@ fn the_wire_what_roam_core_sends_the_hub_reads_and_its_peers_lists_decode_in_roa
     let (h, s, b) = (unhex(&run(&["hello"])), unhex(&run(&["snap"])), unhex(&run(&["bye"])));
     assert_eq!(
         decode_roam(&h),
-        Some(RoamMsg::Hello { sender: 0x1234ABCD, core: 4, status: 2, room: fnv1a("blue"), name: "Ann K.".into() })
+        Some(RoamMsg::Hello { sender: 0x1234ABCD, core: 5, status: 2, room: fnv1a("blue"), name: "Ann K.".into() })
     );
     assert_eq!(
-        hello_with(0x1234ABCD, &HelloOpts { room: fnv1a("blue"), name: b"Ann K.", seen: &[0x11, 0x22], core: 4, ..Default::default() }),
+        hello_with(0x1234ABCD, &HelloOpts { room: fnv1a("blue"), name: b"Ann K.", seen: &[0x11, 0x22], core: 5, ..Default::default() }),
         h,
         "this test's HELLO = the C core's, byte for byte"
     );

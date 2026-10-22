@@ -232,6 +232,32 @@ Good to know:
   1,000 feet (300 m) ahead of the other wins, and the bank pays or charges as in an outrun against a tuner. Leaving it
   (back to the menus, quitting, losing the connection) loses it. The other players' cars stay, and they see the two
   drive. Players on the Windows plugin are not offered outruns.
+- **Races with other players:** a race of your career can be raced with the players around you, as the game's own LAN
+  race on its track, in your career car.
+  - **An open race** (its marker in the street): its card asks Accept or Decline as always, and Accept asks once more:
+    **Solo** (the career race, as before) or **Multiplayer**.
+  - **A race that is not open** in your career has no marker of the game's. Within about 150 m its start shows
+    "Circuit (multiplayer)" or the like, and there the top of the screen says why it is not open (you won it, your
+    sponsor's contract has no place for it, a URL race before its wins, an SUV race without an SUV, not open yet) and
+    that Enter races it with others. A spot offers the race of your stage there, else the last one you won there:
+    never one of a stage you have not reached. None in the prologue, none while a story task runs.
+  - **Multiplayer opens a lobby** at the start. The players near see "Thom's circuit (1/6)" over it (from about
+    400 m) and a message ("Thom is starting a multiplayer circuit nearby"); everyone in free roam sees its race's icon
+    on the world map (M), with the same words beside it ("Multiplayer circuit (1/6)" from far away). They join at the start: Enter (at an open race: its card's Accept, then **Join**). Up to 6 players; drag 4, 3 on the
+    three-lane track. Drive more than 40 m from the start to leave a lobby; the host leaving calls it off. A lobby is
+    within your Room, as everything in free roam.
+  - **The host presses Enter** to start once another player is in. After a 5-second countdown every game in the lobby
+    goes to the race by itself: out of free roam, the LAN menus (your keys and controller do nothing meanwhile), the
+    race on the career race's track, direction and laps (a URL event: its first race; a LAN race takes at least 2
+    laps, drift and Street X 4), with no traffic and no AI racers. You drive the race. After the results every game
+    goes back by itself, through the main menu and your crib, to where it left free roam: about a minute and a half
+    for the way out and back.
+  - **Your career is not touched:** the race does not count in it, is neither won nor lost there and opens nothing.
+    Only your bank changes: 1st $400, 2nd $300, 3rd $200, 4th $100, nothing for 5th, 6th or a race you left. It goes in
+    at the crib on the way back, and the crib saves it with your profile (with the game's Save on Prompt it asks
+    first, as it does for any change).
+  - A race that cannot come together (the host's game gone, nobody else in the game in time) ends the trip: every game
+    goes back to free roam by itself and says why. Players on an older version or the Windows plugin see no lobbies.
 - **Rooms:** set the same "Room" to see only some of the players' cars. A room is a filter between players, not
   privacy: every browser on the server still sees your name ("Your name", or the profile name), whether you are in
   the menus or driving, and the room, and someone with their own tools could join it. Play on a server only with
@@ -242,8 +268,8 @@ Good to know:
   real address: the server gives each player a virtual one (`10.77.x.x`).
 - **A tab in the background** (or another window in front) pauses your game. The others see you as paused: your car stays where you stopped, with "paused" after your name, until you come back.
 - **Closing the tab:** the others see your car disappear after a few seconds.
-- **Messages over the game** say when a player joins free roam, goes into a race, is back in free roam after it, or
-  leaves. The menus and the shops are not announced.
+- **Messages over the game** say when a player joins free roam, goes into a race, is back in free roam after it,
+  starts a multiplayer race nearby, or leaves. The menus and the shops are not announced.
 - **The game's own LAN races** (its LAN menu) work between players on the same server too, with free roam on or off.
 
 ## 7. The game's Online mode
@@ -285,7 +311,7 @@ Good to know:
 - **Every track is open** when you create a game, either direction, whatever your career has unlocked, and a new
   game starts at **2 laps** (the game's own default was 3; Options, Laps changes it). The same goes for the game's
   LAN races. The career and Quick Race keep their unlocks.
-- **Up to 6 players** race in one game (Options, Max Players; the game's own most was 4, and 6 only in Street X).
+- **Up to 6 players** race in one game (Options, Max Players; the game's own most was 4, and 6 only in URL races).
   Drag keeps one car per lane: 4, or 3 on the track with three lanes.
 - **Horn:** N (or the controller's left stick click) honks in a race too, as in free roam: the others hear it from your
   car. The same in the game's LAN races.
