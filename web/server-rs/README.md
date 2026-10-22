@@ -164,8 +164,11 @@ Online host together as the server wires them, fuzzes the binary, and runs it on
 The same bytes on the wire and on disk as before: pages already open, the game and the state folders of running
 servers depend on them (`nfsu2_util::json` for what JSON.stringify wrote, `nfsu2_util::js` for JS's text and number
 semantics, Unicode tables held at Node's ICU version, Unicode 16).  Nothing a client sends may panic or hold
-resources past their end, and nothing is shared by every frame (no lock or atomic all frames touch, no allocation a
-`Bytes` slice spares).  Judge a change by server-compare's crowd and mix at 2000 players.
+resources past their end, nothing it sends may cost the server work its budgets did not pay for (a broadcast walks
+the peers only once paid for), and nothing is shared by every frame (no lock or atomic all frames touch, no
+allocation a `Bytes` slice spares, but for the one copy of a frame that waits in a queue: a slice of what a reader
+read keeps its whole block, nfsu2-lan's crate doc).  Judge a change by server-compare's crowd and mix at 2000
+players.
 
 ## Where it differs from the Node server
 

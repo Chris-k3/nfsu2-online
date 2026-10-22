@@ -122,7 +122,11 @@
 //!   (behind theirs: shared only by that client's connections), then the receivers.  No lock is shared by all.
 //! - Who is on the switch changes under one lock (`members`: admit, leave, reservations, the peer-list changes,
 //!   the store); routing never takes it.  A frame finds its receiver in a fixed table of the 4000 addresses (an
-//!   `ArcSwapOption<Peer>` per address: one atomic load), a broadcast walks a copy-on-write list of every peer.
+//!   `ArcSwapOption<Peer>` per address: one atomic load), a broadcast walks a copy-on-write list of every peer (LAN
+//!   play's, of every peer with LAN play open).  What a broadcast costs its sender is its list's length, known
+//!   without a look at the peers, and they are walked only for a broadcast paid for (the second security audit,
+//!   2026-10-22: counting the peers each one reached before the budgets made one message of 255 broadcasts walk the
+//!   4000 peers 255 times, paid or not, and a few clients kept every core busy that way).
 //! - Each receiver has its own queue (`OutQueue`: a short lock, a byte count the senders read for the queue
 //!   rules, a wake-up for its writer).  Its writer takes everything queued at once and puts it into one write:
 //!   under load many frames leave in one system call.  For a page that takes bundles the writer makes them from the
@@ -148,7 +152,11 @@
 //!
 //! A frame is never written to in place: a datagram is copied once, by its receiver's writer, into the bytes that
 //! go out, with its source (the sender's address) and its destination written there.  So a bundle's frame goes to
-//! its 32 receivers as 32 references to the bytes the sender's reader read, and no receiver needs a copy of its own.
+//! its 32 receivers as 32 references to one copy of it, and no receiver needs a copy of its own.  That one copy is
+//! the router's, of the frame alone: the bytes the sender's reader read are a block of 16 to 64 KB (nfsu2-ws), and a
+//! frame of a few bytes waiting in a queue kept all of it (the second security audit: a client sending such frames
+//! to a connection of its own that never read, a large message between each two, held about a thousand times what
+//! the queues' limits count).
 //!
 //! # The ws library's behaviour kept
 //!
@@ -256,7 +264,8 @@ pub struct LanOptions {
     /// `stall_ms` while segments waited) is disconnected; otherwise the senders outrun it and the client with the
     /// most queued there is disconnected, all of its connections (the review of the audit's F2: streams from 9
     /// addresses got a reading victim cut, and a receiver that stopped reading got its sender cut).  A LAN race's
-    /// host sends about 11 KB of stream data a race.
+    /// host sends about 11 KB of stream data a race.  Each segment counts with what it costs the switch besides its
+    /// bytes (route.rs `SEGMENT_COST`).
     pub stream_queue: usize,
     /// (see `stream_queue`)
     pub stream_share: usize,
@@ -627,6 +636,8 @@ pub struct LanSwitch {
     table: Box<[ArcSwapOption<Peer>]>,
     /// every peer, in the order of `Members::peers` (broadcasts, the timers, info)
     all: ArcSwap<Vec<Arc<Peer>>>,
+    /// every peer whose LAN play is not off (`Members::lan`): LAN play's broadcasts
+    lan_all: ArcSwap<Vec<Arc<Peer>>>,
     members: Mutex<members::Members>,
     /// LAN play's stream segments queued at their receivers (rare traffic: one lock for all of them)
     streams: Mutex<route::Streams>,
@@ -693,6 +704,7 @@ impl LanSwitch {
             store,
             table: (0..ADDRS).map(|_| ArcSwapOption::empty()).collect(),
             all: ArcSwap::from_pointee(Vec::new()),
+            lan_all: ArcSwap::from_pointee(Vec::new()),
             members: Mutex::new(m),
             streams: Mutex::new(route::Streams::default()),
             groups: Mutex::new(HashMap::new()),

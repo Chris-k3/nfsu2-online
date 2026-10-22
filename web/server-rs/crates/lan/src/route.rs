@@ -10,10 +10,20 @@ use std::sync::atomic::{
 
 use bytes::{BufMut, Bytes, BytesMut};
 use nfsu2_util::{FrameCtx, mono_ms};
-use smallvec::SmallVec;
 
 use crate::conn::{Conn, Out};
 use crate::{BROADCAST, Cause, Cut, KIND_LAN_ICMP, KIND_LAN_UDP, KIND_STREAM, KIND_UDP, LanSwitch, Peer, STREAM_LOW, slot};
+
+/// What a stream segment waiting at the switch costs it besides its bytes (its entry here, its copy's allocation),
+/// counted with them against `stream_share` and `stream_queue`, so that those bound the memory for segments of a few
+/// bytes too (the second security audit: 12-byte segments, 87,000 of them under one client's share).  A LAN race's
+/// segments are far larger and far fewer.
+const SEGMENT_COST: usize = 128;
+
+/// what a stream segment counts for in the switch's queue
+fn cost(data: &Bytes) -> usize {
+    data.len() + SEGMENT_COST
+}
 
 /// The stream segments (kind 4) waiting at each receiver (by connection), behind the switch's one lock for them.
 #[derive(Default)]
@@ -33,7 +43,8 @@ impl Streams {
 #[derive(Default)]
 struct StreamQueue {
     sq: VecDeque<Segment>,
-    /// bytes queued by sending client, in the order they first queued (the first of equals is cut)
+    /// bytes queued by sending client (each segment's `cost`), in the order they first queued (the first of equals
+    /// is cut)
     queued: Vec<Queued>,
     total: usize,
     /// since when the queue is not empty, and when a segment last went out
@@ -66,7 +77,7 @@ impl LanSwitch {
     /// browsers each reaches, the free-roam hub or the Online host, within peer's budgets.  False: over them (what
     /// follows in a bundle goes too).
     ///
-    /// Each destination costs k frames of n bytes (k the players a broadcast reaches, 1 for any other), and the first
+    /// Each destination costs k frames of n bytes (k the others on a broadcast's list, 1 for any other), and the first
     /// one the buckets cannot pay for ends it.  The buckets are locked once for all of them (32 friends were 32 times
     /// three locks and a clock read): the destinations go up to the first whose running total one of the buckets
     /// cannot pay for, which is where checking them one destination after the other stops.
@@ -74,25 +85,31 @@ impl LanSwitch {
         let n = data.len();
         let lan_only = (KIND_LAN_UDP..=KIND_LAN_ICMP).contains(&data[0]);
         let reaches = |p: &Arc<Peer>| !Arc::ptr_eq(p, peer) && p.open() && (!lan_only || p.lan() != Some(false));
-        // what the switch sends for each: a broadcast costs its size for every player it reaches, so the switch never
-        // sends more for a client than its budgets allow (the audit's F2: one 4 MB/s sender made it send 15 x that)
-        let all = dsts.clone().any(|d| d == BROADCAST).then(|| self.all.load());
-        let reached: SmallVec<[usize; 2]> = match &all {
-            Some(all) => dsts.clone().filter(|&d| d == BROADCAST).map(|_| all.iter().filter(|p| reaches(p)).count()).collect(),
-            None => SmallVec::new(),
-        };
-        let mut reached_each = reached.iter();
-        let costs = dsts.clone().map(|d| if d == BROADCAST { reached_each.next().map_or(1, |&c| c.max(1)) } else { 1 });
+        // what the switch sends for each: a broadcast costs its size for every player on its list but the sender (all
+        // of them, or for LAN play's kinds those with LAN play open), so the switch never sends more for a client
+        // than its budgets allow (the audit's F2: one 4 MB/s sender made it send 15 x that), and never walks the
+        // list for a broadcast that was not paid for (the crate doc's How the work is shared out)
+        let list = dsts.clone().any(|d| d == BROADCAST).then(|| if lan_only { self.lan_all.load() } else { self.all.load() });
+        let on_list = !lan_only || peer.lan() != Some(false);
+        let reached = list.as_ref().map_or(0, |l| l.len().saturating_sub(usize::from(on_list)));
+        let costs = dsts.clone().map(|d| if d == BROADCAST { reached.max(1) } else { 1 });
         let (paid, all_paid) = self.charge(peer, mono_ms(), n as f64, costs);
         if paid > 0 {
             self.stats.frames.add(paid as u64);
             self.stats.bytes.add((n * paid) as u64);
             peer.frames_in.fetch_add(paid as u64, Relaxed);
         }
-        let mut reached_each = reached.iter();
+        // the frame's own copy for the browsers' queues, not the sender's read block (the crate doc's one copy)
+        let own_copy;
+        let data = if dsts.clone().take(paid).any(|d| Some(d) != self.roam_vip && Some(d) != self.online_vip) {
+            own_copy = Bytes::copy_from_slice(data);
+            &own_copy
+        } else {
+            data
+        };
         for dst in dsts.take(paid) {
-            let count = if dst == BROADCAST { reached_each.next().copied().unwrap_or(0) } else { 0 };
-            self.route_one(peer, data, dst, all.as_deref().map(|a| &a[..]), count, &reaches);
+            let count = if dst == BROADCAST { reached } else { 0 };
+            self.route_one(peer, data, dst, list.as_deref().map(|a| &a[..]), count, &reaches);
         }
         if !all_paid {
             self.stats.limited.inc();
@@ -247,7 +264,7 @@ impl LanSwitch {
     /// connections)
     fn send_stream(&self, from: &Arc<Peer>, p: &Arc<Peer>, data: &Bytes, dst: u32) -> bool {
         let g = &from.group.id;
-        let len = data.len();
+        let len = cost(data);
         let now = mono_ms();
         let mut guard = self.streams.lock();
         // a receiver that left after deliver_now looked: its close logic let go of its queue here (under this lock,
@@ -347,7 +364,7 @@ impl LanSwitch {
         }
         while !s.sq.is_empty() && conn.out.buffered_synced() <= STREAM_LOW {
             let x = s.sq.pop_front().expect("not empty");
-            let len = x.data.len();
+            let len = cost(&x.data);
             if let Some(i) = s.queued.iter().position(|q| q.era == x.era && q.group == x.group) {
                 s.queued[i].n -= len.min(s.queued[i].n);
                 if s.queued[i].n == 0 {
@@ -446,6 +463,87 @@ pub(crate) mod tests {
             if all { whole += 1 } else { cut_short += 1 }
         }
         assert!(cut_short > 1000 && whole > 1000, "both cases came up ({cut_short} cut short, {whole} whole)");
+        sw.stop();
+    }
+
+    /// The second security audit: a bundle entry of 255 broadcasts, refused by the budgets, walked every peer 255
+    /// times before the refusal (2000 such messages here: 2 billion looks at a peer, seconds; without a walk, well
+    /// under a millisecond).
+    #[tokio::test]
+    async fn a_broadcast_refused_walks_no_peer() {
+        let sw = LanSwitch::new(LanOptions { max_peers: 4000, ..LanOptions::default() }, "", None, None, None, None);
+        let peers: Vec<_> = (0..4000).map(|i| peer(&sw, &format!("g{i}"))).collect();
+        let p = &peers[0].2;
+        for b in [&mut *p.buckets.lock(), &mut *p.group.buckets.lock()] {
+            b.frames.v = 0.0;
+            b.frames.t = 1e15;
+        }
+        let f = frame(KIND_UDP, BROADCAST);
+        let t = std::time::Instant::now();
+        for _ in 0..2000 {
+            assert!(!sw.route(p, &f, std::iter::repeat_n(BROADCAST, 255)));
+        }
+        let ms = t.elapsed().as_secs_f64() * 1000.0;
+        assert!(ms < 500.0, "2000 refused messages of 255 broadcasts at 4000 players took {ms:.0} ms");
+        assert!(peers.iter().all(|(c, ..)| c.out.q.lock().len() <= 1), "nothing sent (a welcome at most)");
+        sw.stop();
+    }
+
+    /// LAN play's broadcasts go to the list of those with LAN play open: a page that said nothing (a page of before,
+    /// or no hello yet) is on it, one that shut LAN play is not, and one that left or was replaced is gone from it
+    #[tokio::test]
+    async fn the_list_of_lan_play_follows_hellos_lan_messages_and_closes() {
+        let sw = LanSwitch::new(LanOptions::default(), "", None, None, None, None);
+        let (_ac, _actx, a) = peer(&sw, "a");
+        let (bc, bctx, b) = peer(&sw, "b");
+        let on = |sw: &LanSwitch| {
+            let mut v: Vec<u32> = sw.lan_all.load().iter().map(|p| p.vip).collect();
+            v.sort();
+            v
+        };
+        assert_eq!(on(&sw), [a.vip, b.vip], "no hello yet: every broadcast");
+        let hello = |lan: u8| match crate::text::parse_json(format!(r#"{{"t":"hello","name":"x","lan":{lan}}}"#).as_bytes()) {
+            Some(serde_json::Value::Object(m)) => m,
+            _ => unreachable!(),
+        };
+        sw.hello(&a, &hello(0));
+        assert_eq!(on(&sw), [b.vip]);
+        sw.set_lan(&a, true);
+        sw.set_lan(&b, false);
+        assert_eq!(on(&sw), [a.vip]);
+        // a LAN broadcast from a reaches nobody: b's LAN play is shut
+        assert!(sw.route(&a, &frame(KIND_LAN_UDP, BROADCAST), std::iter::once(BROADCAST)));
+        assert!(b.conn.out.q.lock().iter().all(|o| !matches!(o, Out::Frame { .. })));
+        sw.set_lan(&b, true);
+        assert!(sw.route(&a, &frame(KIND_LAN_UDP, BROADCAST), std::iter::once(BROADCAST)));
+        assert_eq!(b.conn.out.q.lock().iter().filter(|o| matches!(o, Out::Frame { .. })).count(), 1);
+        bc.terminate();
+        sw.closed(&bc, &bctx);
+        assert_eq!(on(&sw), [a.vip], "gone with its connection");
+        sw.stop();
+    }
+
+    /// A frame waiting in a receiver's queue has bytes of its own: not the block the sender's reader read it into,
+    /// which a frame of a few bytes kept whole (the second security audit)
+    #[tokio::test]
+    async fn a_queued_frame_holds_its_own_bytes_not_the_senders_block() {
+        let sw = LanSwitch::new(LanOptions::default(), "", None, None, None, None);
+        let (_ac, _actx, a) = peer(&sw, "a");
+        let (_bc, _bctx, b) = peer(&sw, "b");
+        for kind in [KIND_UDP, KIND_LAN_UDP, KIND_STREAM] {
+            let mut block = vec![0u8; 64 << 10];
+            block[100..140].copy_from_slice(&frame(kind, b.vip));
+            let block = Bytes::from(block);
+            assert!(sw.route(&a, &block.slice(100..140), std::iter::once(b.vip)));
+            let q = b.conn.out.q.lock();
+            let Some(Out::Frame { data, .. }) = q.iter().rev().find(|o| matches!(o, Out::Frame { .. })) else {
+                panic!("kind {kind}: queued")
+            };
+            let at = data.as_ptr() as usize;
+            let range = block.as_ptr() as usize..block.as_ptr() as usize + block.len();
+            assert!(!range.contains(&at), "kind {kind}: the queued frame is a slice of the sender's block");
+            assert_eq!(&data[..], &block[100..140]);
+        }
         sw.stop();
     }
 

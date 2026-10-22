@@ -27,6 +27,8 @@ pub(crate) struct Reservation {
 pub(crate) struct Members {
     /// in the order they came (a replaced holder keeps its place): the peer lists, info and the store show it
     pub(crate) peers: IndexMap<u32, Arc<Peer>>,
+    /// the ones of `peers` whose LAN play is not off (in no order: LAN play's broadcasts, `LanSwitch::lan_all`)
+    lan: IndexMap<u32, Arc<Peer>>,
     pub(crate) reserved: IndexMap<u32, Reservation>,
     next: usize,
     /// the peer list: addresses that joined, got their name or left since the last change went out, and the ones
@@ -46,6 +48,7 @@ impl Members {
     pub(crate) fn new() -> Self {
         Members {
             peers: IndexMap::new(),
+            lan: IndexMap::new(),
             reserved: IndexMap::new(),
             next: 0,
             changed: IndexSet::new(),
@@ -165,6 +168,11 @@ impl LanSwitch {
             greet(&peer, h);
         }
         m.peers.insert(vip, peer.clone());
+        // (a replaced holder's place on it goes with it)
+        m.lan.swap_remove(&vip);
+        if peer.lan() != Some(false) {
+            m.lan.insert(vip, peer.clone());
+        }
         *conn.peer.lock() = Some(peer.clone());
         // the welcome (and a resume's whole list, which has the newcomer on it) are queued before the other players'
         // readers can find the newcomer: nothing they route to it comes first (Node sent both before it went back to
@@ -212,6 +220,7 @@ impl LanSwitch {
             return;
         }
         m.peers.shift_remove(&vip);
+        m.lan.swap_remove(&vip);
         if let Some(i) = slot(vip) {
             self.table[i].store(None);
         }
@@ -243,9 +252,39 @@ impl LanSwitch {
         }
     }
 
-    /// the copy-on-write list of every peer, after a change (in the order of `peers`)
+    /// the copy-on-write lists of every peer (in the order of `peers`) and of those with LAN play open, after a change
     fn publish(&self, m: &Members) {
         self.all.store(Arc::new(m.peers.values().cloned().collect()));
+        self.publish_lan(m);
+    }
+
+    fn publish_lan(&self, m: &Members) {
+        self.lan_all.store(Arc::new(m.lan.values().cloned().collect()));
+    }
+
+    /// peer's LAN play, from its hello or its {"t":"lan"} (only its own reader sets it, as its connection's close
+    /// logic runs after that reader ended): on the list of those with LAN play open or not, while it holds its address
+    pub(crate) fn set_lan(&self, peer: &Arc<Peer>, on: bool) {
+        let mut m = self.members.lock();
+        peer.lan.store(if on { LAN_ON } else { LAN_OFF }, Relaxed);
+        self.lan_changed(&mut m, peer);
+    }
+
+    fn lan_changed(&self, m: &mut Members, peer: &Arc<Peer>) {
+        let vip = peer.vip;
+        if !m.peers.get(&vip).is_some_and(|p| Arc::ptr_eq(p, peer)) {
+            return;
+        }
+        let want = peer.lan() != Some(false);
+        if want == m.lan.contains_key(&vip) {
+            return;
+        }
+        if want {
+            m.lan.insert(vip, peer.clone());
+        } else {
+            m.lan.swap_remove(&vip);
+        }
+        self.publish_lan(m);
     }
 
     /// vip is kept for its token for `reserve_ms`; past its client's (and site's) share of reservations
@@ -396,6 +435,7 @@ impl LanSwitch {
         }
         let was = peer.name().to_string();
         greet(peer, msg);
+        self.lan_changed(&mut m, peer);
         let list = self.peer_list(&m);
         self.send(peer, Out::Text(list));
         if peer.name() != was {
