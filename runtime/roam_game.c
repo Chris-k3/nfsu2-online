@@ -3466,8 +3466,8 @@ static void mp_ui_frame(CPU *c, int64_t host, int in_roam, int press, const MpSp
  * open races.  The nearest TAG_MPN on the screen get one, as the names over
  * friends' cars (tags_update), after the HUD's update. */
 #if MPRACES
-#define MP_SEE_LOBBY_M  400.f
-#define MP_SEE_ONLY_M   150.f
+#define MP_SEE_LOBBY_M  250.f
+#define MP_SEE_ONLY_M   50.f
 #define MP_RGB_LOBBY    0xffc832u
 #define MP_RGB_ONLY     0xa0d2ffu
 /* the height of a race's start (its trigger's marker +0x14), else the player's car's */
