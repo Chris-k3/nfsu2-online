@@ -94,13 +94,15 @@ pub fn sha256_source(text: &str) -> String {
 }
 
 /// The Permissions-Policy.  Only what the game uses: game controllers, full screen, the keyboard layout
-/// (key names in the settings; Keyboard Lock itself has no policy and needs full screen), and sound without a
-/// click first.  The rest is switched off for this page and anything it could embed.
+/// (key names in the settings; Keyboard Lock itself has no policy and needs full screen), sound without a
+/// click first, and the screen kept on while a game runs (a controller's buttons do not keep every system's
+/// screen awake).  The rest is switched off for this page and anything it could embed.
 pub const PERMISSIONS_POLICY: &str = concat!(
     "gamepad=(self), fullscreen=(self), keyboard-map=(self), autoplay=(self), cross-origin-isolated=(self), ",
+    "screen-wake-lock=(self), ",
     "accelerometer=(), bluetooth=(), browsing-topics=(), camera=(), clipboard-read=(), display-capture=(), ",
     "encrypted-media=(), geolocation=(), gyroscope=(), hid=(), idle-detection=(), local-fonts=(), ",
-    "magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-get=(), screen-wake-lock=(), ",
+    "magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-get=(), ",
     "serial=(), usb=(), window-management=(), xr-spatial-tracking=()",
 );
 

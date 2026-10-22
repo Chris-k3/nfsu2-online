@@ -4,6 +4,7 @@
 // shapes.  See web/src/host/abi.ts for the shared-memory side (nfsu2_register
 // kinds).
 import type { GameProcess } from '../host/process';
+import type { PadPage } from '../input/gamepad';
 
 /** Given to every subsystem. */
 export interface CommonOptions {
@@ -40,6 +41,8 @@ export interface InputOptions extends CommonOptions {
   viewRect?: () => { x: number; y: number; w: number; h: number };
   /** what Cmd-F does on a Mac: the shell's full screen (stage + Keyboard Lock) */
   toggleFullscreen?: () => void;
+  /** the shell's own use of the controller: its menu (Home) and dialogs */
+  padPage?: PadPage;
 }
 
 export interface NetOptions extends CommonOptions {

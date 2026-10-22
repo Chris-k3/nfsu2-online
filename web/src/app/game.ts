@@ -12,6 +12,7 @@ import {
 import { StatusReader } from './status';
 import { DATA_BASE, MANIFEST_URL } from '../host/datacache';
 import type { GameInfo } from './loader';
+import type { PadPage } from '../input/gamepad';
 
 export interface SessionOptions {
   module: WebAssembly.Module;
@@ -33,6 +34,8 @@ export interface SessionOptions {
   /** tests: where frame dumps go, and their scale */
   artifacts?: string; dumpScale?: number;
   toggleFullscreen(): void;
+  /** the page's own use of the controller: its menu (Home) and dialogs */
+  padPage?: PadPage;
   log(line: string): void;
   /** a subsystem the game cannot do without (the renderer) failed to attach */
   onFatal(what: string): void;
@@ -94,7 +97,7 @@ export class GameSession {
       if (!a) void o.audio?.close().catch(() => {});
     });
     void attach('input', () => attachInput(s.proc, o.canvas, {
-      ...common, stage: o.stage, toggleFullscreen: o.toggleFullscreen, viewRect: () => s.viewRect(),
+      ...common, stage: o.stage, toggleFullscreen: o.toggleFullscreen, padPage: o.padPage, viewRect: () => s.viewRect(),
     })).then(i => { s.input = i; });
     if (o.netName !== null)
       void attach('network', () => attachNet(s.proc, { ...common, name: o.netName!, notice: o.notice, back: o.netBack })).then(n => { s.net = n; });

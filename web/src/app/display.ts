@@ -1,7 +1,8 @@
 // The display side of the shell: the refresh rate (for NFSU2_DISPLAY_HZ, so
 // "fps = auto" can follow a 120 Hz screen), the canvas kept at the
 // device-pixel size of its box, and full screen with Keyboard Lock (so
-// Escape, the game's Back/Pause, reaches the game; hold Escape to leave).
+// Escape, the game's Back/Pause, reaches the game; hold Escape to leave),
+// landscape on phones and tablets, and the screen kept on while a game runs.
 
 const COMMON_HZ = [48, 50, 60, 72, 75, 90, 100, 120, 144, 165, 180, 240, 360];
 
@@ -65,6 +66,45 @@ export async function lockKeys(): Promise<boolean> {
   const kb = (navigator as any).keyboard as { lock?: (codes?: string[]) => Promise<void> } | undefined;
   if (!kb?.lock || !document.fullscreenElement) return false;
   try { await kb.lock(); return true; } catch { return false; }
+}
+
+/** The screen turned to landscape and held there (a phone or tablet in full screen: Android's browsers allow the lock
+ *  only then, and lift it when full screen ends).  Resolves once it turned, false where the browser refuses. */
+export async function lockLandscape(): Promise<boolean> {
+  const o = screen.orientation as ScreenOrientation & { lock?(o: string): Promise<void> };
+  if (typeof o?.lock !== 'function') return false;
+  try { await o.lock('landscape'); return true; } catch { return false; }
+}
+
+/**
+ * The screen kept on while a game runs (Screen Wake Lock): the buttons of a controller do not keep every system's
+ * screen awake, so a race with one could dim and lock the screen.  The browser lets the lock go while the page is
+ * hidden; it is taken again when the page shows.  Returns the stop.
+ */
+export function keepScreenOn(log: (s: string) => void): () => void {
+  const wl = (navigator as { wakeLock?: { request(t: 'screen'): Promise<WakeLockSentinel> } }).wakeLock;
+  if (!wl) { log('[app] no Wake Lock in this browser: the screen may turn off while a controller plays'); return () => {}; }
+  let lock: WakeLockSentinel | null = null, asking = false, stopped = false, said = false;
+  const take = () => {
+    if (stopped || asking || lock || document.hidden) return;
+    asking = true;
+    wl.request('screen').then(l => {
+      if (stopped) { void l.release().catch(() => {}); return; }
+      lock = l;
+      l.addEventListener('release', () => { if (lock === l) lock = null; });
+      if (!said) { said = true; log('[app] the screen stays on while the game runs (Wake Lock)'); }
+    }, e => { if (!said) { said = true; log(`[app] Wake Lock refused: ${e}`); } })
+      .finally(() => { asking = false; });
+  };
+  const onVisible = () => { if (!document.hidden) take(); };
+  document.addEventListener('visibilitychange', onVisible);
+  take();
+  return () => {
+    stopped = true;
+    document.removeEventListener('visibilitychange', onVisible);
+    void lock?.release().catch(() => {});
+    lock = null;
+  };
 }
 
 export function exitFullscreen() {

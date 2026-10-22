@@ -637,7 +637,7 @@ export function parseLines(text: string, notes?: string[]): Line[] {
   return out;
 }
 
-export type Source = 'environment' | 'settings.ini' | 'default' | 'host';
+export type Source = 'environment' | 'settings.ini' | 'default' | 'host' | 'device';
 export interface Resolved {
   env: Record<string, string>;
   source: Record<string, Source>;
@@ -656,8 +656,11 @@ export interface Resolved {
  * app_set_defaults + app_setup, in its order.  `environment` is the real
  * environment (the page address); `host` holds the page's own variables
  * (mounts, canvas size, refresh rate), which only the environment overrides.
+ * `device`: settings.ini keys whose default is another on this device
+ * (device.ts: a phone's), below the file and the environment.
  */
-export function resolveEnv(text: string | null, environment: Record<string, string>, host: Record<string, string>): Resolved {
+export function resolveEnv(text: string | null, environment: Record<string, string>, host: Record<string, string>,
+                           device: Record<string, string> = {}): Resolved {
   const env: Record<string, string> = { ...environment };
   const source: Record<string, Source> = {};
   for (const k of Object.keys(env)) source[k] = 'environment';
@@ -694,6 +697,10 @@ export function resolveEnv(text: string | null, environment: Record<string, stri
       if (rec) rec.value = c.value;
       notes.push(`settings.ini:${l.line}: ${l.key} -> ${c.env}=${c.value}`);
     }
+  }
+  for (const [key, v] of Object.entries(device)) {
+    const c = checkSetting(key, v);
+    if (c?.ok && !(c.env in env)) { env[c.env] = c.value; source[c.env] = 'device'; notes.push(`${key} = ${v}: this device's default`); }
   }
   for (const [k, v] of Object.entries(APP_DEFAULTS)) if (!(k in env)) { env[k] = v; source[k] = 'default'; }
   for (const [k, v] of Object.entries(host)) if (!(k in env)) { env[k] = v; source[k] = 'host'; }

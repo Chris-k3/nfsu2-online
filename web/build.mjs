@@ -44,8 +44,10 @@ fs.rmSync(path.join(DIST, 'test'), { recursive: true, force: true });
 for (const f of fs.existsSync(DIST) ? fs.readdirSync(DIST, { recursive: true }) : []) if (String(f).endsWith('.map')) fs.rmSync(path.join(DIST, String(f)));
 fs.mkdirSync(path.join(DEV, 'test'), { recursive: true });
 fs.mkdirSync(DIST, { recursive: true });
-// the start page (its script and stylesheet are main.js / main.css)
+// the start page (its script and stylesheet are main.js / main.css), and its files as they are (src/static: the
+// app's manifest and icons, for installing it on a phone's home screen or as a desktop app)
 fs.copyFileSync('index.html', path.join(DIST, 'index.html'));
+for (const f of fs.readdirSync('src/static')) fs.copyFileSync(path.join('src/static', f), path.join(DIST, f));
 const page = name => `<!doctype html><meta charset=utf-8><title>${name}</title><script type=module src="/test/${name}.js"></script>`;
 for (const name of ['play', 'hostcheck', 'shadercheck', 'aicheck']) fs.writeFileSync(path.join(DEV, 'test', `${name}.html`), page(name));
 // the player's page takes its address's test parameters only from a server that serves this (--dev: shell.ts)

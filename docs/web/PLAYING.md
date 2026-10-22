@@ -48,6 +48,12 @@ server answers. The start page then says **Offline**, and the game runs from the
 it first. The movies are off for such a game unless every one of them is on the PC already. Free roam and Online
 need the server; your saves are in the browser either way.
 
+**Phones and tablets** (Chrome on Android): a tap is a click, so the game's menus work by touch; to drive, connect a
+controller. The ☰ button in the top left corner opens the page menu. On a phone the game goes full screen and turns
+to landscape when you press Play, and renders at 75% resolution scale (Settings, Display changes both). The screen
+stays on while the game runs. Chrome's menu, **Add to Home screen** (or **Install app**), puts the game on the home
+screen as an app that opens full screen in landscape; on a PC the same makes it an app with its own window.
+
 ## 3. Controls
 
 | Key or button | What it does |
@@ -65,16 +71,21 @@ need the server; your saves are in the browser either way.
 | Enter | Choose (menus); in free roam, start an event at its marker or take an outrun |
 | F12 | Screenshot (PNG), kept with your saves and shown in Saves on the start page |
 | **F8** | Frame-rate counter: off, on, detailed |
-| **F9** | The page menu: when the game last saved, full screen, counter, controls, log, **Quit game** |
+| **F9** | The page menu: when the game last saved, full screen, counter, controls, log, **Quit game**; on a controller Home, or both sticks pressed in; on a touch screen the ☰ button |
 | **Hold Esc** | Leave full screen (a short press still goes to the game) |
 
 The start page shows these keys under **Controls**, and F9, Controls shows them while you play.
 
 - **Change the keys:** in the game, Options, Controls. The horn stays on N (the game has no horn of its own).
-- **Mouse:** works in the menus.
+- **Mouse:** works in the menus. **Touch:** a tap is a click there.
 - **Controller:** an Xbox or PlayStation pad works through the browser. The browser shows a pad to the page only
-  after a button is pressed on it. A click of the left stick is the horn, unless your car has hydraulics: then the
-  stick clicks are the game's hydraulics (left: pressurize, right: bounce).
+  after a button is pressed on it. The triggers are throttle and brake, the left stick steers, LB is nitrous, RB the
+  handbrake, A and X shift, Y and B are camera and look back, View respawns, Start pauses; D-pad up starts an event
+  or takes an outrun, left and right are the map and messages. A click of the left stick is the horn, unless your
+  car has hydraulics: then the stick clicks are the game's hydraulics (left: pressurize, right: bounce).
+- **The page menu on a controller:** Home, or both sticks pressed in, opens it (where the browser passes Home on; on
+  Windows the Game Bar may take it). The D-pad or left stick moves in it, A picks, B closes it; meanwhile the game
+  gets no controller input.
 - **Rumble:** a controller that can rumble in Chrome (Xbox, DualSense and others) shakes when you crash, scrape a
   wall or land hard. Settings, Controller, Rumble turns it off. Firefox has no rumble.
 - **Sound** starts with the Play click. If the browser still keeps it off, a note says so, and a click on the game or
@@ -93,7 +104,7 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
 |---|---|
 | Online | its own section under Saves: how many play on this server now, free roam with others, your name (in free roam and online), room, the game's Online mode (on by default); more: solid cars and the free-roam network |
 | Game | language, movies, autosave; more: startup movies (skippable, original or off), sound, pause or keep running in the background, sound output latency |
-| Display | full screen on Play (off: the game plays in the browser window), resolution scale, frame rate (auto follows the screen: 120 on a 120 Hz display, 240 on a 240 Hz one; 60, 120 or 240; Online and LAN races at most 120); more: HUD layout, movie framing, cutscene bars, other cars' headlights (players, all cars, off), frame-rate counter |
+| Display | full screen on Play (off: the game plays in the browser window; on by default on phones), resolution scale (phones start at 75%), frame rate (auto follows the screen: 120 on a 120 Hz display, 240 on a 240 Hz one; 60, 120 or 240; Online and LAN races at most 120); more: HUD layout, movie framing, cutscene bars, other cars' headlights (players, all cars, off), frame-rate counter |
 | Controller | rumble; more: controller on or off, menu buttons, dead zones |
 
 - **Language:** English, French, German, Italian, Spanish, Dutch, Swedish, Danish, Korean, Chinese, Japanese, Russian

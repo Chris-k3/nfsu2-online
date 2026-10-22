@@ -16,6 +16,11 @@
 // vibrationActuator ("dual-rumble") in short overlapping effects, and lets
 // the motors stop once the levels stop coming (a paused or parked game, a
 // hidden page) or fall to zero.
+//
+// The page has a share too (PadPage): Home, or both sticks pressed in, opens
+// its menu, which F9 opens on a keyboard (the game binds neither), and while
+// one of its dialogs is open the controller works the dialog instead of the
+// game.
 import {
   IM_OFF_PAD_NAME, IM_PAD_AXIS, IM_PAD_BUTTONS, IM_PAD_CONNECTED, IM_PAD_FAMILY, IM_PAD_GEN, IM_PAD_RUMBLE, IM_PAD_SEQ,
   IM_RUMBLE_SEQ, IM_RUMBLE_STRONG, IM_RUMBLE_WEAK,
@@ -60,6 +65,22 @@ export function mapStandard(g: Gamepad): PadSnapshot {
   return { connected: true, buttons, axes, family, name, index: g.index };
 }
 
+/** what the page itself does with the controller */
+export interface PadPage {
+  /** Home, or both sticks pressed in: the page's menu (open or close it) */
+  menu(): void;
+  /** whether a dialog of the page is open: it has the controller, the game gets it at rest */
+  dialog(): boolean;
+  /** a button went down while dialog() (a PAD_* number; the left stick's directions come as the D-pad's) */
+  press(button: number): void;
+}
+
+/** the left stick as four directions, PAD_D* bits: on past 0.55, off below 0.40 (runtime/dinput_pad.c's hat) */
+function stickDirs(x: number, y: number, prev: number): number {
+  const on = (bit: number, v: number) => v > 0.55 || (v > 0.40 && (prev & 1 << bit) !== 0) ? 1 << bit : 0;
+  return on(PAD_DUP, -y) | on(PAD_DDOWN, y) | on(PAD_DLEFT, -x) | on(PAD_DRIGHT, x);
+}
+
 export class PadPoller {
   private order: number[] = [];            // controller indices in connection order
   private active = -1;
@@ -75,6 +96,9 @@ export class PadPoller {
   private rumbleSent = 0;
   private rumbleNow: [number, number] = [0, 0];
   private rumblePad: Gamepad | null = null;
+  // the page's share: buttons kept from the game until let go, the left stick's directions
+  private held = 0;
+  private stick = 0;
   // views of the game's memory: dropped by dispose(), so nothing keeps an ended
   // process's (1 GB+) shared memory reachable or writes into its mailbox
   private h: Int32Array | null;
@@ -88,9 +112,11 @@ export class PadPoller {
     this.poll();
   };
 
-  /** onPress: a button went down; onUse: that, or a stick or trigger moved a quarter of its range */
+  /** onPress: a button went down; onUse: that, or a stick or trigger moved a quarter of its range; page: the page's
+   *  menu and dialogs */
   constructor(h: Int32Array, u8: Uint8Array, private base: number,
-              private onPress: () => void, private log: (s: string) => void, private onUse?: () => void) {
+              private onPress: () => void, private log: (s: string) => void, private onUse?: () => void,
+              private page?: PadPage) {
     this.h = h; this.u8 = u8;
     addEventListener('gamepadconnected', this.onConnect);
     addEventListener('gamepaddisconnected', this.onDisconnect);
@@ -127,9 +153,29 @@ export class PadPoller {
     this.pressedBefore = s.buttons;
     if (pressed) this.onPress();
     if (pressed || s.axes.some((v, i) => Math.abs(v - this.usedAxes[i]) > 0.25)) { this.usedAxes = s.axes; this.onUse?.(); }
-    if (this.same(s)) return;
-    this.publish(s, !this.last || this.last.connected !== s.connected || this.last.index !== s.index || this.last.name !== s.name);
-    this.last = s;
+    const out = this.page ? this.forPage(s, pressed) : s;
+    if (this.same(out)) return;
+    this.publish(out, !this.last || this.last.connected !== out.connected || this.last.index !== out.index || this.last.name !== out.name);
+    this.last = out;
+  }
+
+  /** The page's share of the controller: Home, or the second stick pressed in while the other is, opens or closes its
+   *  menu.  While a dialog of the page is open, the buttons and the left stick work it and the game gets the
+   *  controller at rest.  A button held then (or the shortcut's) stays away from the game until it is let go, so the
+   *  A that closed the menu does not press A in the game too. */
+  private forPage(s: PadSnapshot, pressed: number): PadSnapshot {
+    const page = this.page!, sticks = 1 << PAD_LS | 1 << PAD_RS, home = 1 << PAD_HOME;
+    const menu = (pressed & home) !== 0 || ((pressed & sticks) !== 0 && (s.buttons & sticks) === sticks);
+    if (menu) { page.menu(); this.held |= s.buttons & (sticks | home); }
+    const dirs = stickDirs(s.axes[PAD_AXIS_LX], s.axes[PAD_AXIS_LY], this.stick), turned = dirs & ~this.stick;
+    this.stick = dirs;
+    if (!page.dialog()) {
+      this.held &= s.buttons;
+      return this.held ? { ...s, buttons: s.buttons & ~this.held } : s;
+    }
+    this.held = s.buttons;
+    if (!menu) for (let b = 0; b < 16; b++) if ((pressed | turned) & 1 << b) page.press(b);
+    return { ...s, buttons: 0, axes: [0, 0, 0, 0, 0, 0] };
   }
 
   private same(s: PadSnapshot) {

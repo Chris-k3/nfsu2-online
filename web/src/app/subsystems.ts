@@ -36,7 +36,7 @@ export const attachAudio: AttachAudio = async (proc, o) => {
 };
 
 export const attachInput: AttachInput = (proc, element, o) =>
-  inputAttach(proc, element, { log: o.log, viewRect: o.viewRect, toggleFullscreen: o.toggleFullscreen });
+  inputAttach(proc, element, { log: o.log, viewRect: o.viewRect, toggleFullscreen: o.toggleFullscreen, padPage: o.padPage });
 
 export const attachNet: AttachNet = (proc, o) => {
   const link = netAttach(proc, { name: o.name, log: o.log, onNotice: o.notice, onBack: o.back });

@@ -20,6 +20,8 @@
 <meta name="twitter:title" content="Underground 2 Revived">
 <meta name="twitter:description" content="Play Need for Speed: Underground 2 (2004) in Chrome and Firefox with WebGPU graphics, Web Audio, up to 120 fps widescreen, controller support, free roam and Online races with friends. Fan project, not affiliated with Electronic Arts.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23171717'/%3E%3Crect x='5' y='5' width='22' height='22' rx='6' fill='%23404038' stroke='%23c8f088' stroke-width='2'/%3E%3C/svg%3E">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icon-180.png">
 <link rel="stylesheet" href="/main.css">
 <script type="application/ld+json">
 {
@@ -58,7 +60,7 @@
       <p class="status" id="status" role="status">Loading</p>
       <p class="status-sub" id="status-sub">Loading the game.</p>
       <div class="row">
-        <button type="button" class="play" id="play" disabled>Play <kbd>Enter</kbd></button>
+        <button type="button" class="play" id="play" disabled>Play <kbd class="key-only">Enter</kbd></button>
         <button type="button" class="btn" id="retry" hidden>Retry</button>
         <button type="button" class="btn" id="reload" hidden>Reload</button>
         <button type="button" class="text-btn" id="log-btn" hidden>Download log</button>
@@ -72,8 +74,9 @@
     <section class="panel" id="controls" aria-labelledby="controls-title">
       <h2 id="controls-title">Controls</h2>
       <div id="keys">
-        <h3>Driving</h3>
-        <dl class="keys">
+        <p class="hint touch-only">Tap to use the game's menus. To drive, connect a controller, such as an Xbox or PlayStation one.</p>
+        <h3 class="key-only">Driving</h3>
+        <dl class="keys key-only">
           <div><dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>Throttle, brake and reverse</dd></div>
           <div><dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>Steer (or W S A D)</dd></div>
           <div><dt><kbd>Alt</kbd></dt><dd>Nitrous</dd></div>
@@ -87,14 +90,31 @@
           <div><dt><kbd>M</kbd> <kbd>Tab</kbd></dt><dd>Map, messages</dd></div>
           <div><dt><kbd>Esc</kbd> <kbd>P</kbd></dt><dd>Pause</dd></div>
         </dl>
+        <p class="hint key-only">In menus: arrow keys and Enter, Esc goes back. Change keys in the game's Options, Controls.</p>
+        <h3>Controller</h3>
+        <dl class="keys">
+          <div><dt><kbd>RT</kbd> <kbd>LT</kbd></dt><dd>Throttle, brake and reverse</dd></div>
+          <div><dt>Left stick</dt><dd>Steer</dd></div>
+          <div><dt><kbd>LB</kbd></dt><dd>Nitrous</dd></div>
+          <div><dt><kbd>RB</kbd></dt><dd>Handbrake</dd></div>
+          <div><dt><kbd>A</kbd> <kbd>X</kbd></dt><dd>Shift up, shift down (manual)</dd></div>
+          <div><dt><kbd>Y</kbd> <kbd>B</kbd></dt><dd>Change camera, look back</dd></div>
+          <div><dt><kbd>View</kbd></dt><dd>Respawn</dd></div>
+          <div><dt>Left stick click</dt><dd>Horn (with other players)</dd></div>
+          <div><dt>D-pad <kbd>↑</kbd></dt><dd>Start an event, take an outrun</dd></div>
+          <div><dt>D-pad <kbd>←</kbd> <kbd>→</kbd></dt><dd>Map, messages</dd></div>
+          <div><dt><kbd>Start</kbd></dt><dd>Pause</dd></div>
+        </dl>
+        <p class="hint">In menus: D-pad and A, B goes back. On a PlayStation controller A, B, X and Y are Cross, Circle, Square and Triangle, and LB, RB, LT and RT are L1, R1, L2 and R2.</p>
         <h3>This page</h3>
         <dl class="keys">
-          <div><dt><kbd>F9</kbd></dt><dd>Menu: full screen, controls, log, quit</dd></div>
-          <div><dt><kbd>F8</kbd></dt><dd>Frame-rate counter</dd></div>
-          <div><dt><kbd>F12</kbd></dt><dd>Screenshot, shown in Saves</dd></div>
-          <div><dt>Hold <kbd>Esc</kbd></dt><dd>Leave full screen</dd></div>
+          <div class="key-only"><dt><kbd>F9</kbd></dt><dd>Menu: full screen, controls, log, quit</dd></div>
+          <div class="touch-only"><dt><kbd>☰</kbd></dt><dd>Menu: full screen, controls, log, quit</dd></div>
+          <div><dt><kbd>Home</kbd> or both sticks pressed in</dt><dd>The menu, on a controller</dd></div>
+          <div class="key-only"><dt><kbd>F8</kbd></dt><dd>Frame-rate counter</dd></div>
+          <div class="key-only"><dt><kbd>F12</kbd></dt><dd>Screenshot, shown in Saves</dd></div>
+          <div class="key-only"><dt>Hold <kbd>Esc</kbd></dt><dd>Leave full screen</dd></div>
         </dl>
-        <p class="hint">In menus: arrow keys and Enter, Esc goes back. Change keys in the game's Options, Controls. Xbox and PlayStation controllers work too.</p>
       </div>
     </section>
 
@@ -127,10 +147,10 @@
       </div>
       <p class="msg" id="saves-msg" role="status"></p>
       <ul class="profiles" id="profiles" aria-label="Profiles in this browser"></ul>
-      <p class="hint">To save while playing: <kbd>Esc</kbd> &gt; Garage &gt; Save</p>
+      <p class="hint">To save while playing: <span class="key-only"><kbd>Esc</kbd> or </span><kbd>Start</kbd> &gt; Garage &gt; Save</p>
       <div class="panel-head sub">
         <h3>Screenshots</h3>
-        <p class="hint">Screenshot with <kbd>F12</kbd></p>
+        <p class="hint key-only">Screenshot with <kbd>F12</kbd></p>
       </div>
       <p class="hint" id="shots-info" hidden>None yet.</p>
       <ul class="shots" id="shots" aria-label="Screenshots in this browser"></ul>
@@ -209,6 +229,7 @@
 </main>
 
 <div class="stage" id="stage" hidden>
+  <button type="button" class="stage-menu" id="stage-menu" tabindex="-1" aria-label="Menu" data-nfsu2-ui hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h14"/></svg></button>
   <div class="hud-fps" id="fps" hidden></div>
   <div class="toast" id="toast" hidden></div>
   <div class="toast away" id="away" role="status" hidden></div>

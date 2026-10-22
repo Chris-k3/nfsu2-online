@@ -12,7 +12,9 @@
 // Mouse: positions relative to the shown image (the C side maps them into
 //        the game's client area and HUD), buttons with pointer capture, the
 //        wheel in WHEEL_DELTA units.  The OS cursor is hidden over the game.
-// Pads:  polled every frame (gamepad.ts).
+// Touch: one finger is the mouse, so a tap is a left click (the game's menus
+//        take clicks); other fingers are left alone.
+// Pads:  polled every frame (gamepad.ts), with the page's share (padPage).
 // Life:  blur and a hidden page deactivate the game (it parks, as after an
 //        alt-tab on Windows) and release everything held; focus and a visible
 //        page reactivate it; requestQuit() is WM_CLOSE.  Fullscreen locks the
@@ -25,7 +27,7 @@
 import type { GameProcess } from '../host/process';
 import { HostKind } from '../host/abi';
 import { CODES, cp1252, isMeta, keyChars, keyVk } from './keymap';
-import { PadPoller } from './gamepad';
+import { PadPoller, type PadPage } from './gamepad';
 import { SynthDriver } from './synth';
 import {
   IEV_FOCUS, IEV_KEY_DOWN, IEV_KEY_TAP, IEV_KEY_UP, IEV_MOUSE_DOWN, IEV_MOUSE_MOVE, IEV_MOUSE_UP, IEV_QUIT,
@@ -53,6 +55,8 @@ export interface InputOptions {
   toggleFullscreen?: () => void;
   /** keys whose browser default is kept (default F11, F12) */
   passThrough?: string[];
+  /** the page's own use of the controller: its menu and dialogs (gamepad.ts) */
+  padPage?: PadPage;
   log?: (s: string) => void;
 }
 export interface InputStats {
@@ -196,13 +200,15 @@ export function attachInput(proc: GameProcess, element: HTMLElement, opts: Input
     buttons = now;
   }
   function onPointerMove(e: PointerEvent) {
-    if (detached || e.pointerType === 'touch') return;
+    if (detached) return;
+    if (e.pointerType === 'touch') { if (e.pointerId === finger && !fingerUp) push(IEV_MOUSE_MOVE, 0, 0, flagsOf(e), [], ...pos(e)); return; }
     const [x, y] = pos(e);
     push(IEV_MOUSE_MOVE, 0, 0, flagsOf(e), [], x, y);
     if ((e.buttons & 31) !== buttons) syncButtons(e);
   }
   function onPointerDown(e: PointerEvent) {
-    if (detached || e.pointerType === 'touch') return;
+    if (detached) return;
+    if (e.pointerType === 'touch') { onFingerDown(e); return; }
     try { element.setPointerCapture(e.pointerId); } catch { /* a synthetic pointer */ }
     const [x, y] = pos(e);
     push(IEV_MOUSE_MOVE, 0, 0, flagsOf(e), [], x, y);
@@ -211,9 +217,49 @@ export function attachInput(proc: GameProcess, element: HTMLElement, opts: Input
     e.preventDefault();
   }
   function onPointerUp(e: PointerEvent) {
-    if (detached || e.pointerType === 'touch') return;
+    if (detached) return;
+    if (e.pointerType === 'touch') { onFingerUp(e); return; }
     syncButtons(e);                                        // a release is delivered even outside the image
     try { element.releasePointerCapture(e.pointerId); } catch { /* not captured */ }
+  }
+
+  // ---- touch: one finger is the mouse ------------------------------------------------
+  // The game reads its mouse once a frame, so the cursor goes to the finger first
+  // and the button follows TAP_MS later: the menu has its highlight under the
+  // finger before the click picks.  The release comes TAP_MS after the press at
+  // the earliest, so the shortest tap still shows the game a pressed button.
+  const TAP_MS = 50;
+  let finger = -1, fingerUp = false, fingerFlags = 0, pressedAt = 0, fingerTimer = 0;   // pressedAt 0: not pressed yet
+  function onFingerDown(e: PointerEvent) {
+    if (!e.isPrimary) return;
+    if (finger !== -1) fingerDone(true);                   // the last tap's release was still to come
+    finger = e.pointerId; fingerUp = false; fingerFlags = flagsOf(e); pressedAt = 0;
+    push(IEV_MOUSE_MOVE, 0, 0, fingerFlags, [], ...pos(e));
+    fingerTimer = setTimeout(fingerPress, TAP_MS) as unknown as number;
+    if (document.activeElement !== element && element.tabIndex >= 0) element.focus({ preventScroll: true });
+    e.preventDefault();
+  }
+  function fingerPress() {
+    if (detached || finger === -1) return;
+    push(IEV_MOUSE_DOWN, 0, 0, fingerFlags, [], 0);
+    buttons |= 1; pressedAt = performance.now();
+    if (fingerUp) fingerTimer = setTimeout(fingerDone, TAP_MS) as unknown as number;
+  }
+  function onFingerUp(e: PointerEvent) {
+    if (e.pointerId !== finger || fingerUp) return;
+    fingerUp = true;
+    if (!pressedAt) return;                                // fingerPress releases it
+    const wait = pressedAt + TAP_MS - performance.now();
+    if (wait > 0) fingerTimer = setTimeout(fingerDone, wait) as unknown as number; else fingerDone();
+  }
+  /** the finger's button released (now: pressed first if it was not yet) and the finger forgotten */
+  function fingerDone(now = false) {
+    clearTimeout(fingerTimer);
+    if (!detached && finger !== -1) {
+      if (!pressedAt && now) push(IEV_MOUSE_DOWN, 0, 0, fingerFlags, [], 0);
+      if (pressedAt || now) { push(IEV_MOUSE_UP, 0, 0, fingerFlags, [], 0); buttons &= ~1; }
+    }
+    finger = -1; fingerUp = false; pressedAt = 0;
   }
   function onWheel(e: WheelEvent) {
     if (detached) return;
@@ -326,7 +372,7 @@ export function attachInput(proc: GameProcess, element: HTMLElement, opts: Input
       // whatever the game holds is let go (it may outlive the page's input, e.g. a test page)
       push(IEV_RELEASE_ALL, 0, 0, 0, [], 0, IREASON_PAGE);
       if (h) Atomics.compareExchange(h, IM_ATTACHED, 1, 0);   // only our own claim (2 = the C ns* driver)
-      detached = true; quitPending = 0; cancelAnimationFrame(raf); clearInterval(timer);
+      detached = true; quitPending = 0; cancelAnimationFrame(raf); clearInterval(timer); clearTimeout(fingerTimer);
       pads?.dispose(); pads = null; synth = null;
       h = null; u8 = null; i32 = null; synF32 = null;     // no view of the old process's memory stays reachable
       kbTarget.removeEventListener('keydown', onKeyDown as EventListener, { capture: true });
@@ -385,7 +431,7 @@ export function attachInput(proc: GameProcess, element: HTMLElement, opts: Input
       focus: (on) => { active = on; push(IEV_FOCUS, 0, 0, 0, [], on ? 1 : 0, IREASON_SCRIPT); },
     });
     if (opts.gamepads ?? true)
-      pads = new PadPoller(h, u8, base, () => dispatchEvent(new Event('nfsu2-gesture')), log, onUse);
+      pads = new PadPoller(h, u8, base, () => dispatchEvent(new Event('nfsu2-gesture')), log, onUse, opts.padPage);
     void loadLayout();
     // the game starts active (CreateWindowEx posts the activation): tell it
     // if the page is not

@@ -22,7 +22,10 @@ import { checkBrowser, checkGpu, checkIsolation, checkStorage, firefoxVersion, f
 import { loadGame, serverRev, type Loaded } from './loader';
 import { claimInstance } from './instance';
 import { LogRing, downloadBlob, stamp } from './logs';
-import { enterFullscreen, exitFullscreen, isFullscreen, measureRefresh, settledSize, trackCanvasSize } from './display';
+import { enterFullscreen, exitFullscreen, isFullscreen, keepScreenOn, lockLandscape, measureRefresh, settledSize, trackCanvasSize } from './display';
+import { deviceDefaults, markTouch, padSeen, touchFirst } from './device';
+import { markPad, padPress, pageDialog } from './padnav';
+import type { PadPage } from '../input/gamepad';
 import { checkSetting, HOST_FIXED, pageOnly, resolveEnv, settingsUpgrade, TEMPLATE, type Resolved } from './settings';
 import { exists, filesOf, listProfiles, PROFILES_DIR, readText, removeSaveDir, writeFile } from './savefs';
 import { turnOnAutosave } from './profile';
@@ -161,8 +164,8 @@ function evaluate() {
   }
   if (pending) { if (phase !== 'exited') setPhase('boot', 'Loading', `${pending.label}: ${pending.detail}`); return; }
   if (phase === 'exited') { updatePlay(); return; }
-  setPhase('ready', 'Ready', offline ? 'Offline: the game runs from this PC, without free roam or Online. Press Play or Enter to start.'
-    : 'Press Play or Enter to start.');
+  const press = touchFirst() ? 'Press Play to start.' : 'Press Play or Enter to start.';
+  setPhase('ready', 'Ready', offline ? `Offline: the game runs from this PC, without free roam or Online. ${press}` : press);
 }
 
 function updatePlay() {
@@ -185,7 +188,9 @@ async function loadSettings(): Promise<string | null> {
   settingsText = text;
   return text;
 }
-function resolved(host: Record<string, string> = {}): Resolved { return resolveEnv(settingsText, ENVIRONMENT, host); }
+/** this device's own defaults (a phone's: device.ts), below settings.ini and the page address */
+const DEVICE = deviceDefaults();
+function resolved(host: Record<string, string> = {}): Resolved { return resolveEnv(settingsText, ENVIRONMENT, host, DEVICE); }
 /** the game's language (runtime/language.c): which language pack the page fetches ahead and counts */
 const language = (r: Resolved = resolved()) => (r.env.NFSU2_LANGUAGE ?? 'english').toLowerCase();
 
@@ -289,12 +294,16 @@ async function startGame() {
   $('#app').inert = true;             // the start page is behind the game: out of the focus order and screen readers
   const canvas = stageCanvas();
   untrack = trackCanvasSize(canvas);
+  awake = keepScreenOn(logLine);
+  $('#stage-menu').hidden = !touchFirst();
   setPhase('starting', 'Starting', full ? 'Going full screen and starting the game.' : 'Starting the game.');
   let fsNote = '';
   if (full) {
     const fs = await enterFullscreen(stage);
-    if (!fs.ok) fsNote = 'Full screen was not allowed here; F9 has it in the menu.';
-    else if (!fs.locked) fsNote = 'Esc leaves full screen in this browser (no keyboard lock).';
+    if (!fs.ok) fsNote = `Full screen was not allowed here; ${menuName()} has it.`;
+    else if (!fs.locked && !touchFirst()) fsNote = 'Esc leaves full screen in this browser (no keyboard lock).';
+    // a phone or tablet turns to landscape before the game takes its size from the canvas
+    if (fs.ok && touchFirst()) log.add(`[app] landscape: ${await Promise.race([lockLandscape(), new Promise<boolean>(r => setTimeout(r, 2000, false))]) ? 'locked' : 'not locked'}`);
   }
   const size = await settledSize(canvas);
   await Promise.race([refreshMeasured, new Promise(r => setTimeout(r, 2000))]);
@@ -373,7 +382,7 @@ async function startGame() {
     session = await GameSession.start({
       module: loaded!.module, info: loaded!.info, saveDir: SAVE, env: r.env, canvas, stage, audio, displayHz, netName, notice, netBack, onSaved,
       artifacts: q.get('artifacts') ?? undefined, dumpScale: q.get('dumpscale') ? +q.get('dumpscale')! : undefined,
-      toggleFullscreen, log: logLine, onFatal: stopFatal,
+      toggleFullscreen, padPage: PAD_PAGE, log: logLine, onFatal: stopFatal,
     });
   } catch (e) {
     log.add(`[app] the game could not start: ${e}`);
@@ -391,7 +400,8 @@ async function startGame() {
   const st = session;
   const waitStatus = setInterval(() => { if (st.status) { fps.reader = st.status; clearInterval(waitStatus); } }, 100);
   fps.set((r.env.NFSU2_FPS_COUNTER as FpsMode) in { off: 1, on: 1, detailed: 1 } ? r.env.NFSU2_FPS_COUNTER as FpsMode : 'off');
-  const hint = offlineNote + (fsNote || (full ? 'F9 opens the menu. Hold Esc to leave full screen.' : 'F9 opens the menu: full screen, controls, quit.'));
+  const opens = `${cap(menuKey())} opens the menu`;
+  const hint = offlineNote + (fsNote || (full ? (touchFirst() ? `${opens}.` : `${opens}. Hold Esc to leave full screen.`) : `${opens}: full screen, controls, quit.`));
   if (autosaved.length) toast(`Autosave is now on for ${autosaved.join(', ')}: the game saves by itself (Options, Gameplay, Save). ${hint}`, 9000);
   else toast(hint, 6000);
   void st.exited.then(code => { clearInterval(waitStatus); onExit(st, code); });
@@ -400,7 +410,8 @@ async function startGame() {
   setTimeout(() => {
     if (session !== st || !st.audio || st.audio.state() === 'running' || r.env.NOSOUND === '1') return;
     log.add(`[app] the AudioContext is ${st.audio.state()} after Play`);
-    toast('No sound yet: click the game or press a key to turn it on (a controller button cannot).', 8000);
+    toast(touchFirst() ? 'No sound yet: tap the game to turn it on (a controller button cannot).'
+      : 'No sound yet: click the game or press a key to turn it on (a controller button cannot).', 8000);
   }, 3000);
 }
 
@@ -446,10 +457,37 @@ function stopFatal(what: string) {
 
 function toggleFullscreen() {
   if (isFullscreen()) exitFullscreen();
-  else void enterFullscreen($('#stage')).then(r => { if (!r.ok) toast('Full screen was not allowed.', 4000); });
+  else void enterFullscreen($('#stage')).then(r => { if (!r.ok) toast('Full screen was not allowed.', 4000); else if (touchFirst()) void lockLandscape(); });
 }
 
+/** how the page's menu opens here, for the hints: F9, the ☰ button on a touch screen, Home on a controller */
+function menuKey(): string {
+  return (touchFirst() ? 'the ☰ button' : 'F9') + (padSeen() ? ' or Home on the controller' : '');
+}
+/** "the menu (F9)", with what opens it here */
+function menuName(): string {
+  return `the menu (${touchFirst() ? '☰' : 'F9'}${padSeen() ? ', or Home on the controller' : ''})`;
+}
+const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
+
+/** the controller's share of the page while a game runs (gamepad.ts): Home, or both sticks pressed in, opens or
+ *  closes the menu (not over another dialog), and an open dialog of the page takes the controller (padnav.ts) */
+const PAD_PAGE: PadPage = {
+  menu() {
+    const d = pageDialog();
+    if (d && d.id !== 'menu') return;
+    openMenu();
+    const m = $<HTMLDialogElement>('#menu');
+    if (m.open) markPad(m);
+  },
+  dialog: () => !!pageDialog(),
+  press: padPress,
+};
+
+let awake: (() => void) | null = null;   // the running game's Wake Lock (display.ts keepScreenOn)
+
 function endStage() {
+  awake?.(); awake = null;
   away?.stop(); away = null;
   exitFullscreen();
   untrack?.(); untrack = null;
@@ -856,7 +894,7 @@ export async function boot() {
   fps.extra = () => session?.stats() ?? {};
   settings = new SettingsPanel($('#settings'), {
     // another language counts other files as the game data (its language pack); a keyphrase sends the file
-    saveDir: SAVE, environment: ENVIRONMENT, onSaved: t => { const was = language(); settingsText = t; if (language() !== was) void saves.refresh(); vault?.changed(); },
+    saveDir: SAVE, environment: ENVIRONMENT, defaults: DEVICE, onSaved: t => { const was = language(); settingsText = t; if (language() !== was) void saves.refresh(); vault?.changed(); },
     // the tab that owns the saves is the one whose Play reads the file: another tab only looks
     readOnly: () => !instance.owner, say: pageToast,
   }, $('#online'));
@@ -901,7 +939,13 @@ export async function boot() {
     }
   }, { capture: true });
   window.addEventListener('beforeunload', e => { if (session) { e.preventDefault(); e.returnValue = ''; } });
-  document.addEventListener('fullscreenchange', () => { if (!isFullscreen() && session) toast('Full screen left. F9 has it in the menu.', 3000); });
+  document.addEventListener('fullscreenchange', () => { if (!isFullscreen() && session) toast(`Full screen left. ${cap(menuName())} has it.`, 3000); });
+  // the menu's button on the game: on a touch screen from the start, elsewhere from the first touch
+  markTouch();
+  const stageMenu = $<HTMLButtonElement>('#stage-menu');
+  stageMenu.onpointerdown = e => e.preventDefault();     // the canvas keeps the focus (and with it the keyboard)
+  stageMenu.onclick = () => { if (session) openMenu(); };
+  $('#stage').addEventListener('pointerdown', e => { if (e.pointerType === 'touch') stageMenu.hidden = false; }, { capture: true });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { void checkNewer(); vault.shown(); } });
   setInterval(() => { if (document.visibilityState === 'visible') void checkNewer(); }, NEWER_EVERY_MS);
 

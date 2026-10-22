@@ -46,9 +46,12 @@ h1, h2, h3, .status, .btn, .play, kbd, .set-label, .opt, .val, summary, .profile
 }
 .hint { color: var(--muted); font-size: 14px; line-height: 20px; }
 
-/* keyboard focus: the game's selected-item glow */
-:focus-visible { outline: 2px solid var(--lime); outline-offset: 2px; box-shadow: 0 0 12px var(--lime-glow); }
+/* keyboard focus: the game's selected-item glow; also in a dialog a controller works (padnav.ts) */
+:focus-visible, .dlg[data-pad] :focus { outline: 2px solid var(--lime); outline-offset: 2px; box-shadow: 0 0 12px var(--lime-glow); }
 :focus:not(:focus-visible) { outline: none; }
+
+/* what fits the device (device.ts markTouch): keys where there is a keyboard, taps where a finger is the pointer */
+html[data-touch] .key-only, html:not([data-touch]) .touch-only { display: none; }
 
 /* ---------------------------------------------------------------- layout */
 .app {
@@ -289,12 +292,20 @@ summary:hover { color: var(--text); }
 .page-toast:empty { display: none; }
 
 /* ----------------------------------------------------------------- stage */
-.stage { position: fixed; inset: 0; z-index: 10; background: #000; }
+.stage { position: fixed; inset: 0; z-index: 10; background: #000; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 /* the start page behind the game does not scroll: its scrollbar would stay beside the game out of full screen
  * (full screen refused, or left), and the game a scrollbar narrower */
 html:has(> body > .stage:not([hidden])) { overflow: hidden; }
 .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: none; touch-action: none; }
 .stage.cursor canvas { cursor: default; }
+/* the menu's button on the game (touch screens): small and dim in the top left corner, clear of a notch */
+.stage-menu {
+  position: absolute; z-index: 4; top: max(12px, env(safe-area-inset-top)); left: max(12px, env(safe-area-inset-left));
+  width: 48px; height: 48px; padding: 12px; border: 0; border-radius: 50%;
+  background: rgba(0, 0, 0, 0.4); color: rgba(255, 255, 255, 0.72); touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+}
+.stage-menu svg { display: block; width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.stage-menu:active { background: rgba(0, 0, 0, 0.72); color: var(--lime); }
 .hud-fps {
   position: absolute; top: 16px; right: 16px; z-index: 2; pointer-events: none; min-width: 80px;
   padding: 4px 12px; border-radius: 8px; background: rgba(0, 0, 0, 0.64);
@@ -368,6 +379,10 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.64); }
   .set-control > .seg { display: flex; flex: 1; }
   .set-control > .text-btn { order: 1; }            /* Reset after the control here, where the control is aligned left */
   .opt { flex: 1; justify-content: center; padding: 0 8px; }
+}
+/* a phone in landscape: the page menu's buttons in two columns, so Quit game needs no scrolling */
+@media (max-height: 479px) {
+  .menu-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
