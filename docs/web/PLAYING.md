@@ -260,7 +260,8 @@ Good to know:
   (back to the menus, quitting, losing the connection) loses it. The other players' cars stay, and they see the two
   drive. Players on the Windows plugin are not offered outruns.
 - **Races with other players:** a race of your career can be raced with the players around you, as the game's own LAN
-  race on its track, in your career car.
+  race on its track, in your career car. That takes a car of your own: in a new career's prologue (the 350Z you
+  start in) you cannot join or open a lobby, and the panel says so; from your first car on you can.
   - **An open race** (its marker in the street): its card asks Accept or Decline as always, and Accept asks once more:
     **Solo** (the career race, as before) or **Multiplayer**.
   - **A race that is not open** in your career has no marker of the game's. Within about 50 m its start shows

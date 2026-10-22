@@ -18,8 +18,12 @@ typedef struct {
 } MpRace;
 enum { MPR_IDLE = 0, MPR_OUT, MPR_LAN, MPR_RACE, MPR_BACK, MPR_DONE, MPR_FAILED };
 
-/* the trip starts at the next frame; 0 when one runs already or the game is
- * not in career free roam */
+/* the career has a car of its own, one the LAN race can take (not a new
+ * career's prologue car): a trip without one would race a car made of
+ * garbage */
+int  mprace_car_ok(void);
+/* the trip starts at the next frame; 0 when one runs already, the game is
+ * not in career free roam or the career has no car of its own */
 int  mprace_start(const MpRace *r);
 /* where the trip is (MPR_*); MPR_DONE / MPR_FAILED until the next start or
  * mprace_ack */

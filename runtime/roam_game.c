@@ -2921,6 +2921,9 @@ static void race_name(uint32_t r, char *o, int n){
 #define MP_ASK_US       5000000       /* a JOIN the host does not take in this long is off */
 #define MP_AWAY_US      3000000       /* a player of ours gone from free roam or the start this long is out (a hitch is not) */
 #define MP_NOTE_US      5000000
+/* a career with no car of its own yet (a new one's prologue, mprace_car_ok) neither joins nor opens a lobby: the
+ * LAN race would build its car from garbage */
+#define MP_NOCAR        "Multiplayer races take a car of your own: buy one in your career first"
 #define MP_SEEN         16
 enum { MP_IDLE, MP_HOST, MP_ASKED, MP_IN, MP_COUNT, MP_TRIP };
 static const char *const mp_st[] = { "idle", "hosting", "asked to join", "in a lobby", "counting down", "on the trip" };
@@ -3071,6 +3074,7 @@ static MpLobby *mp_joinable(void){
 static void mp_ask_in(void){ roam_plat_lock(); mp_send(RC_LOBBY_JOIN, 0, g_mp.l.host); mp_send(RC_LOBBY_JOIN, 0, 0); roam_plat_unlock(); }
 static int mp_join(int64_t host, MpLobby *l){
     if (g_mp.st != MP_IDLE || !l) return 0;
+    if (!mprace_car_ok()){ mp_note(host, MP_NOCAR); return 0; }
     g_mp.l = *l;
     mp_to(MP_ASKED, host);
     mp_ask_in(); g_mp.tx_at = host;
@@ -3186,6 +3190,7 @@ static void mp_trip(int64_t host){
 /* the player pressed Engage (or chose Multiplayer) at a spot of race r: our
  * lobby there, or the one waiting there */
 static int mp_engage_spot(int64_t host, uint32_t r){
+    if (!mprace_car_ok()){ mp_note(host, MP_NOCAR); return 0; }
     MpLobby *l = mp_joinable();
     if (l) return mp_join(host, l);
     return mp_open(host, r);
@@ -3294,7 +3299,8 @@ static int mp_line(int64_t host, char *tx, int n){
         const MpSpot *sp = mp_spot_here();
         MpLobby *l = mp_joinable();
         if (l && (!sp || sp->kind == MPS_ONLY)){
-            snprintf(tx, (size_t)n, "Press Enter to join %s's %s (%d of %d)", mp_name(l->host), race_kind(l->race), l->n, l->max);
+            if (!mprace_car_ok()) snprintf(tx, (size_t)n, "%s's %s: %s", mp_name(l->host), race_kind(l->race), MP_NOCAR);
+            else snprintf(tx, (size_t)n, "Press Enter to join %s's %s (%d of %d)", mp_name(l->host), race_kind(l->race), l->n, l->max);
             return 1;
         }
         if (sp && sp->kind == MPS_ONLY){
@@ -3429,6 +3435,7 @@ static void mp_panel(int64_t host, int in_roam){
         }
         /* a message first, for its few seconds (back from the race at the spot: the place and the prize) */
         if (g_mp.note[0] && host < g_mp.note_until){ js_str(&j, "v", "note"); js_str(&j, "text", g_mp.note); }
+        else if (l && (!sp || sp->kind == MPS_ONLY) && !mprace_car_ok()){ js_str(&j, "v", "note"); js_str(&j, "text", MP_NOCAR); }
         else if (l && (!sp || sp->kind == MPS_ONLY)){ js_str(&j, "v", "join"); js_race(&j, l->race); js_players(&j, l); }
         else if (full){ js_str(&j, "v", "full"); js_race(&j, full->race); js_players(&j, full); }
         else if (sp && sp->kind == MPS_ONLY){ js_str(&j, "v", "spot"); js_race(&j, sp->race); js_str(&j, "why", mpw_text[sp->why]); }

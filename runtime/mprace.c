@@ -253,9 +253,36 @@ static void to_phase(int ph){
     M.phase = ph; M.since = clk();
 }
 
+/* The race's setup (0x53FEB0) looks the network car's handle up among the
+ * front end's cars (G_FECARS +0x9BD8: 91 records, 0x5036F0; each +8 its
+ * handle) and fills the race car's description from the one it finds; with
+ * none found it went on with the description as the stack held it: a car
+ * named "" (CARS\\VINYLS.BIN, CARS\(null)\PARTS_ANIMATIONS.BIN), garbage
+ * physics and stores anywhere -- a hang at the race's start, a trap in a
+ * car's wheels (0x5921B0), the runtime's own memory past the guest's end
+ * written over (players' reports, 2026-10-22).  A career's car is none of
+ * them until the player has a car of their own: a new career's is "CAREER_0"
+ * (0x532830), the prologue's 350Z, until the first car is bought (then
+ * CAREER_SLOT_n). */
+#define G_FECARS        0x0083ad90u
+#define FECARS_N        0x5bu
+int mprace_car_ok(void){
+    uint32_t h = rd(G_CAREER_CAR);
+    for (uint32_t i = 0; h && i < FECARS_N; i++){
+        uint32_t e = rd(G_FECARS + 0x9bd8u + 4u * i);
+        if (e && rd(e + 8u) == h) return 1;
+    }
+    return 0;
+}
+
 int mprace_start(const MpRace *r){
     if (M.phase != MPR_IDLE && M.phase != MPR_DONE && M.phase != MPR_FAILED) return 0;
     if (rd(G_FLOW) != 6u || !(rd(G_GAMEMODE) & 1u)) return 0;
+    if (!mprace_car_ok()){
+        fprintf(stderr, "[mprace] f=%ld start: the career car 0x%08x is none of the game's cars (no car of its own yet): not going\n",
+                autotest_frame(), rd(G_CAREER_CAR));
+        return 0;
+    }
     memset(&M, 0, sizeof M);
     M.r = *r; M.goal = G_RACE_GOAL; M.frame0 = autotest_frame();
     M.step = "Leaving free roam";

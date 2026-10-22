@@ -30,6 +30,8 @@
 //        [--crowd-race 1-3:200:320]  roam-crowd's --race: those players are in a race meanwhile
 //        [--seed <save tree>]  every page starts from that save (web/tools/save-seed.mjs, as run-suite's
 //                    NFSU2_SAVE_SEED: e.g. a player's "Download a backup" unzipped) instead of a fresh one
+//        [--fresh Neo]  that page starts from a fresh profile all the same (a new career's prologue beside
+//                    --seed's careers: tests/scripts/mprace_nocar_b.txt)
 //
 // Without --base it starts its own server (web/tools/server-cmd.mjs, --dev on the given
 // ports, the game folder from --data or NFSU2_DATA) and stops it at the end.
@@ -78,6 +80,8 @@ const APP = opt('page', 'test') === 'app';
 const PLAY = opt('page', 'test') === 'play', SIZE = opt('size', opt('page', 'test') === 'app' ? '1600x900' : '960x540').split('x').map(Number), PLAY_ONLY = opt('play-only', '');
 const FETCH = opts('fetch');                 // files of each page's save folder to copy out, as <out>/<name>.<file>
 const SEED = opt('seed', '');               // a save tree each page starts from
+const FRESH = opts('fresh');                 // pages that start from a fresh profile all the same
+const seeded = name => SEED && !FRESH.includes(name);
 const HIDE = opts('hide').map(x => { const [n, at, dur] = x.split(':'); return { name: n, at: +at * 1000, dur: +(dur ?? 8) * 1000 }; });
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -106,7 +110,7 @@ function url(i, name, script, own) {
   const play = PLAY && (!PLAY_ONLY || PLAY_ONLY === name);
   if (play) { q.set('w', String(SIZE[0])); q.set('h', String(SIZE[1])); q.set('artifacts', `/artifacts/${name}-`); q.set('dumpscale', '1'); }
   for (const [k, v] of Object.entries(env)) if (!(APP && (k === 'NFSU2_SAVEDIR'))) q.append('env', `${k}=${v}`);
-  const fresh = SEED ? '' : '&fresh';
+  const fresh = seeded(name) ? '' : '&fresh';
   return APP ? `${BASE}/?${q}${fresh}` : `${BASE}/test/${play ? 'play' : 'hostcheck'}.html?${q}${fresh}`;
 }
 
@@ -163,7 +167,7 @@ async function start(i, name, script, own) {
   });
   page.on('pageerror', e => w('PAGEERROR ' + e));
   const u = url(i, name, script, own);
-  if (SEED) w(`[roam-pair] save seed: ${await seedSave(page, BASE, `roam-${name}`, SEED)} files from ${SEED}`);
+  if (seeded(name)) w(`[roam-pair] save seed: ${await seedSave(page, BASE, `roam-${name}`, SEED)} files from ${SEED}`);
   w(`URL ${u}`);
   await page.goto(u);
   if (APP) {
