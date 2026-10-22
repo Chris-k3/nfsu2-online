@@ -78,11 +78,15 @@ export async function checkGpu(): Promise<Check & { adapter?: string }> {
   // Chrome on Linux runs WebGPU on Vulkan while the rest of it stays on OpenGL, so
   // chrome://gpu says WebGPU is on even when no Vulkan driver is installed
   const linux = /Linux/.test(navigator.userAgent) && !/Android/.test(navigator.userAgent);
+  // and on Windows on Direct3D 12 only: the D3D11 adapters are compatibility mode, blocklisted
+  const windows = /Windows/.test(navigator.userAgent);
   if (!ad) return { id: 'gpu', label, state: 'fail', detail: ff
     ? 'Firefox found no usable graphics adapter (its blocklist may turn WebGPU off for this graphics driver). Check about:support, Graphics, or play in Chrome.'
     : linux
       ? 'Chrome found no usable graphics adapter. On Linux Chrome runs WebGPU on Vulkan, so most likely the Vulkan driver for your graphics is missing: install it (mesa-vulkan-drivers on Debian, Ubuntu and Fedora), then restart Chrome. Where chrome://gpu says WebGPU is disabled, also enable it in chrome://flags (#enable-unsafe-webgpu).'
-      : 'Chrome found no usable graphics adapter (blocklisted driver or GPU process crash). Check chrome://gpu.' };
+      : windows
+        ? 'Chrome found no usable graphics adapter. On Windows Chrome runs WebGPU on Direct3D 12, which older graphics (Intel HD 4000 and older, for one) do not have: the game cannot run on them. On newer graphics, update the graphics driver, then restart Chrome. Dawn Info in chrome://gpu says why each adapter is blocked.'
+        : 'Chrome found no usable graphics adapter (blocklisted driver or GPU process crash). Check chrome://gpu.' };
   const info = ad.info ? [ad.info.vendor, ad.info.architecture, ad.info.description].filter(Boolean).join(' ') : '';
   // no BC (PowerVR, Mali): the renderer unpacks the textures (web/src/gpu/dxt.ts), so it plays
   if (!ad.features.has('texture-compression-bc')) {
