@@ -122,7 +122,7 @@ async function startServer() {
   await new Promise((res, rej) => {
     let out = '';
     const t = setTimeout(() => rej(new Error('server did not start')), 20000);
-    c.stdout.on('data', d => { out += d; if (out.includes('this Mac')) { clearTimeout(t); res(); } });
+    c.stdout.on('data', d => { out += d; if (out.includes('this Mac') || out.includes('this host')) { clearTimeout(t); res(); } });
     c.on('exit', code => { clearTimeout(t); rej(new Error(`server exited (${code})`)); });
   });
   serverLog.write(`--- server pid ${c.pid} up at ${new Date().toISOString()}\n`);

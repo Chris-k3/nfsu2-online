@@ -59,6 +59,7 @@
 #include "host_abi.h"
 #include "net_proto.h"
 #include "lan_vfd.h"
+#include "racenet.h"
 #include <errno.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -413,16 +414,29 @@ static void sent_note(VSock *v, uint32_t ip, uint16_t port){
 }
 
 /* the race's peers: the addresses the game's race link (UDP 3658, a star
- * around the game's creator) exchanged datagrams with lately (g_mu held) */
+ * around the game's creator) exchanged datagrams with lately, and how their
+ * datagrams came (racenet.h: waits, and the runs of datagrams that came at
+ * once, as a link that held them hands them over) (g_mu held) */
 #define RACE_PORT  3658
 #define RACE_PEERS 16
-static struct { uint32_t ip_h; uint64_t at; } g_race[RACE_PEERS];
+static struct { uint32_t ip_h; uint64_t at; RaceLink s; int gap_run; } g_race[RACE_PEERS];
 static void race_note(uint32_t ip_h){
     int k = -1;
     for (int j = 0; j < RACE_PEERS && k < 0; j++) if (g_race[j].at && g_race[j].ip_h == ip_h) k = j;
     for (int j = 0; j < RACE_PEERS && k < 0; j++) if (!g_race[j].at) k = j;
     if (k < 0){ k = 0; for (int j = 1; j < RACE_PEERS; j++) if (g_race[j].at < g_race[k].at) k = j; }
-    g_race[k].ip_h = ip_h; g_race[k].at = now_us();
+    if (!g_race[k].at || g_race[k].ip_h != ip_h){ memset(&g_race[k], 0, sizeof g_race[k]); g_race[k].ip_h = ip_h; }
+    uint64_t now = now_us(), gap = g_race[k].at ? now - g_race[k].at : 0;
+    RaceLink *s = &g_race[k].s;
+    if (g_race[k].at && gap <= RACENET_ONCE_MS * 1000u){ if (g_race[k].gap_run) s->after++; }
+    else {
+        s->runs++;
+        g_race[k].gap_run = gap >= RACENET_GAP_MS * 1000u;
+        if (g_race[k].gap_run){ s->gaps++; s->after++; }
+        if (gap / 1000u > s->gap_max_ms) s->gap_max_ms = (uint32_t)(gap / 1000u);
+    }
+    s->ip_h = ip_h; s->n++;
+    g_race[k].at = now;
 }
 
 /* ---- the LAN thread: received frames ------------------------------------------------- */
@@ -1233,6 +1247,18 @@ int vlan_race_peers(uint32_t *ip_h, int max, uint32_t within_ms){
     int n = 0;
     for (int j = 0; j < RACE_PEERS && n < max; j++)
         if (g_race[j].at && now - g_race[j].at <= (uint64_t)within_ms * 1000u && g_race[j].ip_h != g_vip) ip_h[n++] = g_race[j].ip_h;
+    pthread_mutex_unlock(&g_mu);
+    return n;
+}
+/* how the race peers' datagrams came since the last reset (racenet.h) */
+int vlan_race_links(RaceLink *o, int max, int reset){
+    pthread_mutex_lock(&g_mu);
+    int n = 0;
+    for (int j = 0; j < RACE_PEERS; j++){
+        if (!g_race[j].at || g_race[j].ip_h == g_vip) continue;
+        if (g_race[j].s.n && n < max) o[n++] = g_race[j].s;
+        if (reset){ memset(&g_race[j].s, 0, sizeof g_race[j].s); g_race[j].gap_run = 0; }
+    }
     pthread_mutex_unlock(&g_mu);
     return n;
 }

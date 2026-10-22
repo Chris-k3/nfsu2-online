@@ -23,6 +23,8 @@
  *   - where it sounds: from the car of the player with that name.  (A car's
  *     racer record names the profile, not the player: "No Profile" for a
  *     player without one, nothing for the others' cars.)
+ * The port also carries the players' frame rates ("N2FS"), which go to
+ * racenet.c.
  * Only in the browser, where Online and the virtual LAN are; the Mac's LAN
  * has no such port (the weak stand-ins below). */
 #include "cpu.h"
@@ -93,7 +95,9 @@ static void send_all(const uint8_t *m, uint32_t except){
     int n = vlan_race_peers(peers, 16, PEER_MS);
     for (int i = 0; i < n; i++) if (peers[i] != except) vlan_rt_send(HORN_PORT, peers[i], m, MSG_N);
 }
+void racenet_heard(uint8_t *m, int n, uint32_t from);   /* racenet.c: the players' frame rates */
 static void got(uint8_t *m, int n, uint32_t from, uint32_t now){
+    if (n >= 4 && !memcmp(m, "N2FS", 4)){ racenet_heard(m, n, from); return; }
     if (n < MSG_N || memcmp(m, "N2HN", 4) || m[4] != 1) return;
     char name[NAME_N];
     int k = 0;
