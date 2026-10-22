@@ -276,7 +276,7 @@ Good to know:
     map (M), and the nearest four lobbies their words beside it ("Circuit 1/6"). They join at the start: within 15 m
     of it the panel shows the lobby and Enter joins (at an open race: its card's Accept, then **Join**). Up to 6
     players; at a full one the panel says so, and Enter starts another. Drive more than 40 m from the start to leave
-    a lobby; the host leaving calls it off. A lobby is within your Room, as everything in free roam. At a race's
+    a lobby; the host leaving calls it off, and a lobby nobody joins closes after 5 minutes. A lobby is within your Room, as everything in free roam. At a race's
     start Enter is for the race: no outrun is offered there.
   - **The host presses Enter** to start once another player is in. After a 5-second countdown every game in the lobby
     goes to the race by itself, behind a screen with the lobby on it and where the trip is ("Loading the race"): out

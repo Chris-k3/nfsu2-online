@@ -299,6 +299,20 @@ int mprace_prize(void){ return M.prize; }
 const char *mprace_why(void){ return M.why[0] ? M.why : "unknown"; }
 void mprace_host_gone(void){ if (!M.r.host && M.goal == G_RACE_GOAL && (M.phase == MPR_OUT || M.phase == MPR_LAN)) M.host_gone = 1; }
 int mprace_owns_input(void){ return __atomic_load_n(&M.owns, __ATOMIC_RELAXED); }   /* (the input thread asks) */
+void mprace_end_in_roam(void){
+    if (M.phase == MPR_IDLE || M.phase == MPR_DONE || M.phase == MPR_FAILED) return;
+    if (M.prize > 0 && !M.paid){
+        uint32_t b = rd(G_CAREER + C_BANK);
+        MR32(G_CAREER + C_BANK) = b + (uint32_t)M.prize;
+        M.paid = 1;
+        fprintf(stderr, "[mprace] f=%ld the prize: $%d into the bank ($%u -> $%u), in free roam\n", autotest_frame(), M.prize, b, b + (uint32_t)M.prize);
+    }
+    if (!M.raced && !M.why[0]) snprintf(M.why, sizeof M.why, "the trip lost its way");
+    mlog("back in free roam without the trip's way back: %s", M.raced ? "done" : M.why);
+    state_log("ended in free roam");
+    M.goal = G_CAREER_GOAL; M.owns = 0; M.nkeys = 0;
+    to_phase(M.raced ? MPR_DONE : MPR_FAILED);
+}
 int mprace_covered(void){ return M.phase == MPR_OUT || M.phase == MPR_LAN || (M.phase == MPR_BACK && M.owns); }
 const char *mprace_step(void){ return M.step ? M.step : ""; }
 
@@ -607,8 +621,11 @@ static void step_back(CPU *c, long f){
     M.wait_at = 0;
     if (on("UI_PostRaceResults.fng")){ autotest_tap(K_RET, 6); M.next = f + 180; return; }   /* (Continue missed) */
     if (flow == 6u){
-        /* free roam again: done (the career's own free roam, not a LAN race's world) */
-        if ((rd(G_GAMEMODE) & 1u) && rd(G_RACETYPE) == 0 && rd(rd(G_RACECO)) == 4u && on("HUD_SingleRace.fng")){
+        /* free roam again: done (the career's own free roam, not a LAN race's world); a test's
+         * NFSU2_MPRACE_TEST_NODONE=1 misses it, as a trip that lost its way would (roam_game.c's MP_STALE_US) */
+        static int nodone = -1;
+        if (nodone < 0){ const char *e = getenv("NFSU2_MPRACE_TEST_NODONE"); nodone = e && *e == '1'; }
+        if ((rd(G_GAMEMODE) & 1u) && rd(G_RACETYPE) == 0 && rd(rd(G_RACECO)) == 4u && on("HUD_SingleRace.fng") && !nodone){
             state_log("back in free roam"); to_phase(M.why[0] ? MPR_FAILED : MPR_DONE);
             M.owns = 0;
             return;

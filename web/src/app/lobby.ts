@@ -11,8 +11,9 @@ interface LobbyState {
   /** lobby: host (ours), asked (joining), in (joined), count (the countdown, t seconds) */
   st?: 'host' | 'asked' | 'in' | 'count';
   kind?: string; track?: string; laps?: number;
-  /** the lobby's players, the host first; me: our place in it (-1: none); max: its places */
-  names?: string[]; me?: number; max?: number; t?: number;
+  /** the lobby's players, the host first; me: our place in it (-1: none); max: its places; t: the countdown's
+   *  seconds; closes: the seconds left of a lobby nobody joined (its last minute) */
+  names?: string[]; me?: number; max?: number; t?: number; closes?: number;
   why?: string; step?: string; text?: string;
 }
 
@@ -108,7 +109,8 @@ export class LobbyPanel {
         if (s.st === 'count') kids.push(el('div', 'lobby-count', `Starting in ${s.t ?? 0}`));
         else if (s.st === 'asked') kids.push(this.act(null, `Joining ${host}'s ${s.kind ?? 'race'}…`));
         else if (mine && names.length >= 2) kids.push(this.act('Enter', 'Start the race'), el('div', 'lobby-hint', 'Drive away to call it off'));
-        else if (mine) kids.push(this.act(null, 'Waiting for players to drive up and join…'), el('div', 'lobby-hint', 'Drive away to call it off'));
+        else if (mine) kids.push(this.act(null, 'Waiting for players to drive up and join…'),
+          el('div', 'lobby-hint', s.closes !== undefined ? `Closes in ${s.closes} s if nobody joins` : 'Drive away to call it off'));
         else kids.push(this.act(null, `Waiting for ${host} to start`), el('div', 'lobby-hint', 'Drive away to leave'));
         break;
       }

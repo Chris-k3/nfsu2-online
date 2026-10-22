@@ -38,6 +38,10 @@ const char *mprace_why(void);
 /* a joiner's host closed its game (free roam heard it quit): the trip ends
  * once in the LAN menus, as the host's LAN server is gone with it */
 void mprace_host_gone(void);
+/* the player is in career free roam again while the trip is not over (it made its way back by hand, or the trip
+ * lost its way): the trip is over, as done once raced (the prize, if the crib did not pay it, into the bank now),
+ * else as failed */
+void mprace_end_in_roam(void);
 /* the game's input is the trip's own: the player's keys, mouse and pad are
  * not passed on (runtime/web/input_web.c, dinput_pad.c) */
 int  mprace_owns_input(void);

@@ -2920,6 +2920,8 @@ static void race_name(uint32_t r, char *o, int n){
 #define MP_COUNT_US     5000000       /* the countdown */
 #define MP_ASK_US       5000000       /* a JOIN the host does not take in this long is off */
 #define MP_AWAY_US      3000000       /* a player of ours gone from free roam or the start this long is out (a hitch is not) */
+#define MP_ALONE_US     (300ll * 1000000)   /* a lobby nobody joins closes after this (NFSU2_ROAM_LOBBY_ALONE_S: tests) */
+#define MP_STALE_US     3000000       /* in free roam this long with the trip not over: it is over (mprace_end_in_roam) */
 #define MP_NOTE_US      5000000
 /* a career with no car of its own yet (a new one's prologue, mprace_car_ok) neither joins nor opens a lobby: the
  * LAN race would build its car from garbage */
@@ -2937,6 +2939,9 @@ static struct {
     char     note[TAG_DUEL_MAX]; int64_t note_until;
     uint32_t opened, joined, trips;              /* statistics */
     int64_t  away[RC_LOBBY_MAX];                 /* hosting: since when each player of ours looks gone (0: here) */
+    int64_t  alone_at;                           /* hosting: since when nobody else is in it (0: someone is) */
+    int64_t  roam_at;                            /* on the trip: since when in free roam with it not over (0: not) */
+    int64_t  alone_us;                           /* MP_ALONE_US, or the test's */
     char     names[RC_LOBBY_MAX][RC_NAME_MAX + 1];   /* on the trip: the lobby's players' names (their links end in the menus) */
 } g_mp;
 static const char *race_kind(uint32_t r){
@@ -2975,6 +2980,7 @@ static void mp_note(int64_t host, const char *t){
 }
 static void mp_to(int st, int64_t host){
     if (st != g_mp.st) rlog("[roam] f=%ld race lobby %08x: %s -> %s\n", rh_frame(), g_mp.l.id, mp_st[g_mp.st], mp_st[st]);
+    if (st != g_mp.st) g_mp.alone_at = g_mp.roam_at = 0;
     g_mp.st = st; g_mp.since = host;
     if (st == MP_IDLE) memset(&g_mp.l, 0, sizeof g_mp.l);
 }
@@ -3207,6 +3213,12 @@ static void mp_frame(CPU *c, int64_t host, int in_roam, int world_runs, const ui
     if (g_mp.st == MP_TRIP){
         int ph = mprace_phase();
         if (quit && quit == g_mp.l.host && quit != g_s.conf.self_id) mprace_host_gone();   /* on the way to the race: its server is gone */
+        /* free roam again with the trip not over (its own end comes within frames of the HUD): a trip that
+         * lost its way kept the lobby, and every race card closed itself until a restart */
+        if (in_roam && ph != MPR_OUT && ph != MPR_DONE && ph != MPR_FAILED){
+            if (!g_mp.roam_at) g_mp.roam_at = host;
+            if (host - g_mp.roam_at > MP_STALE_US){ rlog("[roam] f=%ld race lobby %08x: in free roam, the trip not over: over\n", rh_frame(), g_mp.l.id); mprace_end_in_roam(); ph = mprace_phase(); }
+        } else g_mp.roam_at = 0;
         if (ph != MPR_DONE && ph != MPR_FAILED) return;
         if (!in_roam) return;                                     /* back once free roam is */
         char t[TAG_DUEL_MAX];
@@ -3234,6 +3246,16 @@ static void mp_frame(CPU *c, int64_t host, int in_roam, int world_runs, const ui
         break; }
     case MP_HOST:
         if (mp_dist(g_mp.l.x, g_mp.l.y) > MP_STAY_M){ mp_close(host, RC_LL_GONE, "You drove away: the race is called off"); break; }
+        if (g_mp.l.n < 2){
+            if (!g_mp.alone_at) g_mp.alone_at = host;
+            if (host - g_mp.alone_at > g_mp.alone_us){
+                char t[TAG_DUEL_MAX]; int s = (int)(g_mp.alone_us / 1000000);
+                if (s % 60) snprintf(t, sizeof t, "Nobody joined in %d s: the lobby is closed", s);
+                else snprintf(t, sizeof t, "Nobody joined in %d minutes: the lobby is closed", s / 60);
+                mp_close(host, RC_LL_GONE, t);
+                break;
+            }
+        } else g_mp.alone_at = 0;
         /* players gone from free roam, or away from the start, for MP_AWAY_US (a player who just joined, whose
          * car we may not see yet, or a hitch in its snapshots, is not) */
         for (int i = 1; i < g_mp.l.n; i++){
@@ -3425,6 +3447,10 @@ static void mp_panel(int64_t host, int in_roam){
         js_str(&j, "v", "lobby"); js_str(&j, "st", st[g_mp.st]);
         js_race(&j, g_mp.l.race); js_players(&j, &g_mp.l);
         if (g_mp.st == MP_COUNT){ int64_t s = (g_mp.start_at - host + 999999) / 1000000; js_int(&j, "t", (int)(s < 0 ? 0 : s)); }
+        if (g_mp.st == MP_HOST && g_mp.alone_at){
+            int64_t s = (g_mp.alone_at + g_mp.alone_us - host + 999999) / 1000000;
+            if (s <= 60) js_int(&j, "closes", (int)(s < 0 ? 0 : s));
+        }
     } else if (hud){
         const MpSpot *sp = mp_spot_here();
         MpLobby *l = mp_joinable();
@@ -3557,7 +3583,7 @@ static void mp_card(CPU *c){
     uint32_t self = c->ecx, msg = MR32(c->esp + 4u), obj = MR32(c->esp + 8u);
     int64_t host = roam_plat_now_us();
     if (!O.on || !g_net_ok){ sub_00499c00(c); return; }
-    if (g_mp.st != MP_IDLE && g_mpd.dlg != MPD_CARD && !MR8(self + 0x51u)){
+    if (g_mp.st != MP_IDLE && g_mp.st != MP_TRIP && g_mpd.dlg != MPD_CARD && !MR8(self + 0x51u)){
         /* in a race lobby, Enter (start, or nothing) at an open race's marker
          * engaged the race too: its card goes at once, as Multiplayer closes it */
         rlog("[roam] f=%ld race card: in a race lobby, closed\n", rh_frame());
@@ -3866,6 +3892,9 @@ static void init_once(CPU *c){
     O.test_owncars = env_int("NFSU2_ROAM_TEST_OWNCARS", 0, 0, 1);
     O.test_outside = env_int("NFSU2_ROAM_TEST_OUTSIDE", 0, 0, 1);
     O.max_cars = env_int("NFSU2_ROAM_MAX_CARS", MAX_CARS, 0, MAX_CARS);
+#if MPRACES
+    g_mp.alone_us = (int64_t)env_int("NFSU2_ROAM_LOBBY_ALONE_S", (int)(MP_ALONE_US / 1000000), 5, 3600) * 1000000;
+#endif
     /* at most 30: each snapshot goes to up to 32 friends, and 60 tripled what each of them got from that player
      * (the server's port the limit, nfsu2.xyz 2026-10-22) for little they see: they draw a car 100 ms in the past,
      * between its snapshots */
