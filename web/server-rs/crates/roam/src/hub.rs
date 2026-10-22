@@ -46,6 +46,10 @@ const LOBBY_NEAR_MAX: usize = 24;
 /// a player's ask to join a lobby (its JOIN's copy to the hub) links it with the host first for this long (it asks
 /// again every half second while it waits; once in, it is one of the lobby's players)
 const LOBBY_JOIN_MS: f64 = 6000.0;
+/// a lobby's host, and each player it lists, are this near its start, or the advert is no reason for a link: the host
+/// game drops a player of its lobby who is farther (roam_game.c MP_STAY_M + 10 m), and leaves the lobby itself past
+/// MP_STAY_M (40 m)
+const LOBBY_STAY_M: f64 = 50.0;
 
 /// a link: the player it is to, and since when
 #[derive(Clone, Copy, Debug)]
@@ -792,6 +796,10 @@ fn since_of(slots: &[Option<Player>], a: u32, b: u32, now: f64) -> f64 {
 /// there, whose places count for `stale_ms`) had its links full of nearer players than one who stopped there to join:
 /// that one's link came and went, it heard of the lobby now and then, and its Enter went nowhere.  Into `s.lpairs`, as
 /// places in the room, the host first; the link functions make them first, while both ends have room.
+///
+/// Only for a lobby whose start is where its host is, and for the players it lists who are there too (LOBBY_STAY_M):
+/// an advert says what it likes, and one placed at a crowd, or listing the ids of players anywhere in the room, had
+/// the hub link its sender with all of them first (the third security audit, 2026-10-23).
 fn lobby_pairs(slots: &[Option<Player>], list: &[u32], now: f64, s: &mut Scratch) {
     let Scratch { pos, lpairs, lids, ljoin, lnear, .. } = s;
     lpairs.clear();
@@ -804,8 +812,10 @@ fn lobby_pairs(slots: &[Option<Player>], list: &[u32], now: f64, s: &mut Scratch
     }
     for (i, &slot) in list.iter().enumerate() {
         let Some((l, t)) = player(slots, slot).and_then(|p| p.lobby) else { continue };
-        // open or starting (RC_LS_*), its advert fresh
-        if now - t > LOBBY_STALE_MS || l.state > 1 {
+        // open or starting (RC_LS_*), its advert fresh, its start where its host is
+        let (x, y) = (f64::from(l.x), f64::from(l.y));
+        let there = |j: usize| (pos[j][0] - x).powi(2) + (pos[j][1] - y).powi(2) <= LOBBY_STAY_M * LOBBY_STAY_M;
+        if now - t > LOBBY_STALE_MS || l.state > 1 || !there(i) {
             continue;
         }
         if lids.is_empty() {
@@ -816,13 +826,12 @@ fn lobby_pairs(slots: &[Option<Player>], list: &[u32], now: f64, s: &mut Scratch
             }
         }
         for id in &l.ids[1..(l.n as usize).clamp(1, wire::LOBBY_PLAYERS)] {
-            if let Some(&j) = lids.get(id).filter(|&&j| j != i as u32) {
+            if let Some(&j) = lids.get(id).filter(|&&j| j != i as u32 && there(j as usize)) {
                 lpairs.push((i as u32, j));
             }
         }
         lpairs.extend(ljoin.iter().filter(|&&(id, j)| id == l.id && j != i as u32).map(|&(_, j)| (i as u32, j)));
         lnear.clear();
-        let (x, y) = (f64::from(l.x), f64::from(l.y));
         for (j, &q) in list.iter().enumerate() {
             // in free roam or paused there (RC_ST_ROAM, RC_ST_PAUSED), as the map's
             if j == i || !player(slots, q).is_some_and(|o| matches!(o.status, 2 | 5)) {

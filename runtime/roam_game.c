@@ -3058,6 +3058,7 @@ static void race_name(uint32_t r, char *o, int n){
 #define MP_GONE_US      3500000       /* a lobby, or a player in one, not heard of for this long is gone */
 #define MP_COUNT_US     5000000       /* the countdown */
 #define MP_ASK_US       5000000       /* a JOIN the host does not take in this long is off */
+#define MP_LATE_US      30000000      /* ...but taken this long after it was sent, still in (a connection seconds behind) */
 #define MP_AWAY_US      3000000       /* a player of ours gone from free roam or the start this long is out (a hitch is not) */
 #define MP_ALONE_US     (300ll * 1000000)   /* a lobby nobody joins closes after this (NFSU2_ROAM_LOBBY_ALONE_S: tests) */
 #define MP_STALE_US     3000000       /* in free roam this long with the trip not over: it is over (mprace_end_in_roam) */
@@ -3081,6 +3082,7 @@ static struct {
     int64_t  alone_at;                           /* hosting: since when nobody else is in it (0: someone is) */
     int64_t  roam_at;                            /* on the trip: since when in free roam with it not over (0: not) */
     int64_t  alone_us;                           /* MP_ALONE_US, or the test's */
+    uint32_t asked_host, asked_id; int64_t asked_at;   /* the lobby we last sent a JOIN to (its host, its id), and when */
     char     names[RC_LOBBY_MAX][RC_NAME_MAX + 1];   /* on the trip: the lobby's players' names (their links end in the menus) */
 } g_mp;
 static const char *race_kind(uint32_t r){
@@ -3133,17 +3135,19 @@ static const char *mp_name(uint32_t id){
     const rc_peer *p = mp_peer(id);
     return p && p->name[0] ? p->name : "a player";
 }
-/* one message about our lobby (g_mp.l) to `to` (0: the hub); the session lock is ours */
-static void mp_send(uint8_t op, uint8_t arg, uint32_t to){
+/* one message about lobby l to `to` (0: the hub); the session lock is ours */
+static void mp_send_of(const MpLobby *l, uint8_t op, uint8_t arg, uint32_t to){
     rc_lobby m; memset(&m, 0, sizeof m);
-    m.op = op; m.arg = arg; m.to = to; m.lobby = g_mp.l.id; m.race = MR32(g_mp.l.race + 8u);
-    m.max = g_mp.l.max; m.state = g_mp.l.state; m.n = g_mp.l.n;
-    m.x = (int16_t)(g_mp.l.x < -32767.f ? -32767.f : g_mp.l.x > 32767.f ? 32767.f : g_mp.l.x);
-    m.y = (int16_t)(g_mp.l.y < -32767.f ? -32767.f : g_mp.l.y > 32767.f ? 32767.f : g_mp.l.y);
+    m.op = op; m.arg = arg; m.to = to; m.lobby = l->id; m.race = MR32(l->race + 8u);
+    m.max = l->max; m.state = l->state; m.n = l->n;
+    m.x = (int16_t)(l->x < -32767.f ? -32767.f : l->x > 32767.f ? 32767.f : l->x);
+    m.y = (int16_t)(l->y < -32767.f ? -32767.f : l->y > 32767.f ? 32767.f : l->y);
     if (op == RC_LOBBY_START){ int64_t t = (g_mp.start_at - roam_plat_now_us()) / 1000; m.t_ms = (uint16_t)(t < 0 ? 0 : t > 60000 ? 60000 : t); }
-    memcpy(m.ids, g_mp.l.ids, sizeof m.ids);
+    memcpy(m.ids, l->ids, sizeof m.ids);
     rc_send_lobby(&g_s, &m);
 }
+/* one about our lobby (g_mp.l) */
+static void mp_send(uint8_t op, uint8_t arg, uint32_t to){ mp_send_of(&g_mp.l, op, arg, to); }
 /* the host's lobby to every peer that takes lobbies, and to the hub */
 static void mp_send_all(uint8_t op, uint8_t arg){
     roam_plat_lock();
@@ -3221,6 +3225,7 @@ static int mp_join(int64_t host, MpLobby *l){
     if (g_mp.st != MP_IDLE || !l) return 0;
     if (!mprace_car_ok()){ mp_note(host, MP_NOCAR); return 0; }
     g_mp.l = *l;
+    g_mp.asked_host = l->host; g_mp.asked_id = l->id; g_mp.asked_at = host;
     mp_to(MP_ASKED, host);
     mp_ask_in(); g_mp.tx_at = host;
     return 1;
@@ -3252,9 +3257,12 @@ static void mp_recv(int64_t host, uint32_t from, const rc_lobby *m){
             }
         } else if (g_mp.st == MP_IDLE && m->op == RC_LOBBY_ADVERT && m->state == RC_LS_OPEN && mp_in(l, self)){
             /* our JOIN taken after we gave up asking (a connection seconds behind: on the live server hundreds
-             * were): in, while still at its start; else out again, or the host would keep a player who is not */
-            if (mp_dist(l->x, l->y) <= MP_STAY_M){ g_mp.l = *l; g_mp.joined++; mp_to(MP_IN, host); }
-            else mp_send_one(RC_LOBBY_LEAVE, RC_LL_LEFT, from);
+             * were): in, while still at its start; else out again, or the host would keep a player who is not.
+             * Only the lobby we asked to join, lately: any other that lists us is a host's mistake, or a player
+             * pulling others into its race, and then off on its trip (the third security audit) */
+            int asked = from == g_mp.asked_host && m->lobby == g_mp.asked_id && host - g_mp.asked_at <= MP_LATE_US;
+            if (asked && mp_dist(l->x, l->y) <= MP_STAY_M){ g_mp.asked_host = 0; g_mp.l = *l; g_mp.joined++; mp_to(MP_IN, host); }
+            else { roam_plat_lock(); mp_send_of(l, RC_LOBBY_LEAVE, RC_LL_LEFT, from); roam_plat_unlock(); }   /* about its lobby: ours is none */
         }
         return; }
     case RC_LOBBY_JOIN:
@@ -3295,15 +3303,25 @@ static void lan_name(const char *src, char *o){
     if (!n) snprintf(o, 13, "Player");
 }
 /* the lobby's players' LAN names, the host first: one already taken by an
- * earlier player gets its place's digit at its end (a LAN server takes each
- * name once); every game of the lobby works them out alike */
+ * earlier player gets its place's digit at its end, again while taken ("Bob",
+ * "Bob2", "Bob22"; a LAN server takes each name once).  At 12 characters that
+ * changes nothing (two players named "AAAAAAAAAAA2" hung every game of their
+ * lobby here: the third security audit), so then its last character is the
+ * first of the other digits and letters that is free (there are more than
+ * players).  Every game of the lobby works them out alike. */
+static int lan_taken(char nm[RC_LOBBY_MAX][13], int i){
+    for (int j = 0; j < i; j++) if (!strcasecmp(nm[i], nm[j])) return 1;
+    return 0;
+}
 static void lan_names(char nm[RC_LOBBY_MAX][13]){
+    static const char other[] = "123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
     for (int i = 0; i < g_mp.l.n && i < RC_LOBBY_MAX; i++){
         lan_name(mp_name(g_mp.l.ids[i]), nm[i]);
-        for (int j = 0; j < i; j++) if (!strcasecmp(nm[i], nm[j])){
+        for (int k = 0; k < 12 && lan_taken(nm, i); k++){
             int len = (int)strlen(nm[i]); if (len > 11) len = 11;
-            nm[i][len] = (char)('1' + i); nm[i][len + 1] = 0; j = -1;
+            nm[i][len] = (char)('1' + i); nm[i][len + 1] = 0;
         }
+        for (int k = 0; other[k] && lan_taken(nm, i); k++) nm[i][11] = other[k];   /* 12 characters by now */
     }
 }
 /* the trip, with the lobby's race */
@@ -3625,7 +3643,7 @@ static void mp_panel(int64_t host, int in_roam){
  * card closes as Decline does but for its "declined" mark in the career).
  * A multiplayer-only spot asks its own: the reason it is not open, and
  * Multiplayer (Join) or Cancel.  Both are the game's generic in-game dialog
- * (DialogInterface 0x558750: two buttons, a literal text) over the screen
+ * (DialogInterface 0x558750: two buttons, a printf text) over the screen
  * they come from; the buttons' labels are strings of our own, added to the
  * game's language table (a sorted {hash, text} array, [0x8383D8] x
  * [0x8383D0], which the game only points into its language chunk: 0x5125B0
@@ -3696,15 +3714,24 @@ static void mp_lang(CPU *c){
     MR32(G_LANG) = mem; MR32(G_LANG_N) = o; g_lang_mine = mem;
     rlog("[roam] race lobby labels added to the game's %u strings\n", n);
 }
-/* a two-button question over package `from` (a name in guest memory) */
+/* a two-button question over package `from` (a name in guest memory).  The
+ * dialog's text is a format the game's vsprintf (0x43FBC0) fills in, and ours
+ * has another player's name in it (a name with "%n" or "%999d" in it wrote
+ * over the game's stack: the third security audit).  So it goes in as the
+ * argument of a "%s", and with no % left in it: the game takes the text it
+ * made as a format again later (a joiner whose question named
+ * "Ann%n%s%999d" froze when its trip quit to the main menu) */
 static int mp_ask(CPU *c, uint32_t from, const char *text, int l1, int l2, uint32_t m1, uint32_t m2, uint32_t back){
     if (!g_mpd.str){ uint32_t sz = 0x200u; g_mpd.str = rh_call(c, FN_MALLOC, 0, 0, 1, &sz); }
     if (!g_mpd.str || rd32(G_DLG_ID) || !mp_lang_hash[0]) return 0;
-    uint32_t dl = g_mpd.str, fmt = g_mpd.str + 0x40u;
-    gstr(dl, "IG_GenericDialog_MED.fng", 0x40);
-    gstr(fmt, text, 0x1c0);
-    uint32_t a[9] = { from, dl, mp_lang_hash[l1], mp_lang_hash[l2], m1, m2, back, 0, fmt };
-    rh_call(c, FN_DIALOG2, 0, 0, 9, a);
+    uint32_t dl = g_mpd.str, fmt = g_mpd.str + 0x38u, txt = g_mpd.str + 0x40u;
+    char plain[0x1c0]; snprintf(plain, sizeof plain, "%s", text);
+    for (char *p = plain; *p; p++) if (*p == '%') *p = '?';
+    gstr(dl, "IG_GenericDialog_MED.fng", 0x38);
+    gstr(fmt, "%s", 8);
+    gstr(txt, plain, 0x1c0);
+    uint32_t a[10] = { from, dl, mp_lang_hash[l1], mp_lang_hash[l2], m1, m2, back, 0, fmt, txt };
+    rh_call(c, FN_DIALOG2, 0, 0, 10, a);
     g_mpd.asked++;
     return rd32(G_DLG_ID) != 0;
 }
@@ -4782,6 +4809,22 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
         }
         char tx[TAG_DUEL_MAX];
         if (mp_line(roam_plat_now_us(), tx, sizeof tx)) rlog("[roam]   the line at the top: %s\n", tx);   /* (when the HUD is up) */
+        return 1;
+    }
+    if (!strcasecmp(sub, "pull")){
+        /* "mp pull": hosting, our advert lists every linked peer that takes lobbies, as though each had asked to join:
+         * what a player's game does with an advert that lists it unasked (it leaves: mp_recv) */
+        int n0 = g_mp.l.n;
+        if (g_mp.st == MP_HOST){
+            roam_plat_lock();
+            for (int i = 0; i < RC_TABLE && g_mp.l.n < g_mp.l.max; i++){
+                const rc_peer *p = &g_s.peer[i];
+                if (p->state == RC_PS_EST && p->lobbies && !mp_in(&g_mp.l, p->id)){ g_mp.away[g_mp.l.n] = 0; g_mp.l.ids[g_mp.l.n++] = p->id; }
+            }
+            roam_plat_unlock();
+            mp_send_all(RC_LOBBY_ADVERT, 0); g_mp.tx_at = roam_plat_now_us();
+        }
+        rlog("[roam] f=%ld mp pull: %s, %d players listed (were %d)\n", f, mp_st[g_mp.st], g_mp.l.n, n0);
         return 1;
     }
     if (!strcasecmp(sub, "ui")){
