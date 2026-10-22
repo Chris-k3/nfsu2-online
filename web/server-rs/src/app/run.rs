@@ -362,10 +362,12 @@ pub async fn run(o: Options, cores: usize) {
             Some(v) => {
                 let vo = v.store.options();
                 format!(
-                    "keyphrase saves (/vault) in {}, up to {} (new keyphrases until {}); one unused for two years goes",
+                    "keyphrase saves (/vault) in {}, up to {} (new keyphrases until {}, {} a day at most); one unused for \
+                     two years goes",
                     vo.dir.display(),
                     size(vo.max_bytes),
-                    size(vo.new_until)
+                    size(vo.new_until),
+                    vo.new_per_day
                 )
             }
             None => "no keyphrase saves (--vault-gb 0)".into(),
@@ -382,17 +384,27 @@ pub async fn run(o: Options, cores: usize) {
     }
     lines.push("  access    : none: whoever reaches this server may play (the firewall decides who that is)".into());
     log::line(&lines.join("\n"));
-    // keyphrase saves: counted (the caps wait for it) and swept now (its line after the start-up lines), then daily
+    // keyphrase saves: counted (the caps wait for it) and swept now (its line after the start-up lines), then daily; a
+    // count that stopped is tried again in ten minutes, not a day (until one ends, the caps wait)
     if let Some(v) = vault {
         tokio::spawn(async move {
             loop {
                 let (t0, st) = (std::time::Instant::now(), v.clone());
-                match tokio::task::spawn_blocking(move || st.sweep(nfsu2_util::now_ms())).await {
-                    Ok(Ok(s)) => log::line(&vault_line(&s, v.options().max_bytes, t0.elapsed().as_secs_f64())),
-                    Ok(Err(e)) => log::error(&format!("[vault] the count of the keyphrase saves stopped: {e}")),
-                    Err(e) => log::error(&format!("[vault] the count of the keyphrase saves stopped: {e}")),
-                }
-                tokio::time::sleep(VAULT_SWEEP_EVERY).await;
+                let failed = match tokio::task::spawn_blocking(move || st.sweep(nfsu2_util::now_ms())).await {
+                    Ok(Ok(s)) => {
+                        log::line(&vault_line(&s, v.options().max_bytes, t0.elapsed().as_secs_f64()));
+                        false
+                    }
+                    Ok(Err(e)) => {
+                        log::error(&format!("[vault] the count of the keyphrase saves stopped: {e}"));
+                        true
+                    }
+                    Err(e) => {
+                        log::error(&format!("[vault] the count of the keyphrase saves stopped: {e}"));
+                        true
+                    }
+                };
+                tokio::time::sleep(if failed { Duration::from_secs(600) } else { VAULT_SWEEP_EVERY }).await;
             }
         });
     }

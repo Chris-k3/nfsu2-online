@@ -156,6 +156,7 @@ function remoteOf(r: Response): Remote | null {
 function failure(r: Response): VaultError {
   return new VaultError(r.status === 429 ? 'the server asks this address to wait a minute (too many requests)'
     : r.status === 507 ? 'the server has no room for more saves now'
+    : r.status === 503 ? 'the server takes no more new keyphrases for now: try again in an hour'
     : r.status === 413 ? 'these saves are larger than the server takes'
     : `the server answered ${r.status}`);
 }

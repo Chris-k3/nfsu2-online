@@ -155,6 +155,13 @@ sees a keyphrase, a key or a save, and its files name no player.
   day; 60 saves, then one every 2 s; 60 loads, then one a second; and 30 loads of keyphrases there are not, then 30
   an hour, so nobody learns anything by guessing. A version is at most 256 KB. More gets 429 (or 413, or 507 when the
   room is full).
+- **What all clients may do:** new keyphrases come at most as many a day as would fill the room in 30 days if each held
+  the most it can (two versions of 256 KB), 2000 a day at least (50 GB: about 2,800; 140 GB: about 7,900; the start-up
+  line says), a quarter of that at once; more gets 503 and the console a line `[vault] refused a new keyphrase:
+  today's N are taken`. Without it, anyone with enough addresses could fill the room within days, and keep every new
+  player out for the two years the files stay. Saves of the keyphrases already there never wait for it.
+- **The disk:** any save that would grow a file stops (507, `[vault] refused a save: the disk has less than ...`)
+  while the disk under the state folder has less than 2 GB or 100,000 inodes free, whatever `NFSU2_VAULT_GB` says.
 - **Backups:** copy `vault/` while the server runs: each file is replaced whole, by a rename. Without the folder the
   players' copies on the server are gone; their browsers keep their own.
 

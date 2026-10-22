@@ -11,7 +11,8 @@
 //! - `PUT /vault` with `If-None-Match: *` (a new keyphrase) or `If-Match: "<rev>"` (the version the page has): 201 or
 //!   200 with the new ETag and `x-vault-saved`; 412 when that does not hold, with the current ETag and
 //!   `x-vault-saved` (none: no such keyphrase); 428 with neither; 413 past 256 KB; 507 when the server's room for them
-//!   is full.
+//!   is full, or its disk nearly; 503 (Retry-After) when the new keyphrases of the day, all clients together, are
+//!   taken (crates/vault, Limits).
 //! - `DELETE /vault`: the keyphrase and both its versions go (404: none).
 //!
 //! Per client (its budget key, and twice that per site as `Rate` does): 60 reads, then one a second; 60 writes, then
@@ -199,6 +200,34 @@ impl App {
                             1,
                         );
                         (507, "The server has no room for more saves")
+                    }
+                    Put::DiskLow => {
+                        let o = v.store.options();
+                        log::limited(
+                            "vault",
+                            "disk",
+                            "",
+                            &format!(
+                                "[vault] refused a save: the disk has less than {} bytes or {} files free",
+                                o.min_free, o.min_free_files
+                            ),
+                            1,
+                        );
+                        (507, "The server has no room for more saves")
+                    }
+                    Put::Busy => {
+                        log::limited(
+                            "vault",
+                            "busy",
+                            "",
+                            &format!(
+                                "[vault] refused a new keyphrase: today's {} are taken (all clients together)",
+                                v.store.options().new_per_day
+                            ),
+                            1,
+                        );
+                        h.set("retry-after", "3600");
+                        (503, "The server takes no more new keyphrases for now")
                     }
                 };
                 let body = format!("{text}\n");

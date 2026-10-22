@@ -133,6 +133,81 @@ fn the_caps_count_disk_blocks_once_counted() {
 }
 
 #[test]
+fn new_keyphrases_come_at_most_new_per_day() {
+    // 8 a day: 2 at once, then one every 3 hours; saves of the keyphrases there never wait
+    let (_d, v) = vault(|o| o.new_per_day = 8);
+    let ids: Vec<Id> = (0..5u8).map(|i| id_of(&[i])).collect();
+    let m0 = saved(v.put(&ids[0], Cond::New, b"x", T0).unwrap());
+    saved(v.put(&ids[1], Cond::New, b"x", T0).unwrap());
+    assert_eq!(v.put(&ids[2], Cond::New, b"x", T0 + HOUR).unwrap(), Put::Busy);
+    assert!(!file(&v, &ids[2]).exists());
+    saved(v.put(&ids[0], Cond::Rev(m0.cur.rev), b"bigger", T0 + HOUR).unwrap());
+    saved(v.put(&ids[2], Cond::New, b"x", T0 + 3 * HOUR).unwrap());
+    assert_eq!(v.put(&ids[3], Cond::New, b"x", T0 + 3 * HOUR).unwrap(), Put::Busy);
+    // a day later: 2 at once again, not 8
+    saved(v.put(&ids[3], Cond::New, b"x", T0 + 30 * HOUR).unwrap());
+    saved(v.put(&ids[4], Cond::New, b"x", T0 + 30 * HOUR).unwrap());
+    assert_eq!(v.put(&id_of(b"five"), Cond::New, b"x", T0 + 30 * HOUR).unwrap(), Put::Busy);
+    // what `sized` gives: as many a day as fill the room in FILL_DAYS at the most each can hold, 2000 at least
+    let o = VaultOptions::sized(PathBuf::from("/x"), 140.0);
+    assert_eq!(o.new_per_day, 126_000_000_000 / disk(HEAD as u64 + 2 * (256 << 10)) / FILL_DAYS);
+    assert_eq!(VaultOptions::sized(PathBuf::from("/x"), 1.0).new_per_day, 2000);
+}
+
+#[test]
+fn a_nearly_full_disk_takes_nothing_that_grows() {
+    let (d, v) = vault(|_| {});
+    let id = id_of(b"a");
+    let mut m = saved(v.put(&id, Cond::New, b"four", T0).unwrap());
+    drop(v);
+    for low in [|o: &mut VaultOptions| o.min_free = u64::MAX, |o: &mut VaultOptions| o.min_free_files = u64::MAX] {
+        let mut o = VaultOptions::sized(d.path().join("vault"), 1.0);
+        low(&mut o);
+        let v = Vault::open(o).unwrap();
+        assert_eq!(v.put(&id_of(b"b"), Cond::New, b"x", T0).unwrap(), Put::DiskLow);
+        assert_eq!(v.put(&id, Cond::Rev(m.cur.rev), &vec![1u8; 2 * BLOCK as usize], T0).unwrap(), Put::DiskLow);
+        // the same blocks, or fewer: a save goes on, and so do reads and deletes
+        m = saved(v.put(&id, Cond::Rev(m.cur.rev), b"same", T0).unwrap());
+        assert_eq!(v.get(&id, Want::Current, T0).unwrap().unwrap(), (m, b"same".to_vec()));
+    }
+    let v = Vault::open(VaultOptions::sized(d.path().join("vault"), 1.0)).unwrap();
+    assert!(v.disk_ok(), "a test machine's disk has 2 GB free");
+    assert!(v.delete(&id).unwrap());
+}
+
+#[test]
+fn the_count_passes_over_files_that_go_while_it_runs() {
+    // saves (a temporary file renamed over the old) and deletes next to sweeps: every sweep ends with a count
+    let (_d, v) = vault(|_| {});
+    let v = std::sync::Arc::new(v);
+    for i in 0..400u32 {
+        v.put(&id_of(&i.to_le_bytes()), Cond::New, b"x", T0).unwrap();
+    }
+    let stop = std::sync::Arc::new(AtomicBool::new(false));
+    let churn = {
+        let (v, stop) = (v.clone(), stop.clone());
+        std::thread::spawn(move || {
+            let mut n = 0u32;
+            while !stop.load(Ordering::Relaxed) {
+                let id = id_of(&(1000 + n % 64).to_le_bytes());
+                match v.meta(&id, T0).unwrap() {
+                    Some(_) if n % 3 == 0 => assert!(v.delete(&id).unwrap()),
+                    Some(m) => drop(v.put(&id, Cond::Rev(m.cur.rev), &n.to_le_bytes(), T0).unwrap()),
+                    None => drop(v.put(&id, Cond::New, b"x", T0).unwrap()),
+                }
+                n += 1;
+            }
+        })
+    };
+    for _ in 0..200 {
+        let s = v.sweep(T0).expect("a count");
+        assert!(s.keyphrases >= 400);
+    }
+    stop.store(true, Ordering::Relaxed);
+    churn.join().unwrap();
+}
+
+#[test]
 fn the_sweep_removes_the_unused_but_the_kept() {
     let (_d, v) = vault(|_| {});
     let now = T0 + 800 * DAY_MS;

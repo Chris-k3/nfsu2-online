@@ -227,7 +227,7 @@ async fn the_binary_starts_counts_its_players_and_stops() {
     assert!(rust.modes.1 == 0 || rust.modes.1 == 0o700, "the online folder is private");
     // keyphrase saves: their folder (private too), counted at the start
     assert!(
-        rust.startup.contains(&"  saves     : keyphrase saves (/vault) in <state>/vault, up to 50.00 GB (new keyphrases until 45.00 GB); one unused for two years goes".to_string()),
+        rust.startup.contains(&"  saves     : keyphrase saves (/vault) in <state>/vault, up to 50.00 GB (new keyphrases until 45.00 GB, 2838 a day at most); one unused for two years goes".to_string()),
         "{:?}",
         rust.startup
     );

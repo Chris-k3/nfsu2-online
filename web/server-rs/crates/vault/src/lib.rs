@@ -36,12 +36,21 @@
 //!   6-14 KB, so that is dozens of profiles);
 //! - new keyphrases stop once all of them take [`VaultOptions::new_until`] bytes, every write that grows a file at
 //!   [`VaultOptions::max_bytes`] (counted in 4 KB blocks, as the disk takes them); what is kept stays readable;
+//! - new keyphrases come at most [`VaultOptions::new_per_day`] a day from all clients together, a quarter of that at
+//!   once: as many as fill the room in [`FILL_DAYS`] when each takes the most it can (both versions at `max_body`),
+//!   2000 at least.  The per-client limits alone let anyone with enough addresses fill the room within days, and
+//!   whatever fills it stays two years (the third security audit, 2026-10-23); so a flood now takes a month, and
+//!   leaves a line a day in the log;
+//! - every write that grows a file stops while the disk under the folder has less than [`VaultOptions::min_free`]
+//!   bytes free, or fewer than [`VaultOptions::min_free_files`] files (inodes): the caps count bytes, the room given
+//!   may be more than the disk has, and many small files run a disk out of inodes before its bytes;
 //! - a keyphrase unused for [`VaultOptions::unused_ms`] (two years) goes at the next sweep, unless its flags say
 //!   [`KEPT`] (an operator's choice for one keyphrase: kept however long it goes unused).
 //!
 //! The totals behind the caps are counted by [`Vault::sweep`] (at the start, then daily) and kept up to date by each
-//! write; until the first count ends no cap applies.  A write during a sweep may be missed by its count: the next
-//! one sets it right.
+//! write; until the first count ends only the day's new keyphrases and the free disk limit them.  A write during a
+//! sweep may be missed by its count: the next one sets it right; a file that goes while the sweep looks at it (a
+//! save's rename, a delete) is passed over.
 //!
 //! Every call blocks (file I/O): the server makes them on its blocking threads.  Calls for one keyphrase take turns
 //! (a lock per id, of 256 stripes); the others run side by side.
@@ -64,6 +73,8 @@ pub const DAY_MS: i64 = 86_400_000;
 pub const BLOCK: u64 = 4096;
 /// a temporary file that was never renamed (the server stopped mid-write) goes at the first sweep an hour after
 const STALE_TMP_MS: i64 = 3_600_000;
+/// the days new keyphrases take at the least to fill the room, each at the most it can hold (`sized`)
+pub const FILL_DAYS: u64 = 30;
 
 pub struct VaultOptions {
     /// the folder (made 0700)
@@ -74,15 +85,33 @@ pub struct VaultOptions {
     pub max_bytes: u64,
     /// new keyphrases stop at this many bytes in all
     pub new_until: u64,
+    /// new keyphrases a day at most, from all clients together (a quarter of it at once)
+    pub new_per_day: u64,
+    /// every write that grows a file stops while the disk has fewer bytes free than this...
+    pub min_free: u64,
+    /// ...or fewer files (inodes)
+    pub min_free_files: u64,
     /// a keyphrase unused this long goes (but a [`KEPT`] one)
     pub unused_ms: i64,
 }
 
 impl VaultOptions {
-    /// `gb` gigabytes in all, new keyphrases until 90 % of it, 256 KB a version, two years unused
+    /// `gb` gigabytes in all, new keyphrases until 90 % of it and at most what fills that in [`FILL_DAYS`], 256 KB a
+    /// version, 2 GB and 100,000 files kept free on the disk, two years unused
     pub fn sized(dir: PathBuf, gb: f64) -> VaultOptions {
         let max_bytes = (gb * 1e9) as u64;
-        VaultOptions { dir, max_body: 256 << 10, max_bytes, new_until: max_bytes / 10 * 9, unused_ms: 730 * DAY_MS }
+        let (max_body, new_until) = (256 << 10, max_bytes / 10 * 9);
+        let biggest = disk(HEAD as u64 + 2 * max_body as u64);
+        VaultOptions {
+            dir,
+            max_body: max_body as usize,
+            max_bytes,
+            new_until,
+            new_per_day: (new_until / biggest / FILL_DAYS).max(2000),
+            min_free: 2_000_000_000,
+            min_free_files: 100_000,
+            unused_ms: 730 * DAY_MS,
+        }
     }
 }
 
@@ -157,6 +186,10 @@ pub enum Put {
     TooLarge,
     /// the caps: no new keyphrase, or no more bytes
     Full,
+    /// the disk is nearly full (`min_free`, `min_free_files`): nothing that grows a file
+    DiskLow,
+    /// the day's new keyphrases are taken (`new_per_day`): a new one later
+    Busy,
 }
 
 /// What a sweep found, and did.
@@ -177,6 +210,8 @@ pub struct Vault {
     count: AtomicI64,
     counted: AtomicBool,
     seq: AtomicU64,
+    /// the new keyphrases there is room for now (`new_per_day`'s bucket) and when it was last filled up (ms)
+    news: Mutex<(f64, i64)>,
 }
 
 fn u32_at(b: &[u8], i: usize) -> u32 {
@@ -247,13 +282,44 @@ impl Vault {
     pub fn open(o: VaultOptions) -> io::Result<Vault> {
         mkdir(&o.dir)?;
         Ok(Vault {
-            o,
             locks: (0..256).map(|_| Mutex::new(())).collect(),
             bytes: AtomicI64::new(0),
             count: AtomicI64::new(0),
             counted: AtomicBool::new(false),
             seq: AtomicU64::new(0),
+            news: Mutex::new((Self::news_burst(&o), 0)),
+            o,
         })
+    }
+
+    /// the new keyphrases there may be at once: a quarter of a day's
+    fn news_burst(o: &VaultOptions) -> f64 {
+        (o.new_per_day as f64 / 4.0).max(1.0)
+    }
+
+    /// one new keyphrase out of the day's, if there is one left (the bucket refills at new_per_day a day)
+    fn take_new(&self, now: i64) -> bool {
+        let mut q = self.news.lock();
+        let (v, t) = *q;
+        let refill = if t == 0 { 0.0 } else { (now - t).max(0) as f64 * self.o.new_per_day as f64 / DAY_MS as f64 };
+        let v = (v + refill).min(Self::news_burst(&self.o));
+        let ok = v >= 1.0;
+        *q = (if ok { v - 1.0 } else { v }, now.max(t));
+        ok
+    }
+
+    /// the disk under the folder has `min_free` bytes and `min_free_files` files free (what an unprivileged writer
+    /// may take); true when statvfs cannot tell, or the filesystem counts no files
+    fn disk_ok(&self) -> bool {
+        use std::os::unix::ffi::OsStrExt;
+        let Ok(path) = std::ffi::CString::new(self.o.dir.as_os_str().as_bytes()) else { return true };
+        // SAFETY: statvfs writes the struct it is given, and only that; the path is NUL-terminated
+        let mut s: libc::statvfs = unsafe { std::mem::zeroed() };
+        if unsafe { libc::statvfs(path.as_ptr(), &mut s) } != 0 {
+            return true;
+        }
+        let free = s.f_bavail as u64 * s.f_frsize as u64;
+        free >= self.o.min_free && (s.f_files == 0 || s.f_favail as u64 >= self.o.min_free_files)
     }
 
     pub fn options(&self) -> &VaultOptions {
@@ -385,6 +451,12 @@ impl Vault {
                 return Ok(Put::Full);
             }
         }
+        if grows > 0 && !self.disk_ok() {
+            return Ok(Put::DiskLow);
+        }
+        if old.is_none() && !self.take_new(now) {
+            return Ok(Put::Busy);
+        }
         self.write(&p, &bytes)?;
         self.bytes.fetch_add(grows, Ordering::Relaxed);
         if old.is_none() {
@@ -452,9 +524,21 @@ impl Vault {
             if name.len() != 3 || !shard.file_type()?.is_dir() {
                 continue;
             }
-            for f in fs::read_dir(shard.path())? {
+            let files = match fs::read_dir(shard.path()) {
+                Ok(r) => r,
+                Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
+                Err(e) => return Err(e),
+            };
+            for f in files {
                 let f = f?;
-                let (name, m) = (f.file_name().to_string_lossy().into_owned(), f.metadata()?);
+                // a file that went since it was listed (a save's temporary file renamed, a delete): passed over, not
+                // the end of the count (which left the caps off until the next day's)
+                let m = match f.metadata() {
+                    Ok(m) => m,
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
+                    Err(e) => return Err(e),
+                };
+                let name = f.file_name().to_string_lossy().into_owned();
                 if !m.is_file() {
                     continue;
                 }
