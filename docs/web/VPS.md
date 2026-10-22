@@ -82,6 +82,18 @@ cd /srv/nfsu2 && docker compose up -d && docker compose logs -f server
 `cd /srv/nfsu2 && docker compose pull && docker compose up -d`. The players' browsers notice the new module by its
 ETag and download it once. The module and the image must come from the same commit: [The image](#the-image).
 
+Or all of it in one command from your own machine, with the folder that holds the new `nfsu2.wasm` and `nfsu2.json`:
+
+```sh
+web/deploy/release.sh root@<vps> <folder>              # the module, and the image of its commit (sha-<rev>)
+web/deploy/release.sh root@<vps> <folder> <commit>     # the image of a later commit that changed only the page or server
+web/deploy/release.sh root@<vps> --undo                # back to the module and image before
+```
+
+It checks that the registry has the image (CI cancels a commit's image when a newer push comes), copies the module
+into place by renames, sets `NFSU2_IMAGE` in `.env`, restarts only the server and waits until it is healthy; `-n`
+first only says what it would do. `NFSU2_DIR` names another folder than `/srv/nfsu2`.
+
 **When something is wrong:**
 
 | What you see | Why |
