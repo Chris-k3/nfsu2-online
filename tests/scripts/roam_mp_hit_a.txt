@@ -6,10 +6,12 @@
 #   node web/tools/roam-pair.mjs --a Al:roam_mp_hit_a.txt:A_UP=90 \
 #        --b Bo:roam_mp_hit_b.txt:B_WAIT=1140,B_UP=95 --watch 900
 # B_UP=95 lets go just after the hit, B_UP=240 keeps pushing A for 2.4 s.
-# A hit is shared (roam_game.c roam_game_contact): B went 10.3 -> 5.6 m/s and
-# A 0 -> 4-5 m/s ("hit with ... kept 50 %" lines); NFSU2_ROAM_HIT_SHARE=100
-# on both is the game's own response to a car without physics (B stopped
-# dead, A thrown to 7-10 m/s).
+# A hit is shared by the cars' weights (roam_game.c roam_game_contact; two
+# 350Z here): B went 10.3 -> 5.6 m/s and A 0 -> 4-5 m/s ("hit with ... kept
+# 50 %" lines); NFSU2_ROAM_HIT_SHARE=100 on both is the game's own response
+# to a car without physics (B stopped dead, A thrown to 7-10 m/s).  Other
+# weights: NFSU2_ROAM_TEST_MASS=2900 on one instance and _FMASS=2900 on the
+# other.  At speed: roam_mp_hit_fast_a/b.txt.
 0     tapuntil RETURN MC_Background.fng 120 4000
 +120  tap LEFT
 +30   tap RETURN

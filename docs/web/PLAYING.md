@@ -198,11 +198,13 @@ Good to know:
 - **Solid cars:** you collide with the other players' cars (Online, More online settings,
   Solid cars; off: you drive through them, and they through yours). A car that appears on top of yours, at a garage or
   after a jump, lets you through until you are apart. Each player's own game moves their car: a car you hit is pushed
-  in its owner's game, and moves on your screen as it does there. A hit is shared between the two cars as between two
-  cars of the same weight: driving into a car that stands, you go on at about half your speed and it leaves at about
-  the other half (it used to stop you dead and fly off at your full speed). You also drive through a car whose player
-  is paused (or you are), one that has stood still for a minute (or yours has), and any car within 20 m of a shop's,
-  the garage's or the car lot's door, so a crowd can't wall off an entrance. The same goes for the start of an event
+  in its owner's game, and moves on your screen as it does there. A hit is shared between the two cars by their
+  models' weight (0.96 t for the Peugeot 106 to 2.9 t for the Hummer): driving into a standing car of your weight,
+  you go on at about half your speed and it leaves at about the other half, where you used to stop dead and it flew
+  off faster than you came; driving a 240SX into a standing Hummer, you keep about a quarter of your speed and it
+  leaves at about a third of it. You also drive through a car whose player is paused (or you are), one that has stood
+  still for a minute (or yours has), and any car within 20 m of a shop's, the garage's or the car lot's door, so a
+  crowd can't wall off an entrance. The same goes for the start of an event
   that is open in your career (a race, or one of the stage's other events): within 20 m of it you drive through every
   car, and every car through yours, so nobody blocks it; for players who don't have that event it is an ordinary
   spot. A player on an older version doesn't know about your events or your Solid cars setting, and collides with

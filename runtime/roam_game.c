@@ -302,7 +302,9 @@ static struct {
     int on, test, collide, max_cars, rate, delay_ms, extrap_ms, carpool_kb, labels, spawn_m;
     int test_owncars;                         /* NFSU2_ROAM_TEST_OWNCARS (test aid): friends only in cars of our own (slots 3 and up) */
     int test_outside;                         /* NFSU2_ROAM_TEST_OUTSIDE (test aid): every car of our own outside the car index */
-    int hit_share;                            /* NFSU2_ROAM_HIT_SHARE: % of a hit with a friend's car the player's car keeps (roam_game_contact) */
+    int hit_share;                            /* NFSU2_ROAM_HIT_SHARE: % of a hit with a friend's car the player's car keeps (roam_game_contact);
+                                                 -1: by the two cars' weights (car_mass), 100: the game's own (the whole hit) */
+    int test_mass, test_fmass;                /* NFSU2_ROAM_TEST_MASS / _FMASS (test aid, kg): car_mass of the player's car / friends' cars */
     char name[RC_NAME_MAX + 1], room[64];
 } O;
 
@@ -3682,7 +3684,9 @@ static void init_once(CPU *c){
 #endif
     O.labels = env_int("NFSU2_ROAM_LABELS", 1, 0, 1);
     O.spawn_m = env_int("NFSU2_ROAM_SPAWN_M", SPAWN_M, 0, 1000);
-    O.hit_share = env_int("NFSU2_ROAM_HIT_SHARE", 50, 0, 100);
+    O.hit_share = env_int("NFSU2_ROAM_HIT_SHARE", -1, -1, 100);
+    O.test_mass = env_int("NFSU2_ROAM_TEST_MASS", 0, 0, 20000);
+    O.test_fmass = env_int("NFSU2_ROAM_TEST_FMASS", 0, 0, 20000);
     O.test_owncars = env_int("NFSU2_ROAM_TEST_OWNCARS", 0, 0, 1);
     O.test_outside = env_int("NFSU2_ROAM_TEST_OUTSIDE", 0, 0, 1);
     O.max_cars = env_int("NFSU2_ROAM_MAX_CARS", MAX_CARS, 0, MAX_CARS);
@@ -4773,15 +4777,36 @@ int roam_game_inert(uint32_t car, uint32_t mode, uint32_t from){
  * from which each step works the velocity and the spin out again, and
  * those (+0xA0, +0xC0: 0x593B70, 0x593BD0), which the car has too (+0x70,
  * +0x110).  Measured by what the pair changed; a velocity set without the
- * momentum was gone the next step (the car went on at 0.1 m/s). */
-enum { CS_V = 6, CS_W = 9 };                  /* st[]: momentum, angular momentum, velocity, spin */
+ * momentum was gone the next step (the car went on at 0.1 m/s).  The pair
+ * sets the car's speeds too (+0x42C, +0x430: the speedometer's and the
+ * engine sound's), which the next step works out again: left alone they
+ * showed the game's whole hit for a frame (32 -> -3.5 -> 14 m/s). */
+enum { CS_V = 6, CS_W = 9, CS_S = 12, CS_N = 14 };   /* st[]: momentum, angular momentum, velocity, spin, the 2 speeds */
 static const uint32_t g_cs_off[4] = { 0x70u, 0x80u, 0xa0u, 0xc0u };
-static void contact_get(uint32_t rb, float *st){
+static void contact_get(uint32_t car, uint32_t rb, float *st){
     for (int j = 0; j < 4; j++) rd3(rb + g_cs_off[j], st + 3 * j);
+    st[CS_S] = MRF32(car + 0x42cu); st[CS_S + 1] = MRF32(car + 0x430u);
 }
 static void contact_set(uint32_t car, uint32_t rb, const float *st){
     for (int j = 0; j < 4; j++) for (int i = 0; i < 3; i++) MRF32(rb + g_cs_off[j] + 4u * (uint32_t)i) = st[3 * j + i];
     for (int i = 0; i < 3; i++){ MRF32(car + 0x70u + 4u * (uint32_t)i) = st[CS_V + i]; MRF32(car + 0x110u + 4u * (uint32_t)i) = st[CS_W + i]; }
+    MRF32(car + 0x42cu) = st[CS_S]; MRF32(car + 0x430u) = st[CS_S + 1];
+}
+/* A car's weight for sharing a hit (tonnes): its model's (CarTypeInfo,
+ * car +0xC, at +0x220: the physics block the ride's physics pass 0x5AC4F0
+ * copies from +0x110, the mass first in its rigid body's part at +0x110,
+ * 0x59B940), from 0.96 t (Peugeot 106) to 2.9 t (Hummer).  Not the mass
+ * the car's physics has: the weight upgrade takes up to 20 % off that
+ * (0x5A6B50), a friend's car has none (its ride skips the physics pass),
+ * and both games must weigh both cars alike for their shares to add up to
+ * the whole hit.  NFSU2_ROAM_TEST_MASS / _FMASS (kg, test aid): the
+ * player's car / friends' cars weigh that instead. */
+static float car_mass(uint32_t car, int mine){
+    int kg = mine ? O.test_mass : O.test_fmass;
+    if (kg > 0) return (float)kg / 1000.f;
+    uint32_t types = rd32(G_CARTYPES), ti = ok(car, 0x10) ? rd32(car + 0xcu) : 0;
+    float m = types && ti >= types && (ti - types) % 0x890u == 0 && (ti - types) / 0x890u < 64u && ok(ti, 0x224) ? MRF32(ti + 0x220u) : 0.f;
+    return m > 0.3f && m < 20.f ? m : 1.4f;
 }
 /* a push on a friend's car, held until their game reports it (push_pose) */
 static void push_add(Slot *s, const float *v, int64_t t){
@@ -4801,14 +4826,19 @@ static void push_add(Slot *s, const float *v, int64_t t){
  * network delay: a car driven at 10.6 m/s into a standing one stopped dead
  * in one step (0.1 m/s) on its screen, and the standing one left at 10 m/s
  * within three on its own, where two equal cars both go on at about 5.  So
- * the player's car keeps O.hit_share of the change the game gave its motion
- * (contact_set), and the friend's car takes the rest of the momentum (equal
- * masses) as a push on the car as drawn here, from the next frame until the
- * friend's own report of the hit comes (push_pose).  Each game does the same
- * with its own car, so the hit is shared on both screens: the same ram now
- * left the two at 5.6 and 4.4 m/s. */
+ * the player's car keeps the friend's car's part of the two cars' weight
+ * (car_mass; O.hit_share % instead when set) of the change the game gave
+ * its motion (contact_set), and the friend's car takes the rest of the
+ * momentum as a push on the car as drawn here, from the next frame until
+ * the friend's own report of the hit comes (push_pose): against a car of
+ * the same weight half each, a 106 against a Hummer 75 and 25 %.  Each game
+ * does the same with its own car, so the hit is shared on both screens: the
+ * same ram now left the two at 5.6 and 4.4 m/s; at 32 m/s into a standing
+ * car (the game: the driver back at -3.5, the other off at 35.5) 14.3 and
+ * 18.2, 7.6 and 10.5 into one of 2.9 t; head on, 32 against 18.4 m/s, both
+ * on at 4.0 and 9.3 (the game: thrown back at 23 and 37 m/s). */
 void roam_game_contact(CPU *c, void (*orig)(CPU *)){
-    uint32_t pair = c->ecx, me = O.on && O.collide && O.hit_share < 100 ? player_car() : 0;
+    uint32_t pair = c->ecx, me = O.on && O.collide && O.hit_share != 100 ? player_car() : 0;
     uint32_t mb = ok(me, 0x40) ? rd32(me + 0x3cu) : 0;
     uint32_t a = mb && ok(pair, 0x14) ? MR32(pair + 0xcu) : 0, b = a ? MR32(pair + 0x10u) : 0;
     int k = -1;
@@ -4820,8 +4850,8 @@ void roam_game_contact(CPU *c, void (*orig)(CPU *)){
     uint32_t rb = k >= 0 && ok(mb, 0x6c) && MR32(mb + 0x5cu) ? rd32(mb + 0x68u) : 0;
     if (!ok(rb, 0xcc)){ orig(c); return; }
     Slot *s = &g_sl[k];
-    float st0[12], st[12];
-    contact_get(rb, st0);
+    float st0[CS_N], st[CS_N];
+    contact_get(me, rb, st0);
     orig(c);
     if (s->hits && s->hit_step == g_step){
         /* the pair again in the same step's next pass: the friend's car
@@ -4834,21 +4864,22 @@ void roam_game_contact(CPU *c, void (*orig)(CPU *)){
         return;
     }
     s->hit_step = g_step;
-    contact_get(rb, st);
-    float keep = (float)O.hit_share / 100.f, dv[3], push[3], d2 = 0;
-    for (int i = 0; i < 12; i++) if (!__builtin_isfinite(st[i])) return;
+    contact_get(me, rb, st);
+    float mm = car_mass(me, 1), mf = car_mass(s->car, 0);
+    float keep = O.hit_share >= 0 ? (float)O.hit_share / 100.f : mf / (mm + mf), dv[3], push[3], d2 = 0;
+    for (int i = 0; i < CS_N; i++) if (!__builtin_isfinite(st[i])) return;
     for (int i = 0; i < 3; i++){ dv[i] = st[CS_V + i] - st0[CS_V + i]; d2 += dv[i] * dv[i]; push[i] = -(1.f - keep) * dv[i]; }
-    for (int i = 0; i < 12; i++) st[i] = st0[i] + keep * (st[i] - st0[i]);
+    for (int i = 0; i < CS_N; i++) st[i] = st0[i] + keep * (st[i] - st0[i]);
     contact_set(me, rb, st);
     float wdt = MRF32(G_WORLDDT);                                   /* the hit is a step after the car was drawn at s->rt */
     push_add(s, push, s->rt + (__builtin_isfinite(wdt) && wdt > 0.f && wdt < 1.f ? (int64_t)(wdt * 1e6f) : 0));
     float d = rc_sqrtf(d2);
     if (d > s->hit_max) s->hit_max = d;
     if (++s->hits <= 8 || d > 4.f)
-        rlog("[roam] f=%ld hit with %s's car: the game changed my car's velocity by %.2f m/s (%.2f %.2f %.2f), kept %d %%; "
-             "my velocity now %.2f %.2f %.2f, the push on theirs %.2f %.2f %.2f\n", rh_frame(), s->name, (double)d,
-             (double)dv[0], (double)dv[1], (double)dv[2], O.hit_share, (double)st[CS_V], (double)st[CS_V + 1], (double)st[CS_V + 2],
-             (double)s->push_v[0], (double)s->push_v[1], (double)s->push_v[2]);
+        rlog("[roam] f=%ld hit with %s's car: the game changed my car's velocity by %.2f m/s (%.2f %.2f %.2f), kept %.0f %% "
+             "(%.2f t against %.2f t); my velocity now %.2f %.2f %.2f, the push on theirs %.2f %.2f %.2f\n", rh_frame(), s->name, (double)d,
+             (double)dv[0], (double)dv[1], (double)dv[2], (double)keep * 100.0, (double)mm, (double)mf,
+             (double)st[CS_V], (double)st[CS_V + 1], (double)st[CS_V + 2], (double)s->push_v[0], (double)s->push_v[1], (double)s->push_v[2]);
 }
 /* roam.c, 0x42CD60, from the race's end (0x5F8490 -> 0x42EFB0): every car of
  * the World's AI range that is out gets a new goal from its brain (car +0x2C):
