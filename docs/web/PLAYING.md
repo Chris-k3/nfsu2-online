@@ -290,9 +290,11 @@ Good to know:
     behind the same screen, through the main menu and your crib, to where it left free roam, and the panel says your
     place and prize: about a minute for the way out and back.
   - **Your career is not touched:** the race does not count in it, is neither won nor lost there and opens nothing.
-    Only your bank changes: 1st $400, 2nd $300, 3rd $200, 4th $100, nothing for 5th, 6th or a race you left. It goes in
-    at the crib on the way back, and the crib's autosave saves it with your profile (with the game's Save option at
-    Prompt or Off it waits for your next save, as any change in the crib does).
+    Only your bank changes: 1st $400, 2nd $300, 3rd $200, 4th $100, nothing for 5th or 6th. **Quitting the race**
+    (its pause menu's Quit) costs $75, and the lobby's panel says so: the host's quit ends the race for everyone, and in
+    a race of two either player's does. A race that ends under you costs nothing. It goes in or out at the crib on the
+    way back, and the crib's autosave saves it with your profile (with the game's Save option at Prompt or Off it waits
+    for your next save, as any change in the crib does).
   - A race that cannot come together (the host's game gone, nobody else in the game in time) ends the trip: every game
     goes back to free roam by itself and says why. Players on an older version or the Windows plugin see no lobbies.
 - **Rooms:** set the same "Room" to see only some of the players' cars. A room is a filter between players, not

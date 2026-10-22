@@ -13,7 +13,12 @@
  * prize goes into the career's bank: in the crib, after it took its snapshot
  * of the profile and before Return to Explore Mode, whose autosave (the
  * profile changed) then saves it as any money; with the game's autosave off
- * the crib takes no snapshot and saves nothing, as for any money.
+ * the crib takes no snapshot and saves nothing, as for any money.  A player
+ * who quits the race with its pause menu's Quit pays MPRACE_QUIT_FEE out of
+ * the bank there instead (never more than it holds).  A race that ends under
+ * the player (the host's game gone, or in a race of two the other player's:
+ * either one's quit ends it) costs nothing, and a closed tab saves nothing
+ * anyway.
  *
  * It works as the career bot does (career.c): each frame it looks at the
  * screens and does the next step of its goal there -- the race, or, after
@@ -61,6 +66,13 @@
  *    game's 10 s countdown and its KICK of the rest.
  *  - Results: the rows 0x851044 ([0x85105C] of them, entry +4 the car's id,
  *    +8 1 finished) in their order; ours by our car's id (car +0xA).
+ *  - The pause menu's Quit (0x4C2820, a LAN race too: its dialog's text
+ *    LAN_QUIT_TO_MAIN, or OL_UNRANKED_QUIT_SESSION by 0x5F0120) has the Yes
+ *    0x30ED2368, as in free roam; UI_Pause's handler 0x4C2170 (only from its
+ *    vtable, 0x797CB8) runs it at once, or later on 0xE1FDE1D1 when the
+ *    message it held back (+0x13C) is that Yes: 0x4A7CF0, the coordinator's
+ *    end of the race (event 8, 6).  Losing the host is the network code's
+ *    dialog (OL_HOST_LOST, 0x4A0215), not this.
  *  - Leaving LAN: Yes of UI_OLMAIN's "exit LAN mode?" is 0xD05FC3A3 to it
  *    (0x4A0140: the lobby and the server closed, UI_Main).  The others leave
  *    before the host, whose leaving closes its server under them.
@@ -100,6 +112,9 @@ void dispatch_indirect(CPU *c, uint32_t addr);
 #define FN_MAIN_LAN     0x004aede0u   /* cdecl (package, msg, 0, 0, 0): the main menu's LAN */
 #define FN_RESUME       0x00495a30u   /* cdecl (1): Resume Career, from UI_StartCareer */
 #define MSG_QUIT_YES    0x30ed2368u   /* UI_Pause: Quit's Yes */
+#define FN_PAUSE_MSG    0x004c2170u   /* UI_Pause's message handler (thiscall msg, obj, a3, a4; ret 0x10) */
+#define MSG_PAUSE_LATER 0xe1fde1d1u   /* ...the message it acts on later: its +0x13C, the one it held back */
+#define PAUSE_HELD      0x13cu
 #define MSG_BUTTON      0x0c407210u
 #define MSG_BUTTON1     0xc519bfc0u   /* PAD_BUTTON1: Host LAN Server */
 #define MSG_LAN_EXIT    0xd05fc3a3u   /* UI_OLMAIN: "exit LAN mode?" Yes */
@@ -182,6 +197,7 @@ static struct {
     long     next, since, step_at, frame0, results_at, left_at;
     char     top[64];
     int      place, prize, paid, raced, owns;
+    int      quit_race, fee;                       /* the player quit the race (its pause menu); the fee the bank paid */
     int      paused, quit, lan, hosted, named, carset, created, settings, joined, started, left, career, resumed, crib_go, ndlg, host_gone;
     int      logged_place;
     uint32_t room[10];                             /* the host's room as last logged */
@@ -275,7 +291,24 @@ int mprace_car_ok(void){
     return 0;
 }
 
+/* UI_Pause's messages: in the race, the one that ends it by Quit's Yes (at
+ * once, or held back until the screen's next 0xE1FDE1D1) is the player
+ * quitting it, for the fee; then the game's own handler, as always.  The
+ * vtable is its only caller, so a patch of its entry sees every message. */
+void sub_004c2170(CPU *c);
+void dispatch_patch(uint32_t a, void (*f)(CPU *));
+static void pause_msg(CPU *c){
+    uint32_t m = MR32(c->esp + 4u);
+    if (M.phase == MPR_RACE && !M.results_at && !M.quit_race
+        && (m == MSG_QUIT_YES || (m == MSG_PAUSE_LATER && rd(c->ecx + PAUSE_HELD) == MSG_QUIT_YES))){
+        M.quit_race = 1;
+        mlog("the player quits the race (its pause menu's Quit%s)", m == MSG_QUIT_YES ? "" : ", held back");
+    }
+    sub_004c2170(c);
+}
+
 int mprace_start(const MpRace *r){
+    static int patched;
     if (M.phase != MPR_IDLE && M.phase != MPR_DONE && M.phase != MPR_FAILED) return 0;
     if (rd(G_FLOW) != 6u || !(rd(G_GAMEMODE) & 1u)) return 0;
     if (!mprace_car_ok()){
@@ -283,6 +316,7 @@ int mprace_start(const MpRace *r){
                 autotest_frame(), rd(G_CAREER_CAR));
         return 0;
     }
+    if (!patched){ dispatch_patch(FN_PAUSE_MSG, pause_msg); patched = 1; }
     memset(&M, 0, sizeof M);
     M.r = *r; M.goal = G_RACE_GOAL; M.frame0 = autotest_frame();
     M.step = "Leaving free roam";
@@ -296,17 +330,28 @@ int mprace_phase(void){ return M.phase; }
 void mprace_ack(void){ if (M.phase == MPR_DONE || M.phase == MPR_FAILED) M.phase = MPR_IDLE; }
 int mprace_place(void){ return M.place; }
 int mprace_prize(void){ return M.prize; }
+int mprace_quit(void){ return M.quit_race; }
+int mprace_fee(void){ return M.fee; }
 const char *mprace_why(void){ return M.why[0] ? M.why : "unknown"; }
 void mprace_host_gone(void){ if (!M.r.host && M.goal == G_RACE_GOAL && (M.phase == MPR_OUT || M.phase == MPR_LAN)) M.host_gone = 1; }
 int mprace_owns_input(void){ return __atomic_load_n(&M.owns, __ATOMIC_RELAXED); }   /* (the input thread asks) */
+/* the prize into the bank, or the quit's fee out of it (what it holds at most), once; where: for the log */
+static void pay(const char *where){
+    if (M.paid) return;
+    M.paid = 1;
+    uint32_t b = rd(G_CAREER + C_BANK);
+    if (M.prize > 0){
+        MR32(G_CAREER + C_BANK) = b + (uint32_t)M.prize;
+        fprintf(stderr, "[mprace] f=%ld the prize: $%d into the bank ($%u -> $%u)%s\n", autotest_frame(), M.prize, b, b + (uint32_t)M.prize, where);
+    } else if (M.quit_race){
+        M.fee = b < MPRACE_QUIT_FEE ? (int)b : MPRACE_QUIT_FEE;
+        MR32(G_CAREER + C_BANK) = b - (uint32_t)M.fee;
+        fprintf(stderr, "[mprace] f=%ld the fee for quitting the race: $%d out of the bank ($%u -> $%u)%s\n", autotest_frame(), M.fee, b, b - (uint32_t)M.fee, where);
+    }
+}
 void mprace_end_in_roam(void){
     if (M.phase == MPR_IDLE || M.phase == MPR_DONE || M.phase == MPR_FAILED) return;
-    if (M.prize > 0 && !M.paid){
-        uint32_t b = rd(G_CAREER + C_BANK);
-        MR32(G_CAREER + C_BANK) = b + (uint32_t)M.prize;
-        M.paid = 1;
-        fprintf(stderr, "[mprace] f=%ld the prize: $%d into the bank ($%u -> $%u), in free roam\n", autotest_frame(), M.prize, b, b + (uint32_t)M.prize);
-    }
+    pay(", in free roam");
     if (!M.raced && !M.why[0]) snprintf(M.why, sizeof M.why, "the trip lost its way");
     mlog("back in free roam without the trip's way back: %s", M.raced ? "done" : M.why);
     state_log("ended in free roam");
@@ -590,7 +635,7 @@ static int step_racing(long f){
     if (rd(G_FLOW) == 3u){
         if (M.results_at && !M.place){ M.place = results_place(); M.prize = M.place >= 1 && M.place <= MP_PRIZE_N ? k_prize[M.place - 1] : 0; }
         if (M.results_at) fprintf(stderr, "[mprace] f=%ld the results left by the player: place %d, prize $%d\n", autotest_frame(), M.place, M.prize);
-        else mlog("the race was left: not finished%s", "");
+        else mlog("the race was left: not finished%s", M.quit_race ? " (the player's own Quit: the fee)" : "");
         M.goal = G_CAREER_GOAL; M.step = "Back to free roam"; to_phase(MPR_BACK);
     }
     return 1;
@@ -652,16 +697,10 @@ static void step_back(CPU *c, long f){
         return;
     }
     if (on("UI_CareerCrib.fng") && !on("MC_Main.fng")){
-        /* the prize, once the crib took its snapshot (the autosave on), so that its autosave sees it */
+        /* the prize (or the fee), once the crib took its snapshot (the autosave on), so that its autosave sees it */
         if (!M.paid){
             if (rd(G_SNAPSHOT) == 0 && f - M.since < 60 * 3) return;               /* (its INIT_COMPLETE) */
-            if (M.prize > 0){
-                uint32_t b = rd(G_CAREER + C_BANK);
-                MR32(G_CAREER + C_BANK) = b + (uint32_t)M.prize;
-                fprintf(stderr, "[mprace] f=%ld the prize: $%d into the bank ($%u -> $%u)%s\n", autotest_frame(), M.prize, b, b + (uint32_t)M.prize,
-                        rd(G_SNAPSHOT) ? "" : "; the game's autosave is off: saved at the next save");
-            }
-            M.paid = 1;
+            pay(rd(G_SNAPSHOT) ? "" : "; the game's autosave is off: saved at the next save");
         }
         if (!M.crib_go){
             state_log("at the crib");

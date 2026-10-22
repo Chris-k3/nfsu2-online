@@ -12,8 +12,8 @@ interface LobbyState {
   st?: 'host' | 'asked' | 'in' | 'count';
   kind?: string; track?: string; laps?: number;
   /** the lobby's players, the host first; me: our place in it (-1: none); max: its places; t: the countdown's
-   *  seconds; closes: the seconds left of a lobby nobody joined (its last minute) */
-  names?: string[]; me?: number; max?: number; t?: number; closes?: number;
+   *  seconds; closes: the seconds left of a lobby nobody joined (its last minute); fee: what quitting the race costs */
+  names?: string[]; me?: number; max?: number; t?: number; closes?: number; fee?: number;
   why?: string; step?: string; text?: string;
 }
 
@@ -118,6 +118,7 @@ export class LobbyPanel {
         kids.push(el('div', 'lobby-note', s.text ?? ''));
         break;
     }
+    if ((s.v === 'join' || s.v === 'lobby') && s.fee) kids.push(el('div', 'lobby-hint', `Quitting the race costs $${s.fee}`));
     p.replaceChildren(...kids);
   }
 

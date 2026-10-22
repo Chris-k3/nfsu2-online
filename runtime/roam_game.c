@@ -3231,6 +3231,8 @@ static void mp_frame(CPU *c, int64_t host, int in_roam, int world_runs, const ui
         if (ph == MPR_FAILED) snprintf(t, sizeof t, "The multiplayer race did not happen: %s", mprace_why());
         else if (place && prize) snprintf(t, sizeof t, "Multiplayer race: %d%s place, $%d", place, place == 1 ? "st" : place == 2 ? "nd" : place == 3 ? "rd" : "th", prize);
         else if (place) snprintf(t, sizeof t, "Multiplayer race: %d%s place", place, place == 1 ? "st" : place == 2 ? "nd" : place == 3 ? "rd" : "th");
+        else if (mprace_quit() && mprace_fee()) snprintf(t, sizeof t, "Multiplayer race: you quit it, $%d fee", mprace_fee());
+        else if (mprace_quit()) snprintf(t, sizeof t, "Multiplayer race: you quit it");
         else snprintf(t, sizeof t, "Multiplayer race: not finished");
         mprace_ack();
         mp_note(host, t); mp_to(MP_IDLE, host);
@@ -3320,7 +3322,7 @@ static int mp_line(int64_t host, char *tx, int n){
         return 1;
     case MP_COUNT: {
         int64_t s = (g_mp.start_at - host + 999999) / 1000000;
-        snprintf(tx, (size_t)n, "The race starts in %d", (int)(s < 0 ? 0 : s));
+        snprintf(tx, (size_t)n, "The race starts in %d (quitting it costs $%d)", (int)(s < 0 ? 0 : s), MPRACE_QUIT_FEE);
         return 1; }
     case MP_IDLE: {
         const MpSpot *sp = mp_spot_here();
@@ -3456,6 +3458,7 @@ static void mp_panel(int64_t host, int in_roam){
             int64_t s = (g_mp.alone_at + g_mp.alone_us - host + 999999) / 1000000;
             if (s <= 60) js_int(&j, "closes", (int)(s < 0 ? 0 : s));
         }
+        js_int(&j, "fee", MPRACE_QUIT_FEE);
     } else if (hud){
         const MpSpot *sp = mp_spot_here();
         MpLobby *l = mp_joinable();
@@ -3467,7 +3470,7 @@ static void mp_panel(int64_t host, int in_roam){
         /* a message first, for its few seconds (back from the race at the spot: the place and the prize) */
         if (g_mp.note[0] && host < g_mp.note_until){ js_str(&j, "v", "note"); js_str(&j, "text", g_mp.note); }
         else if (l && (!sp || sp->kind == MPS_ONLY) && !mprace_car_ok()){ js_str(&j, "v", "note"); js_str(&j, "text", MP_NOCAR); }
-        else if (l && (!sp || sp->kind == MPS_ONLY)){ js_str(&j, "v", "join"); js_race(&j, l->race); js_players(&j, l); }
+        else if (l && (!sp || sp->kind == MPS_ONLY)){ js_str(&j, "v", "join"); js_race(&j, l->race); js_players(&j, l); js_int(&j, "fee", MPRACE_QUIT_FEE); }
         else if (full){ js_str(&j, "v", "full"); js_race(&j, full->race); js_players(&j, full); }
         else if (sp && sp->kind == MPS_ONLY){ js_str(&j, "v", "spot"); js_race(&j, sp->race); js_str(&j, "why", mpw_text[sp->why]); }
     }

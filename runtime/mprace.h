@@ -17,6 +17,8 @@ typedef struct {
     int      players;              /* the host: the lobby's players, itself too (it starts once they are all ready) */
 } MpRace;
 enum { MPR_IDLE = 0, MPR_OUT, MPR_LAN, MPR_RACE, MPR_BACK, MPR_DONE, MPR_FAILED };
+/* what quitting a started race with its pause menu's Quit costs the bank (what it holds at most) */
+#define MPRACE_QUIT_FEE 75
 
 /* the career has a car of its own, one the LAN race can take (not a new
  * career's prologue car): a trip without one would race a car made of
@@ -33,6 +35,10 @@ void mprace_ack(void);
  * prize the career's bank got for it */
 int  mprace_place(void);
 int  mprace_prize(void);
+/* the player quit the race (its pause menu's Quit); the fee the bank paid for it (less than MPRACE_QUIT_FEE when it
+ * held less, 0 before the crib) */
+int  mprace_quit(void);
+int  mprace_fee(void);
 /* the reason a failed trip gives ("the host's game was not found") */
 const char *mprace_why(void);
 /* a joiner's host closed its game (free roam heard it quit): the trip ends
