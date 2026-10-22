@@ -3702,7 +3702,10 @@ static void init_once(CPU *c){
     O.test_owncars = env_int("NFSU2_ROAM_TEST_OWNCARS", 0, 0, 1);
     O.test_outside = env_int("NFSU2_ROAM_TEST_OUTSIDE", 0, 0, 1);
     O.max_cars = env_int("NFSU2_ROAM_MAX_CARS", MAX_CARS, 0, MAX_CARS);
-    O.rate = env_int("NFSU2_ROAM_RATE", 20, 10, 60);
+    /* at most 30: each snapshot goes to up to 32 friends, and 60 tripled what each of them got from that player
+     * (the server's port the limit, nfsu2.xyz 2026-10-22) for little they see: they draw a car 100 ms in the past,
+     * between its snapshots */
+    O.rate = env_int("NFSU2_ROAM_RATE", 20, 10, 30);
     O.delay_ms = env_int("NFSU2_ROAM_DELAY", 100, 0, 1000);
     O.extrap_ms = env_int("NFSU2_ROAM_EXTRAP", 250, 0, 1000);
     O.carpool_kb = env_int("NFSU2_ROAM_CARPOOL_KB", 48000, 0, 128000);

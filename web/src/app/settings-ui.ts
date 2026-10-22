@@ -34,7 +34,7 @@ const GROUPS: Group[] = [
     { key: 'roam_discovery', label: 'Find players automatically', help: 'When the server does not pick the players near you: looks for players on this server with a broadcast every 2 s.', c: { t: 'switch' }, more: true },
     { key: 'roam_peers', label: 'Players\' addresses', help: 'a.b.c.d or a.b.c.d:port, separated by commas.', c: { t: 'text', placeholder: 'none' }, more: true },
     { key: 'roam_port', label: 'Port', help: 'The same for every player, 1024 to 65535.', c: { t: 'num', min: 1024, max: 65535, step: 1 }, more: true },
-    { key: 'roam_rate', label: 'Updates per second', help: 'How often your car is sent to the others, 10 to 60.', c: { t: 'num', min: 10, max: 60, step: 1 }, more: true },
+    { key: 'roam_rate', label: 'Updates per second', help: 'How often your car is sent to the others, 10 to 30.', c: { t: 'num', min: 10, max: 30, step: 1 }, more: true },
     { key: 'roam_delay', label: 'Display delay', help: 'With Solid cars off, the other players\' cars are shown this far behind, 0 to 1000. Solid cars are shown where they are now.', c: { t: 'num', min: 0, max: 1000, step: 10, unit: 'ms' }, more: true },
     { key: 'roam_extrap', label: 'Longest extrapolation', help: 'How long another player\'s car keeps moving on its own when updates are late, 0 to 1000.', c: { t: 'num', min: 0, max: 1000, step: 10, unit: 'ms' }, more: true },
     { key: 'roam_carpool_kb', label: 'Car memory pool', help: 'In KB; never below the game\'s own 11000.', c: { t: 'num', min: 0, max: 128000, step: 1000, unit: 'KB' }, more: true },

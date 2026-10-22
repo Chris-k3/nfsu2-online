@@ -220,7 +220,7 @@ static const struct { const char *key, *env; int kind; const char *vals; } g_key
     { "roam_max_players",         "NFSU2_ROAM_MAX_PLAYERS",     K_INT   | K_IC, "2..33" },
     { "roam_max_cars",            "NFSU2_ROAM_MAX_CARS",        K_INT   | K_IC, "0..32" },
     { "roam_collide",             "NFSU2_ROAM_COLLIDE",         K_BOOL  | K_IC },
-    { "roam_rate",                "NFSU2_ROAM_RATE",            K_INT   | K_IC, "10..60" },
+    { "roam_rate",                "NFSU2_ROAM_RATE",            K_INT   | K_IC, "10..30" },
     { "roam_delay",               "NFSU2_ROAM_DELAY",           K_INT   | K_IC, "0..1000" },
     { "roam_extrap",              "NFSU2_ROAM_EXTRAP",          K_INT   | K_IC, "0..1000" },
     { "roam_carpool_kb",          "NFSU2_ROAM_CARPOOL_KB",      K_INT   | K_IC, "0..128000" },
@@ -433,7 +433,7 @@ static const char *const k_template =
 "# and your car one for your friends.\n"
 "# [NFSU2_ROAM_COLLIDE]\n"
 "#roam_collide = on\n"
-"# Snapshots per second (10 to 60), the delay ghost cars are shown with in\n"
+"# Snapshots per second (10 to 30), the delay ghost cars are shown with in\n"
 "# ms (0 to 1000) and the longest cars are extrapolated in ms (0 to 1000).\n"
 "# [NFSU2_ROAM_RATE, NFSU2_ROAM_DELAY, NFSU2_ROAM_EXTRAP]\n"
 "#roam_rate = 20\n"
