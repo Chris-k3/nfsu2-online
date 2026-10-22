@@ -245,6 +245,13 @@ Good to know:
   players on an older version hear the dual tone.
   Each player's horn is also pitched a little differently by their name, so two players with the same horn sound
   apart. It sounds while the game runs, not in the pause menu or on the map. It works in Online and LAN races too.
+- **Engines:** the others hear your engine from your car, as you hear it yourself: the game's own recordings of your
+  car's engine (each car has its own, and the engine upgrades change it), pulling as you accelerate and letting off as
+  you lift, at your revs, with the limiter and a launch's wheelspin as your game plays them; louder the nearer they
+  are, from the side your car is on, duller far away and lower as you drive away. Every player's car sounds, however
+  many there are: the game itself gives an engine only to a few cars, so before, the first three players near you
+  sounded like one of its AI racers and the others not at all. A player on an older version sends no engine: their
+  car sounds from its revs and throttle, as well as those tell; their game still has the old engine sounds.
 - **Hydraulics and nitrous:** the others see your car lift, tilt and bounce on its hydraulics, with its wheels on the
   road, and your nitrous as the game draws it on any car: the light trails behind it. They hear them from your car
   with the game's own sounds, as you hear your own: the nitrous going on and off, letting it out while standing or

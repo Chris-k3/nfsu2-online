@@ -204,18 +204,20 @@ static void put_state(rc_w *w, const rc_state *s){
 static int8_t q_slip(float f){ int32_t v = f_round(f_clamp(f, -1000.f, 1000.f) / RC_SLIP_STEP); return (int8_t)(v > 127 ? 127 : v < -127 ? -127 : v); }
 /* the extension (RC_HF_STATEX): a state without one has the length 0; the
  * slip and surfaces only while a wheel slides (all slips 0 on the wire
- * otherwise: the shorter form, as before) */
+ * otherwise: the shorter form, as before), the engine only while it sounds */
+#define ENG_MAX 20000u
 static void put_statex(rc_w *w, const rc_state *s){
     if (!s->ext){ rc_put8(w, 0); return; }
-    int slides = 0;
+    int slides = 0, eng = s->eng != 0;
     for (int i = 0; i < 8; i++) slides |= q_slip(s->slip[i]) != 0;
-    rc_put8(w, (slides ? RC_STATEX_BYTES : RC_STATEX_HYD) - 1);
+    rc_put8(w, (slides ? RC_STATEX_SLIP : RC_STATEX_HYD) + (eng ? RC_STATEX_ENG : 0) - 1);
     for (int i = 0; i < 4; i++) rc_put16(w, (uint16_t)q16(f_clamp(s->wz[i], -32.f, 32.f), 1000.f));
     rc_put8(w, s->nos);
     rc_put8(w, s->hyd); rc_put8(w, s->thumps);
     if (slides) for (int i = 0; i < 4; i++){
         rc_put8(w, (uint8_t)q_slip(s->slip[2 * i])); rc_put8(w, (uint8_t)q_slip(s->slip[2 * i + 1])); rc_put8(w, s->surf[i]);
     }
+    if (eng){ rc_put16(w, s->eng < ENG_MAX ? s->eng : ENG_MAX); rc_put8(w, s->eng_acc); rc_put8(w, s->eng_dcl); rc_put8(w, s->eng_base); }
 }
 static int get_statex(rc_r *r, rc_state *s){
     uint32_t n = rc_get8(r);
@@ -227,19 +229,25 @@ static int get_statex(rc_r *r, rc_state *s){
     s->nos = (uint8_t)rc_get8(r);
     uint32_t k = RC_STATEX_V4 - 1;
     if (n >= RC_STATEX_HYD - 1){ s->hyd = (uint8_t)rc_get8(r); s->thumps = (uint8_t)rc_get8(r); k = RC_STATEX_HYD - 1; }
-    if (n >= RC_STATEX_BYTES - 1){
+    if (n >= RC_STATEX_SLIP - 1){
         for (int i = 0; i < 4; i++){
             s->slip[2 * i] = (float)(int8_t)rc_get8(r) * RC_SLIP_STEP; s->slip[2 * i + 1] = (float)(int8_t)rc_get8(r) * RC_SLIP_STEP;
             s->surf[i] = (uint8_t)rc_get8(r);
         }
-        s->slipx = 1; k = RC_STATEX_BYTES - 1;
+        s->slipx = 1; k = RC_STATEX_SLIP - 1;
+    }
+    if (n >= k + RC_STATEX_ENG){                                    /* the engine, after the hydraulics or the slip */
+        uint32_t e = rc_get16(r);
+        s->eng = (uint16_t)(e < ENG_MAX ? e : ENG_MAX); s->eng_acc = (uint8_t)rc_get8(r); s->eng_dcl = (uint8_t)rc_get8(r);
+        s->eng_base = (uint8_t)rc_get8(r);
+        k += RC_STATEX_ENG;
     }
     r->n += n - k;                                                  /* a newer core's fields */
     s->ext = 1;
     return RC_OK;
 }
 static int get_state(rc_r *r, rc_state *s){
-    s->ext = 0; s->nos = 0; s->hyd = 0; s->thumps = 0; s->slipx = 0;
+    s->ext = 0; s->nos = 0; s->hyd = 0; s->thumps = 0; s->slipx = 0; s->eng = 0; s->eng_acc = 0; s->eng_dcl = 0; s->eng_base = 0;
     for (int i = 0; i < 4; i++){ s->wz[i] = 0; s->surf[i] = 0; }
     for (int i = 0; i < 8; i++) s->slip[i] = 0;
     s->t_us = rc_get32(r);
@@ -599,6 +607,12 @@ static void lerp_rest(const rc_state *a, const rc_state *b, float u, rc_pose *o)
     o->slipx = n->slipx;
     for (int i = 0; i < 4; i++) o->surf[i] = n->surf[i];
     for (int i = 0; i < 8; i++) o->slip[i] = a->slipx && b->slipx ? a->slip[i] + u * (b->slip[i] - a->slip[i]) : n->slip[i];
+    if (a->eng && b->eng){
+        o->eng = (float)a->eng + u * (float)(b->eng - a->eng);
+        o->eng_acc = ((float)a->eng_acc + u * (float)(b->eng_acc - a->eng_acc)) / 255.f;
+        o->eng_dcl = ((float)a->eng_dcl + u * (float)(b->eng_dcl - a->eng_dcl)) / 255.f;
+        o->eng_base = ((float)a->eng_base + u * (float)(b->eng_base - a->eng_base)) / 255.f;
+    } else { o->eng = n->eng; o->eng_acc = n->eng_acc / 255.f; o->eng_dcl = n->eng_dcl / 255.f; o->eng_base = n->eng_base / 255.f; }
 }
 static void from_state(const rc_state *s, rc_pose *o){
     for (int i = 0; i < 3; i++){ o->p[i] = s->p[i]; o->v[i] = s->v[i]; o->w[i] = s->w[i]; }
@@ -608,6 +622,7 @@ static void from_state(const rc_state *s, rc_pose *o){
     o->slipx = s->slipx;
     for (int i = 0; i < 4; i++) o->surf[i] = s->surf[i];
     for (int i = 0; i < 8; i++) o->slip[i] = s->slip[i];
+    o->eng = s->eng; o->eng_acc = s->eng_acc / 255.f; o->eng_dcl = s->eng_dcl / 255.f; o->eng_base = s->eng_base / 255.f;
 }
 int rc_interp_peek(const rc_interp *ip, int64_t rt, int64_t cap_us, rc_pose *o){
     memset(o, 0, sizeof *o); o->q[3] = 1;

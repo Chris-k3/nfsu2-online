@@ -38,9 +38,11 @@
 #define RC_TABLE         64         /* known addresses (configured, gossiped, heard) */
 #define RC_SNAP_STATES   3          /* states per SNAP (newest first): loss redundancy */
 #define RC_STATE_BYTES   52
-#define RC_STATEX_BYTES  24         /* a state's extension (RC_HF_STATEX), its length byte included, at most */
-#define RC_STATEX_HYD    12         /* ...without the wheels' slip (no wheel slides; every core before it) */
+#define RC_STATEX_BYTES  29         /* a state's extension (RC_HF_STATEX), its length byte included, at most */
+#define RC_STATEX_SLIP   24         /* ...without the engine (no engine sound; every core before it) */
+#define RC_STATEX_HYD    12         /* ...without the wheels' slip (no wheel slides; every core before that) */
 #define RC_STATEX_V4     10         /* ...as the first cores of version 4 sent it (no hydraulics) */
+#define RC_STATEX_ENG    5          /* the engine's bytes, after the hydraulics or after the slip */
 #define RC_SLIP_STEP     0.5f       /* a wheel's slip on the wire: int8 steps of this (m/s), up to 63.5 */
 #define RC_BUF_STATES    32         /* jitter buffer per peer */
 #define RC_OFFWIN        64         /* clock-offset samples per peer */
@@ -137,11 +139,14 @@ enum { RC_PLAT_MAC = 1, RC_PLAT_WIN = 2, RC_PLAT_TOOL = 3 };
  * state is followed by its extension: a length byte (what follows, at least
  * RC_STATEX_V4 - 1), the wheel places' heights in the car (4 x int16, mm)
  * and the nitrous left (u8, see rc_state), then (RC_STATEX_HYD) the
- * hydraulics and the landings (u8 each), then (RC_STATEX_BYTES, only while a
+ * hydraulics and the landings (u8 each), then (RC_STATEX_SLIP, only while a
  * wheel slides: its slip is at least half a step) each wheel's slip along
- * and across it (2 x int8, RC_SLIP_STEP) and its surface (u8), then
- * whatever a newer core adds, skipped.  Only to a peer whose HELLO carries
- * the flag: an older core counts the longer SNAP as bad */
+ * and across it (2 x int8, RC_SLIP_STEP) and its surface (u8), then (only
+ * while the car's engine sounds) the engine (RC_STATEX_ENG: its sound's rpm,
+ * u16, and its three voices' volumes, u8 each, see rc_state), so 12, 17, 24
+ * or 29 bytes: the length says which; whatever a newer core adds comes
+ * after the engine of the longest form, and is skipped.  Only to a peer
+ * whose HELLO carries the flag: an older core counts the longer SNAP as bad */
 #define RC_HF_STATEX     0x0040
 /* decoder results */
 enum { RC_OK = 0, RC_E_SHORT = -1, RC_E_MAGIC = -2, RC_E_VERSION = -3, RC_E_LENGTH = -4,
@@ -193,6 +198,10 @@ typedef struct {
     uint8_t  slipx;                /* decoded: the slip and surfaces came (a wheel slides) */
     float    slip[8];              /* each wheel's slip, along it and across it (m/s): the game's, car +0x3B4, on the ground only */
     uint8_t  surf[4];              /* each wheel's surface (the game's, car +0x394: 1 road, 8 dirt, 15 grass, ...) */
+    uint16_t eng;                  /* the engine as the sender's game sounds it: its rpm on the sound's scale (1000 at idle,
+                                      10000 at the most; the clutch and the limiter in it), 0: none */
+    uint8_t  eng_acc, eng_dcl, eng_base;   /* ...its voices' volumes, 255 = full: the pulling and the letting-off
+                                              recordings (GIN) and the engine model under them (the AEMS bank) */
 } rc_state;
 
 typedef struct {
@@ -273,6 +282,7 @@ typedef struct {
     float   wz[4];
     uint8_t slipx, surf[4];        /* as rc_state: slip 0 when no wheel slides */
     float   slip[8];
+    float   eng, eng_acc, eng_dcl, eng_base;   /* as rc_state (the volumes 0 .. 1): eng 0 when the sender sent no engine */
     int     mode;                  /* RC_MODE_* */
 } rc_pose;
 enum { RC_MODE_NONE = 0, RC_MODE_INTERP = 1, RC_MODE_EXTRAP = 2, RC_MODE_HOLD = 3 };

@@ -50,6 +50,11 @@
  *  - horns: the player's goes out with the snapshots, and which horn it is
  *    with the car's look; friends' sound from their cars (sounds_update,
  *    horn.c).
+ *  - engines: the snapshots' extension carries the player's engine as the
+ *    game sounds it (eng_state); a friend's car sounds with its own engine
+ *    sound's recordings at that (eng_files, eng_sound, carsfx.c), and the
+ *    game's AI engine on a free-roam opponent's car a friend drives is
+ *    silenced (aieng_update).
  *  - hydraulics and nitrous: the snapshots' extension carries the wheel
  *    places' heights, the nitrous left, each wheel's hydraulics and the
  *    landings; a friend's car gets its wheels where the friend's are
@@ -371,6 +376,8 @@ typedef struct {
     int64_t  unseen_since;                    /* the peer is not visible: release after a while */
     int64_t  release_after;
     char     carname[RC_CFG_TYPE_NAME + 1];
+    char     gin[2][32];                      /* its engine sound's GIN files, pulling and letting off (eng_files; "": none) */
+    float    eng_idle, eng_max;               /* ...its car type's idle and most rpm */
     /* statistics */
     uint32_t loads, remode, pose_frames, wakes;   /* wakes: the game's wake-ups refused (roam_game_inert) */
     uint32_t moded, wheelfix;                 /* other physics modes the game set (roam_game_inert); frames the wheels were put back (wheels_pose) */
@@ -444,6 +451,39 @@ static uint8_t nos_left(uint32_t car){
     int v = (int)(r * 100.f + 0.5f);
     return (uint8_t)(v < 1 ? 1 : v);
 }
+/* The player's car's engine sound (CARSFX_PlayerEngine, its update 0x474310
+ * and 0x474030): an AEMS voice of the car's engine bank and two GIN voices
+ * of its recordings, pulling and letting off, at the rpm of its
+ * SFXCTL_Engine (+0x128, on the sound's scale: 1000 at idle, 10000 at the
+ * most, with the clutch and the limiter in it), each at its volume from the
+ * engine's mix (+0xC0: +0x7C the AEMS's, +0x80 the pulling's, +0x84 the
+ * letting-off's) times the engine sound's own volume (its control word, at
+ * [+0x58], from the game's mix maps), all 0 .. 0x7FFF */
+#define VT_SFX_PENGINE  0x0078af30u   /* CARSFX_PlayerEngine (vtable) */
+#define VT_SFXCTL_ENG   0x00789f70u   /* SFXCTL_Engine (vtable) */
+#define VT_ENG_MIX      0x00789fe4u   /* the engine's mix (vtable) */
+static uint32_t player_engine(uint32_t car){
+    uint32_t st = ok(car, 0x9e0) ? rd32(car + CAR_SOUND) : 0;
+    if (!ok(st, 0x100) || rd32(st + 0x30u) != car) return 0;
+    for (uint32_t ch = rd32(st + 0x20u), i = 0; ok(ch, 0x110) && i < 64u; ch = rd32(ch + 0x50u), i++)
+        if (rd32(ch) == VT_SFX_PENGINE) return ch;
+    return 0;
+}
+static uint8_t eng_vol(uint32_t v, uint32_t x){                 /* v x x (an int) on 0 .. 255 */
+    int32_t xi = (int32_t)x;
+    uint32_t p = v * (uint32_t)(xi < 0 ? 0 : xi > 0x7fff ? 0x7fff : xi) >> 15;
+    return (uint8_t)((p + 64u) >> 7 > 255u ? 255u : (p + 64u) >> 7);
+}
+/* for friends' games, which play it with the car's own GIN files (carsfx.c) */
+static void eng_state(uint32_t car, rc_state *s){
+    uint32_t pe = player_engine(car), ctl = pe ? rd32(pe + 0xb8u) : 0, mix = pe ? rd32(pe + 0xc0u) : 0, vp = pe ? rd32(pe + 0x58u) : 0;
+    if (!ok(ctl, 0x130) || rd32(ctl) != VT_SFXCTL_ENG || !ok(mix, 0x88) || rd32(mix) != VT_ENG_MIX || !ok(vp, 4)) return;
+    float r = MRF32(ctl + 0x128u);
+    if (!__builtin_isfinite(r) || r < 1.f) return;
+    uint32_t v = MR32(vp) & 0x7fffu;
+    s->eng = (uint16_t)(r > 20000.f ? 20000 : (int)(r + 0.5f));
+    s->eng_base = eng_vol(v, MR32(mix + 0x7cu)); s->eng_acc = eng_vol(v, MR32(mix + 0x80u)); s->eng_dcl = eng_vol(v, MR32(mix + 0x84u));
+}
 static int local_state(rc_state *s){
     uint32_t car = player_car();
     if (!ok(car, 0x9e0)) return 0;
@@ -491,6 +531,8 @@ static int local_state(rc_state *s){
             s->slip[2 * w] = __builtin_isfinite(a) ? a : 0.f; s->slip[2 * w + 1] = __builtin_isfinite(b) ? b : 0.f;
             s->surf[w] = sf < N_SURF ? (uint8_t)sf : 0;
         }
+    /* the engine as the game sounds it, for friends' games (eng_state) */
+    eng_state(car, s);
     if (g_sync_paused > 1){ for (int i = 0; i < 3; i++){ s->v[i] = 0; s->w[i] = 0; } s->speed = 0; s->rpm = 0; for (int i = 0; i < 8; i++) s->slip[i] = 0; }
     for (int i = 0; i < 3; i++) if (!__builtin_isfinite(s->p[i]) || !__builtin_isfinite(s->v[i])) return 0;
     /* the stamp clock may run a little faster than the world (it is pulled
@@ -1460,6 +1502,7 @@ static int begin_load(CPU *c, int k, const uint8_t *cfg, int len, uint32_t gen){
             cc.type_name, cc.n_parts, skin, s->h_new);
     return 1;
 }
+static void eng_files(CPU *c, Slot *s);
 /* the loading ride is in: put it on the slot's car */
 static int finish_load(CPU *c, int k){
     Slot *s = &g_sl[k];
@@ -1481,6 +1524,7 @@ static int finish_load(CPU *c, int k){
     }
     if (!s->activated){ gcall0(c, FN_CAR_ACTIVATE, car); s->activated = 1; }
     gcall1(c, FN_CAR_SETRIDE, car, s->ride_new);
+    eng_files(c, s);
     make_inert(c, car);
     body_set(c, car, 0); s->ghost = 1;
     soft_park(c, car);
@@ -2250,19 +2294,104 @@ typedef struct { int idx; uint32_t id; char name[RC_NAME_MAX + 1]; int visible, 
 static PeerView g_pv[RC_TABLE]; static int g_npv;
 static struct { uint32_t id, gen; int horn; } g_phorn[RC_TABLE];   /* each peer's horn, as its record (cfg_gen) has it */
 
-/* ---- horns, friends' nitrous and hydraulics -------------------------------------------------------- */
+/* ---- horns, friends' engines, nitrous and hydraulics ----------------------------------------------- */
 /* N or the controller's left stick click sounds the player's horn in free
  * roam while the world runs, and the snapshots carry it (RC_BIT_HORN); a
  * friend's horn sounds from their car, as the camera hears it (horn.c: the
- * distance, the side, Doppler).  So do a friend's nitrous and hydraulics,
- * which the game sounds for the player's car (and, for a friend's car that
- * has an AI racer's sound state, its nitrous going on and off): carsfx.c
- * plays the rest with the game's own samples from the friend's state, the
- * nitrous with the friend's throttle and speed as nos_pose draws it (let
- * out unless on the throttle from 5 mph), each wheel's hydraulics and the
- * landings (NFSU2_ROAM_CARSFX=0: not those). */
+ * distance, the side, Doppler).  So do a friend's engine, nitrous and
+ * hydraulics, which the game sounds for the player's car (and, for a
+ * friend's car that has an AI racer's sound state, an AI engine and its
+ * nitrous going on and off): carsfx.c plays them with the game's own sounds
+ * from the friend's state: the engine with the car's GIN files at the rpm
+ * and volumes the friend's game sounds it (eng_sound), the nitrous with the
+ * friend's throttle and speed as nos_pose draws it (let out unless on the
+ * throttle from 5 mph), each wheel's hydraulics and the landings
+ * (NFSU2_ROAM_CARSFX=0: not those, and the game's AI engines as they were). */
 static int g_horns_on, g_carsfx_on;           /* horns, friends' car sounds were driven last frame */
 static int g_carsfx_off = -1;
+/* A friend's car's engine sound: its GIN files, as the game picks the
+ * player's (0x4593B0) by the car's sound type (0x459240, from its car type)
+ * and its engine upgrades (the ride's performance at +0x2F0: the package
+ * 0x18, 0x13 or 0xF installed, 0x599610: level 3, 2, 1, else 0): the
+ * engine of G_ENG_PICK's entry for both (3 dwords each, the engine first),
+ * the pulling recording its +0xC and the letting-off one G_ENG_DCL's entry
+ * at its +0x14.  From finish_load, with the friend's ride on the car. */
+#define FN_SND_TYPE     0x00459240u   /* cdecl (car type) -> its sound type: 0 .. 30 */
+#define FN_PERF_HAS     0x00599610u   /* thiscall (ride + 0x2F0, package) -> al: installed */
+#define G_ENG_PICK      0x007f2230u   /* [sound type][level]: 3 dwords, the engine first */
+#define G_ENGINES       0x007f0de0u   /* the engine sounds, 0x4C each: +0 the AEMS bank, +0xC the pulling GIN, +0x14 the letting-off one */
+#define N_ENGINES       43u
+#define G_ENG_DCL       0x007f1aa8u   /* the letting-off GIN files, 0x34 each: +0 the name */
+#define N_ENG_DCL       37u
+#define ENG_OLD_ON      0.25f         /* a friend whose game sends no engine: the pulling recording on the throttle, */
+#define ENG_OLD_UNDER   0.08f         /* ...the letting-off one under it, */
+#define ENG_OLD_OFF     0.22f         /* ...and off the throttle (what the game's volumes mostly are then) */
+static void eng_files(CPU *c, Slot *s){
+    uint32_t ride = s->ride_new, type = MR32(ride), types = rd32(G_CARTYPES);
+    s->gin[0][0] = s->gin[1][0] = 0; s->eng_idle = s->eng_max = 0.f;
+    uint32_t st = gcall1(c, FN_SND_TYPE, 0, type), lvl = 0;
+    if (st > 30u) return;
+    if (gcall1(c, FN_PERF_HAS, ride + 0x2f0u, 0x18u) & 0xffu) lvl = 3;
+    else if (gcall1(c, FN_PERF_HAS, ride + 0x2f0u, 0x13u) & 0xffu) lvl = 2;
+    else if (gcall1(c, FN_PERF_HAS, ride + 0x2f0u, 0xfu) & 0xffu) lvl = 1;
+    uint32_t e = MR32(G_ENG_PICK + 12u * (st * 4u + lvl)), ent = G_ENGINES + 0x4cu * e, d = e < N_ENGINES ? MR32(ent + 0x14u) : N_ENG_DCL;
+    if (e >= N_ENGINES || d >= N_ENG_DCL) return;
+    cstr(MR32(ent + 0xcu), s->gin[0], sizeof s->gin[0]);
+    cstr(MR32(G_ENG_DCL + 0x34u * d), s->gin[1], sizeof s->gin[1]);
+    /* for a friend whose game sends no engine: the car type's idle and most rpm (CarTypeInfo +0x300, +0x308) */
+    if (types && type < 64u && ok(types + 0x890u * type + 0x300u, 0x10)){
+        s->eng_idle = MRF32(types + 0x890u * type + 0x300u); s->eng_max = MRF32(types + 0x890u * type + 0x308u);
+    }
+}
+/* the engine for carsfx.c: the car's GIN files at the rpm and volumes the
+ * friend's own game plays them (their snapshots' engine; the engine model
+ * under the recordings, the game's AEMS voice, is not played here: its
+ * volume goes to the letting-off recording, which at idle is the engine
+ * settling there).  From a friend whose game sends no engine (an older one),
+ * the rpm from the car's as the game scales it (0x484C50: 1000 + 9000 x
+ * (rpm - idle) / (the most - idle)) and the pulling recording on the
+ * throttle, the letting-off one off it */
+static int g_eng_off = -1;                    /* NFSU2_ROAM_ENGINES=0: no friends' engines (the game's AI ones still silenced) */
+static void eng_sound(const Slot *s, const rc_pose *P, carsfx_state *st){
+    if (g_eng_off < 0){ const char *e = rh_opt("NFSU2_ROAM_ENGINES"); g_eng_off = e && *e == '0'; }
+    if (g_eng_off || !s->gin[0][0] || !s->gin[1][0]) return;
+    st->gin[0] = s->gin[0]; st->gin[1] = s->gin[1];
+    if (P->eng > 0.f){
+        st->eng = P->eng;
+        st->eng_gain[0] = P->eng_acc;
+        st->eng_gain[1] = rc_sqrtf(P->eng_dcl * P->eng_dcl + P->eng_base * P->eng_base);
+        return;
+    }
+    if (!(s->eng_max > s->eng_idle + 100.f)) return;
+    float n = (P->rpm - s->eng_idle) / (s->eng_max - s->eng_idle);
+    st->eng = 1000.f + 9000.f * (n < 0.f ? 0.f : n > 1.f ? 1.f : n);
+    int on = P->throttle > 0.05f;
+    st->eng_gain[0] = on ? ENG_OLD_ON : 0.f; st->eng_gain[1] = on ? ENG_OLD_UNDER : ENG_OLD_OFF;
+}
+/* The game's own engine on a friend's car: the free-roam opponents' cars
+ * have an AI racer's sound state, whose CARSFX_AIEngine plays an AEMS voice
+ * of one of the few AI engine banks the game has loaded (not the friend's
+ * car's, nor at the friend's rpm); carsfx.c plays the friend's own, so on a
+ * friend's car with its GIN files the game's is silenced: its update
+ * (0x4610F0, called only through its vtable) reads its volume through its
+ * control word ([+0x58], 0x45E390), pointed at a zero for the call */
+#ifndef ROAM_HOST_WIN
+#define FN_AIENG_UPDATE 0x004610f0u
+#define ZERO_SCR        0x70u         /* g_gmem scratch: a dword that stays 0 */
+void dispatch_patch(uint32_t a, void (*f)(CPU *));
+void sub_004610f0(CPU *c);
+static int g_aieng_patched;
+static uint32_t g_aieng_calls, g_aieng_muted;   /* (mp sounds) */
+static void aieng_update(CPU *c){
+    uint32_t self = c->ecx, st = rd32(self + 0x9cu), car = ok(st, 0x40) ? rd32(st + 0x30u) : 0, keep = 0;
+    int mute = 0;
+    for (int k = 0; car && g_gmem && !mute && k < NSLOT; k++) mute = g_sl[k].st != SL_FREE && g_sl[k].car == car && g_sl[k].gin[0][0];
+    g_aieng_calls++; g_aieng_muted += (uint32_t)mute;
+    if (mute){ keep = MR32(self + 0x58u); MR32(self + 0x58u) = g_gmem + ZERO_SCR; }
+    sub_004610f0(c);
+    if (mute) MR32(self + 0x58u) = keep;
+}
+#endif
 /* the game sounds this car's nitrous itself: its sound state (an AI
  * racer's) has a nitrous child */
 static int game_sounds_nos(uint32_t car){
@@ -2280,17 +2409,22 @@ static void sounds_update(const rc_state *ls, int heard){
     else if (heard && ok(me, 0x9e0)){ rd3(me + 0x60u, L); rd3(me + 0x90u, f); }   /* else the player's car */
     else heard = 0;
     if (g_carsfx_off < 0){ const char *e = rh_opt("NFSU2_ROAM_CARSFX"); g_carsfx_off = e && *e == '0'; }
+#ifndef ROAM_HOST_WIN
+    if (!g_carsfx_off && !g_aieng_patched){ dispatch_patch(FN_AIENG_UPDATE, aieng_update); g_aieng_patched = 1; }
+#endif
     if ((heard || g_carsfx_on) && !g_carsfx_off){
         rh_carsfx_begin(heard ? L : 0, f, ls ? ls->v : 0);
         for (int i = 0; heard && i < g_npv; i++){
             const PeerView *v = &g_pv[i];
             if (!v->visible || v->paused || !v->have_pose || !v->pose.ext) continue;
             const rc_pose *P = &v->pose;
-            uint32_t car = 0;
-            for (int k = 0; k < NSLOT && !car; k++)
-                if (g_sl[k].st == SL_ACTIVE && g_sl[k].peer_id == v->id && !g_sl[k].hidden) car = g_sl[k].car;
+            int ks = -1;
+            for (int k = 0; k < NSLOT && ks < 0; k++)
+                if (g_sl[k].st == SL_ACTIVE && g_sl[k].peer_id == v->id && !g_sl[k].hidden) ks = k;
+            uint32_t car = ks >= 0 ? g_sl[ks].car : 0;
             carsfx_state st = { (uint8_t)(P->nos != 0), (uint8_t)!(__builtin_fabsf(P->throttle) > 0.001f && P->speed * 2.237f >= 5.f),
-                                P->hyd, P->thumps, (uint8_t)game_sounds_nos(car) };
+                                P->hyd, P->thumps, (uint8_t)game_sounds_nos(car), { 0, 0 }, 0.f, { 0.f, 0.f } };
+            if (car) eng_sound(&g_sl[ks], P, &st);
             rh_carsfx_car(v->id, v->name, P->p, P->v, &st);
         }
         rh_carsfx_end();
@@ -4593,8 +4727,10 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
         /* the player's car: where, how fast, rpm and gear (a race's progress in a test) */
         uint32_t me = player_car();
         if (!ok(me, 0x450)){ rlog("[roam] f=%ld mp car: none\n", f); return 1; }
-        rlog("[roam] f=%ld mp car: at %.1f %.1f, speed %.1f m/s, rpm %.0f, gear %d\n", f, (double)MRF32(me + 0x60u), (double)MRF32(me + 0x64u),
-             (double)MRF32(me + 0x42cu), (double)MRF32(me + 0x440u), (int)(int8_t)MR32(me + 0x434u));
+        rc_state es; memset(&es, 0, sizeof es); eng_state(me, &es);
+        rlog("[roam] f=%ld mp car: at %.1f %.1f, speed %.1f m/s, rpm %.0f, gear %d; its engine sounds at %u (pulling %u, letting off %u, "
+             "under them %u of 255)\n", f, (double)MRF32(me + 0x60u), (double)MRF32(me + 0x64u), (double)MRF32(me + 0x42cu),
+             (double)MRF32(me + 0x440u), (int)(int8_t)MR32(me + 0x434u), es.eng, es.eng_acc, es.eng_dcl, es.eng_base);
         return 1;
     }
     if (!strcasecmp(sub, "map")){
@@ -4856,6 +4992,13 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
             }
         rlog("[roam] f=%ld mp sounds: slot %d car 0x%08x, sound state 0x%08x%s, %d children:%s\n", f, k, car, st,
              ok(st, 0x100) && rd32(st + 0x30u) == car ? "" : " (none of its own)", n, list);
+        if (k >= 0 && k < NSLOT) rlog("[roam] f=%ld mp sounds: slot %d engine %s + %s (idle %.0f, most %.0f rpm)\n", f, k,
+                                      g_sl[k].gin[0][0] ? g_sl[k].gin[0] : "-", g_sl[k].gin[1][0] ? g_sl[k].gin[1] : "-",
+                                      (double)g_sl[k].eng_idle, (double)g_sl[k].eng_max);
+#ifndef ROAM_HOST_WIN
+        rlog("[roam] f=%ld mp sounds: the game's AI engines updated %u times, %u of them on friends' cars (silenced)\n", f,
+             g_aieng_calls, g_aieng_muted);
+#endif
         return 1;
     }
     if (!strcasecmp(sub, "carpoke") || !strcasecmp(sub, "carpeek")){

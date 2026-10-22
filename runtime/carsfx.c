@@ -1,5 +1,25 @@
-/* carsfx.c -- friends' nitrous and hydraulics, heard: the game's own samples
- * played at each friend's car over the game's sound.  See carsfx.h.
+/* carsfx.c -- friends' engines, nitrous and hydraulics, heard: the game's
+ * own sounds played at each friend's car over the game's sound.  See
+ * carsfx.h.
+ *
+ * Engines: the game gives a car of the World an engine sound only through
+ * its sound manager's pools (0x4690E0), made when the world loads: the
+ * player's, up to 8 AI racers' (each for a racer record of the race's, so a
+ * friend's car of our own, with its own record, gets none), with at most 3
+ * AI engine banks loaded for all of them (0x476BD0, 0x463F60: none of them
+ * the friend's car's).  So every friend's engine is played here, as the
+ * game plays the player's own (CARSFX_PlayerEngine, 0x474030): two GIN
+ * files of the car's engine sound, one recorded pulling up through the
+ * rpm and one letting off down through it, each a layer at the volume the
+ * friend's own game gives it, at the rpm it sounds there (both from the
+ * friend's snapshots; the files from the friend's car and engine upgrades,
+ * roam_game.c), and roam_game.c silences the game's AI engine on the
+ * friend's cars that have one (the free-roam opponents' cars).  How loud: a
+ * layer at its volume (0 .. 1) times K_ENG, the game's own output for the
+ * player's engine against its voices' volumes (a solo drive, each moment's
+ * volumes and rpm logged on the output's time axis: idle and letting off
+ * within half a dB, pulling 1 to 3 dB under it, the road and the wind in
+ * that), times OTHER, as the nitrous.
  *
  * The game sounds a car's nitrous and hydraulics from its sound state's
  * CARSFX_Nitrous and CARSFX_Hydraulics children.  The player's car has
@@ -44,7 +64,9 @@
  * so it never mixes half an update, and smooths every change.  A voice not
  * set for STALE_MS (a parked game) falls silent.  The banks are read on a
  * thread of their own, the first time free roam asks, and the mixer plays
- * nothing until they are in. */
+ * nothing until they are in; so are an engine's GIN files, the first time a
+ * car has that engine (kept for the session: the game has 43 engine sounds,
+ * about half a megabyte each decoded). */
 #include "carsfx.h"
 #include <math.h>
 #include <pthread.h>
@@ -64,6 +86,11 @@ int fileio_resolve_game(const char *win, char *out, size_t outsz);     /* fileio
 #define CARS      32
 #define F_LOOP    1u
 #define F_STOP    2u
+#define K_ENG     1.1f               /* a GIN layer's gain for its volume (0 .. 1), as the game plays the player's own (measured, below) */
+#define ENGINES   48                 /* engine sounds kept (the game's table has 43) */
+#define XFADE     96                 /* output samples: a grain that does not follow the last one fades in */
+#define ENG_ATT   0.06f              /* s: an engine fades in, */
+#define ENG_REL   0.15f              /* ...and out */
 
 enum { S_ENGAGE, S_RELEASE, S_PURGE, S_PURGE_START, S_PUMP, S_CLUNK, S_CLICK, S_VALVE, S_THUMP, S_N };
 static const char *const k_bank[2] = { "SOUND\\NOS\\Nitrous_01_MB.abk", "SOUND\\NOS\\Hydraulics_00_MB.abk" };
@@ -159,16 +186,22 @@ static int bank_sample(const uint8_t *f, size_t len, int idx, Sample *o){
     o->loop0 = l0 < n ? l0 : 0; o->loop1 = l1 > o->loop0 && l1 < n ? l1 + 1 : n;   /* the last loop sample is in it */
     return 1;
 }
+/* a file of the game's (a Windows path in its folder), whole: malloc'd, or 0 */
+static uint8_t *game_file(const char *win, long *len){
+    char path[1024]; FILE *fp = 0; uint8_t *f = 0;
+    *len = 0;
+    if (fileio_resolve_game(win, path, sizeof path) && (fp = fopen(path, "rb"))){
+        if (!fseek(fp, 0, SEEK_END) && (*len = ftell(fp)) > 0 && *len < (16l << 20) && !fseek(fp, 0, SEEK_SET) &&
+            (f = malloc((size_t)*len)) && fread(f, 1, (size_t)*len, fp) != (size_t)*len){ free(f); f = 0; }
+        fclose(fp);
+    }
+    return f;
+}
 static void *load_main(void *arg){
     (void)arg;
     uint32_t t0 = now_ms(); int got = 0; double secs = 0;
     for (int b = 0; b < 2; b++){
-        char path[1024]; FILE *fp = 0; uint8_t *f = 0; long len = 0;
-        if (fileio_resolve_game(k_bank[b], path, sizeof path) && (fp = fopen(path, "rb"))){
-            if (!fseek(fp, 0, SEEK_END) && (len = ftell(fp)) > 0 && len < (16l << 20) && !fseek(fp, 0, SEEK_SET) &&
-                (f = malloc((size_t)len)) && fread(f, 1, (size_t)len, fp) != (size_t)len){ free(f); f = 0; }
-            fclose(fp);
-        }
+        long len = 0; uint8_t *f = game_file(k_bank[b], &len);
         if (!f){ CLOG("[carsfx] %s: could not read it\n", k_bank[b]); continue; }
         for (int s = 0; s < S_N; s++){
             if (k_snd[s].bank != b) continue;
@@ -180,6 +213,115 @@ static void *load_main(void *arg){
     CLOG("[carsfx] friends' nitrous and hydraulics: %d of %d samples (%.1f s) in %u ms\n", got, S_N, secs, now_ms() - t0);
     __atomic_store_n(&g_ready, 1, __ATOMIC_RELEASE);
     return 0;
+}
+
+/* ---- engines: the GIN files ------------------------------------------------------- */
+/* A GIN file ("Gnsu20", SOUND\ENGINE): the engine recorded running up (or,
+ * letting off, down) through its rpm, cut into grains of one engine cycle
+ * each, and where the recording is at each of npt + 1 rpm evenly from rmin
+ * to rmax:
+ *   +0x08 float rmin, rmax; +0x10 u32 npt, grains, samples, rate;
+ *   +0x20 u32 where[npt + 1], then u32 start[grains + 1] (in samples), then
+ *   the samples: EA-XAS frames of 19 bytes for 32 samples, each a frame on
+ *   its own: a word with the first two samples' top 12 bits (the filter in
+ *   the low 4 bits of the first, the shift in the second's), then 15 bytes
+ *   of 4-bit steps, high nibble first.
+ * The game plays each layer a grain at a time (0x474030 through the SND
+ * library's granular voice), the grain where the recording is at the rpm
+ * next, on the file's own scale: rmin + (rpm - 1000) / 9000 x (rmax - rmin)
+ * for the sound's rpm (0x46F9A0), and below rmin its first grain lower.
+ * Here a grain also plays at the rpm's pitch over its own (within 0.75 ..
+ * 1.33), so the rpm moves smoothly between grains, and a grain that does
+ * not follow the last fades in over XFADE samples. */
+typedef struct { int16_t *pcm; uint32_t n, rate, npt, ngr; float rmin, rmax; uint32_t *where, *start; float *grpm; } Gin;
+static struct { char name[2][40]; int state; Gin g[2]; } g_eng[ENGINES];   /* state: 1 loading, 2 ready, 3 not there */
+static int g_neng;
+
+static float lef(const uint8_t *p){ uint32_t u = le32(p); float f; memcpy(&f, &u, 4); return f; }
+static void gin_free(Gin *g){ free(g->pcm); free(g->where); free(g->start); free(g->grpm); memset(g, 0, sizeof *g); }
+/* the rpm (the file's) at a place in its recording, from where[] */
+static float gin_rpm_at(const Gin *g, float pos){
+    for (uint32_t i = 0; i < g->npt; i++){
+        float a = (float)g->where[i], b = (float)g->where[i + 1];
+        if (a != b && (pos - a) * (pos - b) <= 0.f)
+            return g->rmin + ((float)i + (pos - a) / (b - a)) * (g->rmax - g->rmin) / (float)g->npt;
+    }
+    return fabsf(pos - (float)g->where[0]) < fabsf(pos - (float)g->where[g->npt]) ? g->rmin : g->rmax;
+}
+/* the grain to play at rpm r (the file's) */
+static uint32_t gin_grain(const Gin *g, float r){
+    float t = (r - g->rmin) / (g->rmax - g->rmin) * (float)g->npt;
+    if (!(t > 0.f)) t = 0.f;
+    if (t > (float)g->npt) t = (float)g->npt;
+    uint32_t i = (uint32_t)t < g->npt ? (uint32_t)t : g->npt - 1;
+    float pos = (float)g->where[i] + ((float)g->where[i + 1] - (float)g->where[i]) * (t - (float)i);
+    uint32_t lo = 0, hi = g->ngr - 1;
+    while (lo < hi){ uint32_t m = (lo + hi + 1) / 2; if ((float)g->start[m] <= pos) lo = m; else hi = m - 1; }
+    return lo;
+}
+static int gin_load(const char *name, Gin *g){
+    static const int c1t[4] = { 0, 240, 460, 392 }, c2t[4] = { 0, 0, -208, -220 };
+    char win[64]; long len = 0;
+    memset(g, 0, sizeof *g);
+    snprintf(win, sizeof win, "SOUND\\ENGINE\\%s", name);
+    uint8_t *f = game_file(win, &len);
+    if (!f) return 0;
+    int good = 0;
+    if (len >= 0x20 && !memcmp(f, "Gnsu20", 6)){
+        g->rmin = lef(f + 8); g->rmax = lef(f + 12);
+        g->npt = le32(f + 0x10); g->ngr = le32(f + 0x14); g->n = le32(f + 0x18); g->rate = le32(f + 0x1c);
+        size_t data = 0x20 + 4u * ((size_t)g->npt + 1) + 4u * ((size_t)g->ngr + 1), frames = ((size_t)g->n + 31) / 32;
+        good = g->rmin >= 100.f && g->rmax > g->rmin + 100.f && g->rmax < 20000.f && g->npt >= 1 && g->npt <= 1024 && g->ngr >= 1 &&
+               g->ngr <= 16384 && g->n >= 1024 && g->n <= 1u << 22 && g->rate >= 8000 && g->rate <= 96000 && data + 19 * frames <= (size_t)len &&
+               (g->where = malloc(4u * (g->npt + 1))) && (g->start = malloc(4u * (g->ngr + 1))) && (g->grpm = malloc(4u * g->ngr)) &&
+               (g->pcm = malloc(2u * (size_t)g->n));
+        for (uint32_t i = 0; good && i <= g->npt; i++) good = (g->where[i] = le32(f + 0x20 + 4 * i)) < g->n;
+        for (uint32_t i = 0; good && i <= g->ngr; i++)
+            good = (g->start[i] = le32(f + 0x20 + 4 * (g->npt + 1) + 4 * i)) <= g->n && (!i || g->start[i] > g->start[i - 1]);
+        for (size_t fr = 0, k = 0; good && fr < frames; fr++){
+            const uint8_t *d = f + data + 19 * fr;
+            uint32_t h = le32(d);
+            int c1 = c1t[h & 3], c2 = c2t[h & 3], sh = 20 - (int)(h >> 16 & 15);
+            int h2 = (int16_t)(h & 0xfff0u), h1 = (int16_t)(h >> 16 & 0xfff0u);
+            if (k < g->n) g->pcm[k++] = (int16_t)h2;
+            if (k < g->n) g->pcm[k++] = (int16_t)h1;
+            for (int i = 0; i < 30 && k < g->n; i++){
+                int nib = i & 1 ? d[4 + i / 2] & 15 : d[4 + i / 2] >> 4;
+                int s = ((nib > 7 ? nib - 16 : nib) * (1 << sh) + h1 * c1 + h2 * c2 + 128) >> 8;
+                if (s > 32767) s = 32767;
+                if (s < -32768) s = -32768;
+                g->pcm[k++] = (int16_t)s; h2 = h1; h1 = s;
+            }
+        }
+        for (uint32_t i = 0; good && i < g->ngr; i++) g->grpm[i] = gin_rpm_at(g, 0.5f * ((float)g->start[i] + (float)g->start[i + 1]));
+    }
+    free(f);
+    if (!good) gin_free(g);
+    return good;
+}
+static void *eng_load_main(void *arg){
+    int e = (int)(intptr_t)arg;
+    uint32_t t0 = now_ms();
+    int good = gin_load(g_eng[e].name[0], &g_eng[e].g[0]) && gin_load(g_eng[e].name[1], &g_eng[e].g[1]);
+    if (!good){ gin_free(&g_eng[e].g[0]); gin_free(&g_eng[e].g[1]); }
+    CLOG("[carsfx] engine %s + %s: %s in %u ms\n", g_eng[e].name[0], g_eng[e].name[1], good ? "read" : "not there", now_ms() - t0);
+    __atomic_store_n(&g_eng[e].state, good ? 2 : 3, __ATOMIC_RELEASE);
+    return 0;
+}
+/* game thread: the engine of these GIN files, its index + 1 (being read or
+ * not), 0 when it is not there */
+static uint32_t engine_of(const char *acc, const char *dcl){
+    for (int e = 0; e < g_neng; e++)
+        if (!strcmp(g_eng[e].name[0], acc) && !strcmp(g_eng[e].name[1], dcl))
+            return __atomic_load_n(&g_eng[e].state, __ATOMIC_ACQUIRE) == 3 ? 0 : (uint32_t)e + 1;
+    if (g_neng == ENGINES || strlen(acc) >= sizeof g_eng[0].name[0] || strlen(dcl) >= sizeof g_eng[0].name[1]) return 0;
+    int e = g_neng++;
+    strcpy(g_eng[e].name[0], acc); strcpy(g_eng[e].name[1], dcl);
+    __atomic_store_n(&g_eng[e].state, 1, __ATOMIC_RELEASE);
+    pthread_t t; pthread_attr_t a; pthread_attr_init(&a); pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
+    if (pthread_create(&t, &a, eng_load_main, (void *)(intptr_t)e)) eng_load_main((void *)(intptr_t)e);
+    pthread_attr_destroy(&a);
+    return (uint32_t)e + 1;
 }
 
 /* ---- game thread -> mixer: a voice's words under a sequence count ------------------ */
@@ -207,6 +349,26 @@ static int words_get(int k, VWords *w){
     __atomic_thread_fence(__ATOMIC_ACQUIRE);
     return __atomic_load_n(&g_in[k].seq, __ATOMIC_RELAXED) == s;
 }
+/* ...and a car's engine's (by the car's place in g_car), the same way:
+ * eng 0 is none; rpm on the sound's scale, each layer's gain, where it is
+ * heard from (the car's gain, side and Doppler) */
+typedef struct { uint32_t gen, eng, rpm, g0, g1, gain, pan, dop, stamp; } EWords;
+static struct { uint32_t seq; EWords w; } g_ein[CARS];
+#define EW_N ((int)(sizeof(EWords) / 4))
+static void ewords_put(int c, const EWords *w){
+    const uint32_t *from = (const uint32_t *)w; uint32_t *to = (uint32_t *)&g_ein[c].w, s = g_ein[c].seq;
+    PUT(g_ein[c].seq, s + 1);
+    __atomic_thread_fence(__ATOMIC_RELEASE);
+    for (int i = 0; i < EW_N; i++) PUT(to[i], from[i]);
+    __atomic_store_n(&g_ein[c].seq, s + 2, __ATOMIC_RELEASE);
+}
+static int ewords_get(int c, EWords *w){
+    uint32_t s = __atomic_load_n(&g_ein[c].seq, __ATOMIC_ACQUIRE), *to = (uint32_t *)w, *from = (uint32_t *)&g_ein[c].w;
+    if (s & 1) return 0;
+    for (int i = 0; i < EW_N; i++) to[i] = GET(from[i]);
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+    return __atomic_load_n(&g_ein[c].seq, __ATOMIC_RELAXED) == s;
+}
 
 /* ---- the game thread: cars and their voices ---------------------------------------- */
 /* a car keeps its sounds by their generations (0: none): a voice whose
@@ -214,7 +376,7 @@ static int words_get(int k, VWords *w){
 static struct { int used, car; uint32_t gen, snd, flags, fade_ms, delay, end_ms, free_at; float gain, pitch, pan; } g_vo[CARSFX_VOICES];
 static struct {
     int used, seen;
-    uint32_t who; char name[24];
+    uint32_t who, egen; char name[24];          /* egen: its engine voice's generation (a new car: a new one) */
     carsfx_state st;
     uint32_t engage, purge[2], wheel[4], thump;      /* its sounds that it may stop */
     float gain, pan, doppler;                        /* where it is heard from, this frame */
@@ -287,7 +449,7 @@ void carsfx_begin(const float *pos, const float *fwd, const float *vel){
 }
 
 void carsfx_car(uint32_t who, const char *name, const float *p, const float *v, const carsfx_state *st){
-    if (!g_lis.ok || !p || !st || __atomic_load_n(&g_ready, __ATOMIC_ACQUIRE) != 1) return;
+    if (!g_lis.ok || !p || !st) return;
     int c = 0;
     while (c < CARS && !(g_car[c].used && g_car[c].who == who)) c++;
     if (c == CARS){
@@ -295,6 +457,8 @@ void carsfx_car(uint32_t who, const char *name, const float *p, const float *v, 
         if (c == CARS) return;
         memset(&g_car[c], 0, sizeof g_car[c]);
         g_car[c].used = 1; g_car[c].who = who; g_car[c].st.thumps = st->thumps;
+        if (!++g_gen) ++g_gen;
+        g_car[c].egen = g_gen;
         snprintf(g_car[c].name, sizeof g_car[c].name, "%s", name && *name ? name : "a friend");
     }
     g_car[c].seen = 1;
@@ -315,6 +479,13 @@ void carsfx_car(uint32_t who, const char *name, const float *p, const float *v, 
         if (dop > 2.f) dop = 2.f;
     }
     g_car[c].gain = g; g_car[c].pan = pan; g_car[c].doppler = dop;
+
+    /* its engine: the mixer plays it while it is given (and its GIN files are in) */
+    uint32_t e = g > 0.f && st->gin[0] && st->gin[1] && st->eng > 0.f ? engine_of(st->gin[0], st->gin[1]) : 0;
+    EWords ew = { g_car[c].egen, e, fbits(st->eng), fbits(K_ENG * OTHER * st->eng_gain[0]), fbits(K_ENG * OTHER * st->eng_gain[1]),
+                  fbits(g), fbits(pan), fbits(dop), g_now };
+    ewords_put(c, &ew);
+    if (__atomic_load_n(&g_ready, __ATOMIC_ACQUIRE) != 1) return;
 
     /* nitrous (0x484F20): on and not let out, the boost (unless the game
      * sounds it); let out, the purge */
@@ -367,6 +538,8 @@ void carsfx_end(void){
     for (int c = 0; c < CARS; c++){
         if (!g_car[c].used || g_car[c].seen) continue;
         for (int k = 0; k < CARSFX_VOICES; k++){ uint32_t x = g_vo[k].gen; if (g_vo[k].used && g_vo[k].car == c) voice_stop(&x, 200); }
+        EWords off = { g_car[c].egen, 0, 0, 0, 0, 0, 0, 0, g_now };
+        ewords_put(c, &off);
         g_car[c].used = 0;
     }
 }
@@ -388,9 +561,83 @@ static inline float at(const Sample *S, int loop, int64_t k){
     return k < 0 || k >= (int64_t)S->n ? 0.f : (float)S->pcm[k] * (1.f / 32768.f);
 }
 
+/* the engines: per car, its two layers a grain at a time (see the GIN files) */
+typedef struct { uint32_t grain; int fade; double pos, old; } Layer;   /* its grain, where; a grain fading out */
+static struct {
+    int live;
+    uint32_t gen, eng;                               /* the car's engine voice and the engine it plays */
+    float rpm, g[2], dop, gl, gr, lp, env;
+    Layer L[2];
+    EWords last;
+} g_ev[CARS];
+static inline float gat(const Gin *G, int64_t k){ return k < 0 || k >= (int64_t)G->n ? 0.f : (float)G->pcm[k] * (1.f / 32768.f); }
+static inline float gcr(const Gin *G, double pos){
+    int64_t j = (int64_t)pos; float fr = (float)(pos - (double)j);
+    float p0 = gat(G, j - 1), p1 = gat(G, j), p2 = gat(G, j + 1), p3 = gat(G, j + 2);
+    return p1 + 0.5f * fr * (p2 - p0 + fr * (2.f * p0 - 5.f * p1 + 4.f * p2 - p3 + fr * (3.f * (p1 - p2) + p3 - p0)));
+}
+static inline float gin_scale(const Gin *G, float rpm){ return G->rmin + (rpm - 1000.f) * (1.f / 9000.f) * (G->rmax - G->rmin); }
+static void engines_mix(float *acc, unsigned frames, float fs, uint32_t now){
+    float k_smooth = 1.f - expf(-1.f / (0.020f * fs)), k_rpm = 1.f - expf(-1.f / (0.030f * fs));
+    float att = 1.f / (ENG_ATT * fs), rel = 1.f / (ENG_REL * fs);
+    for (int c = 0; c < CARS; c++){
+        EWords w;
+        if (ewords_get(c, &w)) g_ev[c].last = w; else w = g_ev[c].last;
+        uint32_t e = w.eng;
+        int ready = e && e <= ENGINES && __atomic_load_n(&g_eng[e - 1].state, __ATOMIC_ACQUIRE) == 2;
+        int stale = (int32_t)(now - w.stamp) > (int32_t)STALE_MS;
+        float trpm = bitsf(w.rpm), tg0 = bitsf(w.g0), tg1 = bitsf(w.g1), gain = bitsf(w.gain), pan = bitsf(w.pan), tdop = bitsf(w.dop);
+        float th = (pan + 1.f) * (float)M_PI * 0.25f, tgl = gain * cosf(th) * (float)M_SQRT2, tgr = gain * sinf(th) * (float)M_SQRT2;
+        if (!g_ev[c].live){
+            if (!ready || stale || !w.gen) continue;
+            g_ev[c].live = 1; g_ev[c].gen = w.gen; g_ev[c].eng = e; g_ev[c].env = 0.f; g_ev[c].rpm = trpm; g_ev[c].dop = tdop;
+            g_ev[c].g[0] = tg0; g_ev[c].g[1] = tg1; g_ev[c].gl = tgl; g_ev[c].gr = tgr; g_ev[c].lp = 0.f;
+            for (int l = 0; l < 2; l++){
+                const Gin *G = &g_eng[e - 1].g[l];
+                g_ev[c].L[l].grain = gin_grain(G, gin_scale(G, trpm)); g_ev[c].L[l].pos = G->start[g_ev[c].L[l].grain]; g_ev[c].L[l].fade = 0;
+            }
+        }
+        /* another car in its place, another engine, none, or a parked game: it fades out (and a new one starts after) */
+        int off = !ready || stale || w.gen != g_ev[c].gen || e != g_ev[c].eng;
+        const Gin *Gs = g_eng[g_ev[c].eng - 1].g;
+        float k_lp = 0.15f + 0.85f * (gain * 1.7f > 1.f ? 1.f : gain * 1.7f);   /* far cars duller, as the voices */
+        float rpm = g_ev[c].rpm, g0 = g_ev[c].g[0], g1 = g_ev[c].g[1], dop = g_ev[c].dop, gl = g_ev[c].gl, gr = g_ev[c].gr, lp = g_ev[c].lp, env = g_ev[c].env;
+        for (unsigned i = 0; i < frames; i++){
+            rpm += (trpm - rpm) * k_rpm; dop += (tdop - dop) * k_smooth;
+            g0 += (tg0 - g0) * k_smooth; g1 += (tg1 - g1) * k_smooth; gl += (tgl - gl) * k_smooth; gr += (tgr - gr) * k_smooth;
+            if (off){ env -= rel; if (env <= 0.f){ env = 0.f; g_ev[c].live = 0; break; } }
+            else if (env < 1.f){ env += att; if (env > 1.f) env = 1.f; }
+            float s = 0.f;
+            for (int l = 0; l < 2; l++){
+                const Gin *G = &Gs[l];
+                Layer *L = &g_ev[c].L[l];
+                float r = gin_scale(G, rpm);
+                if (L->pos >= (double)G->start[L->grain + 1]){              /* the grain is over: the one at the rpm next */
+                    uint32_t ng = gin_grain(G, r);
+                    if (ng != L->grain + 1){ L->old = L->pos; L->fade = XFADE; L->pos = G->start[ng]; }
+                    L->grain = ng;
+                }
+                float pitch = r / G->grpm[L->grain];
+                pitch = pitch < 0.75f ? 0.75f : pitch > 1.33f ? 1.33f : pitch;
+                double step = (double)((float)G->rate / fs * pitch * dop);
+                float x = gcr(G, L->pos);
+                if (L->fade){ float f = (float)L->fade / (float)XFADE; x = x * (1.f - f) + gcr(G, L->old) * f; L->old += step; L->fade--; }
+                L->pos += step;
+                s += x * (l ? g1 : g0);
+            }
+            lp += (s - lp) * k_lp;
+            float o = lp * env;
+            acc[2 * i] += o * gl; acc[2 * i + 1] += o * gr;
+        }
+        g_ev[c].rpm = rpm; g_ev[c].g[0] = g0; g_ev[c].g[1] = g1; g_ev[c].dop = dop; g_ev[c].gl = gl; g_ev[c].gr = gr; g_ev[c].lp = lp; g_ev[c].env = env;
+    }
+}
+
 void carsfx_mix(float *acc, unsigned frames, unsigned rate){
-    if (!rate || !frames || __atomic_load_n(&g_ready, __ATOMIC_ACQUIRE) != 1) return;
+    if (!rate || !frames) return;
     uint32_t now = now_ms();
+    engines_mix(acc, frames, (float)rate, now);
+    if (__atomic_load_n(&g_ready, __ATOMIC_ACQUIRE) != 1) return;
     float fs = (float)rate, k_smooth = 1.f - expf(-1.f / (0.020f * fs)), att = 1.f / (0.004f * fs);
     for (int v = 0; v < CARSFX_VOICES; v++){
         VWords w;

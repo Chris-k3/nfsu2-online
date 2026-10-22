@@ -1097,10 +1097,38 @@ static void t_statex(void){
           "a wheel slides: each wheel's slip in half m/s (clamped, NaN 0) and its surface (%d bytes)", n);
     e = rc_decode(b, n, &d);
     CHECK(e == RC_OK && d.u.snap.s[0].slipx && d.u.snap.s[0].slip[4] == 21.5f && d.u.snap.s[0].slip[5] == -6.5f && d.u.snap.s[0].slip[6] == 63.5f &&
-          d.u.snap.s[0].slip[1] == -63.5f && d.u.snap.s[0].surf[2] == 8 && d.u.snap.s[0].nos == 7, "the slip decodes (e %d)", e);
+          d.u.snap.s[0].slip[1] == -63.5f && d.u.snap.s[0].surf[2] == 8 && d.u.snap.s[0].nos == 7 && !d.u.snap.s[0].eng, "the slip decodes (e %d)", e);
+    /* the engine: after the slip while a wheel slides, after the hydraulics otherwise; none while it is 0 */
+    uint8_t eb[RC_MAX_DGRAM];
+    s->eng = 5948; s->eng_acc = 255; s->eng_dcl = 38; s->eng_base = 99;
+    int en = rc_encode(&m, eb, sizeof eb); const uint8_t *ex = eb + 22 + 52;
+    CHECK(en == 16 + 6 + 52 + 29 + 4 && ex[0] == 28 && le16(ex + 24) == 5948 && ex[26] == 255 && ex[27] == 38 && ex[28] == 99 && (int8_t)ex[18] == 43,
+          "the engine after the slip (%d bytes)", en);
+    e = rc_decode(eb, en, &d);
+    CHECK(e == RC_OK && d.u.snap.s[0].slipx && d.u.snap.s[0].slip[4] == 21.5f && d.u.snap.s[0].eng == 5948 && d.u.snap.s[0].eng_acc == 255 &&
+          d.u.snap.s[0].eng_dcl == 38 && d.u.snap.s[0].eng_base == 99, "...decodes (e %d)", e);
+    rc_state keep = *s;
+    for (int i = 0; i < 8; i++) s->slip[i] = 0;
+    s->eng = 30000;
+    en = rc_encode(&m, eb, sizeof eb);
+    CHECK(en == 16 + 6 + 52 + 17 + 4 && ex[0] == 16 && le16(ex + 12) == 20000 && ex[14] == 255 && ex[15] == 38 && ex[16] == 99,
+          "the engine after the hydraulics, its rpm at most 20000 (%d bytes)", en);
+    e = rc_decode(eb, en, &d);
+    CHECK(e == RC_OK && !d.u.snap.s[0].slipx && d.u.snap.s[0].slip[4] == 0 && d.u.snap.s[0].nos == 7 && d.u.snap.s[0].eng == 20000 &&
+          d.u.snap.s[0].eng_dcl == 38, "...decodes, without slip (e %d)", e);
+    /* (a core before the engine reads 16 as the hydraulics and 28 as the slip, and skips the rest: the two tests below) */
+    *s = keep;
+    en = rc_encode(&m, eb, sizeof eb);
+    eb[22 + 52] = RC_STATEX_BYTES - 1 + 3; eb[en - 4] = 0xAA; eb[en - 3] = 0xBB; eb[en - 2] = 0xCC;
+    int eln = en + 3; eb[6] = (uint8_t)eln; eb[7] = (uint8_t)(eln >> 8);
+    uint32_t ec = rc_crc32(eb, (uint32_t)eln - 4); for (int k = 0; k < 4; k++) eb[eln - 4 + k] = (uint8_t)(ec >> (8 * k));
+    e = rc_decode(eb, eln, &d);
+    CHECK(e == RC_OK && d.u.snap.s[0].slip[4] == 21.5f && d.u.snap.s[0].eng == 5948 && d.u.snap.s[0].eng_dcl == 38,
+          "a newer core's fields after the engine: skipped (e %d)", e);
+    s->eng = 0; s->eng_acc = 0; s->eng_dcl = 0; s->eng_base = 0;
     /* a newer core's longer extension: its own fields skipped */
     uint8_t lb[RC_MAX_DGRAM]; memcpy(lb, b, (size_t)n - 4);
-    lb[22 + 52] = RC_STATEX_BYTES - 1 + 3; lb[n - 4] = 0xAA; lb[n - 3] = 0xBB; lb[n - 2] = 0xCC;
+    lb[22 + 52] = RC_STATEX_SLIP - 1 + 3; lb[n - 4] = 0xAA; lb[n - 3] = 0xBB; lb[n - 2] = 0xCC;
     int ln = n + 3; lb[6] = (uint8_t)ln; lb[7] = (uint8_t)(ln >> 8);
     uint32_t c = rc_crc32(lb, (uint32_t)ln - 4); for (int k = 0; k < 4; k++) lb[ln - 4 + k] = (uint8_t)(c >> (8 * k));
     e = rc_decode(lb, ln, &d);
@@ -1130,6 +1158,7 @@ static void t_statex(void){
             rc_state st; memset(&st, 0, sizeof st); st.q[3] = 1; st.t_us = (uint32_t)g_now; st.p[0] = (float)i;
             st.ext = 1; st.nos = 60; st.hyd = 0x36; st.thumps = 3; for (int w = 0; w < 4; w++) st.wz[w] = 0.1f * (float)(w + 1);
             st.slip[6] = 12.f; st.slip[7] = -3.5f; st.surf[3] = 15;
+            st.eng = 4000; st.eng_acc = 255; st.eng_dcl = 51; st.eng_base = 102;
             rc_set_status(&g_n[i], RC_ST_ROAM); rc_push_state(&g_n[i], &st, g_now);
         }
         net_run(g_now + 10000, 3);
@@ -1148,8 +1177,10 @@ static void t_statex(void){
           "the newer peer's pose has the wheel heights, the nitrous and the hydraulics (%d %d %x %u %g)", P.ext, P.nos, P.hyd, P.thumps, (double)P.wz[3]);
     CHECK(ok1 && P.slipx && P.slip[6] == 12.f && P.slip[7] == -3.5f && P.surf[3] == 15 && P.slip[0] == 0,
           "...and the wheels' slip and surfaces (%d %g %g %u)", P.slipx, (double)P.slip[6], (double)P.slip[7], P.surf[3]);
+    CHECK(ok1 && P.eng == 4000.f && P.eng_acc == 1.f && fabsf(P.eng_dcl - 0.2f) < 1e-6f && fabsf(P.eng_base - 0.4f) < 1e-6f,
+          "...and its engine (%g %g %g %g)", (double)P.eng, (double)P.eng_acc, (double)P.eng_dcl, (double)P.eng_base);
     int ok2 = k2 >= 0 && rc_interp_peek(&g_n[2].peer[k2].mo, g_n[2].peer[k2].mo.t[g_n[2].peer[k2].mo.n - 1], 250000, &P);
-    CHECK(ok2 && !P.ext && !P.nos && !P.hyd && !P.thumps && !P.slipx && P.slip[6] == 0, "the older peer's pose has none");
+    CHECK(ok2 && !P.ext && !P.nos && !P.hyd && !P.thumps && !P.slipx && P.slip[6] == 0 && !P.eng, "the older peer's pose has none");
 }
 
 /* ---- 4e. race lobbies: LOBBY only to a peer that takes them, only for us; the hub's LOBBIES -- */
