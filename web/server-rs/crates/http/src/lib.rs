@@ -281,6 +281,12 @@ pub trait Service: Send + Sync + 'static {
     /// A new TCP connection, before any TLS or byte: None closes it at once.  What it returns is dropped when the
     /// connection goes (the per-client connection budget gives its share back).
     fn admit(&self, peer: &SocketAddr) -> Option<Box<dyn Send + Sync>>;
+    /// This peer's TLS handshake must show a client certificate that the TLS state's client CA signed, or it fails
+    /// (tls.rs; a proxy whose forwarding headers are believed, at addresses others connect from too).  Nobody by
+    /// default.
+    fn client_certificate(&self, _peer: &SocketAddr) -> bool {
+        false
+    }
     /// How long an idle keep-alive connection from this peer is kept, and what its answers' `Keep-Alive: timeout=`
     /// says (Cloudflare's own connections: 905 s; others 65 s).
     fn keep_alive(&self, peer: &SocketAddr) -> Duration;
@@ -564,7 +570,7 @@ async fn connection<S: Service>(
         Some(tls) => {
             // (on the heap for the handshake only: its state, a rustls connection being made, would otherwise be part
             // of the connection's future for as long as the connection lives)
-            let accept = Box::pin(tls.handshake(tcp));
+            let accept = Box::pin(tls.handshake(tcp, service.client_certificate(&peer)));
             let done = if limits.handshake_timeout.is_zero() {
                 Ok(accept.await)
             } else {

@@ -338,6 +338,147 @@ async fn a_handshake_that_never_finishes_is_closed_after_the_handshake_time() {
     assert!(hello(addr, Some("nfsu2.test")).await.is_ok());
 }
 
+/// A GET over TLS (these versions, this client certificate and key, or none): whether an answer came.  (TLS 1.3's
+/// client finishes its handshake before the server checks its certificate: a refusal shows when it reads.)
+async fn get_with(
+    addr: std::net::SocketAddr,
+    versions: &[&'static rustls::SupportedProtocolVersion],
+    cert: Option<(&Path, &Path)>,
+) -> bool {
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let b = rustls::ClientConfig::builder_with_provider(provider.clone())
+        .with_protocol_versions(versions)
+        .expect("versions")
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(Any(provider)));
+    let config = match cert {
+        Some((c, k)) => {
+            let chain = rustls_pemfile::certs(&mut &std::fs::read(c).unwrap()[..]).collect::<Result<Vec<_>, _>>().unwrap();
+            let key = rustls_pemfile::private_key(&mut &std::fs::read(k).unwrap()[..]).unwrap().unwrap();
+            b.with_client_auth_cert(chain, key).expect("client certificate")
+        }
+        None => b.with_no_client_auth(),
+    };
+    let tcp = TcpStream::connect(addr).await.unwrap();
+    let go = async {
+        let mut s =
+            tokio_rustls::TlsConnector::from(Arc::new(config)).connect(ServerName::try_from("nfsu2.test").unwrap(), tcp).await.ok()?;
+        s.write_all(b"GET /x HTTP/1.1\r\nHost: nfsu2.test\r\nConnection: close\r\n\r\n").await.ok()?;
+        let mut all = Vec::new();
+        s.read_to_end(&mut all).await.ok()?;
+        Some(all.starts_with(b"HTTP/1.1 200"))
+    };
+    tokio::time::timeout(Duration::from_secs(5), go).await.ok().flatten().unwrap_or(false)
+}
+
+/// A peer the service names must show a client certificate that the client CA signed (with --trusted-proxies
+/// cloudflare, Cloudflare's origin-pull certificate: any of its customers connects from its addresses too, the second
+/// security audit): without one, or with one another CA signed, nothing gets through; the other peers are asked for
+/// none; without a client CA, a peer that must show one is refused.
+#[tokio::test]
+async fn a_peer_that_must_prove_itself_shows_a_certificate_of_the_client_ca() {
+    let c = certs_or_skip!();
+    let d = &c.dir;
+    let ec = ["-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes"];
+    assert!(
+        ssl(
+            d,
+            &[
+                &["req", "-x509"][..],
+                &ec,
+                &[
+                    "-keyout",
+                    "cca.key",
+                    "-out",
+                    "cca.crt",
+                    "-days",
+                    "30",
+                    "-subj",
+                    "/CN=test origin-pull CA",
+                    "-addext",
+                    "basicConstraints=critical,CA:TRUE",
+                    "-addext",
+                    "keyUsage=critical,keyCertSign"
+                ]
+            ]
+            .concat()
+        ) && std::fs::write(
+            d.join("client.ext"),
+            "basicConstraints=CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=clientAuth\n"
+        )
+        .is_ok()
+            && ssl(d, &[&["req"][..], &ec, &["-keyout", "client.key", "-out", "client.csr", "-subj", "/CN=origin-pull"]].concat())
+            && ssl(
+                d,
+                &[
+                    "x509",
+                    "-req",
+                    "-in",
+                    "client.csr",
+                    "-CA",
+                    "cca.crt",
+                    "-CAkey",
+                    "cca.key",
+                    "-CAcreateserial",
+                    "-out",
+                    "client.crt",
+                    "-days",
+                    "30",
+                    "-extfile",
+                    "client.ext"
+                ]
+            )
+            && ssl(
+                d,
+                &[
+                    &["req", "-x509"][..],
+                    &ec,
+                    &[
+                        "-keyout",
+                        "rogue.key",
+                        "-out",
+                        "rogue.crt",
+                        "-days",
+                        "5",
+                        "-subj",
+                        "/CN=origin-pull",
+                        "-addext",
+                        "extendedKeyUsage=clientAuth"
+                    ]
+                ]
+                .concat()
+            ),
+        "client certificates"
+    );
+    let ca = std::fs::read(c.p("cca.crt")).unwrap();
+    let (state, _) = TlsState::load_with_client_ca(&c.p("chain.crt"), &c.p("server.key"), &ca).expect("load");
+    let (l, _) = nfsu2_http::bind("127.0.0.1", 0, None).await.expect("bind");
+    let proving = l.local_addr().unwrap();
+    let svc = TestService::new(Duration::from_secs(65));
+    svc.prove.store(true, std::sync::atomic::Ordering::Relaxed);
+    nfsu2_http::serve(l, Some(state.clone()), Arc::new(Limits::default()), svc);
+    let (client, rogue) = ((c.p("client.crt"), c.p("client.key")), (c.p("rogue.crt"), c.p("rogue.key")));
+    for v in [&[&rustls::version::TLS13][..], &[&rustls::version::TLS12][..]] {
+        assert!(!get_with(proving, v, None).await, "{v:?}: no client certificate");
+        assert!(!get_with(proving, v, Some((&rogue.0, &rogue.1))).await, "{v:?}: one another CA signed");
+        assert!(get_with(proving, v, Some((&client.0, &client.1))).await, "{v:?}: the client CA's");
+    }
+    // the same certificate state for peers the service does not name: no client certificate asked
+    let others = tls_engine(state, Limits::default()).await;
+    assert!(get_with(others, &[&rustls::version::TLS13], None).await);
+    // no client CA: nothing to prove with
+    let (plain, _) = TlsState::load(&c.p("chain.crt"), &c.p("server.key")).expect("load");
+    let (l, _) = nfsu2_http::bind("127.0.0.1", 0, None).await.expect("bind");
+    let refused = l.local_addr().unwrap();
+    let svc = TestService::new(Duration::from_secs(65));
+    svc.prove.store(true, std::sync::atomic::Ordering::Relaxed);
+    nfsu2_http::serve(l, Some(plain), Arc::new(Limits::default()), svc);
+    assert!(!get_with(refused, &[&rustls::version::TLS13], Some((&client.0, &client.1))).await);
+    // Cloudflare's own CA (built in) is one the server takes; a file without a certificate is not
+    assert!(TlsState::load_with_client_ca(&c.p("chain.crt"), &c.p("server.key"), nfsu2_headers::CLOUDFLARE_ORIGIN_PULL_CA).is_ok());
+    assert!(TlsState::load_with_client_ca(&c.p("chain.crt"), &c.p("server.key"), b"junk").is_err());
+}
+
 #[tokio::test]
 async fn http_over_tls() {
     let c = certs_or_skip!();

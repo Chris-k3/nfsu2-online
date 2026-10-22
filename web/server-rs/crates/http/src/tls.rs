@@ -8,15 +8,22 @@
 //! handshake_failure alert; for a name the SNI callback refused, the socket was destroyed without a byte.  (rustls
 //! itself would send access_denied for both, which tells a scanner that a name is what it lacks.)  An SNI that is an
 //! IP address counts as none (rustls's reading; Node's callback refused it as another name).
+//!
+//! With a client CA (`load_with_client_ca`), a peer the service names (`Service::client_certificate`: a proxy at
+//! addresses others connect from too, Cloudflare's) must show a client certificate that CA signed, or its handshake
+//! fails; nobody else is asked for one.  Its handshakes have session tickets and a session cache of their own, so a
+//! session made without a certificate never resumes as one that showed it.
 
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
-use rustls::server::{Acceptor, ClientHello, ProducesTickets, ResolvesServerCert, ServerSessionMemoryCache, StoresServerSessions};
+use rustls::server::{
+    Acceptor, ClientHello, ProducesTickets, ResolvesServerCert, ServerSessionMemoryCache, StoresServerSessions, WebPkiClientVerifier,
+};
 use rustls::sign::CertifiedKey;
-use rustls::{ServerConfig, pki_types::CertificateDer};
+use rustls::{RootCertStore, ServerConfig, pki_types::CertificateDer};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio_rustls::StartHandshake;
@@ -34,15 +41,35 @@ pub struct CertNames {
 pub struct TlsState {
     cert: PathBuf,
     key: PathBuf,
+    /// what signs the client certificates of the peers that must show one (the crate doc)
+    client_ca: Option<Arc<RootCertStore>>,
     current: ArcSwap<Current>,
-    /// kept across reloads: a client resumes its session after a renewal too
+    /// kept across reloads: a client resumes its session after a renewal too (each kind of handshake its own)
+    tickets: Tickets,
+    proved_tickets: Tickets,
+}
+
+/// the session tickets and the session cache of one kind of handshake
+#[derive(Clone)]
+struct Tickets {
     tickets: Arc<dyn ProducesTickets>,
     sessions: Arc<dyn StoresServerSessions>,
+}
+
+impl Tickets {
+    fn new() -> Result<Tickets, String> {
+        Ok(Tickets {
+            tickets: rustls::crypto::ring::Ticketer::new().map_err(|e| e.to_string())?,
+            sessions: ServerSessionMemoryCache::new(SESSION_CACHE),
+        })
+    }
 }
 
 /// A certificate's context and the names its handshakes are for, swapped as one.
 struct Current {
     config: Arc<ServerConfig>,
+    /// the same, for a peer that must show a client certificate (with a client CA only)
+    proved: Option<Arc<ServerConfig>>,
     dns: Vec<String>,
     /// it names an address: shown to handshakes without a name too
     bare: bool,
@@ -59,16 +86,36 @@ impl TlsState {
     /// Reads and checks both files.  Err: why they cannot be used ("<cert> names no host (no subjectAltName)", a
     /// broken file), for the server's "the certificate files cannot be used: ..."
     pub fn load(cert: &Path, key: &Path) -> Result<(std::sync::Arc<TlsState>, CertNames), String> {
-        let tickets = rustls::crypto::ring::Ticketer::new().map_err(|e| e.to_string())?;
-        let sessions: Arc<dyn StoresServerSessions> = ServerSessionMemoryCache::new(SESSION_CACHE);
-        let (current, names) = build(cert, key, &tickets, &sessions)?;
-        let state =
-            TlsState { cert: cert.to_path_buf(), key: key.to_path_buf(), current: ArcSwap::from_pointee(current), tickets, sessions };
+        Self::load_with(cert, key, None)
+    }
+    /// `load`, and a peer the service names (`Service::client_certificate`) must show a client certificate that
+    /// `client_ca` (PEM: one certificate or more) signed (the crate doc)
+    pub fn load_with_client_ca(cert: &Path, key: &Path, client_ca: &[u8]) -> Result<(std::sync::Arc<TlsState>, CertNames), String> {
+        let mut roots = RootCertStore::empty();
+        for c in rustls_pemfile::certs(&mut &client_ca[..]) {
+            roots.add(c.map_err(|e| format!("the client CA: {e}"))?).map_err(|e| format!("the client CA: {e}"))?;
+        }
+        if roots.is_empty() {
+            return Err("the client CA: no certificate in it".into());
+        }
+        Self::load_with(cert, key, Some(Arc::new(roots)))
+    }
+    fn load_with(cert: &Path, key: &Path, client_ca: Option<Arc<RootCertStore>>) -> Result<(std::sync::Arc<TlsState>, CertNames), String> {
+        let (tickets, proved_tickets) = (Tickets::new()?, Tickets::new()?);
+        let (current, names) = build(cert, key, client_ca.as_ref(), &tickets, &proved_tickets)?;
+        let state = TlsState {
+            cert: cert.to_path_buf(),
+            key: key.to_path_buf(),
+            client_ca,
+            current: ArcSwap::from_pointee(current),
+            tickets,
+            proved_tickets,
+        };
         Ok((Arc::new(state), names))
     }
     /// The files again; Ok: the new names (the server's host check takes them).  On Err the old certificate stays.
     pub fn reload(&self) -> Result<CertNames, String> {
-        let (current, names) = build(&self.cert, &self.key, &self.tickets, &self.sessions)?;
+        let (current, names) = build(&self.cert, &self.key, self.client_ca.as_ref(), &self.tickets, &self.proved_tickets)?;
         self.current.store(Arc::new(current));
         Ok(names)
     }
@@ -78,11 +125,13 @@ impl TlsState {
     }
 
     /// The handshake of a new connection, refused as Node refused it (above): the ClientHello first, then the rest
-    /// only for a name the certificate covers.  None: refused, or broken (the connection goes).  The caller bounds
-    /// the time (`handshake_timeout`, for both parts).
-    pub async fn handshake(&self, mut tcp: TcpStream) -> Option<TlsStream<TcpStream>> {
+    /// only for a name the certificate covers.  `prove`: the peer must show a client certificate the client CA
+    /// signed (refused without a client CA).  None: refused, or broken (the connection goes).  The caller bounds the
+    /// time (`handshake_timeout`, for both parts).
+    pub async fn handshake(&self, mut tcp: TcpStream, prove: bool) -> Option<TlsStream<TcpStream>> {
         let accepted = client_hello(&mut tcp).await?;
         let current = self.current.load_full();
+        let config = if prove { current.proved.clone()? } else { current.config.clone() };
         let ok = match accepted.client_hello().server_name() {
             Some(name) => covers(&current.dns, name),
             None if current.bare => true,
@@ -94,7 +143,7 @@ impl TlsState {
         if !ok {
             return None;
         }
-        StartHandshake::from_parts(accepted, tcp).into_stream(current.config.clone()).await.ok()
+        StartHandshake::from_parts(accepted, tcp).into_stream(config).await.ok()
     }
 }
 
@@ -133,12 +182,14 @@ async fn client_hello(tcp: &mut TcpStream) -> Option<rustls::server::Accepted> {
     }
 }
 
-/// the key, the certificate, its names (none: refused), the context
+/// the key, the certificate, its names (none: refused), the context (and with a client CA, the context that asks for
+/// a client certificate)
 fn build(
     cert: &Path,
     key: &Path,
-    tickets: &Arc<dyn ProducesTickets>,
-    sessions: &Arc<dyn StoresServerSessions>,
+    client_ca: Option<&Arc<RootCertStore>>,
+    tickets: &Tickets,
+    proved_tickets: &Tickets,
 ) -> Result<(Current, CertNames), String> {
     let key_pem = std::fs::read(key).map_err(|e| fs_message(&e, key))?;
     let cert_pem = std::fs::read(cert).map_err(|e| fs_message(&e, cert))?;
@@ -156,17 +207,28 @@ fn build(
     let certified = CertifiedKey::new(chain, signer);
     // as OpenSSL's "key values mismatch"
     certified.keys_match().map_err(|e| format!("the key does not belong to the certificate: {e}"))?;
-    let resolver = Resolver { key: Arc::new(certified), dns: names.dns.clone(), bare: !names.ips.is_empty() };
-    let mut config = ServerConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+    let resolver = Arc::new(Resolver { key: Arc::new(certified), dns: names.dns.clone(), bare: !names.ips.is_empty() });
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let versions = ServerConfig::builder_with_provider(provider.clone())
         .with_protocol_versions(&[&rustls::version::TLS13, &rustls::version::TLS12])
-        .map_err(|e| e.to_string())?
-        .with_no_client_auth()
-        .with_cert_resolver(Arc::new(resolver));
-    // Node's https server: ALPN http/1.1
-    config.alpn_protocols = vec![b"http/1.1".to_vec()];
-    config.ticketer = tickets.clone();
-    config.session_storage = sessions.clone();
-    let current = Current { config: Arc::new(config), dns: names.dns.clone(), bare: !names.ips.is_empty() };
+        .map_err(|e| e.to_string())?;
+    let finish = |mut config: ServerConfig, t: &Tickets| {
+        // Node's https server: ALPN http/1.1
+        config.alpn_protocols = vec![b"http/1.1".to_vec()];
+        config.ticketer = t.tickets.clone();
+        config.session_storage = t.sessions.clone();
+        Arc::new(config)
+    };
+    let config = finish(versions.clone().with_no_client_auth().with_cert_resolver(resolver.clone()), tickets);
+    let proved = match client_ca {
+        Some(roots) => {
+            let verifier =
+                WebPkiClientVerifier::builder_with_provider(roots.clone(), provider).build().map_err(|e| format!("the client CA: {e}"))?;
+            Some(finish(versions.with_client_cert_verifier(verifier).with_cert_resolver(resolver), proved_tickets))
+        }
+        None => None,
+    };
+    let current = Current { config, proved, dns: names.dns.clone(), bare: !names.ips.is_empty() };
     Ok((current, names))
 }
 

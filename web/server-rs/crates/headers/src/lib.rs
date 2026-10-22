@@ -223,6 +223,10 @@ pub fn etag_matches(header: Option<&str>, etag: &str) -> bool {
 /// cloudflare-ips.txt (next to this crate's Cargo.toml), as it was when this was built
 const CLOUDFLARE_IPS: &str = include_str!("../cloudflare-ips.txt");
 
+/// Cloudflare's origin-pull CA (cloudflare-origin-pull-ca.pem next to this crate's Cargo.toml, PEM): what signs the
+/// client certificate Cloudflare's proxy shows an origin with Authenticated Origin Pulls on ([`ProxyTrust`])
+pub const CLOUDFLARE_ORIGIN_PULL_CA: &[u8] = include_bytes!("../cloudflare-origin-pull-ca.pem");
+
 /// Cloudflare's published ranges, from cloudflare-ips.txt next to this crate's Cargo.toml (built in; `file` reads
 /// another): a line each, '#' starts a comment.
 pub fn cloudflare_ranges(file: Option<&Path>) -> std::io::Result<Vec<String>> {
@@ -447,12 +451,19 @@ impl HostCheck {
 /// [`ProxyTrust::parse`]): a comma list of 'cloudflare' (Cloudflare's edge ranges, for a server that Cloudflare's
 /// proxy reaches directly), IP addresses and CIDR ranges.  This machine (loopback: a proxy or tunnel here, such as
 /// Caddy, nginx or cloudflared) is always trusted.
+///
+/// Cloudflare's ranges are not Cloudflare's proxy alone: any of its customers connects from them too (a Worker's TCP
+/// socket), and could say any client address.  So a peer there must also show Cloudflare's origin-pull certificate
+/// in its TLS handshake ([`ProxyTrust::must_prove`], [`CLOUDFLARE_ORIGIN_PULL_CA`]: Authenticated Origin Pulls), which
+/// only Cloudflare's proxy has (the second security audit, 2026-10-22).
 pub struct ProxyTrust {
     /// the Cloudflare ranges are in
     pub cloudflare: bool,
     /// what was given (for the start-up line)
     pub entries: Vec<String>,
     rules: Vec<Rule>,
+    /// the Cloudflare ranges among them
+    shared: Vec<Rule>,
 }
 
 /// One entry of Node's BlockList, on the line both families share there: an IPv4 address or range matches as its
@@ -481,7 +492,7 @@ impl Rule {
 impl ProxyTrust {
     /// Err: the message the server dies with at start-up
     pub fn parse(spec: &str) -> Result<Self, String> {
-        let mut t = ProxyTrust { cloudflare: false, entries: Vec::new(), rules: Vec::new() };
+        let mut t = ProxyTrust { cloudflare: false, entries: Vec::new(), rules: Vec::new(), shared: Vec::new() };
         for it in LOOPBACK {
             t.add(it, it)?;
         }
@@ -490,9 +501,11 @@ impl ProxyTrust {
                 continue;
             }
             if raw == "cloudflare" {
+                let from = t.rules.len();
                 for r in cloudflare_ranges(None).map_err(|e| e.to_string())? {
                     t.add(&r, &r)?;
                 }
+                t.shared.extend_from_slice(&t.rules[from..]);
                 t.cloudflare = true;
                 t.entries.push(raw.to_string());
                 continue;
@@ -535,6 +548,15 @@ impl ProxyTrust {
     /// the TCP peer (in any form [`bare_ip`] reads) is this machine or a given proxy
     pub fn trusts(&self, peer: &str) -> bool {
         ip::bare(peer).is_some_and(|(_, ip)| self.trusts_ip(ip))
+    }
+
+    /// the TCP peer is in Cloudflare's ranges (`cloudflare` given): its TLS handshake must show Cloudflare's
+    /// origin-pull certificate, or it fails (the type's doc)
+    pub fn must_prove(&self, peer: &str) -> bool {
+        ip::bare(peer).is_some_and(|(_, ip)| {
+            let a = ip.as_v6();
+            self.shared.iter().any(|r| r.has(a))
+        })
     }
 
     fn trusts_ip(&self, ip: Ip) -> bool {

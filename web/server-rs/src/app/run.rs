@@ -169,8 +169,15 @@ pub async fn run(o: Options, cores: usize) {
     if o.tls == Tls::Cert {
         // A --tls-cert certificate: its names (SAN), for the Host check and the handshake, which goes through only for a
         // server name (SNI) the certificate covers, so a scanner that connects to the bare address, or asks for any
-        // other name, never sees the certificate or the domain in it (the audit's F4)
-        let (tls, names) = match TlsState::load(Path::new(&o.tls_cert), Path::new(&o.tls_key)) {
+        // other name, never sees the certificate or the domain in it (the audit's F4).  With Cloudflare's ranges trusted,
+        // a peer there must show Cloudflare's origin-pull certificate (App::client_certificate).
+        let (cert, key) = (Path::new(&o.tls_cert), Path::new(&o.tls_key));
+        let loaded = if o.trust.cloudflare {
+            TlsState::load_with_client_ca(cert, key, nfsu2_headers::CLOUDFLARE_ORIGIN_PULL_CA)
+        } else {
+            TlsState::load(cert, key)
+        };
+        let (tls, names) = match loaded {
             Ok(t) => t,
             Err(m) => die(&format!("the certificate files cannot be used: {m}")),
         };
@@ -285,6 +292,12 @@ pub async fn run(o: Options, cores: usize) {
         if o.trust.entries.is_empty() { String::new() } else { format!(", {}", o.trust.entries.join(", ")) },
         o.real_ip
     ));
+    if o.trust.cloudflare && o.tls == Tls::Cert {
+        lines.push(
+            "  cloudflare: its addresses must show its origin-pull certificate (turn on Authenticated Origin Pulls), or their handshakes fail"
+                .into(),
+        );
+    }
     lines.push(format!("  names     : {} (other Host names get 421)", names.join(", ")));
     lines.push(format!("  switch    : at most {} players", o.max_peers));
     lines.push(format!(

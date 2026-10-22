@@ -673,6 +673,12 @@ impl Service for App {
         Share::take(&self.conns, &key, &site).map(|s| Box::new(s) as Box<dyn Send + Sync>)
     }
 
+    /// Cloudflare's addresses (--trusted-proxies cloudflare) show Cloudflare's origin-pull certificate: any of its
+    /// customers connects from them too (nfsu2_headers::ProxyTrust)
+    fn client_certificate(&self, peer: &SocketAddr) -> bool {
+        self.o.trust.must_prove(&peer.ip().to_string())
+    }
+
     fn keep_alive(&self, peer: &SocketAddr) -> Duration {
         if !self.o.trust.cloudflare {
             return Duration::from_secs(limits::KEEP_ALIVE_S);

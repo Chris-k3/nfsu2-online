@@ -322,6 +322,22 @@ fn proxy_trust_as_node_blocklist() {
     assert!(!trusts("0.0.0.0", "::"));
 }
 
+/// Cloudflare's addresses, and only those, must show its origin-pull certificate: a proxy given by its own address,
+/// this machine and everyone else need not (the second security audit)
+#[test]
+fn only_cloudflares_addresses_must_prove_themselves() {
+    let t = ProxyTrust::parse("cloudflare, 10.0.0.0/8").unwrap();
+    for cf in ["104.16.0.1", "::ffff:104.16.0.1", "[2606:4700::1]", "172.64.1.2"] {
+        assert!(t.trusts(cf) && t.must_prove(cf), "{cf}");
+    }
+    for other in ["10.1.2.3", "127.0.0.1", "::1", "203.0.113.5", ""] {
+        assert!(!t.must_prove(other), "{other}");
+    }
+    assert!(!ProxyTrust::parse("10.0.0.0/8").unwrap().must_prove("104.16.0.1"));
+    assert!(!ProxyTrust::parse("104.16.0.0/13").unwrap().must_prove("104.16.0.1"), "a range given by hand is the operator's own");
+    assert!(CLOUDFLARE_ORIGIN_PULL_CA.windows(27).any(|w| w == b"-----BEGIN CERTIFICATE-----"));
+}
+
 #[test]
 fn client_ip_from_trusted_proxies_only() {
     let t = ProxyTrust::parse("10.0.0.0/8").unwrap();

@@ -9,7 +9,8 @@
 #                     --server's (a Linux binary of your own, such as /app/nfsu2-server out of the image)
 #   web/dist/         the page (the test pages and source maps are in web/dist-dev, never copied)
 #   out/web/          the game module (nfsu2.wasm, nfsu2.json), built here with web/build.sh
-#   deploy/           nfsu2-web.service (systemd), Caddyfile (an example), cloudflared.yml (an example)
+#   deploy/           nfsu2-web.service (systemd), Caddyfile (an example), cloudflared.yml (an example),
+#                     cloudflare-origin-pull-ca.pem (for Caddy behind Cloudflare's proxy)
 #   README.md         the short version of docs/web/VPS.md
 # The server finds the page and the module in the folder NFSU2_REPO names (the unit sets /opt/nfsu2-web).
 # The bundle NEVER holds the game folder or anything from it: the files are copied from a
@@ -62,6 +63,7 @@ fi
 done
 cp out/web/nfsu2.wasm out/web/nfsu2.json "$B/out/web/"
 cp web/deploy/nfsu2-web.service web/deploy/Caddyfile web/deploy/cloudflared.yml "$B/deploy/"
+cp web/server-rs/crates/headers/cloudflare-origin-pull-ca.pem "$B/deploy/"
 cp web/deploy/README.md "$B/README.md"
 
 # ---- refusals ----

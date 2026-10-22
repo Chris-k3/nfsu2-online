@@ -40,6 +40,8 @@ pub struct TestService {
     pub panics: AtomicUsize,
     /// the next admit() panics
     pub panic_admit: AtomicBool,
+    /// every peer must show a client certificate (client_certificate())
+    pub prove: AtomicBool,
 }
 
 impl TestService {
@@ -50,6 +52,7 @@ impl TestService {
             held: Arc::new(AtomicUsize::new(0)),
             panics: AtomicUsize::new(0),
             panic_admit: AtomicBool::new(false),
+            prove: AtomicBool::new(false),
         })
     }
 }
@@ -299,6 +302,9 @@ impl Service for TestService {
         }
         self.held.fetch_add(1, Relaxed);
         Some(Box::new(Held(self.held.clone())))
+    }
+    fn client_certificate(&self, _peer: &SocketAddr) -> bool {
+        self.prove.load(Relaxed)
     }
     fn keep_alive(&self, _peer: &SocketAddr) -> Duration {
         self.keep_alive

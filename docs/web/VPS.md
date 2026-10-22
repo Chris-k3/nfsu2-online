@@ -11,8 +11,8 @@ anywhere open `https://<your name>/` in Chrome and play from there.
 
 **What you need:**
 
-- **A Linux VPS** (Debian or Ubuntu, say) that you reach as root over SSH. 2 vCPU and 4 GB of memory are plenty for
-  friends; see [Sizing](#sizing) for more players.
+- **A Linux VPS** (Debian or Ubuntu, say) that you reach as root over SSH, with a key ([SSH](#ssh)). 2 vCPU and
+  4 GB of memory are plenty for friends; see [Sizing](#sizing) for more players.
 - **A domain name** (or a subdomain) with an `A` record pointing at the VPS, and an `AAAA` record if it has IPv6.
 - **Your own NFS Underground 2 folder** (the one with `SPEED2.EXE`).
 - **The game module**, built on the Mac with `web/build.sh` (`out/web/nfsu2.wasm` and `out/web/nfsu2.json`).
@@ -366,17 +366,50 @@ starting (the page lets the place go 10 s after the last network feature). Count
 
 The console names paths and addresses: it is yours.
 
+## SSH
+
+Port 22 answers on the VPS whatever the game's setup (the tunnel's too), and a password there can be guessed: log
+in with a key only.
+
+1. From your computer, with a key (`ssh-keygen -t ed25519` makes one): `ssh-copy-id root@<vps>`, then check that
+   `ssh root@<vps>` logs in without asking for a password.
+2. In that session on the VPS (keep it open until step 3 works):
+
+   ```sh
+   printf 'PasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin prohibit-password\n' \
+     > /etc/ssh/sshd_config.d/00-keys-only.conf
+   sshd -t && systemctl restart ssh        # sessions already open stay
+   ```
+
+   The file's `00-` puts it first: sshd takes the first value it reads, and a provider's image often sets
+   `PasswordAuthentication yes` in a file read later (`50-cloud-init.conf`).
+3. From a second terminal: `ssh root@<vps>` still logs in, and
+   `ssh -o PreferredAuthentications=none -o PubkeyAuthentication=no root@<vps>` says `Permission denied
+   (publickey)`, no longer `(publickey,password)`.
+
+Locked out anyway: the provider's web console (or its rescue system) still logs in.
+
 ## Cloudflare
 
 ### Cloudflare's proxy (orange cloud), in front of Caddy
 
 1. **DNS:** a proxied (orange) `A` record for your name, pointing at the VPS, and an `AAAA` record if the VPS has
    IPv6 (Cloudflare may connect to either).
-2. **The client's address:** add `NFSU2_REAL_IP_HEADER=cf-connecting-ip` to `.env` and run `docker compose up -d`.
-   Caddy believes `CF-Connecting-IP` only from Cloudflare's addresses (`compose.yml` lists them, from
-   `web/server-rs/crates/headers/cloudflare-ips.txt` as of 2026-10-18) and overwrites it otherwise, so a client that reaches the VPS
-   directly cannot choose the address the server logs and limits by.
-3. **Firewall:** let only Cloudflare's addresses reach 80 and 443, or anyone who finds the VPS's address bypasses
+2. **Authenticated Origin Pulls**, before step 3: in Cloudflare's dashboard (SSL/TLS, Origin Server), turn it on.
+   Cloudflare's proxy then shows its origin-pull certificate to the VPS. Cloudflare's addresses are not its proxy
+   alone: any Cloudflare customer connects from them too (a Worker's TCP socket) and could send any
+   `CF-Connecting-IP`, and so pass as thousands of players and lock real ones out of the server's per-address limits
+   (the second security audit, 2026-10-22). Turning it on first is safe: Cloudflare shows the certificate only to
+   an origin that asks for it.
+3. **The client's address:** copy `web/deploy/compose.cloudflare.yml` next to `compose.yml`, add
+   `COMPOSE_FILE=compose.yml:compose.cloudflare.yml` to `.env` and run `docker compose up -d`. Caddy then asks every
+   connection to your name for Cloudflare's origin-pull certificate (without it the TLS handshake fails, so nothing
+   but Cloudflare's proxy reaches the game), believes `CF-Connecting-IP` only from Cloudflare's addresses
+   (`compose.cloudflare.yml` lists them, from `web/server-rs/crates/headers/cloudflare-ips.txt` as of 2026-10-18),
+   and the server reads it. Anyone else's `CF-Connecting-IP` is replaced by the address that connected. Since
+   2026-10-22 `compose.yml` alone believes no proxy: a setup of before (`NFSU2_REAL_IP_HEADER=cf-connecting-ip` in
+   `.env`, which can go now) sees every player at Cloudflare's addresses until it takes steps 2 and 3.
+4. **Firewall:** let only Cloudflare's addresses reach 80 and 443, or anyone who finds the VPS's address bypasses
    Cloudflare. Instead of step 3 of the setup:
 
    ```sh
@@ -386,19 +419,20 @@ The console names paths and addresses: it is yours.
    done
    ```
 
-4. **SSL/TLS mode: Full (strict).** Cloudflare connects to the VPS over TLS and checks Caddy's certificate.
-5. **The certificate.** Caddy gets it over port 80 (the HTTP challenge; the TLS challenge cannot pass Cloudflare's
+5. **SSL/TLS mode: Full (strict).** Cloudflare connects to the VPS over TLS and checks Caddy's certificate.
+6. **The certificate.** Caddy gets it over port 80 (the HTTP challenge; the TLS challenge cannot pass Cloudflare's
    proxy), which Cloudflare passes on as long as it does not redirect it to https itself: leave "Always Use HTTPS"
-   off (Caddy redirects already). The safe order is to start with the record DNS only (grey cloud) and turn the
-   proxy on once Caddy has its certificate.
-6. **Turn off what rewrites pages:**
+   off (Caddy redirects already). The safe order is to start with the record DNS only (grey cloud) and
+   `compose.yml` alone (`compose.cloudflare.yml` lets no browser in without Cloudflare), and turn the proxy on, then
+   take step 3, once Caddy has its certificate.
+7. **Turn off what rewrites pages:**
    - **Rocket Loader** (Speed, Optimization);
    - **Email Obfuscation** (Scrape Shield);
    - anything else that injects scripts, such as Web Analytics' automatic setup or Zaraz.
 
    The page's Content-Security-Policy blocks injected scripts, and Rocket Loader would also rewrite the page's own
    module scripts.
-7. **Caching:** one Cache Rule, which lets Cloudflare keep the game data and the module (Caching, Cache Rules): URI
+8. **Caching:** one Cache Rule, which lets Cloudflare keep the game data and the module (Caching, Cache Rules): URI
    Path wildcard `/data-blocks/*` (the `*` matters: without it only `/data-blocks/` itself matches) or URI Path
    equals `/game.wasm`, Eligible for cache, Edge TTL "Use cache-control header if present, bypass cache if not",
    Browser TTL "Respect origin TTL", the cache key as it is (it must keep the query string). Turn on Smart Tiered
@@ -410,11 +444,11 @@ The console names paths and addresses: it is yours.
    (`Cloudflare-CDN-Cache-Control`), so no
    "Bypass cache" rule is needed; delete one from before: of the rules that match, the last one's settings win, and
    a bypass for the whole hostname after this rule turns the game data's cache off.
-8. **WebSockets** are on by default on every plan. The server pings each connection every 25 s, well inside
+9. **WebSockets** are on by default on every plan. The server pings each connection every 25 s, well inside
    Cloudflare's idle limit.
 
-Through a real Cloudflare: **UNVERIFIED**. The client's address was checked with a stand-in Cloudflare address
-([What was tested](#what-was-tested)).
+Through a real Cloudflare: **UNVERIFIED**. The client's address was checked with a stand-in Cloudflare address, and
+the origin-pull certificate with a stand-in CA ([What was tested](#what-was-tested)).
 
 ### A Cloudflare Tunnel, instead of Caddy
 
@@ -432,7 +466,7 @@ Through a real Cloudflare: **UNVERIFIED**. The client's address was checked with
 
 3. Run `docker compose up -d`. Skip the setup's firewall step for 80 and 443 (`ufw allow 22/tcp && ufw --force
    enable`).
-4. Let Cloudflare keep the game data and the module: the Cache Rule of the proxy's step 7 above, and no "Bypass
+4. Let Cloudflare keep the game data and the module: the Cache Rule of the proxy's step 8 above, and no "Bypass
    cache" rule for the hostname.
 
 What follows from this setup:
@@ -443,7 +477,8 @@ What follows from this setup:
 - **The client's address** comes from Cloudflare's `CF-Connecting-IP`, and only from `cloudflared`. It opens a
   connection to the server for each request in progress and has no limit of its own per client: the server's own
   limits per client address hold.
-- **Settings:** 6 and 8 of the proxy's list above apply too (7 is step 4 here).
+- **Settings:** 7 and 9 of the proxy's list above apply too (8 is step 4 here). Authenticated Origin Pulls is not
+  needed: the server is reached through cloudflared alone.
 
 A real tunnel was **not** opened here (**UNVERIFIED**). The layout was: `cloudflared` stood in by a container that
 reaches the server on 127.0.0.1, crashes of either side, a reboot.
@@ -619,6 +654,12 @@ paths to the VPS, so pick a VPS location between you.
   violation. Two runs of three reached the main menu, in 71 and 81 s; the third was still at the profile prompt when
   the test's two minutes ran out (the same test without Docker reached it in 42 s: every file went through Colima's
   VM). The amd64 image built on the arm64 Mac without emulation, and ran.
+- **2026-10-22, Docker 29.4 on Windows, Caddy 2.11:** Authenticated Origin Pulls with a stand-in CA in place of
+  Cloudflare's. `compose.cloudflare.yml`'s Caddyfile (as `docker compose config` renders it, for `localhost`): no
+  answer for a connection without a client certificate or with one another CA signed, an answer for one the CA
+  signed; a `CF-Connecting-IP` the client sent replaced by its own address, there and with `compose.yml` alone; the
+  `Caddyfile`'s Cloudflare variant uncommented passes `caddy validate`. The server's own (`--trusted-proxies
+  cloudflare`): the same three cases in `crates/http/tests/tls.rs`, and Cloudflare's CA taken by rustls.
 - **Not tested:** a real VPS, real Let's Encrypt, a real domain, Cloudflare (proxy and tunnel), the game in Chrome
   through the current `compose.yml` (no module on the Windows PC), more than one player at once (**UNVERIFIED**).
 
@@ -690,13 +731,17 @@ replace `game.example.com` with your name everywhere in it (and in the unit's `-
   it falls back to IPv4 by itself, and then only an `A` record belongs in DNS. `--bind 0.0.0.0` keeps it to IPv4.
   With Caddy (A) or a tunnel (D), the server listens on 127.0.0.1 only.
 
-**C: Cloudflare's proxy.** As in [Cloudflare](#cloudflare), and:
+**C: Cloudflare's proxy.** As in [Cloudflare](#cloudflare), Authenticated Origin Pulls first (its step 2), and:
 
 - with Caddy (A): the `Caddyfile`'s Cloudflare variant, with its global block at the top (Caddy then believes
-  `CF-Connecting-IP` only from Cloudflare's addresses) and a Cloudflare Origin CA certificate; the server needs
-  `--real-ip-header cf-connecting-ip`;
+  `CF-Connecting-IP` only from Cloudflare's addresses), a Cloudflare Origin CA certificate, and
+  `deploy/cloudflare-origin-pull-ca.pem` copied to `/etc/caddy/` (the variant asks every connection for
+  Cloudflare's origin-pull certificate); the server needs `--real-ip-header cf-connecting-ip`;
 - with the server itself (B): the Origin CA certificate, plus `--trusted-proxies cloudflare`. Then only connections
-  from Cloudflare's published ranges (`web/server-rs/crates/headers/cloudflare-ips.txt`) may say who the client is.
+  from Cloudflare's published ranges (`web/server-rs/crates/headers/cloudflare-ips.txt`) may say who the client is,
+  and only with Cloudflare's origin-pull certificate: the server asks those addresses for it (its CA is built in,
+  `web/server-rs/crates/headers/cloudflare-origin-pull-ca.pem`), and their handshakes fail without it. It says so
+  on start (`cloudflare: its addresses must show its origin-pull certificate`).
 
 **D: a Cloudflare Tunnel.** `cloudflared tunnel login`, `cloudflared tunnel create nfsu2`,
 `cloudflared tunnel route dns nfsu2 game.example.com`; copy `deploy/cloudflared.yml` to

@@ -32,4 +32,10 @@ You copy your own NFS Underground 2 folder to the VPS yourself.
 
 **Who can play:** the server has no accounts or passwords. Anyone who can reach
 it can play, and can download the game files from it. Your firewall decides who
-that is. Behind Cloudflare, let only Cloudflare's addresses reach 80 and 443.
+that is. Behind Cloudflare's proxy, let only Cloudflare's addresses reach 80 and
+443, and turn on Authenticated Origin Pulls (SSL/TLS, Origin Server): any
+Cloudflare customer connects from those addresses too, so Caddy (its Cloudflare
+variant, with `deploy/cloudflare-origin-pull-ca.pem`) or the server (variant B
+with `--trusted-proxies cloudflare`) asks them for Cloudflare's certificate.
+
+**SSH:** log in with a key only (`docs/web/VPS.md`, "SSH").
