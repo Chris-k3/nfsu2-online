@@ -25,6 +25,7 @@ import { LogRing, downloadBlob, stamp } from './logs';
 import { enterFullscreen, exitFullscreen, isFullscreen, keepScreenOn, lockLandscape, measureRefresh, settledSize, trackCanvasSize } from './display';
 import { deviceDefaults, markTouch, padSeen, touchFirst } from './device';
 import { markPad, padPress, pageDialog } from './padnav';
+import { TouchControls } from './touch';
 import type { PadPage } from '../input/gamepad';
 import { checkSetting, HOST_FIXED, pageOnly, resolveEnv, settingsUpgrade, TEMPLATE, type Resolved } from './settings';
 import { exists, filesOf, listProfiles, PROFILES_DIR, readText, removeSaveDir, writeFile } from './savefs';
@@ -396,6 +397,7 @@ async function startGame() {
   setPhase('playing', 'Playing', '');
   document.body.dataset.phase = 'playing';
   away = new AwayCheck(session, awayLimits(), awayLine, logLine);
+  touch.start(session);
   fps.memory = session.proc.memory;
   const st = session;
   const waitStatus = setInterval(() => { if (st.status) { fps.reader = st.status; clearInterval(waitStatus); } }, 100);
@@ -485,8 +487,10 @@ const PAD_PAGE: PadPage = {
 };
 
 let awake: (() => void) | null = null;   // the running game's Wake Lock (display.ts keepScreenOn)
+let touch: TouchControls;                // the controls on the game while a finger drives (touch.ts)
 
 function endStage() {
+  touch.stop();
   awake?.(); awake = null;
   away?.stop(); away = null;
   exitFullscreen();
@@ -946,6 +950,7 @@ export async function boot() {
   stageMenu.onpointerdown = e => e.preventDefault();     // the canvas keeps the focus (and with it the keyboard)
   stageMenu.onclick = () => { if (session) openMenu(); };
   $('#stage').addEventListener('pointerdown', e => { if (e.pointerType === 'touch') stageMenu.hidden = false; }, { capture: true });
+  touch = new TouchControls($('#stage'), { toast, log: logLine });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { void checkNewer(); vault.shown(); } });
   setInterval(() => { if (document.visibilityState === 'visible') void checkNewer(); }, NEWER_EVERY_MS);
 
@@ -976,7 +981,7 @@ export async function boot() {
   (window as any).__nfsu2 = {
     get phase() { return phase; }, get lastExit() { return lastExit; }, get fps() { return { game: fps.gameFps, page: fps.pageFps, source: $('#fps').dataset.source }; },
     get session() { return session; }, log, save: SAVE, download: () => download.status, offline: () => offline, displayHz: () => displayHz, retryModule: () => loadModule(),
-    newer: () => newer, tried: () => tried,
+    newer: () => newer, tried: () => tried, touch: () => touch.state(),
     env: () => resolved().env, settingsText: () => settingsText, checks: () => [...checks.values()],
     fpsMode: (m?: FpsMode) => { if (m && FPS_MODES.includes(m)) fps.set(m); return fps.mode; },
     quitTimes: { forcedCloseMaxMs: FORCED_CLOSE_MAX_MS, stopAfterMs: STOP_AFTER_MS },

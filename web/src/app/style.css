@@ -306,6 +306,65 @@ html:has(> body > .stage:not([hidden])) { overflow: hidden; }
 }
 .stage-menu svg { display: block; width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
 .stage-menu:active { background: rgba(0, 0, 0, 0.72); color: var(--lime); }
+/* touch controls (touch.ts) while the player drives: dim and see-through like the menu's button, lime while
+ * pressed.  The small round ones in a row after the menu's button (the mode button and tilt's straight-ahead top
+ * right), the left thumb's bottom left, the right thumb's bottom right; free roam adds a row's end and Start. */
+.touch {
+  position: absolute; inset: 0; z-index: 3; pointer-events: none; -webkit-user-select: none; user-select: none;
+  --l: max(12px, env(safe-area-inset-left)); --r: max(12px, env(safe-area-inset-right));
+  --t: max(12px, env(safe-area-inset-top)); --b: max(12px, env(safe-area-inset-bottom));
+}
+.touch > * { position: absolute; pointer-events: auto; touch-action: none; -webkit-tap-highlight-color: transparent; }
+.tc {
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  background: rgba(0, 0, 0, 0.4); color: rgba(255, 255, 255, 0.72); font: italic 700 16px/20px var(--font);
+}
+.tc svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.tc svg .fill { fill: currentColor; stroke: none; }
+.tc.on { background: rgba(0, 0, 0, 0.72); color: var(--lime); }
+.tc.small { top: var(--t); width: 48px; height: 48px; border-radius: 50%; }
+.tc.big { bottom: var(--b); border-radius: 16px; }
+.tc.big svg { width: 32px; height: 32px; }
+.tc.round { border-radius: 50%; font-size: 14px; line-height: 16px; }
+.tc.pill { height: 40px; padding: 0 20px; border-radius: 20px; }
+.tc[data-ctl="pause"] { left: calc(var(--l) + 56px); }
+.tc[data-ctl="camera"] { left: calc(var(--l) + 112px); }
+.tc[data-ctl="look"] { left: calc(var(--l) + 168px); }
+.tc[data-ctl="reset"] { left: calc(var(--l) + 224px); }
+.tc[data-ctl="map"] { left: calc(var(--l) + 280px); }
+.tc[data-ctl="msgs"] { left: calc(var(--l) + 336px); }
+.tc[data-ctl="horn"] { left: calc(var(--l) + 392px); }
+.tc[data-ctl="mode"] { right: var(--r); }
+.tc[data-ctl="center"] { right: calc(var(--r) + 56px); }
+.tc[data-ctl="start"] { left: var(--l); bottom: calc(var(--b) + 128px); }
+.tc[data-ctl="left"] { left: var(--l); width: 80px; height: 80px; }
+.tc[data-ctl="right"] { left: calc(var(--l) + 88px); width: 80px; height: 80px; }
+.tc[data-ctl="gas"] { right: var(--r); width: 84px; height: 148px; }
+.tc[data-ctl="brake"] { right: calc(var(--r) + 92px); width: 84px; height: 104px; }
+.tc[data-ctl="nitro"] { right: calc(var(--r) + 12px); bottom: calc(var(--b) + 160px); width: 60px; height: 60px; }
+.tc[data-ctl="hb"] { right: calc(var(--r) + 106px); bottom: calc(var(--b) + 116px); width: 56px; height: 56px; font-size: 12px; line-height: 14px; }
+/* tilt: Brake and the handbrake under the left thumb, Nitro beside Gas */
+.touch[data-steering="tilt"] .tc[data-ctl="brake"] { right: auto; left: var(--l); }
+.touch[data-steering="tilt"] .tc[data-ctl="hb"] { right: auto; left: calc(var(--l) + 96px); bottom: calc(var(--b) + 24px); }
+.touch[data-steering="tilt"] .tc[data-ctl="nitro"] { right: calc(var(--r) + 96px); bottom: calc(var(--b) + 24px); }
+.touch:not([data-steering="buttons"]) :is([data-ctl="left"], [data-ctl="right"]),
+.touch:not([data-steering="stick"]) .stick,
+.touch:not([data-steering="tilt"]) [data-ctl="center"],
+.touch:not([data-roam]) .roam { display: none; }
+/* the thumb stick: anywhere in the lower left; at rest it waits in the corner, a touch brings it under the thumb */
+.stick { left: 0; bottom: 0; width: 42%; height: 72%; }
+.stick-base {
+  position: absolute; left: calc(var(--l) + 60px); top: calc(100% - var(--b) - 60px); width: 120px; height: 120px;
+  border-radius: 50%; transform: translate(-50%, -50%); border: 2px solid rgba(255, 255, 255, 0.24); background: rgba(0, 0, 0, 0.24);
+}
+.stick-knob {
+  position: absolute; left: 50%; top: 50%; width: 52px; height: 52px; border-radius: 50%;
+  transform: translate(calc(-50% + var(--dx, 0px)), -50%); background: rgba(0, 0, 0, 0.4); border: 2px solid rgba(255, 255, 255, 0.5);
+}
+/* a note on the game goes under the row of small buttons */
+.stage:has(> .touch:not([hidden])) .toast:not(.away) { top: calc(max(12px, env(safe-area-inset-top)) + 60px); }
+.stick-base.on { border-color: rgba(200, 240, 136, 0.5); }
+.stick-base.on .stick-knob { border-color: var(--lime); background: rgba(0, 0, 0, 0.72); }
 .hud-fps {
   position: absolute; top: 16px; right: 16px; z-index: 2; pointer-events: none; min-width: 80px;
   padding: 4px 12px; border-radius: 8px; background: rgba(0, 0, 0, 0.64);

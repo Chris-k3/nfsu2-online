@@ -14,7 +14,8 @@
 //        wheel in WHEEL_DELTA units.  The OS cursor is hidden over the game.
 // Touch: one finger is the mouse, so a tap is a left click (the game's menus
 //        take clicks); other fingers are left alone.
-// Pads:  polled every frame (gamepad.ts), with the page's share (padPage).
+// Pads:  polled every frame (gamepad.ts), with the page's share (padPage) and
+//        the touch controls' virtual controller merged in (touchPad).
 // Life:  blur and a hidden page deactivate the game (it parks, as after an
 //        alt-tab on Windows) and release everything held; focus and a visible
 //        page reactivate it; requestQuit() is WM_CLOSE.  Fullscreen locks the
@@ -27,7 +28,7 @@
 import type { GameProcess } from '../host/process';
 import { HostKind } from '../host/abi';
 import { CODES, cp1252, isMeta, keyChars, keyVk } from './keymap';
-import { PadPoller, type PadPage } from './gamepad';
+import { PadPoller, type PadPage, type TouchPad } from './gamepad';
 import { SynthDriver } from './synth';
 import {
   IEV_FOCUS, IEV_KEY_DOWN, IEV_KEY_TAP, IEV_KEY_UP, IEV_MOUSE_DOWN, IEV_MOUSE_MOVE, IEV_MOUSE_UP, IEV_QUIT,
@@ -83,6 +84,12 @@ export interface InputHandle {
   /** performance.now() of the player's last key, mouse or controller input (the attach before any); null
    *  while the game's own driver writes the event ring (an input script without the page's input) */
   lastInput(): number | null;
+  /** a key the page presses or lets go for the player (the touch controls), by KeyboardEvent.code */
+  key(code: string, down: boolean): void;
+  /** the touch controls' virtual controller, merged with a real one (null: none) */
+  touchPad(t: TouchPad | null): void;
+  /** performance.now() of a real controller's last button press (0: none) */
+  padPressed(): number;
   /** diagnostic: n empty events, each timed from the page's write until the
    *  input thread has handled it (busy-waits on the main thread, max 20 ms each);
    *  returns the times in microseconds */
@@ -349,6 +356,12 @@ export function attachInput(proc: GameProcess, element: HTMLElement, opts: Input
       return { 'input events': s.events, 'keys held': s.keysHeld, 'pad connected': s.pad ? 1 : 0, 'input dropped': s.dropped };
     },
     lastInput() { return refused ? null : lastUse; },
+    key(code, down) {
+      const k = CODES[code];
+      if (k && !detached) push(down ? IEV_KEY_DOWN : IEV_KEY_UP, k.dik, k.vk, 0);
+    },
+    touchPad(t) { pads?.setTouch(t); },
+    padPressed() { return pads?.lastPress ?? 0; },
     detach() {
       if (detached) return;
       // whatever the game holds is let go (it may outlive the page's input, e.g. a test page)

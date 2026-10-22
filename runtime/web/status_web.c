@@ -4,10 +4,12 @@
  * runtime may set their own with host_status_set().  With the null renderer
  * "frames" still counts the game's presents, so the overlay shows the game's
  * frame rate rather than the page's display rate. */
+#include "cpu.h"
 #include "status_proto.h"
 #include "host_abi.h"
 #include <pthread.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -63,6 +65,30 @@ static void *status_main(void *unused){
         usleep(g_st.period_ms * 1000u);
     }
     return 0;
+}
+
+/* "drive": what the page's touch controls (web/src/app/touch.ts) need of the
+ * game, set at every Present (autotest.c): 1 while the player drives in a
+ * race, 2 in free roam, 0 elsewhere.  Driving is GameFlow 6 with a race HUD
+ * (HUD_*.fng) the top package; the pause menu (UI_pause.fng), the results,
+ * the world's loading screen and the Engage dialog over the HUD are not, nor
+ * is a cutscene (NIS, as runtime/discord.c tells one). */
+const char *autotest_top_fng(void);
+int career_fe_active(const char *name);
+int roam_exploring(void);
+static int drive_state(void){
+    if (!mem_is_committed(0x8654a7u) || MR32(0x8654a4u) != 6u) return 0;
+    const char *top = autotest_top_fng();
+    if (!top || strncasecmp(top, "HUD_", 4) || !strcasecmp(top, "HUD_World_Loading.fng")) return 0;
+    if (mem_is_committed(0x827ecbu) && (MR32(0x827e98u) | MR32(0x827eb0u) | MR32(0x827ec8u))) return 0;
+    if (career_fe_active("UI_EngageMessageDialog.fng")) return 0;
+    return roam_exploring() ? 2 : 1;
+}
+void status_web_frame(void){
+    static int slot = -2, last = -1;
+    if (slot == -2) slot = host_status_slot("drive");
+    int v = drive_state();
+    if (v != last && slot >= 0){ last = v; host_status_set(slot, v); }
 }
 
 /* main_web.c, before the guest starts */

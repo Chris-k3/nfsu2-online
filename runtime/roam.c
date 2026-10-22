@@ -139,6 +139,8 @@ static int roaming(void){
     return rd32(G_FLOW) == 6u && ok(race, 0xc00) && MR32(race) == 4u && MR32(race + 0x24u) == 1u &&
            !rd32(G_CAREER_RACE);
 }
+/* free roam now (runtime/web/input_web.c: the touch controls' free-roam buttons) */
+int roam_exploring(void){ return roaming(); }
 /* One line per car of the world list (World +0 head; the list node is the
  * car's first two dwords). */
 static void log_cars(const char *why){

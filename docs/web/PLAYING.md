@@ -48,11 +48,23 @@ server answers. The start page then says **Offline**, and the game runs from the
 it first. The movies are off for such a game unless every one of them is on the PC already. Free roam and Online
 need the server; your saves are in the browser either way.
 
-**Phones and tablets** (Chrome on Android): a tap is a click, so the game's menus work by touch; to drive, connect a
-controller. The ☰ button in the top left corner opens the page menu. On a phone the game goes full screen and turns
-to landscape when you press Play, and renders at 75% resolution scale (Settings, Display changes both). The screen
-stays on while the game runs. Chrome's menu, **Add to Home screen** (or **Install app**), puts the game on the home
-screen as an app that opens full screen in landscape; on a PC the same makes it an app with its own window.
+**Phones and tablets** (Chrome on Android): a tap is a click, so the game's menus work by touch. The ☰ button in the
+top left corner opens the page menu. On a phone the game goes full screen and turns to landscape when you press Play,
+and renders at 75% resolution scale (Settings, Display changes both). The screen stays on while the game runs.
+Chrome's menu, **Add to Home screen** (or **Install app**), puts the game on the home screen as an app that opens full
+screen in landscape; on a PC the same makes it an app with its own window.
+
+**Touch controls** show on the game while you drive (races and free roam) and step aside for menus, the pause menu
+and cutscenes:
+
+- **Right thumb:** Gas, Brake (and reverse), Nitro and the handbrake. A finger slides from Gas to Brake.
+- **Steering**, switched with the button in the top right corner and kept in this browser: **buttons** (◀ ▶, as the
+  arrow keys; the default), a **thumb stick** that appears where the left thumb lands, or **tilt**, the phone held like
+  a wheel. With tilt, Brake and the handbrake move under the left thumb, and the button beside the switch sets
+  straight ahead.
+- **Small buttons** along the top: pause, camera, look back, reset; in free roam also the map, messages, horn, and
+  Start (an event, or an outrun).
+- A keyboard or a controller sends them away until you touch the game again. Android phones buzz on crashes.
 
 ## 3. Controls
 

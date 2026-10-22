@@ -75,6 +75,18 @@ export interface PadPage {
   press(button: number): void;
 }
 
+/** the touch controls' share of the pad (web/src/app/touch.ts): PAD_* button bits and the left stick's x */
+export interface TouchPad { buttons: number; lx: number }
+
+/** a real controller's snapshot with the touch controls' added (their buttons too, the stick further out of the
+ *  two); without a real one, the touch controls are the controller */
+function withTouch(s: PadSnapshot, t: TouchPad): PadSnapshot {
+  const axes = [...s.axes];
+  if (Math.abs(t.lx) > Math.abs(axes[PAD_AXIS_LX])) axes[PAD_AXIS_LX] = t.lx;
+  return s.connected ? { ...s, buttons: s.buttons | t.buttons, axes }
+    : { connected: true, buttons: t.buttons, axes, family: PADF_GENERIC, name: 'Touch controls', index: -2 };
+}
+
 /** the left stick as four directions, PAD_D* bits: on past 0.55, off below 0.40 (runtime/dinput_pad.c's hat) */
 function stickDirs(x: number, y: number, prev: number): number {
   const on = (bit: number, v: number) => v > 0.55 || (v > 0.40 && (prev & 1 << bit) !== 0) ? 1 << bit : 0;
@@ -99,6 +111,12 @@ export class PadPoller {
   // the page's share: buttons kept from the game until let go, the left stick's directions
   private held = 0;
   private stick = 0;
+  // the touch controls' virtual controller (touch.ts), and the phone's vibration for the game's rumble without a
+  // controller: when it last buzzed
+  private touch: TouchPad | null = null;
+  private buzzAt = 0;
+  /** performance.now() of a real controller's last button press (0: none yet) */
+  lastPress = 0;
   // views of the game's memory: dropped by dispose(), so nothing keeps an ended
   // process's (1 GB+) shared memory reachable or writes into its mailbox
   private h: Int32Array | null;
@@ -133,6 +151,9 @@ export class PadPoller {
   /** the controller driving the pad, or null */
   current(): string | null { return this.last?.connected ? this.last.name : null; }
 
+  /** the touch controls' virtual controller, merged with a real one (null: none) */
+  setTouch(t: TouchPad | null) { this.touch = t; this.poll(); }
+
   poll() {
     if (!this.h) return;
     const pads = typeof navigator.getGamepads === 'function' ? navigator.getGamepads() : [];
@@ -151,9 +172,11 @@ export class PadPoller {
     this.rumble(g);
     const pressed = s.buttons & ~this.pressedBefore;
     this.pressedBefore = s.buttons;
-    if (pressed) this.onPress();
+    if (pressed) { this.onPress(); this.lastPress = performance.now(); }
     if (pressed || s.axes.some((v, i) => Math.abs(v - this.usedAxes[i]) > 0.25)) { this.usedAxes = s.axes; this.onUse?.(); }
-    const out = this.page ? this.forPage(s, pressed) : s;
+    const both = this.touch ? withTouch(s, this.touch) : s;
+    if (this.touch && !g) this.buzz();
+    const out = this.page ? this.forPage(both, pressed) : both;
     if (this.same(out)) return;
     this.publish(out, !this.last || this.last.connected !== out.connected || this.last.index !== out.index || this.last.name !== out.name);
     this.last = out;
@@ -203,12 +226,28 @@ export class PadPoller {
     if (newPad) Atomics.add(h, IM_PAD_GEN, 1);
   }
 
+  /** Without a controller, the touch controls' rumble: the phone's vibration (Android; on or off, no strength), a
+   *  pulse as long as the game's strongest motor is strong, at most every 150 ms. */
+  private buzz() {
+    const h = this.h, now = performance.now();
+    if (!h || typeof navigator.vibrate !== 'function' || now - this.buzzAt < 150) return;
+    const seq = Atomics.load(h, IM_RUMBLE_SEQ);
+    if (seq !== this.rumbleSeq) { this.rumbleSeq = seq; this.rumbleSeen = now; }
+    if (now - this.rumbleSeen > 150 || document.visibilityState !== 'visible') return;
+    const level = Math.max(Atomics.load(h, IM_RUMBLE_STRONG), Atomics.load(h, IM_RUMBLE_WEAK) * 0.6) / 65535;
+    if (level < 0.25) return;
+    this.buzzAt = now;
+    navigator.vibrate(Math.round(30 + 90 * level));
+  }
+
   /** the game's motor levels onto this controller (every frame, from poll) */
   private rumble(g: Gamepad | null) {
     const h = this.h;
     const va = g?.vibrationActuator;
     const can = !!va && typeof va.playEffect === 'function';
-    if (h && Atomics.load(h, IM_PAD_RUMBLE) !== (can ? 1 : 0)) Atomics.store(h, IM_PAD_RUMBLE, can ? 1 : 0);
+    // the touch controls rumble through the phone's vibration instead (buzz)
+    const phone = !g && !!this.touch && typeof navigator.vibrate === 'function';
+    if (h && Atomics.load(h, IM_PAD_RUMBLE) !== (can || phone ? 1 : 0)) Atomics.store(h, IM_PAD_RUMBLE, can || phone ? 1 : 0);
     const now = performance.now();
     let strong = 0, weak = 0;
     if (h && can) {

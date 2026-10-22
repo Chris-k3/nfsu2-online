@@ -4,7 +4,7 @@
 // shapes.  See web/src/host/abi.ts for the shared-memory side (nfsu2_register
 // kinds).
 import type { GameProcess } from '../host/process';
-import type { PadPage } from '../input/gamepad';
+import type { PadPage, TouchPad } from '../input/gamepad';
 
 /** Given to every subsystem. */
 export interface CommonOptions {
@@ -84,6 +84,12 @@ export interface InputSubsystem extends Subsystem {
   /** performance.now() of the player's last key, mouse or controller input; null: the page cannot tell
    *  (the game's own driver plays an input script) */
   lastInput?(): number | null;
+  /** the touch controls (touch.ts): a key pressed or let go for the player, by KeyboardEvent.code */
+  key?(code: string, down: boolean): void;
+  /** the touch controls' virtual controller, merged with a real one (null: none) */
+  touchPad?(t: TouchPad | null): void;
+  /** performance.now() of a real controller's last button press (0: none) */
+  padPressed?(): number;
 }
 
 export interface NetSubsystem extends Subsystem {
