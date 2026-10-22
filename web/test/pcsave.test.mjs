@@ -1,14 +1,16 @@
 // Profiles from the PC game through Restore a backup (web/src/app/saves-ui.ts
-// readBackup, addProfiles; profile.ts profileName, modCars):
+// readBackup, addProfiles; profile.ts profileName, modCars, sealed):
 //   node --test web/test/pcsave.test.mjs
 // - a zip of the PC's NFS Underground 2 folder, in any shape (the folder, its
 //   profile folders, deeper), or one profile's own file: each profile goes to
 //   "NFS Underground 2/<the name inside>/", its cover shoots beside it, other files are left out
 // - a zip with registry.txt or settings.ini at its top is a backup of the page's and
 //   replaces everything, as before; a cover shoot is no profile in its list
-// - a profile the game would not load (checksums, version, a name its field does not
-//   make) is left out with why, its cover shoots too; one with cars a mod added
-//   (a car type the game's 31 player cars do not have) comes in with a warning
+// - a profile the game would not load (version, a name its field does not make) is
+//   left out with why, its cover shoots too; one a save editor changed (checksums
+//   that no longer hold) comes in sealed again, as the game would have saved it, and
+//   one with cars a mod added (a car type the game's 31 player cars do not have),
+//   each with a warning
 // - adding: a profile of the same name here (in any case) goes with its cover shoots,
 //   the other profiles and files stay, and its autosave-profiles.txt line goes
 // The profiles here are synthetic: the car records' layout of profile.ts, all else zero.
@@ -75,13 +77,31 @@ test('modCars: none among the game\'s own cars; a car type past them, by index o
 });
 
 test('profileName: the checks of a profile from elsewhere, and why one is refused', () => {
-  assert.deepEqual(P.profileName(profile('Zelshia')), { name: 'Zelshia' });
+  assert.deepEqual(P.profileName(profile('Zelshia')), { name: 'Zelshia', edited: false });
   const edited = Buffer.from(profile('Zelshia')); edited[0xA16A] ^= 0x40;      // a save editor's money change
-  assert.match(P.profileName(edited).bad, /checksums/);
+  assert.deepEqual(P.profileName(edited), { name: 'Zelshia', edited: true });
+  const head = Buffer.from(profile('Zelshia')); head[16] ^= 1;                 // block A's checksum alone
+  assert.deepEqual(P.profileName(head), { name: 'Zelshia', edited: true });
+  const old = profile('Zelshia', { version: 0x10C }); old[0xA16A] ^= 0x40;
+  assert.match(P.profileName(old).bad, /another version/, 'another version stays out, edited or not');
   assert.match(P.profileName(profile('Zelshia', { version: 0x10C })).bad, /another version/);
   assert.match(P.profileName(profile('X', { inside: 'TOOLONGNAME' })).bad, /not one the game makes/);
   assert.match(P.profileName(profile('X', { inside: 'a b' })).bad, /not one the game makes/);
   assert.match(P.profileName(profile('Zelshia').subarray(0, 54000)).bad, /54000 bytes/);
+});
+
+test('sealed: an edited profile\'s checksums made again, its bytes kept; the game\'s own file comes out as it was', () => {
+  const good = profile('Zelshia');
+  assert.deepEqual([...P.sealed(good)], [...good]);
+  const edited = Buffer.from(good); edited[0xA16A] ^= 0x40; edited[16] ^= 1; edited[24] ^= 0xff;
+  const s = P.sealed(new Uint8Array(edited));
+  assert.deepEqual(P.profileName(s), { name: 'Zelshia', edited: false });
+  assert.deepEqual(P.readSaveMode(s, 'Zelshia'), { mode: 'off' }, 'the page\'s own checks take it from now on');
+  const changed = [];
+  for (let i = 0; i < s.length; i++) if (s[i] !== edited[i]) changed.push(i);
+  assert.ok(changed.every(i => i >= 16 && i < 28), `only the checksums change: ${changed}`);
+  assert.equal(s[0xA16A], edited[0xA16A], 'the edit stays');
+  assert.equal(edited[16], good[16] ^ 1, 'the original is not touched');
 });
 
 test('a PC save\'s profiles are found wherever the zip has them', async () => {
@@ -93,7 +113,7 @@ test('a PC save\'s profiles are found wherever the zip has them', async () => {
   assert.deepEqual(sorted(folder.profiles), ['MEH', 'Zelshia']);
   assert.deepEqual(paths(folder), sorted([at('MEH'), at('Zelshia'), at('Zelshia DVD 1'), at('Zelshia Magazine 1')]));
   assert.deepEqual(folder.skipped, [`${DIR}/desktop.ini`]);
-  assert.deepEqual([folder.refused, folder.modded], [[], []]);
+  assert.deepEqual([folder.refused, folder.modded, folder.edited], [[], [], []]);
 
   const one = await readBackup(z({ 'Zelshia/Zelshia': profile('Zelshia') }));
   assert.deepEqual([one.kind, paths(one)], ['profiles', [at('Zelshia')]], 'one profile folder, zipped');
@@ -110,41 +130,48 @@ test('a PC save\'s profiles are found wherever the zip has them', async () => {
   assert.deepEqual([file.kind, paths(file), file.profiles], ['profiles', [at('Zelshia')], ['Zelshia']], 'a profile\'s own file');
   const lone = await readBackup(cover('x'), 'Zelshia DVD 1');
   assert.deepEqual([lone.profiles, lone.refused, lone.skipped], [[], [], ['Zelshia DVD 1']], 'a cover shoot alone: no profile, nothing refused');
-  const bad = Buffer.from(profile('Zelshia')); bad[5000] ^= 1;
-  const badFile = await readBackup(new Uint8Array(bad), 'Zelshia');
-  assert.deepEqual([badFile.profiles, badFile.refused.map(x => x.name)], [[], ['Zelshia']]);
+  const edited = Buffer.from(profile('Zelshia')); edited[5000] ^= 1;
+  const editedFile = await readBackup(new Uint8Array(edited), 'Zelshia');
+  assert.deepEqual([editedFile.profiles, editedFile.edited, editedFile.refused], [['Zelshia'], ['Zelshia'], []], 'an edited profile\'s own file');
+  assert.deepEqual(P.profileName(editedFile.entries[0].data), { name: 'Zelshia', edited: false }, 'sealed again');
+  const old = await readBackup(profile('Zelshia', { version: 0x10C }), 'Zelshia');
+  assert.deepEqual([old.profiles, old.refused.map(x => x.name)], [[], ['Zelshia']]);
   await assert.rejects(readBackup(enc.encode('just some text'), 'notes.txt'), /not a zip/);
 });
 
-test('a profile the game would not load is left out with why, its covers too; a mod\'s cars warn', async () => {
+test('a profile the game would not load is left out with why, its covers too; an edited one and a mod\'s cars warn', async () => {
   const edited = Buffer.from(profile('EDIT')); edited[0xA16A] ^= 0x40;
   const r = await readBackup(z({
     [at('EDIT')]: new Uint8Array(edited), [at('EDIT DVD 1')]: cover('f'),
-    [at('OLDV')]: profile('OLDV', { version: 0x10C }), [at('MOD')]: profile('MOD', { career: ['240SX', 0x5ec0ffee] }),
-    [at('OK')]: profile('OK'),
+    [at('OLDV')]: profile('OLDV', { version: 0x10C }), [at('OLDV DVD 1')]: cover('o'),
+    [at('MOD')]: profile('MOD', { career: ['240SX', 0x5ec0ffee] }), [at('OK')]: profile('OK'),
   }));
-  assert.deepEqual(sorted(r.profiles), ['MOD', 'OK']);
-  assert.deepEqual(r.modded, ['MOD']);
-  assert.deepEqual(Object.fromEntries(r.refused.map(x => [x.name, x.why])), {
-    EDIT: 'its checksums do not match (edited outside the game?)', OLDV: 'saved by another version of the game (version 268, not 269)' });
-  assert.deepEqual(paths(r), sorted([at('MOD'), at('OK')]));
-  assert.deepEqual(r.skipped, [at('EDIT DVD 1')]);
-  const none = await readBackup(z({ [at('EDIT')]: new Uint8Array(edited) }));
+  assert.deepEqual(sorted(r.profiles), ['EDIT', 'MOD', 'OK']);
+  assert.deepEqual([r.modded, r.edited], [['MOD'], ['EDIT']]);
+  assert.deepEqual(Object.fromEntries(r.refused.map(x => [x.name, x.why])), { OLDV: 'saved by another version of the game (version 268, not 269)' });
+  assert.deepEqual(paths(r), sorted([at('EDIT'), at('EDIT DVD 1'), at('MOD'), at('OK')]));
+  assert.deepEqual(r.skipped, [at('OLDV DVD 1')]);
+  const e = r.entries.find(x => x.path === at('EDIT')).data;
+  assert.deepEqual([P.profileName(e), e[0xA16A]], [{ name: 'EDIT', edited: false }, edited[0xA16A]], 'sealed again, the edit kept');
+  const none = await readBackup(z({ [at('OLDV')]: profile('OLDV', { version: 0x10C }) }));
   assert.deepEqual([none.kind, none.entries, none.refused.length], ['profiles', [], 1]);
 });
 
 test('a backup of the page\'s restores in place, without a profile the game would not load', async () => {
-  const edited = Buffer.from(profile('BAD')); edited[9000] ^= 2;
+  const edited = Buffer.from(profile('EDIT')); edited[9000] ^= 2;
   const r = await readBackup(z({
     'registry.txt': 'NotFirstTime=1\n', 'settings.ini': 'movies = off\n', 'nfsu2000.tga': new Uint8Array(40), 'autosave-profiles.txt': 'frik\n',
     [at('frik')]: profile('frik'), [at('frik DVD 1')]: cover('g'),
-    [at('BAD')]: new Uint8Array(edited), [at('BAD Magazine 1')]: cover('h'), [at('MOD')]: profile('MOD', { custom: [0x12345678] }),
+    [at('BAD')]: profile('BAD', { version: 0x10C }), [at('BAD Magazine 1')]: cover('h'), [at('MOD')]: profile('MOD', { custom: [0x12345678] }),
+    [at('EDIT')]: new Uint8Array(edited),
   }));
   assert.equal(r.kind, 'backup');
-  assert.deepEqual(sorted(r.profiles), ['MOD', 'frik'], 'a cover shoot is no profile');
-  assert.deepEqual(r.modded, ['MOD']);
+  assert.deepEqual(sorted(r.profiles), ['EDIT', 'MOD', 'frik'], 'a cover shoot is no profile');
+  assert.deepEqual([r.modded, r.edited], [['MOD'], ['EDIT']]);
   assert.deepEqual(r.refused.map(x => x.name), ['BAD']);
-  assert.deepEqual(paths(r), sorted([at('MOD'), at('frik'), at('frik DVD 1'), 'autosave-profiles.txt', 'nfsu2000.tga', 'registry.txt', 'settings.ini']));
+  assert.deepEqual(paths(r), sorted([at('EDIT'), at('MOD'), at('frik'), at('frik DVD 1'), 'autosave-profiles.txt', 'nfsu2000.tga', 'registry.txt', 'settings.ini']));
+  const e = r.entries.find(x => x.path === at('EDIT')).data;
+  assert.deepEqual([P.profileName(e), e[9000]], [{ name: 'EDIT', edited: false }, edited[9000]], 'sealed again, the edit kept');
   const inside = await readBackup(z({ 'registry.txt': 'x', [at('NAMEA')]: profile('NAMEB') }));
   assert.deepEqual([inside.profiles, inside.refused], [[], [{ name: 'NAMEA', why: 'the name inside is "NAMEB"' }]]);
 });

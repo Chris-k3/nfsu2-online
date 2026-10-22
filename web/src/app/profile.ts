@@ -1,8 +1,8 @@
 // A profile the game saved ("NFS Underground 2/<NAME>/<NAME>", 54,966 bytes)
 // as far as the page reads or changes it: the file's checksums and the game's
 // own Save option (Options, Gameplay, Save: Autosave, Prompt or Off), its
-// name (renameProfile), and, for one from the PC game, its checks and the
-// cars a mod added (profileName, modCars).
+// name (renameProfile), and, for one from the PC game, its checks, the cars
+// a mod added and a save editor's stale checksums (profileName, modCars, sealed).
 //
 // Layout and checksum: the clean-room description of this SPEED2.EXE (v1.2 NA,
 // the README's SHA-256) in github.com/whoismept/OpenUG2,
@@ -18,11 +18,16 @@
 // bytes, XOR those 4 bytes read big-endian; stored little-endian.  The name's
 // place agrees with the save editors that work on players' real profiles
 // (0xD225 in hackch/NFSU2-Savegame-Editor); those editors leave the checksums
-// stale, so a file whose checksums do not hold here is left alone instead of
-// being "repaired".  Checked in the game (2026-10-19): a profile it created
-// came in on Prompt, and after withAutosave it loaded with Options, Gameplay,
-// Save at Autosave and every other Gameplay option as before.  Every check
-// below must still hold before the page writes a byte.
+// stale.  The game loads such a file all the same (checked 2026-10-22: a
+// money change with B's and the header's checksums stale, written straight
+// into the save folder, loaded with the changed bank).  One from elsewhere is
+// taken as edited (profileName) and comes in sealed again, with a warning, so
+// the page's own checks below take it too; one in the save folder whose
+// checksums do not hold is left alone instead of being "repaired".  Checked in
+// the game (2026-10-19): a profile it created came in on Prompt, and after
+// withAutosave it loaded with Options, Gameplay, Save at Autosave and every
+// other Gameplay option as before.  Every check below must still hold before
+// the page changes a file in the save folder.
 //
 // Pure (no DOM, no OPFS) so it can be checked under node; turnOnAutosave and
 // renameProfile take the save folder's file functions.
@@ -74,16 +79,22 @@ function checkProfile(file: Uint8Array, name: string): string | null {
   return null;
 }
 
-/** checkProfile's checks of the file itself: what the game's loader checks too (SPEC §3.5), so it refuses such a file as well. */
+/** checkProfile's checks of the file itself: SPEC §3.5's (the game loads one whose checksums are stale, though). */
 function checkFile(file: Uint8Array): string | null {
+  return checkShape(file) ?? (sealedRight(file) ? null : 'its checksums do not match (edited outside the game?)');
+}
+
+/** checkFile's checks but the checksums: the container, its block sizes and the version. */
+function checkShape(file: Uint8Array): string | null {
   if (!isProfileFile(file)) return 'not a profile file (no "20CM")';
   if (file.length !== PROFILE_SIZE) return `${file.length} bytes, not ${PROFILE_SIZE}`;
   if (u32(file, 4) !== file.length || u32(file, 8) !== 8 || u32(file, 12) !== PAYLOAD) return 'unexpected block sizes';
-  if (u32(file, 24) !== checksum(file.subarray(0, 24)) || u32(file, 16) !== checksum(file.subarray(28, B)) ||
-      u32(file, 20) !== checksum(file.subarray(B))) return 'its checksums do not match (edited outside the game?)';
   if (u32(file, 28) !== VERSION || u32(file, 32) !== PAYLOAD) return `saved by another version of the game (version ${u32(file, 28)}, not ${VERSION})`;
   return null;
 }
+
+const sealedRight = (file: Uint8Array) => u32(file, 16) === checksum(file.subarray(28, B)) &&
+  u32(file, 20) === checksum(file.subarray(B)) && u32(file, 24) === checksum(file.subarray(0, 24));
 
 function nameInside(file: Uint8Array): string {
   let inside = '';
@@ -97,16 +108,17 @@ export const isProfileFile = (file: Uint8Array) => file.length >= 4 && file[0] =
 /**
  * The name inside a profile file that comes from elsewhere (the PC game's
  * NFS Underground 2 folder, a backup), or why the page does not take it:
- * checkProfile's checks but the folder's name, and a name the game's own
- * field makes (isProfileName).  A save editor that leaves the checksums
- * stale is caught here; one that makes them again is not.
+ * checkProfile's checks but the folder's name and the checksums, and a name
+ * the game's own field makes (isProfileName).  edited: its checksums do not
+ * hold, as a save editor leaves them; it comes in as sealed() makes it, so
+ * Autosave and Rename take it.  A save editor that makes them again is not seen here.
  */
-export function profileName(file: Uint8Array): { name: string } | { bad: string } {
-  const bad = checkFile(file);
+export function profileName(file: Uint8Array): { name: string; edited: boolean } | { bad: string } {
+  const bad = checkShape(file);
   if (bad) return { bad };
   const name = nameInside(file);
-  if (!isProfileName(name)) return { bad: `the name inside, "${name}", is not one the game makes (edited outside the game?)` };
-  return { name };
+  if (!isProfileName(name)) return { bad: `the name inside, "${name}", is not one the game makes (1 to ${NAME_MAX} letters and digits)` };
+  return { name, edited: !sealedRight(file) };
 }
 
 // ------------------------------------------------------- mod cars --
@@ -145,13 +157,17 @@ export function modCars(file: Uint8Array): number {
   return n;
 }
 
-/** The checksums a change to the payload moves (B's and the header's), made again. */
+/** The file's checksums made again (A's, B's, then the header's, which covers the other two). */
 function seal(f: Uint8Array): Uint8Array {
   const dv = new DataView(f.buffer, f.byteOffset, f.byteLength);
+  dv.setUint32(16, checksum(f.subarray(28, B)), true);
   dv.setUint32(20, checksum(f.subarray(B)), true);
   dv.setUint32(24, checksum(f.subarray(0, 24)), true);
   return f;
 }
+
+/** A copy of a profile file profileName took as edited, with its checksums made again: as if the game had saved it. */
+export const sealed = (file: Uint8Array) => seal(file.slice());
 
 /** A copy of a profile file readSaveMode accepted, with Save at Autosave (both bytes 1, as the game's menu sets it) and its checksums made again. */
 export function withAutosave(file: Uint8Array): Uint8Array {

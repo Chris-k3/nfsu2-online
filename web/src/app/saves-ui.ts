@@ -8,7 +8,7 @@
 // it stays on the server.
 
 import { cacheBytes, clearCache, clearSaveDir, filesOf, listFiles, listProfiles, PROFILES_DIR, readBytes, writeFile, type Profile } from './savefs';
-import { AUTOSAVE_SEEN, coverOf, isProfileFile, modCars, NAME_MAX, profileName, renameProfile, type RenameFiles } from './profile';
+import { AUTOSAVE_SEEN, coverOf, isProfileFile, modCars, NAME_MAX, profileName, renameProfile, sealed, type RenameFiles } from './profile';
 import { listZip, unzip, zip, ZipError, type ZipEntry } from './zip';
 import { downloadBlob, stamp } from './logs';
 import { fmtBytes } from './checks';
@@ -93,6 +93,8 @@ export interface Restore {
   refused: { name: string; why: string }[];
   /** profiles with cars a mod added (profile.ts modCars), restored with a warning */
   modded: string[];
+  /** profiles a save editor changed (profile.ts profileName's edited): sealed again, restored with a warning */
+  edited: string[];
 }
 
 type FileIn = { path: string; data: Uint8Array; mtime?: number };
@@ -121,15 +123,16 @@ export async function readBackup(buf: Uint8Array, fileName = 'the file'): Promis
 
 /** A backup of this page's: every entry, but a profile the game would not load and its cover shoots. */
 function backupIn(files: FileIn[], skipped: string[]): Restore {
-  const out: Restore = { kind: 'backup', entries: [], profiles: [], skipped, refused: [], modded: [] };
+  const out: Restore = { kind: 'backup', entries: [], profiles: [], skipped, refused: [], modded: [], edited: [] };
   const gone = new Set<string>();
   for (const e of files) {
     const s = e.path.split('/');
     if (s.length !== 3 || s[0] !== PROFILES_DIR || lower(s[2]) !== lower(s[1]) || coverOf(s[1])) continue;
-    const r = profileName(e.data);
-    const why = 'bad' in r ? r.bad : lower(r.name) !== lower(s[1]) ? `the name inside is "${r.name}"` : null;
-    if (why) { out.refused.push({ name: s[1], why }); gone.add(lower(s[1])); continue; }
+    let r = profileName(e.data);
+    if ('name' in r && lower(r.name) !== lower(s[1])) r = { bad: `the name inside is "${r.name}"` };
+    if ('bad' in r) { out.refused.push({ name: s[1], why: r.bad }); gone.add(lower(s[1])); continue; }
     out.profiles.push(s[1]);
+    if (r.edited) { out.edited.push(s[1]); e.data = sealed(e.data); }
     if (modCars(e.data)) out.modded.push(s[1]);
   }
   out.entries = files.filter(e => {
@@ -145,8 +148,8 @@ function backupIn(files: FileIn[], skipped: string[]): Restore {
  * ("<NAME> DVD 1/<NAME> DVD 1" anywhere) beside it.  Everything else is left out.
  */
 function profilesIn(files: FileIn[], skipped: string[]): Restore {
-  const out: Restore = { kind: 'profiles', entries: [], profiles: [], skipped, refused: [], modded: [] };
-  const found = new Map<string, FileIn & { name: string }>();
+  const out: Restore = { kind: 'profiles', entries: [], profiles: [], skipped, refused: [], modded: [], edited: [] };
+  const found = new Map<string, FileIn & { name: string; edited: boolean }>();
   const covers: (FileIn & { profile: string; cover: string })[] = [];
   for (const e of files) {
     const s = e.path.split('/'), file = s[s.length - 1], folder = s.length > 1 ? s[s.length - 2] : '';
@@ -156,11 +159,12 @@ function profilesIn(files: FileIn[], skipped: string[]): Restore {
     const r = profileName(e.data);
     if ('bad' in r) out.refused.push({ name: folder || file, why: r.bad });
     else if (found.has(lower(r.name))) out.skipped.push(e.path);          // a second copy of one
-    else found.set(lower(r.name), { ...e, name: r.name });
+    else found.set(lower(r.name), { ...e, name: r.name, edited: r.edited });
   }
   for (const p of found.values()) {
-    out.entries.push({ path: `${PROFILES_DIR}/${p.name}/${p.name}`, data: p.data, mtime: p.mtime });
+    out.entries.push({ path: `${PROFILES_DIR}/${p.name}/${p.name}`, data: p.edited ? sealed(p.data) : p.data, mtime: p.mtime });
     out.profiles.push(p.name);
+    if (p.edited) out.edited.push(p.name);
     if (modCars(p.data)) out.modded.push(p.name);
   }
   for (const c of covers) {
@@ -433,6 +437,8 @@ export class SavesPanel {
         r.entries.some(e => e.path === 'registry.txt') ? 'The game\'s options (registry.txt)' : 'No registry.txt: the next launch starts with fresh game options',
         ini ? (warn.length ? `settings.ini. ${warn.join(' ')}` : 'settings.ini') : 'No settings.ini: the defaults apply');
     }
+    if (r.edited.length) items.push(`${list(r.edited)} ${r.edited.length > 1 ? 'were' : 'was'} changed outside the game, by a save editor (the checksums no longer matched): ` +
+      'a value the game would not make itself may crash it or break the career.');
     if (r.modded.length) items.push(`${list(r.modded)} ${r.modded.length > 1 ? 'have' : 'has'} cars a mod added, which this game does not have: the game may crash or show them wrong when it loads them.`);
     if (refused) items.push(`Left out, as the game would not load ${r.refused.length > 1 ? 'them' : 'it'}: ${refused}.`);
     if (r.skipped.length) items.push(`${r.skipped.length} ${r.kind === 'profiles' ? 'other files are left out' : 'entries are skipped (unsafe names, or over the size limits)'}: ${r.skipped.slice(0, 3).join(', ')}${r.skipped.length > 3 ? ' …' : ''}`);

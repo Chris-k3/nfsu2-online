@@ -132,9 +132,10 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
 - **Profiles from the PC game:** Restore a backup takes them too. Zip the folder `%LOCALAPPDATA%\NFS Underground 2`
   (type that in Explorer's address bar), or pick one profile's own file in it (`<NAME>\<NAME>`, no extension). They
   are added beside the profiles in this browser, with their DVD and magazine covers; one of the same name is
-  replaced, after asking. A profile edited outside the game (its checksums no longer match) or saved by another
-  version is left out, as the game would not load it. One with cars a mod added is restored with a warning: this
-  game does not have those cars, and may crash or show them wrong.
+  replaced, after asking. A profile saved by another version is left out, as the game would not load it. One
+  changed by a save editor is restored with a warning: a value the game would not make itself may crash it or break
+  the career. One with cars a mod added is restored with a warning too: this game does not have those cars, and may
+  crash or show them wrong.
 - **Backups are your safety net.** When the disk is nearly full, the browser may clear a site's storage unless it
   promised to keep it. Chrome decides that by itself, and the page cannot see how full the disk is, so it does not warn.
   Firefox asks by the address bar (the Saves section says so while it asks): allow it. Make a backup now and then.

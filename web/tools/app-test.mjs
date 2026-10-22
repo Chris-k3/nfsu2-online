@@ -13,8 +13,8 @@
 //   restore   the backup restores into an empty save folder (after confirming) and the next
 //             launch auto-loads ROTEST from it (tests/scripts/app_load_probe.txt)
 //   pcsave    ROTEST's own file, as the PC game keeps it, restores into an empty save folder beside
-//             what is there (settings.ini as it was) and loads in the game; again, it would replace
-//             that one; a copy edited outside the game is refused without a question
+//             what is there (settings.ini as it was); again, it would replace that one; a copy a save
+//             editor changed replaces it after a warning, sealed again, and loads in the game, its bank as edited
 //   quit     F9 -> Quit game: the game's own quit path (WM_CLOSE) -> exit 0 -> back on the start page
 //   instance  a second tab on the same saves waits, and takes over when the first closes
 //   readonly  that second tab's Settings are read-only; Play reads settings.ini again
@@ -321,28 +321,43 @@ try {
     const listed = await p3.locator('#profiles .name').allTextContents();
     const written = await readOpfs(p3, SAVE3, 'NFS Underground 2/ROTEST/ROTEST');
     const iniAfter = (await readOpfs(p3, SAVE3, 'settings.ini'))?.text;
-    // the same file again would replace it (Cancel: nothing changes); an edited copy is refused without a question
+    // the same file again would replace it (Cancel: nothing changes); an edited copy replaces it too, with a
+    // warning, its checksums made again (only they differ from the edited file)
     await p3.setInputFiles('#import', pcFile);
     await p3.waitForSelector('#confirm[open]');
     const againText = await p3.locator('#confirm').innerText();
     await p3.click('#confirm-cancel');
     await msg('Nothing changed');
     await p3.setInputFiles('#import', editedFile);
-    await msg('cannot be restored');
-    const editedMsg = await p3.locator('#saves-msg').textContent();
-    const asked = await p3.locator('#confirm[open]').count();
-    // it loads in the game, with fresh game options (no registry.txt came with it)
+    await p3.waitForSelector('#confirm[open]');
+    const editedText = await p3.locator('#confirm').innerText();
+    await shot(p3, 'pcsave-edited.png');
+    await p3.click('#confirm-ok');
+    await msg('Added ROTEST from ROTEST-edited');
+    const sealed = Buffer.from(await p3.evaluate(async ([d, f]) => {
+      let h = await (await navigator.storage.getDirectory()).getDirectoryHandle(d);
+      const parts = f.split('/');
+      for (const p of parts.slice(0, -1)) h = await h.getDirectoryHandle(p);
+      return [...new Uint8Array(await (await (await h.getFileHandle(parts[parts.length - 1])).getFile()).arrayBuffer())];
+    }, [SAVE3, 'NFS Underground 2/ROTEST/ROTEST']));
+    const resealed = [];
+    for (let i = 0; i < Math.max(sealed.length, ed.length); i++) if (sealed[i] !== ed[i]) resealed.push(i);
+    // the edited one loads in the game, with fresh game options (no registry.txt came with it), its bank as edited
     await open(p3, `save=${SAVE3}&${ENV}&script=/tests/scripts/app_load_probe.txt`);
     const run = await playUntilExit(p3, 'pcload', 300000);
     const exit = await run.wait();
     const tail = await p3.evaluate(() => window.__nfsu2.log.text());
     fs.writeFileSync(path.join(OUT, 'play-pcload.log'), tail);
     const loadedGarage = /\[fng\] f=\d+ top package GarageMain\.fng/.test(tail);
+    const bank = { before: prof.readUInt32LE(0xA16A), edited: ed.readUInt32LE(0xA16A), game: Number(/\[career\] f=\d+ stage \d+ bank \$(\d+)/.exec(tail)?.[1]) };
     report('pcsave', /^Add this profile\?/m.test(confirmText) && /Profiles: ROTEST/.test(confirmText) && !/Replaces/.test(confirmText) &&
       listed.includes('ROTEST') && written?.size === prof.length && iniAfter === iniBefore && /Replaces the profile ROTEST/.test(againText) &&
-      /ROTEST-edited cannot be restored: its checksums do not match/.test(editedMsg) && !asked && exit?.code === 0 && loadedGarage,
+      /Replaces the profile ROTEST/.test(editedText) && /ROTEST was changed outside the game, by a save editor/.test(editedText) &&
+      sealed.length === ed.length && resealed.length > 0 && resealed.every(i => i >= 16 && i < 28) &&
+      exit?.code === 0 && loadedGarage && bank.game === bank.edited,
       { confirm: confirmText.replace(/\s+/g, ' ').slice(0, 300), again: againText.replace(/\s+/g, ' ').slice(0, 300), listed,
-        profileBytes: written?.size, settingsKept: iniAfter === iniBefore, editedMsg, exit, garageMainReached: loadedGarage });
+        profileBytes: written?.size, settingsKept: iniAfter === iniBefore, edited: editedText.replace(/\s+/g, ' ').slice(0, 400),
+        resealed, exit, garageMainReached: loadedGarage, bank });
     await p3.close();
   }
 
