@@ -37,6 +37,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { requireDev } from './dev-server.mjs';
+import { seedSave } from './save-seed.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -104,32 +105,6 @@ fs.mkdirSync(OUT, { recursive: true });
 const extraEnv = Object.fromEntries(opt.env.map(e => [e.slice(0, e.indexOf('=')), e.slice(e.indexOf('=') + 1)]));
 
 const saveName = s => `suite-${run}-${s.name}`.replace(/[^\w.-]/g, '_');
-// NFSU2_SAVE_SEED: the tree's files, written into a fresh OPFS save directory
-// from a page of the server's origin (the test page then runs without &fresh)
-async function seedSave(page, s) {
-  const files = [];
-  (function walk(d, rel) {
-    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-      const r = rel ? `${rel}/${e.name}` : e.name;
-      if (e.isDirectory()) walk(path.join(d, e.name), r);
-      else if (e.isFile()) files.push([r, fs.readFileSync(path.join(d, e.name)).toString('base64')]);
-    }
-  })(SEED, '');
-  await page.goto(`${opt.base}/players`);
-  const n = await page.evaluate(async ([dir, files]) => {
-    const root = await navigator.storage.getDirectory();
-    try { await root.removeEntry(dir, { recursive: true }); } catch { /* none yet */ }
-    const top = await root.getDirectoryHandle(dir, { create: true });
-    for (const [rel, b64] of files) {
-      const parts = rel.split('/'); let d = top;
-      for (const p of parts.slice(0, -1)) d = await d.getDirectoryHandle(p, { create: true });
-      const w = await (await d.getFileHandle(parts.at(-1), { create: true })).createWritable();
-      await w.write(Uint8Array.from(atob(b64), c => c.charCodeAt(0))); await w.close();
-    }
-    return files.length;
-  }, [saveName(s), files]);
-  return n;
-}
 
 function urlFor(s) {
   const env = { ...SUITE_ENV, ...Object.fromEntries(s.extra.split(/\s+/).filter(Boolean).map(e => e.split('='))), ...extraEnv };
@@ -191,7 +166,7 @@ async function runOne(browser, s) {
   page.on('pageerror', e => lines.push(`PAGEERROR ${e}`));
   page.on('crash', () => lines.push('CRASH (renderer process)'));
   const limit = s.alarm * opt.scale * 1000;
-  if (s.seed) lines.push(`[suite] save seed: ${await seedSave(page, s)} files from ${SEED}`);
+  if (s.seed) lines.push(`[suite] save seed: ${await seedSave(page, opt.base, saveName(s), SEED)} files from ${SEED}`);
   await page.goto(urlFor(s));
   let timedOut = false;
   try { await page.waitForFunction(() => document.title === 'DONE', null, { timeout: limit, polling: 1000 }); }

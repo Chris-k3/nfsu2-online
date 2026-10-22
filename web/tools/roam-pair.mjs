@@ -25,6 +25,8 @@
 //        [--crowd <n>]  web/tools/roam-crowd.mjs's n simulated players on the same server for the whole run
 //                    (<out>/crowd.log): with 5 or more friends the first cars of our own come into use, in the AI range
 //        [--crowd-race 1-3:200:320]  roam-crowd's --race: those players are in a race meanwhile
+//        [--seed <save tree>]  every page starts from that save (web/tools/save-seed.mjs, as run-suite's
+//                    NFSU2_SAVE_SEED: e.g. a player's "Download a backup" unzipped) instead of a fresh one
 //
 // Without --base it starts its own server (web/tools/server-cmd.mjs, --dev on the given
 // ports, the game folder from --data or NFSU2_DATA) and stops it at the end.
@@ -49,6 +51,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { makeTestCerts } from '../test/cf-sim.mjs';
 import { serverCommand } from './server-cmd.mjs';
+import { seedSave } from './save-seed.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const argv = process.argv.slice(2);
@@ -71,6 +74,7 @@ const N = SPECS.length;
 const APP = opt('page', 'test') === 'app';
 const PLAY = opt('page', 'test') === 'play', SIZE = opt('size', '960x540').split('x').map(Number), PLAY_ONLY = opt('play-only', '');
 const FETCH = opts('fetch');                 // files of each page's save folder to copy out, as <out>/<name>.<file>
+const SEED = opt('seed', '');               // a save tree each page starts from
 const HIDE = opts('hide').map(x => { const [n, at, dur] = x.split(':'); return { name: n, at: +at * 1000, dur: +(dur ?? 8) * 1000 }; });
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -99,7 +103,8 @@ function url(i, name, script, own) {
   const play = PLAY && (!PLAY_ONLY || PLAY_ONLY === name);
   if (play) { q.set('w', String(SIZE[0])); q.set('h', String(SIZE[1])); q.set('artifacts', `/artifacts/${name}-`); q.set('dumpscale', '1'); }
   for (const [k, v] of Object.entries(env)) if (!(APP && (k === 'NFSU2_SAVEDIR'))) q.append('env', `${k}=${v}`);
-  return APP ? `${BASE}/?${q}&fresh` : `${BASE}/test/${play ? 'play' : 'hostcheck'}.html?${q}&fresh`;
+  const fresh = SEED ? '' : '&fresh';
+  return APP ? `${BASE}/?${q}${fresh}` : `${BASE}/test/${play ? 'play' : 'hostcheck'}.html?${q}${fresh}`;
 }
 
 // our own server (stopped by its child handle only)
@@ -148,6 +153,7 @@ async function start(i, name, script, own) {
   page.on('console', m => w(m.text()));
   page.on('pageerror', e => w('PAGEERROR ' + e));
   const u = url(i, name, script, own);
+  if (SEED) w(`[roam-pair] save seed: ${await seedSave(page, BASE, `roam-${name}`, SEED)} files from ${SEED}`);
   w(`URL ${u}`);
   await page.goto(u);
   if (APP) {
