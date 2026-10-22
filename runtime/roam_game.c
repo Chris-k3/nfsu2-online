@@ -2469,7 +2469,7 @@ static void du_icon(CPU *c, uint32_t car){
  * Engage would enter, and not near one (DOOR_M: Enter there is for the door
  * or the event) */
 #if MPRACES
-static int mp_busy(void);                     /* in a race lobby (mp_frame): no outrun */
+static int mp_busy(void);                     /* in a race lobby, at a multiplayer-only spot or by a lobby (mp_frame): no outrun */
 #else
 static int mp_busy(void){ return 0; }
 #endif
@@ -2645,7 +2645,7 @@ static void du_frame(CPU *c, int64_t host, int in_roam, int world_runs, const ui
         du_icon(c, k >= 0 && g_du.st == DU_GOT ? g_sl[k].car : 0);
         if (k < 0 || !du_able(k) || !free || du_dist(g_sl[k].car) > DU_KEEP_M){
             if (g_du.st != DU_GOT) du_send(host, RC_DUEL_CANCEL, RC_DC_WITHDRAWN);
-            du_note(host, k < 0 || !du_able(k) ? "The outrun with %s is off" : "The outrun with %s is off: too far apart", g_du.name);
+            du_note(host, k >= 0 && du_able(k) && free ? "The outrun with %s is off: too far apart" : "The outrun with %s is off", g_du.name);
             du_to(DU_IDLE, host);
             break;
         }
@@ -3274,6 +3274,13 @@ static int mp_line(int64_t host, char *tx, int n){
             return 1;
         }
         if (sp && sp->kind == MPS_ONLY){
+            /* a lobby here with no room left: said, as Enter starts another */
+            for (int i = 0; i < g_mp.nseen; i++){
+                const MpLobby *f = &g_mp.seen[i];
+                if (f->state != RC_LS_OPEN || !f->race || f->n < f->max || mp_dist(f->x, f->y) >= MP_JOIN_M) continue;
+                snprintf(tx, (size_t)n, "%s's %s is full (%d of %d). Press Enter to start another", mp_name(f->host), race_kind(f->race), f->n, f->max);
+                return 1;
+            }
             char k[16]; snprintf(k, sizeof k, "%s", race_kind(sp->race)); k[0] = (char)(k[0] >= 'a' && k[0] <= 'z' ? k[0] - 32 : k[0]);
             snprintf(tx, (size_t)n, "%s: %s. Press Enter to race it with others", k, mpw_text[sp->why]);
             return 1;
@@ -3283,8 +3290,13 @@ static int mp_line(int64_t host, char *tx, int n){
     if (g_mp.note[0] && host < g_mp.note_until){ snprintf(tx, (size_t)n, "%s", g_mp.note); return 1; }
     return 0;
 }
-/* we take no outrun while in a lobby */
-static int mp_busy(void){ return g_mp.st != MP_IDLE; }
+/* no outrun in a lobby, at a multiplayer-only spot or by a lobby to join:
+ * Enter there is for the race (as at the game's own markers, du_free) */
+static int mp_busy(void){
+    if (g_mp.st != MP_IDLE) return 1;
+    const MpSpot *sp = mp_spot_here();
+    return (sp && sp->kind == MPS_ONLY) || mp_joinable();
+}
 #endif
 
 /* ---- multiplayer races from free roam: the pop-ups -------------------------------------------- */
@@ -4419,6 +4431,8 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
                  race_kind(l->race), (double)l->x, (double)l->y, l->n, l->max, l->state, (double)mp_dist(l->x, l->y),
                  (double)(roam_plat_now_us() - l->heard) / 1e6);
         }
+        char tx[TAG_DUEL_MAX];
+        if (mp_line(roam_plat_now_us(), tx, sizeof tx)) rlog("[roam]   the line at the top: %s\n", tx);   /* (when the HUD is up) */
         return 1;
     }
     if (!strcasecmp(sub, "ui")){
@@ -4443,10 +4457,12 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
         return 0;
     }
     if (!strcasecmp(sub, "waitlobby")){
-        /* "mp waitlobby N [tmo]": we host a lobby, or are in one, of N players at least; N 0: we heard of another's */
+        /* "mp waitlobby N [tmo]": we host a lobby, or are in one, of N players at least; N 0: we heard of another's;
+         * in none (idle): we heard of one of N players */
         int want = atoi(a1); long tmo = a2[0] ? atol(a2) : 0;
         if (*wait_start < 0) *wait_start = f;
         int have = want ? ((g_mp.st == MP_HOST || g_mp.st == MP_IN || g_mp.st == MP_COUNT) ? g_mp.l.n : 0) : g_mp.nseen;
+        if (want && g_mp.st == MP_IDLE) for (int i = 0; i < g_mp.nseen; i++) if (g_mp.seen[i].n > have) have = g_mp.seen[i].n;
         if (have >= (want ? want : 1)){ rlog("[roam] f=%ld mp waitlobby %d satisfied after %ld frames (%s)\n", f, want, f - *wait_start, mp_st[g_mp.st]);
                                         *wait_start = -1; return 1; }
         if (tmo && f - *wait_start >= tmo){ rlog("[roam] f=%ld mp waitlobby %d TIMEOUT (%s, %d)\n", f, want, mp_st[g_mp.st], have); *wait_start = -1; return 1; }

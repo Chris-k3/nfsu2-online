@@ -182,7 +182,7 @@ static struct {
     int      paused, quit, lan, hosted, named, carset, created, settings, joined, started, left, career, resumed, crib_go, ndlg, host_gone;
     int      logged_place;
     uint32_t room[10];                             /* the host's room as last logged */
-    long     ready, dlg_at;
+    long     ready, dlg_at, wait_at;
     char     keys[16]; int nkeys; long key_at;     /* keys to press, one every 20 frames: L LEFT, R RETURN, E ESCAPE */
     char     why[96];
 } M;
@@ -218,11 +218,19 @@ static int keys_run(long f){
     M.key_at = f + 20;
     return 1;
 }
+#define G_NET_HOST      0x00866a14u   /* the network race's host state, > 0 in one (framerate.c) */
+#define G_NET_CLIENT    0x008669f4u   /* ... its client state */
+#define G_CAREER_RACE   0x00863470u   /* Career +0x8730: the career race being run (0 free roam) */
+static void state_log(const char *where){
+    fprintf(stderr, "[mprace] f=%ld state %s: mode 0x%x, race type %u, net host %d client %d, LAN mode %u, career race %08x, coordinator %u\n",
+            autotest_frame(), where, rd(G_GAMEMODE), rd(G_RACETYPE), (int32_t)rd(G_NET_HOST), (int32_t)rd(G_NET_CLIENT),
+            rd(G_NET + N_MODE), rd(G_CAREER_RACE), rd(rd(G_RACECO)));
+}
 static void mlog(const char *fmt, const char *a){ fprintf(stderr, "[mprace] f=%ld ", autotest_frame()); fprintf(stderr, fmt, a); fputc('\n', stderr); }
 static void fail(const char *why){
     if (M.goal == G_CAREER_GOAL) return;
     snprintf(M.why, sizeof M.why, "%s", why);
-    mlog("FAILED: %s: back to the career", why);
+    mlog("FAILED: %s: back to the career", why); state_log("failed");
     M.goal = G_CAREER_GOAL; M.phase = MPR_BACK; M.since = autotest_frame();
 }
 static void to_phase(int ph){
@@ -522,20 +530,29 @@ static void step_back(CPU *c, long f){
     uint32_t cb = rd(G_LOBBY + 0xcu), flow = rd(G_FLOW);
     if (rd(G_DLG)){
         /* a dialog on the way back: Yes / OK (the left button, or the only
-         * one); a "please wait" goes by itself */
+         * one); a "please wait" goes by itself, or with its Cancel after 5 s
+         * (on the way out of the LAN menus there is nothing to wait for: a
+         * host gone left one "connecting" for a minute) */
         uint32_t nb = rd(G_DLG_NBUT);
-        if (nb == 0 || (nb == 1 && (rd(G_DLG_MSG3) == MSG_LOOK_CANCEL || rd(G_DLG_LABEL3) == LBL_CANCEL))) return;
         char t[96]; dlg_text(t, sizeof t);
+        int cancel = nb == 1 && (rd(G_DLG_MSG3) == MSG_LOOK_CANCEL || rd(G_DLG_LABEL3) == LBL_CANCEL);
+        if (nb == 0 || cancel){
+            if (!M.wait_at){ M.wait_at = f; mlog("a \"please wait\" on the way back: \"%s\"", t); }
+            if (cancel && f - M.wait_at > 60 * 5){ mlog("... called off%s", ""); dlg_answer(rd(G_DLG_MSG3)); M.wait_at = 0; M.next = f + 90; }
+            return;
+        }
+        M.wait_at = 0;
         mlog("a dialog on the way back: \"%s\": yes / OK", t);
         dlg_answer(nb == 1 ? rd(G_DLG_MSG3) : rd(G_DLG_MSG1));
         M.next = f + 90;
         return;
     }
+    M.wait_at = 0;
     if (on("UI_PostRaceResults.fng")){ autotest_tap(K_RET, 6); M.next = f + 180; return; }   /* (Continue missed) */
     if (flow == 6u){
         /* free roam again: done (the career's own free roam, not a LAN race's world) */
         if ((rd(G_GAMEMODE) & 1u) && rd(G_RACETYPE) == 0 && rd(rd(G_RACECO)) == 4u && on("HUD_SingleRace.fng")){
-            to_phase(M.why[0] ? MPR_FAILED : MPR_DONE);
+            state_log("back in free roam"); to_phase(M.why[0] ? MPR_FAILED : MPR_DONE);
             M.owns = 0;
             return;
         }
@@ -572,7 +589,10 @@ static void step_back(CPU *c, long f){
             }
             M.paid = 1;
         }
-        if (!M.crib_go){ send_to(c, MSG_CRIB_GO, gstr_tmp(c, "UI_CareerCrib.fng")); M.crib_go = 1; mlog("return to explore mode%s", ""); }
+        if (!M.crib_go){
+            state_log("at the crib");
+            send_to(c, MSG_CRIB_GO, gstr_tmp(c, "UI_CareerCrib.fng")); M.crib_go = 1; mlog("return to explore mode%s", "");
+        }
         M.next = f + 120;
         return;
     }
