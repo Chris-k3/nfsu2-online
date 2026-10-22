@@ -238,9 +238,12 @@ Good to know:
 - **Names over the cars** follow the game's own player-names option, as in its LAN races. A player who paused shows
   as "paused" there.
 - **Horn:** hold N (or click the controller's left stick) to honk. The others hear it from your car: louder the nearer
-  they are, from the side your car is on, and lower in pitch as you drive away from them. Each player's horn has its
-  own pitch, so you can tell who honks. It sounds while the game runs, not in the pause menu or on the map. It works
-  in Online and LAN races too.
+  they are, from the side your car is on, and lower in pitch as you drive away from them. Pick yours in Settings,
+  Online, Your horn (the play button next to it lets you hear each one): dual tone, single tone, air horn, train horn,
+  Klaxon, La Cucaracha (it plays while you hold it), clown horn or sad trombone. The others hear the one you picked;
+  players on an older version hear the dual tone.
+  Each player's horn is also pitched a little differently by their name, so two players with the same horn sound
+  apart. It sounds while the game runs, not in the pause menu or on the map. It works in Online and LAN races too.
 - **Hydraulics and nitrous:** the others see your car lift, tilt and bounce on its hydraulics, with its wheels on the
   road, and your nitrous as the game draws it on any car: the light trails behind it. They hear them from your car
   with the game's own sounds, as you hear your own: the nitrous going on and off, letting it out while standing or
@@ -347,8 +350,8 @@ Good to know:
   LAN races. The career and Quick Race keep their unlocks.
 - **Up to 6 players** race in one game (Options, Max Players; the game's own most was 4, and 6 only in URL races).
   Drag keeps one car per lane: 4, or 3 on the track with three lanes.
-- **Horn:** N (or the controller's left stick click) honks in a race too, as in free roam: the others hear it from your
-  car. The same in the game's LAN races.
+- **Horn:** N (or the controller's left stick click) honks in a race too, as in free roam: the others hear the horn you
+  picked from your car. The same in the game's LAN races.
 - **The Lobby lists every open game**, whatever its race type and options (Collision Detection, Race Breaker, Car
   Performance Restrictions, Ranked). The lobby's **Filter** only puts the games it asks for first; in the original
   game it hid all others, so a game made with Collision Detection off was seen by no one. A game with **Private

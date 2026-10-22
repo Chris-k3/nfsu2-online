@@ -8,12 +8,14 @@
 
 import { checkSetting, DEFAULTS, keyDef, resolveEnv, settingsPut, TEMPLATE, type Resolved } from './settings';
 import { readText, writeFile } from './savefs';
+import { playHorn, stopHorn } from './horn-preview';
 
 type Control =
   | { t: 'switch' }
   | { t: 'seg'; opts: [value: string, label: string][] }
-  /** a choice of more than a row of buttons holds: a drop-down list */
-  | { t: 'select'; opts: [value: string, label: string][] }
+  /** a choice of more than a row of buttons holds: a drop-down list; preview: a Listen button beside it plays the
+   *  value chosen (the promise ends when it has played), stop ends that early */
+  | { t: 'select'; opts: [value: string, label: string][]; preview?: { play(value: string): Promise<void>; stop(): void } }
   | { t: 'num'; min?: number; max?: number; step?: number; unit?: string }
   | { t: 'text'; placeholder?: string };
 
@@ -26,6 +28,9 @@ const GROUPS: Group[] = [
   { title: 'Online', status: true, own: true, items: [
     { key: 'roam', label: 'Free roam with others', help: 'Everyone on this server who turns this on sees your car in career free roam, and you see theirs, with their names over them.', c: { t: 'switch' } },
     { key: 'roam_name', label: 'Your name', help: 'What other players see over your car in free roam, and your name in the Online menu (there only letters, digits, - and _, at most 15). Empty uses your profile name.', c: { t: 'text', placeholder: 'profile name' } },
+    { key: 'horn', label: 'Your horn', help: 'N or the controller\'s left stick click, in free roam and in races with other players. They hear the horn you pick (players on an older version hear the dual tone).', c: { t: 'select', opts: [
+      ['dual', 'Dual tone'], ['single', 'Single tone'], ['truck', 'Air horn'], ['train', 'Train horn'], ['klaxon', 'Klaxon'],
+      ['cucaracha', 'La Cucaracha'], ['clown', 'Clown horn'], ['trombone', 'Sad trombone']], preview: { play: playHorn, stop: stopHorn } } },
     { key: 'roam_room', label: 'Room', help: 'Only players in the same room see each other\'s cars. A filter, not privacy: everyone on this server still sees your name and whether you play.', c: { t: 'text', placeholder: 'none' } },
     { key: 'online', label: 'Online mode', help: 'The game\'s Online menu takes you straight to the Online Main Menu under your name, without the EA Login screens: lobby, chat and races with everyone playing from this server.', c: { t: 'switch' } },
     { key: 'roam_collide', label: 'Solid cars', help: 'You collide with the other players\' cars. A car that appears on yours lets you through until you are apart. Off: you drive through them, and they through yours.', c: { t: 'switch' }, more: true },
@@ -341,6 +346,18 @@ export class SettingsPanel {
       }
       sel.onchange = () => void this.put(it.key, sel.value);
       ctl.append(sel);
+      if (c.preview) {
+        // plays what the list shows (also before it is saved); a second press stops it
+        const pv = c.preview, b = document.createElement('button');
+        const show = (on: boolean) => { b.setAttribute('aria-pressed', String(on)); b.textContent = b.title = on ? 'Stop' : 'Listen'; };
+        b.type = 'button'; b.className = 'listen'; show(false);
+        b.onclick = () => {
+          if (b.getAttribute('aria-pressed') === 'true') { pv.stop(); return; }
+          show(true);
+          void pv.play(sel.value).catch(() => {}).finally(() => show(false));
+        };
+        ctl.append(b);
+      }
       described = sel;
     } else {
       const inp = document.createElement('input'); inp.id = id;

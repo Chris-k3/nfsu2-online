@@ -4,7 +4,8 @@
 // Steps (each prints PASS/FAIL with evidence; screenshots go to --out):
 //   start     the start page renders, every check passes or warns (no problem shown), the module loads
 //   settings  the settings on the page edit /save/settings.ini; the file and the derived environment
-//             match; a refused value is shown; it survives a reload; Reset restores a line
+//             match; a refused value is shown; it survives a reload; Reset restores a line; Listen plays
+//             the horn picked through
 //   play      Play -> the game in the window (not full screen: the default) (null renderer) runs tests/scripts/app_rw_probe.txt:
 //             a new profile ROTEST is saved, F12, a Quick Race, then "close" (the game's own
 //             quit path) -> exit 0 -> back on the start page; frame-rate overlay (F8) and page
@@ -167,6 +168,13 @@ try {
     await page.click('.set[data-key="fps_counter"] .opt:has-text("Detailed")'); await settle(page, n0++);
     await page.click('.set[data-key="roam"] .switch'); await settle(page, n0++);            // roam on (validated bool)
     await page.fill('#set-roam_name', 'Tester ; a comment'); await page.press('#set-roam_name', 'Tab'); await settle(page, n0++);
+    await page.selectOption('#set-horn', 'train'); await settle(page, n0++);
+    // Listen plays the horn picked (horn-preview.ts): Stop while it plays, Listen again once it has played
+    await page.click('.set[data-key="horn"] .listen');
+    const listenState = () => page.evaluate(() => document.querySelector('.set[data-key="horn"] .listen')?.getAttribute('aria-pressed'));
+    const listenPlaying = await listenState();
+    const listened = await page.waitForFunction(() => document.querySelector('.set[data-key="horn"] .listen')?.getAttribute('aria-pressed') === 'false',
+      null, { timeout: 10000 }).then(() => true, () => false);
     await page.click('#online summary:has-text("More online")');
     await page.fill('#set-roam_port', '99'); await page.press('#set-roam_port', 'Tab');   // out of range: refused, not written
     const refusedMsg = await page.locator('.set[data-key="roam_port"] .set-state').textContent();
@@ -175,9 +183,9 @@ try {
     const env = await page.evaluate(() => window.__nfsu2.env());
     const lines = file.split('\n').filter(l => /^[a-z_]+ = /.test(l));
     const fileOk = lines.includes('movies = off') && lines.includes('fps = 120') && lines.includes('fps_counter = detailed') &&
-      lines.includes('roam_name = Tester ; a comment') && lines.includes('roam = off') && !/^roam_port = /m.test(file);
+      lines.includes('roam_name = Tester ; a comment') && lines.includes('roam = off') && lines.includes('horn = train') && !/^roam_port = /m.test(file);
     const envOk = env.NOMOVIES === '1' && env.NFSU2_FPS === '120' && env.NFSU2_FPS_COUNTER === 'detailed' &&
-      env.NFSU2_ROAM_NAME === 'Tester' && env.NFSU2_ROAM === '0' && env.SNDSYNC === '0' && !('WINDOW' in env);
+      env.NFSU2_ROAM_NAME === 'Tester' && env.NFSU2_ROAM === '0' && env.NFSU2_HORN === 'train' && env.SNDSYNC === '0' && !('WINDOW' in env);
     // the raw editor: a refused value is kept in the file but shown as ignored
     await page.click('#settings-raw summary');
     const ta = page.locator('#settings-text');
@@ -202,9 +210,10 @@ try {
     await page.click('.set[data-key="hud"] .text-btn'); await settle(page, n0);
     const file2 = (await readOpfs(page, SAVE, 'settings.ini')).text;
     report('settings', fileOk && envOk && /not a whole number in 1024\.\.65535/.test(refusedMsg) && /ignored/.test(rawMsg) &&
-      /ultrawide/.test(hudState) && after.movies === 'false' && after.fps === '120' && after.name === 'Tester' && /^#hud = wide$/m.test(file2) && /\(2 changed\)$/.test(moreDisplay),
-      { setLines: lines, env: { NOMOVIES: env.NOMOVIES, NFSU2_FPS: env.NFSU2_FPS, NFSU2_FPS_COUNTER: env.NFSU2_FPS_COUNTER, NFSU2_ROAM_NAME: env.NFSU2_ROAM_NAME, NFSU2_ROAM: env.NFSU2_ROAM, WINDOW: env.WINDOW ?? '(unset)' },
-        refusedMsg, rawMsg, hudState, afterReload: after, hudReset: /^#hud = wide$/m.test(file2) });
+      /ultrawide/.test(hudState) && after.movies === 'false' && after.fps === '120' && after.name === 'Tester' && /^#hud = wide$/m.test(file2) && /\(2 changed\)$/.test(moreDisplay) &&
+      listenPlaying === 'true' && listened,
+      { setLines: lines, env: { NOMOVIES: env.NOMOVIES, NFSU2_FPS: env.NFSU2_FPS, NFSU2_FPS_COUNTER: env.NFSU2_FPS_COUNTER, NFSU2_ROAM_NAME: env.NFSU2_ROAM_NAME, NFSU2_ROAM: env.NFSU2_ROAM, NFSU2_HORN: env.NFSU2_HORN, WINDOW: env.WINDOW ?? '(unset)' },
+        refusedMsg, rawMsg, hudState, afterReload: after, hudReset: /^#hud = wide$/m.test(file2), listen: { playing: listenPlaying, played: listened } });
   }
 
   // ------------------------------------------------------------- play --

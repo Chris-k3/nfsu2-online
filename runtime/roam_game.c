@@ -47,8 +47,9 @@
  *    player's own car is then passable on every friend's screen too.
  *  - names over friends' cars, as the game's own LAN races show them
  *    (roam_game_hud).
- *  - horns: the player's goes out with the snapshots, friends' sound from
- *    their cars (sounds_update, horn.c).
+ *  - horns: the player's goes out with the snapshots, and which horn it is
+ *    with the car's look; friends' sound from their cars (sounds_update,
+ *    horn.c).
  *  - hydraulics and nitrous: the snapshots' extension carries the wheel
  *    places' heights, the nitrous left, each wheel's hydraulics and the
  *    landings; a friend's car gets its wheels where the friend's are
@@ -527,6 +528,8 @@ static int local_cfg(uint8_t *out, int cap, char *tname){
     for (int i = 0; i < 68; i++) if (MR8(ride + 0x340u + (uint32_t)i)) c.perf[2 + (i >> 3)] |= (uint8_t)(0x80u >> (i & 7));
     for (int i = 0; i < 41; i++) c.perf[11 + i] = MR8(ride + 0x398u + (uint32_t)i);
     c.has_perf = 1;
+    int horn = rh_horn_mine();                       /* the horn the others hear from this car */
+    if (horn >= 0){ c.has_horn = 1; c.horn = (uint8_t)horn; }
     for (uint32_t sl = 0; sl < RC_PART_SLOTS; sl++){
         uint32_t part = MR32(ride + 0x590u + 4u * sl);
         if (!part || !ok(part, 0xe)) continue;
@@ -2242,8 +2245,10 @@ typedef struct { int idx; uint32_t id; char name[RC_NAME_MAX + 1]; int visible, 
                  int has_cfg;          /* a complete car record is held */
                  int cfg_len;          /* > 0: the record is copied here (a slot needs it) */
                  uint8_t cfg[RC_CFG_MAX]; int have_pose; rc_pose pose; float err; uint32_t look;
-                 int64_t newest, rt;   /* the sender's time of its newest snapshot, and the one the car is drawn at (push_pose) */ } PeerView;
+                 int64_t newest, rt;   /* the sender's time of its newest snapshot, and the one the car is drawn at (push_pose) */
+                 int horn;             /* their horn (horn.h's kinds) */ } PeerView;
 static PeerView g_pv[RC_TABLE]; static int g_npv;
+static struct { uint32_t id, gen; int horn; } g_phorn[RC_TABLE];   /* each peer's horn, as its record (cfg_gen) has it */
 
 /* ---- horns, friends' nitrous and hydraulics -------------------------------------------------------- */
 /* N or the controller's left stick click sounds the player's horn in free
@@ -2293,11 +2298,11 @@ static void sounds_update(const rc_state *ls, int heard){
     }
     if (!heard && !g_horn && !g_horns_on) return;     /* racehorn.c may have the voices */
     rh_horn_begin(heard ? L : 0, f, ls ? ls->v : 0);
-    if (g_horn) rh_horn_sound(g_s.conf.self_id, O.name, 0, 0);
+    if (g_horn) rh_horn_sound(g_s.conf.self_id, O.name, rh_horn_mine(), 0, 0);
     for (int i = 0; heard && i < g_npv; i++){
         const PeerView *v = &g_pv[i];
         if (v->visible && !v->paused && v->have_pose && (v->pose.bits & RC_BIT_HORN))
-            rh_horn_sound(v->id, v->name, v->pose.p, v->pose.v);
+            rh_horn_sound(v->id, v->name, v->horn, v->pose.p, v->pose.v);
     }
     rh_horn_end();
     g_horns_on = heard || g_horn;
@@ -4267,6 +4272,14 @@ void roam_game_frame(CPU *c){
             /* the record only when a slot will need it */
             if (p->cfg_len && (slotted < 0 || g_sl[slotted].cfg_gen != p->cfg_gen)){
                 memcpy(v->cfg, p->cfg, (size_t)p->cfg_len); v->cfg_len = p->cfg_len; v->look = rc_fnv1a_bytes(p->cfg, (uint32_t)p->cfg_len); }
+            /* their horn: the record's (read once a record), the dual one without */
+            if (g_phorn[i].id != p->id || g_phorn[i].gen != p->cfg_gen){
+                static rc_carcfg hc;
+                g_phorn[i].id = p->id; g_phorn[i].gen = p->cfg_gen;
+                g_phorn[i].horn = p->cfg_len && rc_carcfg_decode(p->cfg, p->cfg_len, &hc) == RC_OK && hc.has_horn ? hc.horn : 0;
+                if (p->cfg_len && g_phorn[i].horn) rlog("[roam] f=%ld %s's horn: %s\n", rh_frame(), p->name, rh_horn_name(g_phorn[i].horn));
+            }
+            v->horn = g_phorn[i].horn;
             v->have_pose = 0;
             v->newest = p->mo.n > 0 ? p->mo.t[p->mo.n - 1] : 0;
             if (v->visible){

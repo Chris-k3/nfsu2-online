@@ -47,8 +47,10 @@ uint64_t    roam_win_ns(void);
 /* no horn here: the companion neither sounds one nor plays friends', nor
  * their nitrous and hydraulics (carsfx.c) */
 #define rh_horn_held(stick) ((void)(stick), 0)
+#define rh_horn_mine()   (-1)
+#define rh_horn_name(k)  ((void)(k), "another")
 #define rh_horn_begin(pos, fwd, vel)   ((void)(pos), (void)(fwd), (void)(vel))
-#define rh_horn_sound(who, name, p, v) ((void)(who), (void)(name), (void)(p), (void)(v))
+#define rh_horn_sound(who, name, kind, p, v) ((void)(who), (void)(name), (void)(kind), (void)(p), (void)(v))
 #define rh_horn_end()    ((void)0)
 #define rh_carsfx_begin(pos, fwd, vel)    ((void)(pos), (void)(fwd), (void)(vel))
 #define rh_carsfx_car(who, name, p, v, st) ((void)(who), (void)(name), (void)(p), (void)(v), (void)(st))

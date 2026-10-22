@@ -51,6 +51,7 @@
 #define RC_CFG_TYPE_NAME 16
 #define RC_PERF_BYTES    52         /* car-look record extension 1 */
 #define RC_EXT_PERF      1
+#define RC_EXT_HORN      2          /* car-look record extension 2: the player's horn, 1 byte */
 #define RC_DUEL_INBOX    16         /* DUEL messages held for the game side */
 #define RC_MAP_ENTRY     5          /* a MAP entry: x, y (int16, m), heading (u8, 256 a turn) */
 #define RC_MAP_PER       230        /* entries per MAP datagram at most */
@@ -255,6 +256,9 @@ typedef struct {
      * 41 tuning bytes (+0x398) */
     uint8_t  has_perf;
     uint8_t  perf[RC_PERF_BYTES];
+    /* extension 2 (1 byte): the horn the player picked (horn.h's kinds; a
+     * record without it, from an older core: theirs is the dual horn) */
+    uint8_t  has_horn, horn;
 } rc_carcfg;
 int rc_carcfg_encode(const rc_carcfg *c, uint8_t *out, int cap);   /* bytes, or -1 */
 int rc_carcfg_decode(const uint8_t *p, int len, rc_carcfg *c);     /* RC_OK / RC_E_* */

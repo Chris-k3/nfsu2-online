@@ -223,7 +223,16 @@ static void t_roundtrip(void){
             "car record with performance extension: %d bytes", n2);
       CHECK(rc_carcfg_decode(r2, n2, &d2) == RC_OK && d2.has_perf && !memcmp(d2.perf, cp.perf, RC_PERF_BYTES), "performance extension round trip");
       r2[n] = 77;                                            /* an unknown extension tag is skipped */
-      CHECK(rc_carcfg_decode(r2, n2, &d2) == RC_OK && !d2.has_perf && d2.n_parts == RC_PART_SLOTS, "unknown extension skipped"); }
+      CHECK(rc_carcfg_decode(r2, n2, &d2) == RC_OK && !d2.has_perf && d2.n_parts == RC_PART_SLOTS, "unknown extension skipped");
+      /* and the horn after it */
+      cp.has_horn = 1; cp.horn = 6; n2 = rc_carcfg_encode(&cp, r2, sizeof r2);
+      CHECK(n2 == 27 + 9 * RC_PART_SLOTS + 2 + RC_PERF_BYTES + 3 && r2[n - 1] == 2 && r2[n2 - 3] == RC_EXT_HORN && r2[n2 - 2] == 1 && r2[n2 - 1] == 6,
+            "car record with performance and horn extensions: %d bytes", n2);
+      CHECK(rc_carcfg_decode(r2, n2, &d2) == RC_OK && d2.has_perf && d2.has_horn && d2.horn == 6, "horn extension round trip");
+      r2[n2 - 3] = 77;                                       /* as an older core reads it: skipped */
+      CHECK(rc_carcfg_decode(r2, n2, &d2) == RC_OK && d2.has_perf && !d2.has_horn, "horn extension skipped as unknown");
+      cp.has_perf = 0; n2 = rc_carcfg_encode(&cp, r2, sizeof r2);
+      CHECK(n2 == n + 3 && rc_carcfg_decode(r2, n2, &d2) == RC_OK && !d2.has_perf && d2.has_horn && d2.horn == 6, "horn extension alone"); }
     CHECK(rc_carcfg_decode(rec, n, &c2) == RC_OK && c2.type_hash == cc.type_hash && !strcmp(c2.type_name, "350Z") && c2.n_parts == RC_PART_SLOTS &&
           !memcmp(c2.part, cc.part, sizeof cc.part), "car record round trip");
     /* record: version 1, type hash 4, name 16, ride bytes 4, count 1 = 26, then 9 per part */

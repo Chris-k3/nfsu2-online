@@ -47,6 +47,8 @@ export interface KeyDef {
 /** the game's languages (runtime/language.c), the setting's values; english is the default */
 export const LANGUAGES = ['english', 'french', 'german', 'italian', 'spanish', 'dutch', 'swedish', 'danish', 'korean',
   'chinese', 'japanese', 'russian', 'thai', 'portuguese'] as const;
+/** the horns (runtime/horn.c), the setting's values; dual is the default */
+export const HORNS = ['dual', 'single', 'truck', 'train', 'klaxon', 'cucaracha', 'clown', 'trombone'] as const;
 
 export const KEYS: readonly KeyDef[] = [
   // app
@@ -129,6 +131,8 @@ export const KEYS: readonly KeyDef[] = [
   // the game's language (runtime/language.c; the page fetches ahead only its language pack: datacache.ts).  Not in
   // bundle.m's table: there a lower-case key, so it reaches the runtime as NFSU2_LANGUAGE all the same
   { key: 'language', env: 'NFSU2_LANGUAGE', kind: 'enum', vals: LANGUAGES.join('|'), scope: 'web' },
+  // the player's horn, which the others hear too (runtime/horn.c).  Not in bundle.m's table either: NFSU2_HORN there
+  { key: 'horn', env: 'NFSU2_HORN', kind: 'enum', vals: HORNS.join('|'), scope: 'web' },
 ];
 
 /** strcasecmp's and toupper's folding: ASCII letters only (String.toLowerCase would also fold the Kelvin sign to 'k') */
@@ -296,6 +300,14 @@ export const TEMPLATE = `# NFSU2 settings, read at every launch.
 # becomes one '_').  Empty = your profile name.  A ';' or '#' after a blank
 # starts a comment.  [NFSU2_ROAM_NAME]
 #roam_name =
+
+# Your horn (N, or the controller's left stick click), in free roam and in
+# Online and LAN races; the other players hear the one you pick: dual (two
+# tones), single (one higher tone), truck (an air horn), train (five
+# chimes), klaxon (an old car's ah-oo-gah), cucaracha (plays La Cucaracha
+# while you hold it), clown (a bulb horn's honk-honk) or trombone (a sad
+# trombone).  Players on an older version hear the dual one.  [NFSU2_HORN]
+#horn = dual
 
 # The game's own Online mode (main menu, Online) against this server's
 # stand-in for EA's long-gone servers: you go straight in under your name,

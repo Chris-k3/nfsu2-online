@@ -10,9 +10,11 @@
  *     PEER_MS (vlan_race_peers): every joiner for the creator, the creator
  *     for a joiner.  The creator passes each joiner's horn on to the other
  *     joiners, marked relayed (never passed on again).
- *   - what: "N2HN", version 1, flags (1 the horn sounds, 2 relayed), a
- *     sequence number, and the name the player races under, as the game
- *     shows it over their car on every screen: the network race's player
+ *   - what: "N2HN", version 1, flags (1 the horn sounds, 2 relayed, bits
+ *     2-5 which horn: horn.h's kinds, which a build before them leaves at 0,
+ *     the dual one, and ignores), a sequence number, and the name the
+ *     player races under, as the game shows it over their car on every
+ *     screen: the network race's player
  *     table (G_NETPLAYERS: player i's name at +0x12, which its own lookup by
  *     name 0x5F0230 compares; the HUD's names over the cars, 0x4EC0D0, pair
  *     player i with the world's car whose +0xA is i, World 0x5F0E30).  While
@@ -81,7 +83,7 @@ static int has_hydraulics(uint32_t car){
     return (ov > -1 ? ov : lv) != 0;
 }
 
-static struct { char name[NAME_N]; uint32_t at; int on; } g_h[NHORNS];   /* others' horns as last heard */
+static struct { char name[NAME_N]; uint32_t at; int on, kind; } g_h[NHORNS];   /* others' horns as last heard */
 static uint16_t g_seq;
 static int g_mine, g_offs, g_active;                 /* our horn; "stopped" messages still to send; voices driven */
 static uint32_t g_sent_at;
@@ -106,7 +108,7 @@ static void got(uint8_t *m, int n, uint32_t from, uint32_t now){
         if (j == NHORNS) return;
         memcpy(g_h[j].name, name, NAME_N);
     }
-    g_h[j].on = m[5] & 1; g_h[j].at = now;
+    g_h[j].on = m[5] & 1; g_h[j].kind = m[5] >> 2 & 15; g_h[j].at = now;
 }
 
 /* every frame, on the game thread (roam.c's main-loop hook) */
@@ -127,7 +129,7 @@ void racehorn_frame(CPU *c){
     if (horn != g_mine){ g_mine = horn; g_offs = horn ? 0 : 2; g_sent_at = now - SEND_MS; }
     if (mine[0] && (g_mine || g_offs) && now - g_sent_at >= SEND_MS){
         memset(m, 0, MSG_N);
-        memcpy(m, "N2HN", 4); m[4] = 1; m[5] = (uint8_t)g_mine; m[6] = (uint8_t)g_seq; m[7] = (uint8_t)(g_seq >> 8); g_seq++;
+        memcpy(m, "N2HN", 4); m[4] = 1; m[5] = (uint8_t)(g_mine | (horn_mine() & 15) << 2); m[6] = (uint8_t)g_seq; m[7] = (uint8_t)(g_seq >> 8); g_seq++;
         memcpy(m + 8, mine, strlen(mine));
         send_all(m, 0);
         g_sent_at = now;
@@ -141,7 +143,7 @@ void racehorn_frame(CPU *c){
     else if (runs){ rd3(me + 0x60u, L); rd3(me + 0x90u, f); }
     if (runs) rd3(me + 0x70u, v);
     horn_begin(runs ? L : 0, f, v);
-    if (horn) horn_sound(fnv1a(mine), mine, 0, 0);
+    if (horn) horn_sound(fnv1a(mine), mine, horn_mine(), 0, 0);
     for (int j = 0; j < NHORNS; j++){
         if (!runs || !g_h[j].on || now - g_h[j].at >= STALE_MS) continue;
         uint32_t car = rd32(w);
@@ -152,7 +154,7 @@ void racehorn_frame(CPU *c){
             if (strcmp(nm, g_h[j].name)) continue;
             float p[3], cv[3];
             rd3(car + 0x60u, p); rd3(car + 0x70u, cv);
-            horn_sound(fnv1a(nm), nm, p, cv);
+            horn_sound(fnv1a(nm), nm, g_h[j].kind, p, cv);
             break;
         }
     }

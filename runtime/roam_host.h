@@ -24,6 +24,8 @@
  *   rh_hud_marker(&x, &y)   a HUD marker's position (640x480 units from the
  *                           view's pixels) as the screen shows the HUD
  *   rh_horn_held(stick)     1 while the horn key or button is held (horn.h's horn_held)
+ *   rh_horn_mine()          the player's horn (horn.h's horn_mine), -1: none here
+ *   rh_horn_name(kind)      a horn's name (horn.h's horn_name)
  *   rh_horn_begin/rh_horn_sound/rh_horn_end
  *                           a frame of horns (horn.h's horn_begin, ...)
  *   rh_carsfx_begin/rh_carsfx_car/rh_carsfx_end
@@ -60,8 +62,10 @@ void ws_hud_marker(float *x, float *y);  /* widescreen.c */
 #define rh_heap_mb()     (win32_heap_live() >> 20)
 #define rh_hud_marker(x, y) ws_hud_marker((x), (y))
 #define rh_horn_held(stick) horn_held(stick)
+#define rh_horn_mine()   horn_mine()
+#define rh_horn_name(k)  horn_name(k)
 #define rh_horn_begin(pos, fwd, vel)   horn_begin((pos), (fwd), (vel))
-#define rh_horn_sound(who, name, p, v) horn_sound((who), (name), (p), (v))
+#define rh_horn_sound(who, name, kind, p, v) horn_sound((who), (name), (kind), (p), (v))
 #define rh_horn_end()    horn_end()
 #define rh_carsfx_begin(pos, fwd, vel)    carsfx_begin((pos), (fwd), (vel))
 #define rh_carsfx_car(who, name, p, v, st) carsfx_car((who), (name), (p), (v), (st))

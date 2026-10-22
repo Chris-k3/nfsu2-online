@@ -139,8 +139,10 @@ long autotest_frame(void){ return g_frame; }
 uint32_t win32_heap_live(void){ return 0; }
 int64_t roam_plat_now_us(void){ return g_now; }
 int horn_held(int stick){ (void)stick; return 0; }   /* the companion has no horn */
+int horn_mine(void){ return -1; }
+const char *horn_name(int kind){ (void)kind; return "dual"; }
 void horn_begin(const float *pos, const float *fwd, const float *vel){ (void)pos; (void)fwd; (void)vel; }
-int horn_sound(uint32_t who, const char *name, const float *p, const float *v){ (void)who; (void)name; (void)p; (void)v; return 0; }
+int horn_sound(uint32_t who, const char *name, int kind, const float *p, const float *v){ (void)who; (void)name; (void)kind; (void)p; (void)v; return 0; }
 void horn_end(void){}
 void carsfx_begin(const float *pos, const float *fwd, const float *vel){ (void)pos; (void)fwd; (void)vel; }
 void carsfx_car(uint32_t who, const char *name, const float *p, const float *v, const carsfx_state *st){ (void)who; (void)name; (void)p; (void)v; (void)st; }

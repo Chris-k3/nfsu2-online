@@ -28,7 +28,7 @@ const NEWS: Page = Page {
            - Every track is open, whatever your career has unlocked, and a new game starts at 2 laps.\r\n\
            - The Lobby lists every open game, whatever its race type and options. The Filter puts the games it asks for first.\r\n\
            - Free roam with other players: their cars drive in your city, with their names over them.\r\n\
-           - A horn: H, in races and in free roam. The others hear it from your car.\r\n\
+           - A horn: N, in races and in free roam, eight to pick from in Settings. The others hear it from your car.\r\n\
            - Widescreen, and up to 120 fps on a 120 Hz screen.",
 };
 
