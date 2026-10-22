@@ -47,8 +47,6 @@ struct Player {
     v: [f64; 3],
     heading: u8,
     pos_at: f64,
-    /// its last world map answered (map_gap_ms)
-    map_at: f64,
     seen: f64,
     /// its links after the last tick (a HELLO of another start of the game empties them)
     links: Vec<Link>,
@@ -201,6 +199,11 @@ pub struct Hub {
     by_key: HashMap<u64, u32>,
     /// the endpoints of each virtual address (`max_per_vip`)
     per_vip: HashMap<u32, u32>,
+    /// each virtual address's last world map answered (map_gap_ms), kept past its players: a BYE and a HELLO (or
+    /// another port) make a new player, and when a player's own time was the limit, a new player's first answer came
+    /// at once (the second security audit, 2026-10-22: a map walks every player on the hub's one thread, and a few
+    /// clients asking that way kept it busy); dropped at each tick once older than map_gap_ms
+    map_at: HashMap<u32, f64>,
     s: Scratch,
 }
 
@@ -236,6 +239,7 @@ impl Hub {
             holes: 0,
             by_key: HashMap::new(),
             per_vip: HashMap::new(),
+            map_at: HashMap::new(),
             s: Scratch::default(),
         }
     }
@@ -390,7 +394,6 @@ impl Hub {
                     v: [0.0; 3],
                     heading: 0,
                     pos_at: 0.0,
-                    map_at: f64::NEG_INFINITY,
                     seen: 0.0,
                     links: Vec::new(),
                     at: 0,
@@ -435,12 +438,13 @@ impl Hub {
 
     /// The world map's answer to the player in `slot` (roam_core.h RC_MSG_MAP): the players of its room in free roam
     /// (or paused there) with a position younger than map_fresh_ms, past itself and its links, nearest first (at one
-    /// distance in the order they came), map_max of them at most, in datagrams of MAP_PER; one answer every
-    /// map_gap_ms at most (a page asks again when an answer does not come).
+    /// distance in the order they came), map_max of them at most, in datagrams of MAP_PER; one answer to a browser (its
+    /// virtual address, whatever its endpoints) every map_gap_ms at most (a page asks again when an answer does not
+    /// come).
     fn map(&mut self, slot: u32, req: u16, now: f64) {
         let (gap, fresh, max) = (self.o.map_gap_ms, self.o.map_fresh_ms, self.o.map_max);
         let Some(p) = self.player(slot) else { return };
-        if now - p.map_at < gap {
+        if self.map_at.get(&p.vip).is_some_and(|&t| now - t < gap) {
             return;
         }
         let (room, at) = (p.room, p.p.unwrap_or_default());
@@ -472,9 +476,7 @@ impl Hub {
             self.seq = self.seq.wrapping_add(1);
             (self.send)(vip, Bytes::from(f));
         }
-        if let Some(Some(p)) = self.slots.get_mut(slot as usize) {
-            p.map_at = now;
-        }
+        self.map_at.insert(vip, now);
     }
 
     /// browser `vip` left the switch
@@ -496,6 +498,8 @@ impl Hub {
         self.drop_slots(&gone);
         // every player gone since the last tick out of the links the tick weighs
         self.purge();
+        let gap = self.o.map_gap_ms;
+        self.map_at.retain(|_, t| now - *t < gap);
 
         // the rooms: the players with a position younger than `stale_ms`, in the order they came
         let s = &mut self.s;

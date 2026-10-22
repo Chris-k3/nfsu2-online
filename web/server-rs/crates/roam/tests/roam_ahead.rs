@@ -161,6 +161,40 @@ fn the_world_map_lists_the_others_nearest_first() {
     assert_eq!(maps(&k).into_iter().map(|(_, x)| (x.3, x.4.len())).collect::<Vec<_>>(), [(0, 0)], "only its link 1 is fresh");
 }
 
+// one answer a second for a browser, whatever its endpoints: a BYE and a HELLO, or another port, make a new player,
+// not a new answer (the second security audit: that way a few clients kept the hub's thread busy with maps)
+#[test]
+fn the_world_map_answers_a_browser_once_a_second_whatever_its_endpoints() {
+    let mut k = Kit::new(RoamOptions::default());
+    for i in 0..20 {
+        join(&mut k, i);
+        k.from(W(i), &snap(100 + i, [i as f64 * 10.0, 0.0, 0.0]));
+    }
+    k.hub.tick();
+    k.clear();
+    k.from(W(0), &mapreq(100, 1));
+    assert_eq!(maps(&k).len(), 1);
+    // again as a new player on the same endpoint, then on other ports: nothing within the second
+    k.clear();
+    k.from(W(0), &bye(100));
+    join(&mut k, 0);
+    k.from(W(0), &mapreq(100, 2));
+    for port in [47211, 47212] {
+        k.hub.frame(W(0), &frame_ports(W(0), &hello_with(100, &HelloOpts { core: 4, ..Default::default() }), port, 47210));
+        k.hub.frame(W(0), &frame_ports(W(0), &mapreq(100, 3), port, 47210));
+    }
+    assert!(maps(&k).is_empty(), "one answer a second for the browser");
+    // another browser is not held back by it; and past the second (and a tick, which forgets old answers) it asks again
+    k.from(W(1), &mapreq(101, 1));
+    assert_eq!(maps(&k).len(), 1);
+    k.clear();
+    k.step(1000.0);
+    k.hub.tick();
+    k.clear();
+    k.from(W(0), &mapreq(100, 4));
+    assert_eq!(maps(&k).len(), 1);
+}
+
 // roam_core asks as the hub reads it, and takes the hub's answer in parts, in any order
 #[test]
 fn the_world_map_on_the_wire_roam_core_asks_and_takes_the_answer() {

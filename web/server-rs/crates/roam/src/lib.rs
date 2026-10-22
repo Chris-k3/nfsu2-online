@@ -97,7 +97,7 @@ pub struct RoamOptions {
     /// how far ahead the links look (ms): a pair counts at the nearer of its distance now and its distance once both
     /// cars went on this long at their speeds, so a car a player heads for is linked before it is near
     pub look_ms: f64,
-    /// the world map (MAPREQ): at most this many players a answer, one answer a player every map_gap_ms at most, of
+    /// the world map (MAPREQ): at most this many players a answer, one answer a browser every map_gap_ms at most, of
     /// the players in free roam (or paused there) with a position younger than map_fresh_ms
     pub map_max: usize,
     pub map_gap_ms: f64,
