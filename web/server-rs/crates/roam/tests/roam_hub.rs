@@ -303,6 +303,29 @@ fn limits_two_endpoints_a_browser_a_player_starts_with_its_hello_bad_datagrams_c
     assert_eq!(k.info("bad"), 3.0, "a position out of the map: refused");
 }
 
+// in free roam (/players' roam): the browsers driving there or paused there, as their last HELLO or SNAP says, each
+// once whatever its endpoints; in a race, a shop, the menus or loading, not
+#[test]
+fn in_free_roam_driving_or_paused_each_browser_once() {
+    let mut k = Kit::new(RoamOptions::default());
+    // roam_core.h RC_ST_*: 0 menus, 1 loading, 2 free roam, 3 a race, 4 a shop, 5 paused
+    for st in 0..6u32 {
+        k.from(V(st), &hello_with(400 + st, &HelloOpts { status: st as u8, ..Default::default() }));
+    }
+    assert_eq!(k.hub.in_roam(), 2, "free roam, and paused there");
+    // another start of the game in the browser in free roam: a second endpoint
+    k.hub.frame(V(2), &frame_ports(V(2), &hello(500), 47211, 47210));
+    assert_eq!(k.hub.in_roam(), 2, "a browser once");
+    k.from(V(5), &snap_n(405, [0.0, 0.0, 0.0], 3, 1));
+    assert_eq!(k.hub.in_roam(), 1, "a SNAP says the paused one went into a race");
+    k.from(V(0), &hello(400));
+    assert_eq!(k.hub.in_roam(), 2, "out of the menus into free roam");
+    k.from(V(2), &bye(402));
+    assert_eq!(k.hub.in_roam(), 2, "BYE from one endpoint: its other one is in free roam");
+    k.hub.peer_gone(V(2));
+    assert_eq!(k.hub.in_roam(), 1, "left the switch");
+}
+
 // a player that comes and goes, HELLO and BYE over and over (a client may send the hub 2500 frames a second), costs the
 // hub little: a player gone is taken out of the others' links once in a while, for many at once, not with every BYE
 // (each walked every player's links: 2000 players' 64,000)

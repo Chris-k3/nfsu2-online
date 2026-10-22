@@ -52,9 +52,10 @@ struct Player {
     hub_port: u16,
     id: u32,
     room: u32,
-    /// kept as the player last sent them; nothing reads them yet
-    #[allow(dead_code)]
+    /// as the player last sent it (roam_core.h RC_ST_*: 2 in free roam, 5 paused there): the world map and
+    /// `in_roam()` read it
     status: u8,
+    /// kept as the player last sent it; nothing reads it yet
     #[allow(dead_code)]
     name: String,
     degree: usize,
@@ -681,6 +682,12 @@ impl Hub {
     /// the browsers in free roam now (a HELLO within `gone_ms`)
     pub fn vips(&self) -> HashSet<u32> {
         self.players().map(|p| p.vip).collect()
+    }
+
+    /// how many browsers drive in free roam now, or paused there, as their last HELLO or SNAP says (the server's
+    /// /players `roam`): one a browser whatever its endpoints; in a race, a shop, the menus or loading, not
+    pub fn in_roam(&self) -> usize {
+        self.players().filter(|p| matches!(p.status, 2 | 5)).map(|p| p.vip).collect::<HashSet<u32>>().len()
     }
 
     /// for the tests and the switch's `info()` (the server's console): counts only, never a position

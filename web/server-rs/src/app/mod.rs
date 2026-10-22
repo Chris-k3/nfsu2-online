@@ -214,7 +214,7 @@ pub struct App {
     pool: Arc<pool::CpuPool>,
     pub lan: Arc<LanSwitch>,
     pub online: Option<Arc<OnlineHost>>,
-    /// free roam's hub (its `crowded()` for /players), none with --roam-hub off
+    /// free roam's hub (its `crowded()` and `in_roam()` for /players), none with --roam-hub off
     pub roam: Option<Arc<nfsu2_roam::RoamHub>>,
     /// keyphrase saves (/vault), none with --vault-gb 0
     pub vault: Option<vault::VaultRoute>,
@@ -596,11 +596,12 @@ impl App {
         self.current_manifest().map_or(0, |m| m.count)
     }
 
-    /// /players: how many play on this server now (the start page's Multiplayer settings): two counts, whether it is
-    /// full and whether free roam is busy, nothing else, no names, addresses or times; online: in the game's Online
-    /// mode (logged in, or racing an online race), null with --online off; full: a game that connects now gets "LAN
-    /// full"; roamBusy: the hub gives fewer than askCap links a player (nfsu2-roam), so the page does not ask the
-    /// free-roam question now (false with --roam-hub off)
+    /// /players: how many play on this server now (the start page's Multiplayer settings): three counts, whether it
+    /// is full and whether free roam is busy, nothing else, no names, addresses or times; online: in the game's Online
+    /// mode (logged in, or racing an online race), null with --online off; roam: driving in free roam, or paused
+    /// there, as of the hub's last tick (nfsu2-roam), null with --roam-hub off; full: a game that connects now gets
+    /// "LAN full"; roamBusy: the hub gives fewer than askCap links a player, so the page does not ask the free-roam
+    /// question now (false with --roam-hub off)
     async fn send_players(&self, q: &Request, s: &mut Response) -> Res {
         let info = match &self.online {
             Some(h) => {
@@ -619,9 +620,12 @@ impl App {
             }
             None => serde_json::Value::Null,
         };
+        // (Math.min as online: the hub's last tick and the switch now, a player who just left may still be in it)
+        let roam = self.roam.as_ref().map_or(serde_json::Value::Null, |r| serde_json::Value::from(r.in_roam().min(players)));
         let mut m = serde_json::Map::new();
         m.insert("players".into(), serde_json::Value::from(players));
         m.insert("online".into(), online);
+        m.insert("roam".into(), roam);
         m.insert("full".into(), serde_json::Value::Bool(self.lan.full()));
         m.insert("roamBusy".into(), serde_json::Value::Bool(self.roam.as_ref().is_some_and(|r| r.crowded())));
         let body = nfsu2_util::json::stringify(&serde_json::Value::Object(m));

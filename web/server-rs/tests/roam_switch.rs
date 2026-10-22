@@ -66,8 +66,10 @@ async fn on_the_switch_frames_to_the_hub_reach_it_its_lists_come_back_a_departur
     assert!(list.iter().any(|p| p["vip"] == VHOST_VIP && p["server"] == true));
     let n = sw.lan.breakdown().await;
     assert_eq!((n.players, n.roam), (2, 2), "both counted in free roam (the console's [players] line): {n:?}");
+    assert!(wait_for(2500, || hub.in_roam() == 2).await, "both driving in free roam (/players): {}", hub.in_roam());
     b.close().await;
     assert_eq!(hub_until(&hub, |v| v["players"] == 1).await["players"], 1, "Bob left the switch: the hub forgot him");
+    assert!(wait_for(2500, || hub.in_roam() == 1).await, "and at its next tick /players: {}", hub.in_roam());
     let roam: Value = sw.info().await["roam"].clone();
     assert_eq!(roam["players"], 1, "{roam}");
     a.close().await;

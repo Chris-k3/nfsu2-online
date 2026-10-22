@@ -1,9 +1,11 @@
 // The server's /players (how many play on this server now, for the start page's Multiplayer settings) and the
 // line the page makes of it:
 //   node --test web/test/players.test.mjs
-// Against the real server when the game folder is there: the two counts, whether it is full and whether free roam
-// is busy, nothing else in the body, never cached, the Host check of every route, null with --online off, full with --max-peers 1.  The online count itself (logged in, or racing
-// an online race) is in the online crate's tests (web/server-rs/crates/online/src/tests/lobby.rs).
+// Against the real server when the game folder is there: the three counts, whether it is full and whether free roam
+// is busy, nothing else in the body, never cached, the Host check of every route, null with --online off and
+// --roam-hub off, full with --max-peers 1.  The online count itself (logged in, or racing an online race) is in the
+// online crate's tests (web/server-rs/crates/online/src/tests/lobby.rs), the free-roam one (driving there, or paused)
+// in the roam crate's (web/server-rs/crates/roam/tests/roam_hub.rs).
 // Ports: NFSU2_TEST_PLAYERS_PORT1 (8530), NFSU2_TEST_PLAYERS_PORT2 (8630).
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -52,7 +54,7 @@ async function server(port, extra = []) {
   };
 }
 
-test('/players: two counts, full and roamBusy, nothing else, never cached, only for the server\'s own names', { skip: SKIP }, async () => {
+test('/players: three counts, full and roamBusy, nothing else, never cached, only for the server\'s own names', { skip: SKIP }, async () => {
   const s = await server(P1);
   try {
     let r = await s.get('/players');
@@ -61,15 +63,15 @@ test('/players: two counts, full and roamBusy, nothing else, never cached, only 
     assert.match(r.headers['cache-control'], /no-store/);
     assert.equal(r.headers['cdn-cache-control'], 'no-store');
     assert.ok(r.headers['x-content-type-options'], 'the security headers of every response');
-    assert.deepEqual(JSON.parse(r.body), { players: 0, online: 0, full: false, roamBusy: false });
-    assert.deepEqual(Object.keys(JSON.parse(r.body)), ['players', 'online', 'full', 'roamBusy'], 'nothing else in the body');
+    assert.deepEqual(JSON.parse(r.body), { players: 0, online: 0, roam: 0, full: false, roamBusy: false });
+    assert.deepEqual(Object.keys(JSON.parse(r.body)), ['players', 'online', 'roam', 'full', 'roamBusy'], 'nothing else in the body');
     // two games on the switch, one leaves
     const a = await s.player('Alice'), b = await s.player('Bob');
     await sleep(100);
-    assert.deepEqual(JSON.parse((await s.get('/players')).body), { players: 2, online: 0, full: false, roamBusy: false });
+    assert.deepEqual(JSON.parse((await s.get('/players')).body), { players: 2, online: 0, roam: 0, full: false, roamBusy: false });
     b.close(); await sleep(300);
     r = await s.get('/players');
-    assert.equal(r.body, '{"players":1,"online":0,"full":false,"roamBusy":false}', 'counts only: no names, addresses or times');
+    assert.equal(r.body, '{"players":1,"online":0,"roam":0,"full":false,"roamBusy":false}', 'counts only: no names, addresses or times');
     a.close();
     // another site's name (DNS rebinding) gets what every route gives it
     assert.equal((await s.get('/players', 'evil.example')).status, 421);
@@ -80,10 +82,10 @@ test('/players: two counts, full and roamBusy, nothing else, never cached, only 
   } finally { await s.stop(); }
 });
 
-test('/players with --online off: online is null', { skip: SKIP }, async () => {
-  const s = await server(P2, ['--online', 'off']);
+test('/players with --online off --roam-hub off: online and roam are null', { skip: SKIP }, async () => {
+  const s = await server(P2, ['--online', 'off', '--roam-hub', 'off']);
   try {
-    assert.deepEqual(JSON.parse((await s.get('/players')).body), { players: 0, online: null, full: false, roamBusy: false });
+    assert.deepEqual(JSON.parse((await s.get('/players')).body), { players: 0, online: null, roam: null, full: false, roamBusy: false });
   } finally { await s.stop(); }
 });
 
@@ -92,11 +94,11 @@ test('/players with --max-peers 1: full while one plays, and the next game gets 
   try {
     const a = await s.player('Alice');
     await sleep(100);
-    assert.deepEqual(JSON.parse((await s.get('/players')).body), { players: 1, online: 0, full: true, roamBusy: false });
+    assert.deepEqual(JSON.parse((await s.get('/players')).body), { players: 1, online: 0, roam: 0, full: true, roamBusy: false });
     const b = new WebSocket(`ws://127.0.0.1:${P1}/lan`);
     assert.deepEqual(await new Promise(r => b.on('close', (k, why) => r([k, String(why)]))), [1013, 'LAN full']);
     a.close(); await sleep(300);
-    assert.deepEqual(JSON.parse((await s.get('/players')).body), { players: 0, online: 0, full: false, roamBusy: false });
+    assert.deepEqual(JSON.parse((await s.get('/players')).body), { players: 0, online: 0, roam: 0, full: false, roamBusy: false });
   } finally { await s.stop(); }
 });
 
@@ -107,9 +109,12 @@ test('the page\'s line', async () => {
   assert.equal(playersText({ players: 1, online: 0 }), 'On this server now: 1 player, 0 in Online mode.');
   assert.equal(playersText({ players: 3, online: 2 }), 'On this server now: 3 players, 2 in Online mode.');
   assert.equal(playersText({ players: 3, online: null }), 'On this server now: 3 players.');
+  assert.equal(playersText({ players: 3, online: 1, roam: 2 }), 'On this server now: 3 players, 1 in Online mode, 2 in free roam.');
+  assert.equal(playersText({ players: 3, online: null, roam: 0 }), 'On this server now: 3 players, 0 in free roam.');
+  assert.equal(playersText({ players: 3, online: 2, roam: null }), 'On this server now: 3 players, 2 in Online mode.');
   assert.equal(playersText({ players: 3, online: 1, full: false }), 'On this server now: 3 players, 1 in Online mode.');
-  assert.equal(playersText({ players: 128, online: 9, full: true }),
-    'On this server now: 128 players, 9 in Online mode. The server is full: playing with others waits until a place frees up.');
+  assert.equal(playersText({ players: 128, online: 9, roam: 100, full: true }),
+    'On this server now: 128 players, 9 in Online mode, 100 in free roam. The server is full: playing with others waits until a place frees up.');
   assert.equal(playersText({ players: -1, online: 0 }), '');
   assert.equal(playersText({}), '');
 });

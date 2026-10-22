@@ -35,7 +35,8 @@
 //! it has room again (under `busy_low`) the cap goes back up by 2 every `cap_up_ms`.  The nearest links stay.  While
 //! the cap is under `ask_cap` (24) free roam counts as busy (the server's /players roamBusy): the start page does not
 //! ask its question (Free roam with others?) at a Play then, so fewer new players join a crowd that already gets fewer
-//! cars; it asks at a later Play once the cap is back.
+//! cars; it asks at a later Play once the cap is back.  /players also says how many drive in free roam, or are paused
+//! there (`in_roam()`, counted at each tick).
 //!
 //! What the hub keeps, in memory only: per player endpoint its virtual address, port, id, room hash, status, name and
 //! last position; gone `gone_ms` after its last message, when it says BYE, or when it leaves the switch.  Reading
@@ -175,8 +176,10 @@ const MAX_PENDING: usize = 1 << 13;
 pub struct RoamHub {
     tx: mpsc::Sender<Cmd>,
     pending: Arc<AtomicUsize>,
-    /// the hub's `crowded()` after its last tick, for /players (which must not wait for the hub's thread)
+    /// the hub's `crowded()` and `in_roam()` after its last tick, for /players (which must not wait for the hub's
+    /// thread)
     crowded: Arc<AtomicBool>,
+    in_roam: Arc<AtomicUsize>,
 }
 
 impl RoamHub {
@@ -201,17 +204,23 @@ impl RoamHub {
         let hub = Hub::new(o, Box::new(|| nfsu2_util::now_ms() as f64), busy, Box::new(move |l| log(l)), Box::new(|_, _| false), id);
         // (made here, not on its thread: until its first tick crowded() is what the hub begins with)
         let crowded = Arc::new(AtomicBool::new(hub.crowded()));
-        let busy_now = crowded.clone();
+        let in_roam = Arc::new(AtomicUsize::new(0));
+        let (busy_now, roam_now) = (crowded.clone(), in_roam.clone());
         std::thread::Builder::new()
             .name("roam-hub".into())
-            .spawn(move || run(hub, rx, &waiting, &busy_now))
+            .spawn(move || run(hub, rx, &waiting, &busy_now, &roam_now))
             .expect("a thread for the free-roam hub");
-        Arc::new(RoamHub { tx, pending, crowded })
+        Arc::new(RoamHub { tx, pending, crowded, in_roam })
     }
 
     /// the hub's `crowded()`: free roam is busy, the cap is under `ask_cap` (as of the hub's last tick)
     pub fn crowded(&self) -> bool {
         self.crowded.load(Ordering::Relaxed)
+    }
+
+    /// the hub's `in_roam()`: how many browsers drive in free roam, or are paused there (as of the hub's last tick)
+    pub fn in_roam(&self) -> usize {
+        self.in_roam.load(Ordering::Relaxed)
     }
 
     /// the switch's way to its browsers
@@ -228,7 +237,7 @@ fn guard(f: impl FnOnce()) {
 
 /// The hub's thread: what the switch posts, in order, and a tick every tick_ms (the next one a tick_ms after this
 /// one began).  It ends once the RoamHub is gone.
-fn run(mut hub: Hub, rx: mpsc::Receiver<Cmd>, pending: &AtomicUsize, crowded: &AtomicBool) {
+fn run(mut hub: Hub, rx: mpsc::Receiver<Cmd>, pending: &AtomicUsize, crowded: &AtomicBool, in_roam: &AtomicUsize) {
     let every = Duration::from_millis(hub.options().tick_ms);
     let mut next = Some(Instant::now() + every);
     loop {
@@ -238,6 +247,7 @@ fn run(mut hub: Hub, rx: mpsc::Receiver<Cmd>, pending: &AtomicUsize, crowded: &A
                 if now >= at {
                     guard(|| hub.tick());
                     crowded.store(hub.crowded(), Ordering::Relaxed);
+                    in_roam.store(hub.in_roam(), Ordering::Relaxed);
                     next = Some(now + every);
                     continue;
                 }
@@ -323,7 +333,12 @@ mod tests {
     #[test]
     fn a_stuck_hub_holds_few_frames() {
         let (tx, rx) = mpsc::channel();
-        let hub = RoamHub { tx, pending: Arc::new(AtomicUsize::new(0)), crowded: Arc::new(AtomicBool::new(false)) };
+        let hub = RoamHub {
+            tx,
+            pending: Arc::new(AtomicUsize::new(0)),
+            crowded: Arc::new(AtomicBool::new(false)),
+            in_roam: Arc::new(AtomicUsize::new(0)),
+        };
         let ctx = FrameCtx { group: Arc::from("client"), site: None, cause: None, slot: None };
         for _ in 0..100_000 {
             hub.frame(0x0A4D_0005, Bytes::from_static(b"a frame"), ctx.clone());
@@ -357,7 +372,7 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         let (pending, crowded) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicBool::new(false)));
         let c = crowded.clone();
-        let t = std::thread::spawn(move || run(hub, rx, &pending, &c));
+        let t = std::thread::spawn(move || run(hub, rx, &pending, &c, &AtomicUsize::new(0)));
         let until = |want: bool| {
             let t0 = Instant::now();
             while crowded.load(Ordering::Relaxed) != want {

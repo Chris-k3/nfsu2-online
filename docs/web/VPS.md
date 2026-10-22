@@ -659,13 +659,14 @@ paths to the VPS, so pick a VPS location between you.
     own.
   - **The console** names online players by persona and virtual address (10.77.x.x) only, and shows at most 30
     Online lines a minute caused by one client address (then one line saying how many were left out).
-  - **Who plays now:** `/players` answers anyone who reaches the server with two numbers for the start page,
-    whether it is full and whether free roam is busy: `{"players":3,"online":1,"full":false,"roamBusy":false}`,
-    the games on the switch, how many of them are in Online mode (logged in, or in an online race; `null` with
-    `--online off`), whether a game that connects now gets "LAN full", and whether the free-roam hub gives fewer
-    than 24 links a player (its thread is busy; the start page doesn't ask its free-roam question then). Nothing
-    else: no names, addresses or times, never cached. The
-    game's own lobby shows its players to anyone who logs in anyway.
+  - **Who plays now:** `/players` answers anyone who reaches the server with three numbers for the start page,
+    whether it is full and whether free roam is busy:
+    `{"players":3,"online":1,"roam":2,"full":false,"roamBusy":false}`, the games on the switch, how many of them
+    are in Online mode (logged in, or in an online race; `null` with `--online off`), how many drive in free roam
+    or are paused there (`null` with `--roam-hub off`), whether a game that connects now gets "LAN full", and
+    whether the free-roam hub gives fewer than 24 links a player (its thread is busy; the start page doesn't ask
+    its free-roam question then). Nothing else: no names, addresses or times, never cached. The game's own lobby
+    shows its players to anyone who logs in anyway.
   - **Limits:** 2000 lobby sessions (the Node server: 1000), 3 per browser, 8 per client address, 32 per IPv6 /48,
     and the last quarter only for a client that holds none; 600 games (Node: 300) of at most 6, 2 open and 2
     started per browser (4 and 8 per client address), one browser one player of a race; 20 lobby messages a second per session (a flood ends the session);
