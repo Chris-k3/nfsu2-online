@@ -26,7 +26,7 @@ ports; give each its own `--state`.  Knobs for measurements, from the environmen
 | `NFSU2_THREADS` | the runtime's workers (default half the cores, 2 to 8: more did the same work for more CPU; past about 3000 players in free roam more keep them at 32 friends, "Measured" below) |
 | `NFSU2_BUNDLE_MS` | a fixed tick for the bundle clock (default: it follows the crowd, below; 0: no clock, each datagram wakes its writer at once) |
 | `NFSU2_BUNDLE_MAX_MS`, `NFSU2_BUNDLE_BUDGET` | the adaptive tick's longest (25 ms) and its aim (125,000 bundles a second in all) |
-| `NFSU2_LAN_SNDBUF` | SO_SNDBUF of /lan connections (default the kernel's own) |
+| `NFSU2_LAN_SNDBUF` | SO_SNDBUF of /lan connections (default 32 KiB, which Linux doubles; 0: the kernel's own, which grows to 4 MB) |
 | `NFSU2_REPO` | where the defaults are (web/dist, out/web/nfsu2.wasm, the state in out/web/server): the repo it was built from |
 
 ## The container image
@@ -130,6 +130,13 @@ delivering to the receiver, 11 % recvfrom).
   Who is on the switch changes under one lock; frames find their receivers without it (a table of the 4000
   addresses, a copy-on-write list of everyone).  Each receiver's writer takes everything queued into one write, and
   makes bundles of a page's datagrams on the bundle clock.  Counters every frame touches are sharded.
+- **A player behind on its path** (nfsu2-lan `lag.rs`): a WebSocket ping every second times each player's round trip,
+  queues past the server included (the kernel's, cloudflared's, the tunnel's).  While its data waits there, the
+  player gets only a share of free roam's snapshots (a half for each late round trip, a sixteenth at once past
+  1.5 s, an eighth back for each round trip without a wait), never fewer of its other messages.  On 2026-10-22 two
+  of the Cloudflare Tunnel's connections on a lossy route left about 600 of 2950 players seconds behind while the
+  server was idle; the 5-minute `[players]` line now counts the players more than a second behind and the snapshots
+  left out.
 - **The Online host and the free-roam hub** (nfsu2-online, nfsu2-roam): single-threaded, each on a thread of its
   own; the switch posts them their frames in order.  Past 4096 frames waiting at the Online host, a reader that feeds
   it waits (TCP backpressure); the hub's busy cap reads the runtime's workers' busy time.
@@ -186,6 +193,8 @@ players.
 - The Online host's sends are charged to a sender's budgets on the host's thread, a moment after the frame was routed
   (the Node server did it at once).
 - The hub's busy cap reads the workers' busy time; `[roam] the server's thread was N % busy` keeps its words.
+- A ping every second besides the keepalive's (lag.rs), and a pong to any of the switch's pings queued since the
+  keepalive's last tick says the client is there; `[players]` has a clause more.
 - JSON a client sends: a lone surrogate escape reads as U+FFFD; a number beyond the doubles or nesting deeper than
   128 makes the switch ignore that message, where JS took it.
 - Pipelined requests are answered one after the other (Node ran their handlers at once and wrote the answers in

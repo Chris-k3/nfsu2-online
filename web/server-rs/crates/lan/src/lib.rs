@@ -89,6 +89,11 @@
 //! LAN race sent at most 100 frames and 7.7 KB a second (the audit's measurement on the switch); LAN play's frames are
 //! at most an Ethernet MTU (runtime/web/net_proto.h NET_SLOT_BYTES 1536).
 //!
+//! A player whose path takes less than that gets fewer of free roam's snapshots, not late ones: the switch times
+//! each player's path with a WebSocket ping every `probe_ms`, and while the round trips say its data waits in queues
+//! past the switch (the kernel's, cloudflared's, the tunnel's), it passes on only a share of the snapshots sent to
+//! it (lag.rs).
+//!
 //! ## The server's own hosts
 //!
 //! The Online host (`online`, nfsu2-online): the server's own host on the switch, 10.77.0.1 (an address the switch
@@ -170,6 +175,7 @@
 
 mod conn;
 mod impair;
+mod lag;
 mod members;
 mod reader;
 mod route;
@@ -178,7 +184,7 @@ mod text;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, AtomicU64, Ordering::Relaxed};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, AtomicU32, AtomicU64, Ordering::Relaxed};
 use std::sync::{Arc, OnceLock, Weak};
 use std::time::Duration;
 
@@ -277,8 +283,11 @@ pub struct LanOptions {
     pub send_buffer: usize,
     /// a WebSocket ping this often, well under a proxy's idle cut (Cloudflare closes a WebSocket that stays quiet for
     /// about 100 s); no pong to that ping (its payload is random: only a client that reads can answer) by the next
-    /// ping = the connection is gone
+    /// ping = the connection is gone (a pong to any of the switch's pings queued since that ping counts: lag.rs)
     pub keepalive_ms: u64,
+    /// a WebSocket ping this often besides, whose round trip says how far behind the player's path is, and so the
+    /// share of free roam's snapshots it gets (lag.rs; 0: none)
+    pub probe_ms: u64,
     /// no message at all from the client for this long: closed (the page pings the switch every 2 s while it is
     /// connected)
     pub idle_ms: i64,
@@ -334,6 +343,7 @@ impl Default for LanOptions {
             stall_ms: 1000.0,
             send_buffer: 8 << 20,
             keepalive_ms: 25_000,
+            probe_ms: 1000,
             idle_ms: 10 * 60_000,
             reserve_ms: 60_000,
             group_reserve: 8,
@@ -353,7 +363,8 @@ impl Default for LanOptions {
 
 impl LanOptions {
     /// only finite numbers above 0 are taken from the options: a 0 (or a negative or non-finite rate) keeps the
-    /// default.  (`bundle_ms`, `bundle_max_ms` and `send_buffer_os` are left as they are: their 0 means what it says.)
+    /// default.  (`bundle_ms`, `bundle_max_ms`, `send_buffer_os` and `probe_ms` are left as they are: their 0 means what it
+    /// says.)
     fn sane(mut self) -> Self {
         let d = LanOptions::default();
         macro_rules! whole {
@@ -431,7 +442,17 @@ pub struct Breakdown {
     pub older: usize,
     pub other: usize,
     pub bundles: usize,
+    /// of all of them, more than `BEHIND_MS` behind on their path (lag.rs: the last round trip, or a ping unanswered
+    /// for that long)
+    pub behind: usize,
+    /// getting only a share of free roam's snapshots now (lag.rs)
+    pub thinning: usize,
+    /// the snapshots left out so far (the switch's `thinned`, since it started)
+    pub thinned: u64,
 }
+
+/// a player this far behind on its path counts in `Breakdown::behind` (ms)
+pub const BEHIND_MS: f64 = 1000.0;
 
 /// Why the switch closed a connection (info()'s `cuts`): a control-frame flood, a queue over `send_buffer` (when
 /// sending; on the keepalive tick), no pong to its ping, idle, a client that flooded a receiver with stream segments,
@@ -459,6 +480,8 @@ pub(crate) struct Stats {
     refused: Counter,
     /// datagrams dropped for a receiver's full queue
     shed: Counter,
+    /// free roam's snapshots left out for a receiver behind on its path (lag.rs)
+    thinned: Counter,
     bundles_in: Counter,
     bundles_out: Counter,
     /// addresses given back to their token
@@ -550,8 +573,10 @@ pub(crate) struct Peer {
     ctl: Mutex<CtlBuckets>,
     alive: AtomicBool,
     last_in: AtomicI64,
-    /// the payload of the switch's last ping, until its pong
-    ping: Mutex<Option<[u8; 8]>>,
+    /// the switch's pings waiting for their pong, and their round trips (lag.rs)
+    probe: Mutex<lag::Probe>,
+    /// of free roam's snapshots sent to it, the share it gets (lag.rs: SHARE_FULL while its path keeps up)
+    share: AtomicU32,
 }
 
 impl Peer {
@@ -738,6 +763,23 @@ impl LanSwitch {
                 sw.keepalive();
             }
         });
+        // pings that time each player's path (lag.rs)
+        if self.o.probe_ms > 0 {
+            let (me, stopped) = (self.me.clone(), self.stopped.clone());
+            let period = Duration::from_millis(self.o.probe_ms);
+            tokio::spawn(async move {
+                let mut iv = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+                iv.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                loop {
+                    tokio::select! {
+                        _ = stopped.cancelled() => return,
+                        _ = iv.tick() => {}
+                    }
+                    let Some(sw) = me.upgrade() else { return };
+                    sw.probe();
+                }
+            });
+        }
         if let Some(clock) = &self.clock {
             conn::Clock::start(Arc::downgrade(clock));
             if self.o.bundle_max_ms > self.o.bundle_ms {
@@ -855,7 +897,8 @@ impl LanSwitch {
     /// the LAN or Online screens open, free roam (the hub's vips()), a page from before the page said whether LAN
     /// play is open (it holds its place until its tab closes), the rest (leaving: the page lets go 10 s after the
     /// last network feature; or starting: free roam not yet heard by the hub); and apart from that, how many of them
-    /// take bundles (a page loaded since the switch has them)
+    /// take bundles (a page loaded since the switch has them), how many are behind on their path and get fewer
+    /// snapshots (lag.rs)
     pub async fn breakdown(&self) -> Breakdown {
         let online = match &self.online {
             Some(h) => h.vips().await.unwrap_or_default(),
@@ -866,6 +909,7 @@ impl LanSwitch {
             None => Default::default(),
         };
         let all = self.all.load();
+        let now = nfsu2_util::mono_ms();
         let mut n = Breakdown { players: all.len(), ..Breakdown::default() };
         for p in all.iter() {
             let lan = p.lan();
@@ -883,7 +927,14 @@ impl LanSwitch {
             if p.takes_bundles() {
                 n.bundles += 1;
             }
+            if p.probe.lock().lag(now) > BEHIND_MS {
+                n.behind += 1;
+            }
+            if p.share.load(Relaxed) < lag::SHARE_FULL {
+                n.thinning += 1;
+            }
         }
+        n.thinned = self.stats.thinned.get();
         n
     }
 
@@ -914,6 +965,7 @@ impl LanSwitch {
             ("limited", &s.limited),
             ("refused", &s.refused),
             ("shed", &s.shed),
+            ("thinned", &s.thinned),
             ("bundlesIn", &s.bundles_in),
             ("bundlesOut", &s.bundles_out),
             ("resumed", &s.resumed),
@@ -976,9 +1028,22 @@ impl LanSwitch {
                 continue;
             }
             p.alive.store(false, Relaxed);
-            let mut data = [0u8; 8];
-            nfsu2_util::rand::fill(&mut data);
-            *p.ping.lock() = Some(data);
+            let data = {
+                let mut pr = p.probe.lock();
+                let mono = nfsu2_util::mono_ms();
+                pr.tick(mono);
+                pr.ping(mono)
+            };
+            p.conn.push(Out::Ping(data));
+        }
+    }
+
+    /// a ping to every player, its round trip timed (every `probe_ms`; public for the tests)
+    #[doc(hidden)]
+    pub fn probe(&self) {
+        let now = nfsu2_util::mono_ms();
+        for p in self.all.load().iter().filter(|p| p.open()) {
+            let data = p.probe.lock().ping(now);
             p.conn.push(Out::Ping(data));
         }
     }

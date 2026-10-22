@@ -12,6 +12,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use nfsu2_util::{FrameCtx, mono_ms};
 
 use crate::conn::{Conn, Out};
+use crate::lag::{self, SHARE_FULL};
 use crate::{BROADCAST, Cause, Cut, KIND_LAN_ICMP, KIND_LAN_UDP, KIND_STREAM, KIND_UDP, LanSwitch, Peer, STREAM_LOW, slot};
 
 /// What a stream segment waiting at the switch costs it besides its bytes (its entry here, its copy's allocation),
@@ -236,6 +237,14 @@ impl LanSwitch {
     fn send_frame(&self, from: &Arc<Peer>, p: &Arc<Peer>, data: &Bytes, dst: u32) -> bool {
         if data[0] == KIND_STREAM {
             return self.send_stream(from, p, data, dst);
+        }
+        // a player behind on its path gets only its share of free roam's snapshots (lag.rs)
+        if data[0] == KIND_UDP {
+            let share = p.share.load(Relaxed);
+            if share < SHARE_FULL && lag::is_snap(data) && !lag::pick(share) {
+                self.stats.thinned.inc();
+                return false;
+            }
         }
         let q = &p.conn.out;
         let limit = if data[0] == KIND_UDP { self.o.roam_queue } else { self.o.shed_queue };

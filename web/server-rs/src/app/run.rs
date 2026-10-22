@@ -25,6 +25,10 @@ use crate::paths;
 
 /// what the players on the switch do, every 5 minutes while any are on (counts only)
 const BREAKDOWN_EVERY: Duration = Duration::from_secs(5 * 60);
+/// SO_SNDBUF of a /lan connection (NFSU2_LAN_SNDBUF; 0: the kernel's own), which Linux doubles: what a player's path
+/// does not take waits in the switch's own queue then, where its rules see it (roam_queue), not in the kernel's,
+/// which Linux grows to 4 MB (nfsu2.xyz, 2026-10-22: up to 4 MB waiting there for one player, seconds of free roam)
+const LAN_SNDBUF: u64 = 32 << 10;
 /// keyphrase saves: counted at the start, then swept (the unused removed) and counted again every day
 const VAULT_SWEEP_EVERY: Duration = Duration::from_secs(24 * 3600);
 
@@ -122,7 +126,7 @@ pub async fn run(o: Options, cores: usize) {
         let dir = paths::join(&o.state, "vault");
         Arc::new(Vault::open(VaultOptions::sized(PathBuf::from(&dir), o.vault_gb)).unwrap_or_else(|e| die(&format!("{dir}: {e}"))))
     });
-    let lan_sndbuf = env_num("NFSU2_LAN_SNDBUF", 0) as usize;
+    let lan_sndbuf = env_num("NFSU2_LAN_SNDBUF", LAN_SNDBUF) as usize;
     // the bundle clock follows the crowd (nfsu2-lan); NFSU2_BUNDLE_MS fixes its tick (0: none), for measurements
     let d = LanOptions::default();
     let fixed = std::env::var_os("NFSU2_BUNDLE_MS").is_some().then(|| env_num("NFSU2_BUNDLE_MS", d.bundle_ms));
@@ -159,6 +163,7 @@ pub async fn run(o: Options, cores: usize) {
         let lan = lan.clone();
         tokio::spawn(async move {
             let mut shown = false;
+            let mut thinned = 0;
             let mut every = interval_at(Instant::now() + BREAKDOWN_EVERY, BREAKDOWN_EVERY);
             loop {
                 every.tick().await;
@@ -167,11 +172,15 @@ pub async fn run(o: Options, cores: usize) {
                     continue;
                 }
                 shown = b.players > 0;
+                // how many are behind on their connection (its queues past the server: the kernel's, cloudflared's,
+                // the tunnel's) and get fewer of the other cars' updates meanwhile (nfsu2-lan lag.rs)
                 log::line(&format!(
                     "[players] {} on the switch: {} in Online mode, {} on the LAN or Online screens, {} in free roam, {} on an older page \
-                     (until its tab closes), {} leaving or starting; {} of all of them bundling (a page loaded since the server has bundles)",
-                    b.players, b.online, b.lan, b.roam, b.older, b.other, b.bundles
+                     (until its tab closes), {} leaving or starting; {} of all of them bundling (a page loaded since the server has \
+                     bundles); {} more than a second behind on their connection, {} getting fewer car updates ({} left out since the last count)",
+                    b.players, b.online, b.lan, b.roam, b.older, b.other, b.bundles, b.behind, b.thinning, b.thinned - thinned
                 ));
+                thinned = b.thinned;
             }
         });
     }

@@ -1,16 +1,19 @@
 //! The switch's own tests, the second half (tests/lan.rs has the first): the audit's F2 (what one client can make the
 //! switch send, and whom it can get cut), the store, the 4000 addresses, LAN play's broadcasts, a page that lets go,
-//! the breakdown, bundles.
+//! the breakdown, bundles, a player behind on its path (lag.rs).
 
 mod harness;
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
+use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use harness::*;
 use nfsu2_lan::{Breakdown, LanOptions, LanSwitch};
 use serde_json::Value;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::task::JoinHandle;
 
 fn vip_of(m: &Value) -> u32 {
     m["vip"].as_u64().unwrap() as u32
@@ -550,7 +553,10 @@ async fn breakdown_online_lan_screens_free_roam_older_page_leaving_or_starting()
     }
     in_online.lock().unwrap().insert(all[0].vip);
     in_roam.lock().unwrap().extend([all[2].vip, all[3].vip, all[0].vip]);
-    assert_eq!(sw.lan.breakdown().await, Breakdown { players: 6, online: 1, lan: 1, roam: 2, older: 1, other: 1, bundles: 0 });
+    assert_eq!(
+        sw.lan.breakdown().await,
+        Breakdown { players: 6, online: 1, lan: 1, roam: 2, older: 1, other: 1, bundles: 0, ..Breakdown::default() }
+    );
     // (the Online host is on the peer list, as { vip, name, server: true }; the hub is on none)
     let list = all[1].got().ctl.iter().rev().find(|m| m["t"] == "peers").cloned().unwrap();
     let last = list["peers"].as_array().unwrap().last().unwrap().clone();
@@ -678,4 +684,175 @@ async fn bundles_each_frame_pays_the_budgets_a_broken_entry_ends_it() {
     a.udp(b.vip, 9999, 9999, b"still fine", 1, 0);
     b.until_true(|g| g.dgrams().len() == 2).await;
     sw2.close().await;
+}
+
+/// A player on a plain socket that answers the switch's pings `delay` ms late (its path's queues), and counts the
+/// datagrams it gets by their free-roam message type (byte 21 of the frame: 1 HELLO, 3 SNAP).
+struct Laggy {
+    vip: u32,
+    delay: Arc<AtomicU64>,
+    /// the pongs waiting for their time: when, and the ping's payload
+    due: Arc<Mutex<VecDeque<(Instant, Vec<u8>)>>>,
+    counts: Arc<Mutex<[usize; 16]>>,
+    tasks: Vec<JoinHandle<()>>,
+}
+
+/// a frame from the switch (never masked): its opcode, its payload, and the bytes it took
+fn server_frame(b: &[u8]) -> Option<(u8, Vec<u8>, usize)> {
+    if b.len() < 2 {
+        return None;
+    }
+    let (len, at) = match b[1] & 0x7F {
+        126 if b.len() >= 4 => (u16::from_be_bytes([b[2], b[3]]) as usize, 4),
+        127 if b.len() >= 10 => (u64::from_be_bytes(b[2..10].try_into().unwrap()) as usize, 10),
+        126 | 127 => return None,
+        n => (n as usize, 2),
+    };
+    (b.len() >= at + len).then(|| (b[0] & 0x0F, b[at..at + len].to_vec(), at + len))
+}
+
+impl Laggy {
+    async fn start(port: u16, name: &str, delay_ms: u64) -> Laggy {
+        let (mut r, mut w) = raw_peer(port, name, "").await.into_split();
+        let delay = Arc::new(AtomicU64::new(delay_ms));
+        let due: Arc<Mutex<VecDeque<(Instant, Vec<u8>)>>> = Arc::default();
+        let counts: Arc<Mutex<[usize; 16]>> = Arc::default();
+        let (vtx, vrx) = tokio::sync::oneshot::channel();
+        let (d, q, c) = (delay.clone(), due.clone(), counts.clone());
+        let reader = tokio::spawn(async move {
+            let mut vtx = Some(vtx);
+            let mut buf = Vec::new();
+            let mut chunk = vec![0u8; 64 << 10];
+            loop {
+                match r.read(&mut chunk).await {
+                    Ok(0) | Err(_) => return,
+                    Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                }
+                while let Some((op, payload, used)) = server_frame(&buf) {
+                    buf.drain(..used);
+                    match op {
+                        0x1 => {
+                            let m: Value = serde_json::from_slice(&payload).unwrap();
+                            if m["t"] == "welcome" {
+                                if let Some(t) = vtx.take() {
+                                    let _ = t.send(vip_of(&m));
+                                }
+                            }
+                        }
+                        0x2 if payload.len() > 21 => c.lock().unwrap()[payload[21] as usize & 15] += 1,
+                        0x9 => {
+                            let at = Instant::now() + Duration::from_millis(d.load(Relaxed));
+                            q.lock().unwrap().push_back((at, payload));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        });
+        let q = due.clone();
+        let writer = tokio::spawn(async move {
+            loop {
+                let ready: Vec<Vec<u8>> = {
+                    let mut q = q.lock().unwrap();
+                    let mut v = Vec::new();
+                    while q.front().is_some_and(|(at, _)| *at <= Instant::now()) {
+                        v.push(q.pop_front().unwrap().1);
+                    }
+                    v
+                };
+                for p in ready {
+                    if w.write_all(&frame(PONG, &p)).await.is_err() {
+                        return;
+                    }
+                }
+                sleep(5).await;
+            }
+        });
+        let vip = tokio::time::timeout(Duration::from_secs(5), vrx).await.expect("a welcome").unwrap();
+        Laggy { vip, delay, due, counts, tasks: vec![reader, writer] }
+    }
+
+    /// its path keeps up from now on: pings answered at once, the late answers still waiting never sent
+    fn keep_up(&self) {
+        self.delay.store(0, Relaxed);
+        self.due.lock().unwrap().clear();
+    }
+
+    /// what it got since the last call
+    fn take(&self) -> [usize; 16] {
+        std::mem::take(&mut *self.counts.lock().unwrap())
+    }
+}
+
+impl Drop for Laggy {
+    fn drop(&mut self) {
+        for t in &self.tasks {
+            t.abort();
+        }
+    }
+}
+
+/// a free-roam datagram as roam_core sends it, far enough for the switch: "N2FR", version 1, its type
+fn roam_dgram(kind: u8) -> Vec<u8> {
+    let mut d = b"N2FR".to_vec();
+    d.extend_from_slice(&[1, kind, 0, 0]);
+    d.extend_from_slice(&[0; 40]);
+    d
+}
+
+/// until the breakdown says `f`, at most `secs`
+async fn until_breakdown(sw: &Switch, secs: u64, what: &str, f: impl Fn(&Breakdown) -> bool) -> Breakdown {
+    let t0 = Instant::now();
+    loop {
+        let b = sw.lan.breakdown().await;
+        if f(&b) {
+            return b;
+        }
+        assert!(t0.elapsed().as_secs() < secs, "{what}: {b:?}");
+        sleep(50).await;
+    }
+}
+
+// a player behind on its path (its pings answered 2.5 s late) gets a share of free roam's snapshots and every other
+// message, and all of them again once it keeps up (lag.rs)
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_player_behind_gets_a_share_of_the_snapshots_and_all_again_once_it_keeps_up() {
+    let _s = serial().await;
+    let sw = start(LanOptions { probe_ms: 100, ..unlimited() }).await;
+    let laggy = Laggy::start(sw.port, "Laggy", 2500).await;
+    let mut s = Client::connect(sw.port, "Sender").await;
+    s.welcome().await;
+    let (snap, hello) = (roam_dgram(3), roam_dgram(1));
+    let send = |n: usize| {
+        for i in 0..n {
+            s.udp(laggy.vip, 47210, 47210, if i % 5 == 4 { &hello } else { &snap }, 1, 0);
+        }
+    };
+    // before its first round trip it gets all of them
+    send(100);
+    sleep(300).await;
+    assert_eq!(laggy.take()[3], 80);
+    // its round trips 2.5 s: behind, and the least share at once
+    let b = until_breakdown(&sw, 6, "thinned", |b| b.thinning == 1).await;
+    assert_eq!(b.behind, 1, "{b:?}");
+    send(500);
+    sleep(300).await;
+    let got = laggy.take();
+    assert_eq!(got[1], 100, "every HELLO");
+    assert!(got[3] < 80, "a share of the 400 snapshots ({})", got[3]);
+    assert!(sw.info().await["thinned"].as_u64().unwrap() >= 320);
+    assert_eq!(sw.info().await["shed"], 0, "nothing for a long queue: it reads everything");
+    // its round trips back to the path's own: all of them again, an eighth more a round trip
+    laggy.keep_up();
+    let b = until_breakdown(&sw, 6, "all again", |b| b.thinning == 0).await;
+    assert_eq!(b.behind, 0, "{b:?}");
+    let thinned = sw.info().await["thinned"].as_u64().unwrap();
+    send(500);
+    sleep(300).await;
+    let got = laggy.take();
+    assert_eq!((got[3], got[1]), (400, 100));
+    assert_eq!(sw.info().await["thinned"].as_u64().unwrap(), thinned);
+    s.close().await;
+    drop(laggy);
+    sw.close().await;
 }

@@ -84,20 +84,16 @@ where
                 }
             }
             Ok(Message::Pong(d)) => {
-                // only a pong carrying the payload of the switch's last ping says the client is there
+                // only a pong carrying the payload of one of the switch's pings counts: its round trip is timed, and
+                // for a ping queued since the keepalive's last tick it says the client is there (lag.rs)
                 if let Some(p) = &peer {
-                    let ours = {
-                        let mut last = p.ping.lock();
-                        let ours = last.as_ref().is_some_and(|x| x[..] == d[..]);
-                        if ours {
-                            *last = None;
+                    let ours = p.probe.lock().pong(&d, nfsu2_util::mono_ms(), &p.share);
+                    match ours {
+                        Some(true) => p.alive.store(true, Relaxed),
+                        Some(false) => {}
+                        None => {
+                            sw.flood(p);
                         }
-                        ours
-                    };
-                    if ours {
-                        p.alive.store(true, Relaxed);
-                    } else {
-                        sw.flood(p);
                     }
                 }
             }

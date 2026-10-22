@@ -410,7 +410,11 @@ and leaving (by virtual address and nickname), refused requests and connections,
 server's own stack, never the client's details). Every 5 minutes while anyone is on, a `[players]` line says what
 the players on the switch do, each counted once: in Online mode, on the LAN or Online screens, in free roam, on an
 older page (one loaded before the page let its place go; it holds the place until its tab closes), and leaving or
-starting (the page lets the place go 10 s after the last network feature). Counts only, no names or addresses.
+starting (the page lets the place go 10 s after the last network feature). It ends with how many players are more
+than a second behind on their connection (the server times each one's round trip every second, queues past the
+server included: cloudflared's, the tunnel's) and how many of them get fewer of the other cars' updates meanwhile,
+with the updates left out since the last line. Many players behind while the server is idle: look at the tunnel
+(the cloudflared copies' sites, below). Counts only, no names or addresses.
 
 - **No player's real IP address** is written, and the page sends the server nothing about the player but the
   nickname.
@@ -544,6 +548,10 @@ What follows from this setup:
   players got the other cars seconds late while the server was idle. A copy's sites are in its log:
   `docker logs nfsu2-web-cloudflared-1 2>&1 | grep 'Registered tunnel connection'`. Restart only the copy with the
   bad site (`docker restart nfsu2-web-cloudflared-1`); `docker compose restart cloudflared` drops every player.
+- **Small receive buffers** in the namespace (`sysctls` on `net`: 128 KiB at most, not Linux's 32 MiB): what a
+  player's connection does not take waits at the server, which then sends that player fewer of free roam's
+  updates, instead of piling up unread at cloudflared. A change to it recreates `net`, and with it cloudflared and
+  the server: every player reconnects.
 
 A real tunnel was **not** opened here (**UNVERIFIED**). The layout was: `cloudflared` stood in by a container that
 reaches the server on 127.0.0.1, crashes of either side, a reboot.

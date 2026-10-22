@@ -18,6 +18,12 @@ services:
     image: registry.k8s.io/pause:3.10
     restart: unless-stopped
     cgroup_parent: ${NFSU2_SLICE:-nfsu2.slice}
+    # the receive buffers of this namespace's sockets at most 128 KiB, not Linux's 32 MiB: what a player's path does
+    # not take then waits at the server, which leaves out free roam's snapshots for it, instead of unread at
+    # cloudflared, out of the server's sight (nfsu2.xyz, 2026-10-22: 132 MB there, up to 1 MB for one player).  The
+    # localhost hop is fast enough with that for anything (a download goes on as fast as cloudflared reads).
+    sysctls:
+      net.ipv4.tcp_rmem: "4096 65536 131072"
   # three copies of the tunnel, 4 connections to Cloudflare each: a connection to a far or lossy Cloudflare site
   # slows every player on it (nfsu2.xyz, 2026-10-22: two of one copy's four went to Amsterdam, lost ~100 times
   # the packets of the Helsinki ones, and ~600 of 2,950 players got the others' cars seconds late).  Restart only

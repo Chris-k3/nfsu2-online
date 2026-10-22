@@ -161,7 +161,8 @@ impl LanSwitch {
             ctl: parking_lot::Mutex::new(CtlBuckets { texts: Bucket::new_at(o.text_rate, now), ctl: Bucket::new_at(o.ctl_rate, now) }),
             alive: true.into(),
             last_in: now_ms().into(),
-            ping: parking_lot::Mutex::new(None),
+            probe: parking_lot::Mutex::new(crate::lag::Probe::new(now)),
+            share: crate::lag::SHARE_FULL.into(),
         });
         if let Some(h) = &hello {
             peer.ctl.lock().texts.take_at(now, 1.0);
