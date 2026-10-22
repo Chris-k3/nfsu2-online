@@ -641,6 +641,49 @@ async fn bundles_each_entry_reaches_its_destinations_as_a_frame_of_its_own() {
     sw.close().await;
 }
 
+// bundles: LAN play's datagrams (a race's car updates) go to a client that takes bundles at once; free roam's wait for
+// the bundle clock's tick
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn bundles_lan_play_datagrams_do_not_wait_for_the_clock() {
+    let _s = serial().await;
+    // a fixed tick of 400 ms: 8 datagrams 50 ms apart that wait for it wait 350 ms or more, one of them at least (no
+    // probes: a ping wakes the writer, which takes the datagrams queued along)
+    let sw = start(LanOptions { bundle_ms: 400, bundle_max_ms: 400, probe_ms: 0, ..opts() }).await;
+    let mut a = Client::connect(sw.port, "A").await;
+    let mut b = Client::with(sw.port, "B", "", bundles()).await;
+    a.welcome().await;
+    b.welcome().await;
+    sleep(100).await;
+    // ms from sending to B's getting it, for each of 8 datagrams of this kind
+    async fn waits(a: &Client, b: &Client, kind: u8) -> Vec<u64> {
+        let mut sent = Vec::new();
+        for i in 0..8 {
+            let tag = format!("k{kind}-{i}");
+            sent.push((tag.clone(), Instant::now()));
+            a.udp(b.vip, 3658, 3658, tag.as_bytes(), kind, 0);
+            sleep(50).await;
+        }
+        let pre = format!("k{kind}-");
+        b.until_true(|g| g.dgrams().iter().filter(|d| d.data.starts_with(&pre)).count() == 8).await;
+        let g = b.got();
+        let got = g.dgrams();
+        sent.iter()
+            .map(|(tag, t)| {
+                let d = got.iter().find(|d| &d.data == tag).unwrap();
+                g.frames[d.msg].1.duration_since(*t).as_millis() as u64
+            })
+            .collect()
+    }
+    let lan = waits(&a, &b, 3).await;
+    let roam = waits(&a, &b, 1).await;
+    println!("LAN play: {lan:?} ms; free roam: {roam:?} ms");
+    assert!(lan.iter().all(|&ms| ms < 150), "LAN play's go at once: {lan:?}");
+    assert!(roam.iter().any(|&ms| ms >= 300), "free roam's wait for the tick: {roam:?}");
+    a.close().await;
+    b.close().await;
+    sw.close().await;
+}
+
 // bundles: each frame pays the budgets as a frame of its own; a broken entry, one over the budget, or a bundle too
 // large ends it
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -192,7 +192,8 @@ impl Conn {
         self.out.wake.notify_one();
     }
 
-    /// a datagram for a peer that takes bundles: it waits for the bundle clock (or goes at once without one); a
+    /// a datagram for a peer that takes bundles: it waits for the bundle clock (or goes at once without one: no clock,
+    /// or LAN play's, route.rs `post`); a
     /// bundle's worth (BUNDLE_OUT) wakes the writer at once: a full bundle does not wait for the tick
     pub(crate) fn push_dgram(self: &Arc<Self>, data: Bytes, src: u32, dst: u32, clock: Option<&Clock>) {
         if !self.open() {

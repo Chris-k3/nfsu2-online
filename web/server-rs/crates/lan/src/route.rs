@@ -256,7 +256,9 @@ impl LanSwitch {
         self.post(p, data, from.vip, dst)
     }
 
-    /// a datagram to p, into its bundle when it takes them (out at the bundle clock's next tick), else as it is
+    /// a datagram to p, into its bundle when it takes them, else as it is.  Free roam's wait for the bundle clock's
+    /// next tick; LAN play's go at once (with whatever else is queued): a race's car updates, 5 to 20 a second for each
+    /// car, a tick's wait apart (up to `bundle_max_ms`, at random) made the other cars wobble
     fn post(&self, p: &Arc<Peer>, data: &Bytes, src: u32, dst: u32) -> bool {
         if !p.takes_bundles() {
             return self.send(p, Out::Frame { data: data.clone(), src, dst });
@@ -265,7 +267,8 @@ impl LanSwitch {
             self.stats.dropped.inc();
             return false;
         }
-        p.conn.push_dgram(data.clone(), src, dst, self.clock.as_deref());
+        let clock = if (KIND_LAN_UDP..=KIND_LAN_ICMP).contains(&data[0]) { None } else { self.clock.as_deref() };
+        p.conn.push_dgram(data.clone(), src, dst, clock);
         true
     }
 

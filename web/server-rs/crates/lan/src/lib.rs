@@ -142,7 +142,9 @@
 //!   datagrams queued (one frame alone goes as it is), and free roam's datagrams wait for the next tick of the
 //!   bundle clock when nothing else is queued: Node bundled what came in one turn of its event loop, a turn that
 //!   grew with the load; here the clock does it (without it every datagram wakes its writer: the .NET port measured
-//!   2.19 against 0.94 cores).  Text and stream segments wake it at once.
+//!   2.19 against 0.94 cores).  Text, stream segments and LAN play's datagrams wake it at once: a race sends each
+//!   car 5 to 20 times a second, and a tick's wait (up to 25 ms, at random, at each pass through the switch: two
+//!   between joiners, whose updates go through the race's creator) made the other cars wobble.
 //! - The clock's tick follows the crowd: `bundle_ms` (4 ms) while few take bundles, longer as more do, so that the
 //!   switch sends about `bundle_budget` (125,000) bundles a second in all, up to `bundle_max_ms` (25 ms).  What a
 //!   crowd costs is its messages, not its bytes: each is a TCP segment, which the kernel (and the tunnel in front,

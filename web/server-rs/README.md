@@ -100,7 +100,8 @@ WebSocket message (and the tunnel in front, cloudflared, pays for each again).  
 (2000 players, 32 friends each): 4 ms sent 374,000 messages a second for 8.5 cores and did not keep up; 16 ms,
 132,000 messages for 4.2 cores, everything.  So the tick follows the crowd: 4 ms up to 500 players taking bundles,
 then as long as it takes to send about 125,000 bundles a second in all, 25 ms at most (free roam draws friends' cars
-100 ms in the past).  And the worker count: 2.9 cores on 4 workers, 3.8 on 8, 4.3 on 12, the same latency up to 8.
+100 ms in the past).  LAN play's datagrams (Online and LAN races) never wait for the tick: the game draws the other
+racers from each update as it comes, and a wait of up to 25 ms at random made them wobble.  And the worker count: 2.9 cores on 4 workers, 3.8 on 8, 4.3 on 12, the same latency up to 8.
 
 4000 players (2026-10-21, the server on CPUs 0-11, nfsu2-roamload on 12-23, 3999 bots and the probe, spread over
 3 km; other sessions' loads on the machine the same day put 2000 players on 6 workers at the busy cap's edge, 5.0
