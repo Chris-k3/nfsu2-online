@@ -35,13 +35,16 @@
  *    or the player's car does) until they are clear of the player's car,
  *    so nobody is shoved out of a car that appeared inside theirs, and
  *    while they are passable: paused, standing for a minute, near a door,
- *    or the player at the new career's start (soft_update), so nobody walls
- *    off a shop or the garage; a friend's car at that start is not shown at
- *    all (at_spawn): every new player appears on that spot.  They are
+ *    either player near one of their own open events (the friend's game
+ *    says so in its snapshots: RC_BIT_PASS), or the player at the new
+ *    career's start (soft_update), so nobody walls off a shop, the garage
+ *    or a race's start; a friend's car at that start is not shown at all
+ *    (at_spawn): every new player appears on that spot.  They are
  *    drawn where the friend is now (predicted by half the round trip), so
  *    a contact is at the same spot on both screens.  Ghost cars
  *    (NFSU2_ROAM_COLLIDE=0) have no collision body and are drawn a little in
- *    the past (NFSU2_ROAM_DELAY), smoothed through the jitter buffer.
+ *    the past (NFSU2_ROAM_DELAY), smoothed through the jitter buffer; the
+ *    player's own car is then passable on every friend's screen too.
  *  - names over friends' cars, as the game's own LAN races show them
  *    (roam_game_hud).
  *  - horns: the player's goes out with the snapshots, friends' sound from
@@ -55,7 +58,7 @@
  *    carsfx.c: the game's own samples).
  *  - outruns: two players who stay near each other can challenge each other
  *    to the game's own outrun, raced against each other's car (du_frame),
- *    away from the doors.
+ *    away from the doors and their open events.
  *  - leaving free roam (shop, crib, race, menus) parks the cars; their
  *    rides are unloaded once the world is gone.  A peer that leaves, times
  *    out or goes into a shop or race disappears (soft-parked), and its slot
@@ -183,6 +186,15 @@
 #define G_TRIGGERS      0x0088f298u   /* the track's triggers: +0x440 + 4t .. +0x444 + 4t those of type t (0x5D9BF0) */
 #define TRIG_DOOR       14            /* the triggers of the shops, the garage and the car lot (0x5EB040 asks types 13-15) */
 #define MAX_DOORS       64
+#define TRIG_EVENT      13            /* the events' triggers, the whole career's: open or not by the player's career */
+#define MAX_EVENTS      128
+#define EV_PER_FRAME    8             /* event triggers asked a frame (events_read) */
+#define EV_SWEEP_US     4000000       /* ...all of them again this often: a race won or an SMS opens new ones */
+#define EV_SCR          0x00u         /* g_gmem scratch: the 5 dwords FN_MARKER_WHAT fills */
+#define G_CAREER        0x0085ad40u   /* Career: the player's (+0x71C8 the races open now, 0x5007E0) */
+#define G_STRPOOL       0x00838428u   /* the career tables' strings: a race's name at +[race +0] (u16) */
+#define FN_MARKER_WHAT  0x00527800u   /* thiscall Career (out, trigger), callee pops: out = {the trigger or 0, race, shop, showcase, ...} */
+#define FN_MARKER_OPEN  0x00532a50u   /* thiscall Career (out), callee pops -> al: Engage enters it now (as 0x5EAFB0 asks) */
 
 /* ---- guest access ----------------------------------------------------------------- */
 static int ok(uint32_t a, uint32_t n){ return a && rh_committed(a) && rh_committed(a + n); }
@@ -731,19 +743,38 @@ static void ghost_all(void){ for (int k = 0; k < NSLOT; k++) g_sl[k].ghost = 1; 
  * background.  So a friend's car has no collision body (as a ghost) while
  * the friend or the player is paused, or has stood for a minute, or either
  * car is near a door: a shop's, the garage's or the car lot's trigger (type
- * 14; every career has them all, where the events' triggers, type 13, lead
- * somewhere or not by the player's career).  Every rule holds for the pair,
- * so both screens agree on whether two cars touch.  Passable no longer, the
- * car is a ghost until it is clear of the player's car, as when it appears.
- * A player at the new career's start is not shown to others (at_spawn), so
- * there friends' cars are passable for the player too. */
-enum { SOFT_PAUSED = 1, SOFT_IDLE = 2, SOFT_DOOR = 4, SOFT_SPAWN = 8 };
+ * 14; every career has them all).  Each of those rules holds for the pair,
+ * so both screens agree on whether two cars touch.  A race's start is an
+ * event's trigger (type 13), which leads somewhere or not by each player's
+ * career: there a player near one of their own open events lets every car
+ * through theirs (events_read), and says so to the others in the snapshots
+ * (RC_BIT_PASS), so the pair agrees again; the same bit makes the car of a
+ * player whose friends' cars are ghosts (NFSU2_ROAM_COLLIDE=0) passable for
+ * everyone.  Passable no longer, the car is a ghost until it is clear of the
+ * player's car, as when it appears.  A player at the new career's start is
+ * not shown to others (at_spawn), so there friends' cars are passable for
+ * the player too. */
+enum { SOFT_PAUSED = 1, SOFT_IDLE = 2, SOFT_DOOR = 4, SOFT_SPAWN = 8, SOFT_EVENT = 16, SOFT_SAYS = 32 };
+/* an open event: its trigger's box, and what it leads to (FN_MARKER_WHAT's
+ * out[kind]: 1 a race, 2 a shop, 3 a showcase (a cover shoot), 4 another
+ * (the table at 0x838424: STAGE_2_SHOW_1, STAGE_3_PERF_1, ...)) */
+typedef struct { float box[4]; uint32_t what; int kind; } OpenEvent;
 static struct {
     int      n;
     float    box[MAX_DOORS][4];               /* min x, min y, max x, max y (the trigger's +0x20) */
     uint32_t first, end;                      /* the list was read from these */
     int64_t  paused_since, idle_since;        /* the player is paused / the player's car stands, since (0: not) */
     int      me;                              /* the player's own reasons (SOFT_*) */
+    /* the player's open events (events_read), and how many of the career's
+     * event triggers there are */
+    int      nev, evall;
+    OpenEvent ev[MAX_EVENTS];
+    uint32_t ev_first, ev_end, ev_at;         /* the list asked from; the next trigger to ask (0: no sweep now) */
+    int      ev_nb, ev_seen;                  /* the sweep so far: open, asked */
+    OpenEvent ev_new[MAX_EVENTS];
+    int64_t  ev_next;                         /* the next sweep */
+    uint64_t ev_ns, ev_ns_max; int ev_frames; /* this sweep's cost: in all, the dearest frame's, its frames */
+    uint64_t ev_cost[3];                      /* ...the last whole sweep's (mp events) */
 } g_pass;
 /* the doors' boxes: the track's triggers stay while its world does; read
  * again when their place changes */
@@ -761,12 +792,58 @@ static void doors_read(void){
     }
     if (g_pass.n) rlog("[roam] f=%ld doors: %d shops' and garages' triggers, friends' cars near them are passable\n", rh_frame(), g_pass.n);
 }
-static int near_door(float x, float y){
-    for (int i = 0; i < g_pass.n; i++){
-        const float *b = g_pass.box[i];
-        if (x >= b[0] - DOOR_M && x <= b[2] + DOOR_M && y >= b[1] - DOOR_M && y <= b[3] + DOOR_M) return 1;
+static int near_box(const float *b, float x, float y){
+    return x >= b[0] - DOOR_M && x <= b[2] + DOOR_M && y >= b[1] - DOOR_M && y <= b[3] + DOOR_M;
+}
+static int near_door(float x, float y){ for (int i = 0; i < g_pass.n; i++) if (near_box(g_pass.box[i], x, y)) return 1; return 0; }
+static int near_event(float x, float y){ for (int i = 0; i < g_pass.nev; i++) if (near_box(g_pass.ev[i].box, x, y)) return 1; return 0; }
+/* The player's open events: the event triggers Engage would enter now, by
+ * the game's own test (0x5EB040 finds the trigger the car is in, 0x527800
+ * what it leads to, 0x5EAFB0 enters it if 0x532A50 says so: a race open in
+ * the career, a cover shoot not done yet, one of the stage's other events;
+ * in the prologue none).  Both are lookups in the career's tables: a few
+ * triggers a frame (all 196 took 0.4 ms in 25 frames, at most 30 us a
+ * frame), all of them again every EV_SWEEP_US, and from the start for a new
+ * track.  Saves of stages 2 and 3 had 11 to 22 open. */
+static void events_read(CPU *c, int64_t host){
+    uint32_t first = rd32(G_TRIGGERS + 0x440u + 4u * TRIG_EVENT), end = rd32(G_TRIGGERS + 0x444u + 4u * TRIG_EVENT);
+    if (first != g_pass.ev_first || end != g_pass.ev_end){
+        g_pass.ev_first = first; g_pass.ev_end = end; g_pass.nev = g_pass.evall = 0; g_pass.ev_at = 0; g_pass.ev_next = 0;
+        g_pass.ev_ns = g_pass.ev_ns_max = 0; g_pass.ev_frames = 0;
     }
-    return 0;
+    if (!g_gmem) return;
+    if (!g_pass.ev_at){
+        if (host < g_pass.ev_next || !first || first >= end) return;
+        g_pass.ev_at = first; g_pass.ev_nb = g_pass.ev_seen = 0;
+    }
+    uint32_t out = g_gmem + EV_SCR;
+    uint64_t t0 = rh_ns();
+    for (int i = 0; i < EV_PER_FRAME && g_pass.ev_at < end && ok(g_pass.ev_at, 0x44); i++){
+        uint32_t e = g_pass.ev_at, a[2] = { out, e };
+        int sz = (int16_t)MR16(e + 0x42u);
+        rh_call(c, FN_MARKER_WHAT, G_CAREER, 0, 2, a);
+        if (MR32(out) == e && (rh_call(c, FN_MARKER_OPEN, G_CAREER, 0, 1, &out) & 0xffu) && g_pass.ev_nb < MAX_EVENTS){
+            OpenEvent *v = &g_pass.ev_new[g_pass.ev_nb];
+            for (int j = 0; j < 4; j++) v->box[j] = MRF32(e + 0x20u + 4u * (uint32_t)j);
+            v->kind = 0; v->what = 0;
+            for (int k = 1; k <= 4 && !v->kind; k++) if (MR32(out + 4u * (uint32_t)k)){ v->kind = k; v->what = MR32(out + 4u * (uint32_t)k); }
+            if (v->box[0] <= v->box[2] && v->box[1] <= v->box[3]) g_pass.ev_nb++;
+        }
+        g_pass.ev_seen++;
+        g_pass.ev_at = sz > 0 ? e + (uint32_t)sz : end;
+    }
+    uint64_t dt = rh_ns() - t0;
+    g_pass.ev_ns += dt; g_pass.ev_frames++;
+    if (dt > g_pass.ev_ns_max) g_pass.ev_ns_max = dt;
+    if (g_pass.ev_at < end && ok(g_pass.ev_at, 0x44)) return;
+    g_pass.ev_cost[0] = g_pass.ev_ns; g_pass.ev_cost[1] = g_pass.ev_ns_max; g_pass.ev_cost[2] = (uint64_t)g_pass.ev_frames;
+    g_pass.ev_ns = g_pass.ev_ns_max = 0; g_pass.ev_frames = 0;
+    if (g_pass.ev_nb != g_pass.nev || g_pass.ev_seen != g_pass.evall)
+        rlog("[roam] f=%ld events: %d of the career's %d events' triggers open; with the player near one, every car is passable\n", rh_frame(),
+                g_pass.ev_nb, g_pass.ev_seen);
+    memcpy(g_pass.ev, g_pass.ev_new, sizeof g_pass.ev);
+    g_pass.nev = g_pass.ev_nb; g_pass.evall = g_pass.ev_seen;
+    g_pass.ev_at = 0; g_pass.ev_next = host + EV_SWEEP_US;
 }
 /* The new career's start: every new player's car appears there (all on one
  * spot, cars inside cars), stands through the prologue's first seconds, and
@@ -778,9 +855,12 @@ static int at_spawn(const float *p){
     return dx * dx + dy * dy + dz * dz < r * r;
 }
 /* the player's own reasons, once a frame: paused (a second, as a friend's
- * pause counts), standing, near a door, at the new career's start */
-static void soft_me(int64_t host, uint8_t status){
+ * pause counts), standing, near a door or one of their open events, at the
+ * new career's start; any of them, or ghost cars, goes out in the snapshots
+ * (local_state: RC_BIT_PASS) */
+static void soft_me(CPU *c, int64_t host, uint8_t status){
     doors_read();
+    events_read(c, host);
     if (status != RC_ST_PAUSED) g_pass.paused_since = 0;
     else if (!g_pass.paused_since) g_pass.paused_since = host;
     float v = rc_sqrtf(g_lv[0] * g_lv[0] + g_lv[1] * g_lv[1] + g_lv[2] * g_lv[2]);
@@ -792,14 +872,17 @@ static void soft_me(int64_t host, uint8_t status){
     g_pass.me = (g_pass.paused_since && host - g_pass.paused_since >= 1000000 ? SOFT_PAUSED : 0) |
                  (g_pass.idle_since && host - g_pass.idle_since >= IDLE_US ? SOFT_IDLE : 0) |
                  (ok(me, 0x70) && near_door(at[0], at[1]) ? SOFT_DOOR : 0) |
+                 (ok(me, 0x70) && near_event(at[0], at[1]) ? SOFT_EVENT : 0) |
                  (ok(me, 0x70) && at_spawn(at) ? SOFT_SPAWN : 0);
 }
-/* a shown friend's car's reasons, the player's added; leaving them makes it a ghost */
+/* a shown friend's car's reasons, the player's added; leaving them makes it
+ * a ghost.  The friend's own (RC_BIT_PASS): near one of their open events,
+ * their cars ghosts, or what we see too */
 static void soft_update(Slot *s, const rc_pose *pose, int64_t host){
     if (!s->paused && __builtin_fabsf(pose->speed) >= IDLE_MPS) s->idle_since = 0;
     else if (!s->idle_since) s->idle_since = host;
     int soft = g_pass.me | (s->paused ? SOFT_PAUSED : 0) | (s->idle_since && host - s->idle_since >= IDLE_US ? SOFT_IDLE : 0) |
-               (near_door(pose->p[0], pose->p[1]) ? SOFT_DOOR : 0);
+               (near_door(pose->p[0], pose->p[1]) ? SOFT_DOOR : 0) | (pose->bits & RC_BIT_PASS ? SOFT_SAYS : 0);
     if (s->soft && !soft) s->ghost = 1;
     s->soft = soft;
 }
@@ -2135,6 +2218,7 @@ static struct {
     uint32_t ranks;                           /* order changes */
     uint32_t icon, hud;                       /* the car the HUD's outrun icon is on (0 off), in this HUD */
     int      engage;                          /* Engage held last frame */
+    int      busy;                            /* we take no outrun now (du_free): the snapshots say so (RC_BIT_BUSY) */
     char     note[TAG_DUEL_MAX]; int64_t note_until;
     uint32_t offers, races, wins, losses;     /* statistics */
 } g_du;
@@ -2169,6 +2253,12 @@ static int du_able(int k){
     const PeerView *v = k >= 0 ? du_pv(g_sl[k].peer_id) : 0;
     return v && v->visible && !v->paused && v->duels && !g_sl[k].paused;
 }
+/* the friend's game says it takes no outrun now (near a door or one of their
+ * events, in a marker, racing): none offered (the challenge goes on once made) */
+static int du_busy(int k){
+    const PeerView *v = du_pv(g_sl[k].peer_id);
+    return v && v->have_pose && (v->pose.bits & RC_BIT_BUSY);
+}
 static float du_dist(uint32_t car){
     uint32_t me = player_car();
     float dx = MRF32(car + 0x60u) - MRF32(me + 0x60u), dy = MRF32(car + 0x64u) - MRF32(me + 0x64u);
@@ -2182,11 +2272,12 @@ static void du_icon(CPU *c, uint32_t car){
     g_du.icon = car;
 }
 /* our game can race now: free roam, the world running, no race, no marker
- * Engage would enter, and not near one (DOOR_M: Enter there is for the door) */
+ * Engage would enter, and not near one (DOOR_M: Enter there is for the door
+ * or the event) */
 static int du_free(int in_roam, int world_runs){
     uint32_t race = rd32(G_RACE), pl = rd32(G_PLAYER1);
     return in_roam && world_runs && pl && ok(race, 0xc44) && MR32(race + 0x24u) == 1u && !MR32(G_RACETYPE) && !rd32(pl + PL_MARKER) &&
-           !(g_pass.me & SOFT_DOOR);
+           !(g_pass.me & (SOFT_DOOR | SOFT_EVENT));
 }
 /* the game's outrun against the friend's car, as Engage starts one */
 static int du_start(CPU *c, int64_t host){
@@ -2323,11 +2414,12 @@ static void du_frame(CPU *c, int64_t host, int in_roam, int world_runs, const ui
     int press = eng && !g_du.engage;
     g_du.engage = eng;
     int free = du_free(in_roam, world_runs);
+    g_du.busy = !free;
     /* who has been near for the time it takes */
     for (int k = 0; k < NSLOT; k++){
         Slot *s = &g_sl[k];
         int near = free && me && s->st == SL_ACTIVE && !s->hidden && ok(s->car, 0x9e0) && du_able(k) && !(s->soft & SOFT_DOOR) &&
-                   du_dist(s->car) < (g_du.st == DU_IDLE && g_du.icon == s->car ? DU_PROMPT_M : DU_NEAR_M);
+                   !du_busy(k) && du_dist(s->car) < (g_du.st == DU_IDLE && g_du.icon == s->car ? DU_PROMPT_M : DU_NEAR_M);
         if (!near) s->near_since = 0;
         else if (!s->near_since) s->near_since = host;
     }
@@ -2803,6 +2895,10 @@ void roam_game_frame(CPU *c){
     int world_runs = in_roam && g_sync_paused <= 1 && !g_parked;
     g_horn = world_runs && rh_horn_held(!has_hydraulics(player_car()));
     rc_state ls; int have_ls = in_roam && local_state(&ls);
+    /* what friends can't see for themselves (last frame's): our car lets
+     * every car through, we take no outrun now */
+    if (have_ls && (!O.collide || g_pass.me)) ls.bits |= RC_BIT_PASS;
+    if (have_ls && g_du.busy) ls.bits |= RC_BIT_BUSY;
     uint8_t cfgb[RC_CFG_MAX]; int cfgn = 0; char tname[RC_CFG_TYPE_NAME + 1] = {0};
     if (in_roam && host >= g_cfg_next){ cfgn = local_cfg(cfgb, sizeof cfgb, tname); g_cfg_next = host + 5000000; }
     if (have_ls){
@@ -2893,7 +2989,7 @@ void roam_game_frame(CPU *c){
         for (int k = 0; k < NSLOT; k++) if (g_sl[k].st != SL_FREE && g_sl[k].st != SL_PARKED) want = 1;
         for (int i = 0; i < g_npv; i++) if (g_pv[i].visible && g_pv[i].has_cfg && g_pv[i].have_pose) want = 1;
         em_update(c, want, host);
-        soft_me(host, st);
+        soft_me(c, host, st);
         g_heavy = 0;
         assign(c, host);
         for (int k = 0; k < NSLOT; k++){
@@ -3074,11 +3170,12 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
                     car ? MR32(car + 0x24u) : 0, car ? MR32(car + 0x28u) : 0, car ? MR32(car + 0x554u) : 0, car ? (int16_t)MR16(car + 8u) : -1,
                     car ? (double)MRF32(car + 0x50u) : 0, car ? (double)MRF32(car + 0x54u) : 0, car ? (double)MRF32(car + 0x58u) : 0);
             uint32_t body = car ? rd32(car + 0x3cu) : 0;
-            if (car) rlog("[roam]     %s%s%s%s%s%s; collision body %s\n", g_sl[k].soft ? "passable:" : g_sl[k].ghost ? "a ghost" : "solid",
+            if (car) rlog("[roam]     %s%s%s%s%s%s%s%s; collision body %s%s\n", g_sl[k].soft ? "passable:" : g_sl[k].ghost ? "a ghost" : "solid",
                           g_sl[k].soft & SOFT_PAUSED ? " paused" : "", g_sl[k].soft & SOFT_IDLE ? " standing" : "",
                           g_sl[k].soft & SOFT_DOOR ? " near a door" : "", g_sl[k].soft & SOFT_SPAWN ? " at the start" : "",
+                          g_sl[k].soft & SOFT_EVENT ? " near my event" : "", g_sl[k].soft & SOFT_SAYS ? " says so" : "",
                           g_sl[k].soft && g_sl[k].ghost ? " (then a ghost)" : "",
-                          !ok(body, 0x20) ? "none" : MR8(body + 0x17u) ? "off" : "on");
+                          !ok(body, 0x20) ? "none" : MR8(body + 0x17u) ? "off" : "on", DUELS && du_busy(k) ? "; takes no outrun now" : "");
             if (car) rlog("[roam]     nitrous %u%% (the game sounds it: %s), wheels at %.3f %.3f %.3f %.3f m in the car, front spinners at %.2f rad turning %.2f rad/s, "
                           "blinked out %u (blink from %u)\n",
                           nos_left(car), game_sounds_nos(car) ? "yes" : "no", (double)MRF32(car + 0x168u), (double)MRF32(car + 0x1a8u), (double)MRF32(car + 0x1e8u),
@@ -3086,18 +3183,30 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
         }
         return 1;
     }
-    if (!strcasecmp(sub, "doors")){
-        /* the doors' boxes and the player's own reasons */
+    if (!strcasecmp(sub, "doors") || !strcasecmp(sub, "events")){
+        /* the doors' or the player's open events' boxes, and the player's own
+         * reasons (sent as RC_BIT_PASS with ghost cars too) */
         uint32_t me = player_car();
+        int ev = !strcasecmp(sub, "events"), n = ev ? g_pass.nev : g_pass.n;
         float mx = me ? MRF32(me + 0x60u) : 0, my = me ? MRF32(me + 0x64u) : 0;
-        rlog("[roam] f=%ld mp doors: %d, the player at %.1f %.1f is%s%s%s%s\n", f, g_pass.n, (double)mx, (double)my,
+        rlog("[roam] f=%ld mp %s: %d doors, %d open events of %d; the player at %.1f %.1f is%s%s%s%s%s%s; sends%s%s\n", f, sub, g_pass.n,
+                g_pass.nev, g_pass.evall, (double)mx, (double)my,
                 g_pass.me ? "" : " not passable", g_pass.me & SOFT_PAUSED ? " paused" : "", g_pass.me & SOFT_IDLE ? " standing" : "",
-                g_pass.me & SOFT_DOOR ? " near a door" : "");
-        for (int i = 0; i < g_pass.n; i++){
-            const float *b = g_pass.box[i];
+                g_pass.me & SOFT_DOOR ? " near a door" : "", g_pass.me & SOFT_EVENT ? " near an event" : "",
+                g_pass.me & SOFT_SPAWN ? " at the start" : "",
+                !O.collide || g_pass.me ? " passable" : "", g_du.busy ? " no outruns" : (!O.collide || g_pass.me ? "" : " nothing"));
+        if (ev) rlog("[roam]   the last sweep of the event triggers: %.0f us in %d frames, at most %.0f us a frame\n",
+                     (double)g_pass.ev_cost[0] / 1e3, (int)g_pass.ev_cost[2], (double)g_pass.ev_cost[1] / 1e3);
+        for (int i = 0; i < n; i++){
+            const float *b = ev ? g_pass.ev[i].box : g_pass.box[i];
             float cx = (b[0] + b[2]) / 2 - mx, cy = (b[1] + b[3]) / 2 - my;
-            rlog("[roam]   door %d: %.1f %.1f to %.1f %.1f (%.1f x %.1f m), its centre %.0f m away\n", i, (double)b[0], (double)b[1],
-                    (double)b[2], (double)b[3], (double)(b[2] - b[0]), (double)(b[3] - b[1]), sqrt((double)(cx * cx + cy * cy)));
+            /* what an event leads to: a race or another (their names in the string pool), a shop or a showcase (theirs) */
+            char what[48] = ""; const OpenEvent *v = ev ? &g_pass.ev[i] : 0;
+            if (v && (v->kind == 1 || v->kind == 4) && ok(v->what, 2)) cstr(rd32(G_STRPOOL) + MR16(v->what), what, 32);
+            else if (v && (v->kind == 2 || v->kind == 3)) cstr(v->what, what, 32);
+            rlog("[roam]   %s %d%s%s: %.1f %.1f to %.1f %.1f (%.1f x %.1f m), its centre %.0f m away\n", ev ? "event" : "door", i,
+                    v ? (v->kind == 1 ? " race " : v->kind == 3 ? " showcase " : v->kind == 2 ? " shop " : " other ") : "", what, (double)b[0],
+                    (double)b[1], (double)b[2], (double)b[3], (double)(b[2] - b[0]), (double)(b[3] - b[1]), sqrt((double)(cx * cx + cy * cy)));
         }
         return 1;
     }

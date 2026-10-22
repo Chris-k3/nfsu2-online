@@ -45,8 +45,8 @@ What to expect
 --------------
 - Up to 33 players in a group, the nearest 5 friends' cars shown at once (the
   game's own paint slots; the Mac and browser versions show 32).
-- Friends' cars are ghosts (you drive through them). Collide = 1 makes them
-  solid: experimental.
+- Friends' cars are ghosts (you drive through them, and they through yours).
+  Collide = 1 makes them solid: experimental.
 - While friends are in your free roam, the "outrun" challengers are off
   (tuners already cruising are parked once they are out of sight, or after
   20 s at most); they come back a minute after the friends have gone. An

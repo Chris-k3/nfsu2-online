@@ -6,6 +6,7 @@
 //        [--timeout 1200] [--drive 3600] [--watch 2400] [--stagger 2] [--bounce <s>]
 //        [--a Alice:roam_mp_drive.txt] [--b Bob:roam_mp_watch.txt] [--c Carol:<script>] [--d Dave:<script>] [--solo]
 //        [--env K=V ...] [--headed]
+//        (an instance's own settings after its script: --a Alice:roam_mp_ram_a.txt:NFSU2_ROAM_COLLIDE=0,K=V)
 //        [--base http://localhost:8616]   (use a server that is already running instead)
 //        [--https]   the pages load from https://localhost:<port> (the switch over wss://): our own server
 //                    gets a test certificate (web/test/cf-sim.mjs makeTestCerts, --tls-cert), whose
@@ -83,8 +84,9 @@ const COMMON = {
 };
 for (const kv of opts('env')) COMMON[kv.slice(0, kv.indexOf('='))] = kv.slice(kv.indexOf('=') + 1);
 
-function url(i, name, script) {
+function url(i, name, script, own) {
   const env = { ...COMMON, NFSU2_ROAM_NAME: name, ROAM_PROFILE: name };
+  for (const kv of own ? own.split(',') : []) env[kv.slice(0, kv.indexOf('='))] = kv.slice(kv.indexOf('=') + 1);
   if (MODE === 'vlan') env.NFSU2_ROAM_WEBTEST = 'vlan';
   else {
     env.NFSU2_ROAM_PORT = String(47300 + i);
@@ -138,14 +140,14 @@ if (CROWD) {
 const browser = await chromium.launch({ channel: 'chrome', headless: !argv.includes('--headed') });
 const t0 = Date.now();
 const inst = [];
-async function start(i, name, script) {
+async function start(i, name, script, own) {
   const ctx = await browser.newContext(HTTPS ? { ignoreHTTPSErrors: true } : {});
   const page = await ctx.newPage();
   const log = fs.createWriteStream(path.join(OUT, `${name}.log`));
   const w = (s) => log.write(`${((Date.now() - t0) / 1000).toFixed(3)} ${s}\n`);
   page.on('console', m => w(m.text()));
   page.on('pageerror', e => w('PAGEERROR ' + e));
-  const u = url(i, name, script);
+  const u = url(i, name, script, own);
   w(`URL ${u}`);
   await page.goto(u);
   if (APP) {

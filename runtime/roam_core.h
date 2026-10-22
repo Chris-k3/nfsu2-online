@@ -88,6 +88,11 @@ enum { RC_PLAT_MAC = 1, RC_PLAT_WIN = 2, RC_PLAT_TOOL = 3 };
 #define RC_BIT_HANDBRAKE 0x08
 #define RC_BIT_LIGHTS    0x10
 #define RC_BIT_HORN      0x20       /* the horn sounds (horn.c); older builds ignore it */
+#define RC_BIT_PASS      0x40       /* drive through this car: its player's game lets every car through it now (near
+                                       one of their open events, their cars are ghosts: roam_game.c soft_me); older
+                                       builds ignore it */
+#define RC_BIT_BUSY      0x80       /* this player takes no outrun now (at a door or an event, in a marker or a race:
+                                       roam_game.c du_free); older builds ignore it */
 /* header flags (SNAP): the peer gets every n-th snapshot (0 or 1: all); a
  * peer far away gets fewer (rc_push_state), and its gap count follows */
 #define RC_HF_EVERY      0x000F

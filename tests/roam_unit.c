@@ -64,6 +64,12 @@ static void t_layout(void){
     CHECK((int16_t)le16(st + 36) == 500 && (int16_t)le16(st + 38) == -250 && (int16_t)le16(st + 40) == 1000, "SNAP angvel x1000");
     CHECK((int16_t)le16(st + 42) == -16384 && st[44] == 255 && st[45] == 0 && le16(st + 46) == 4500 &&
           (int16_t)le16(st + 48) == 3333 && (int8_t)st[50] == 3 && st[51] == RC_BIT_BRAKE, "SNAP controls");
+    /* every state bit goes through, the passable and busy ones too (roam_game.c; an older core ignores them) */
+    s->bits = RC_BIT_PASS | RC_BIT_BUSY | RC_BIT_HORN;
+    n = rc_encode(&m, b, sizeof b);
+    rc_msg sd; memset(&sd, 0, sizeof sd);
+    CHECK(n == 16 + 6 + 52 + 4 && st[51] == (RC_BIT_PASS | RC_BIT_BUSY | RC_BIT_HORN) && rc_decode(b, n, &sd) == RC_OK &&
+          sd.u.snap.s[0].bits == (RC_BIT_PASS | RC_BIT_BUSY | RC_BIT_HORN), "SNAP state bits");
 
     memset(&m, 0, sizeof m);
     m.h.type = RC_MSG_PEERS; m.h.sender = 5; m.u.peers.n = 1; m.u.peers.e[0].ip = 0xC0A80114u; m.u.peers.e[0].port = 47211; m.u.peers.e[0].id = 0x55667788u;

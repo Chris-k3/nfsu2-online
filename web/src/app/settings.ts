@@ -318,7 +318,7 @@ export const TEMPLATE = `# NFSU2 settings, read at every launch.
 #roam_max_cars = 32
 # on = the other players' cars are solid: drawn where they are now, and one
 # that appears on your car lets you through until you are apart.
-# off = you drive through them.
+# off = you drive through them, and they through yours.
 # [NFSU2_ROAM_COLLIDE]
 #roam_collide = on
 # Snapshots per second (10 to 60), the delay ghost cars are shown with in
