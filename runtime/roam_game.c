@@ -181,6 +181,11 @@
 #define SPAWN_Z         24.1f
 #define SPAWN_M         5             /* a car this near it is not shown to others, and the player there is passable */
 #define JUMP_M          5.f           /* a friend's car drawn this far from where it was last frame is a ghost again */
+#define HIT_REPORT_US   50000         /* a hit's push (roam_game_contact) holds until the friend's snapshots from this long after it come */
+#define NUDGE_REPORT_US 20000         /* ...a push of 1 m/s or less (cars leaning on each other) this long */
+#define HIT_HOLD_US     400000        /* ...or this long at most; then it fades into where their game has the car */
+#define HIT_FADE_US     100000        /* (time constant: the interpolation's own for a correction, rc_interp_eval) */
+#define PUSH_Q          8             /* pushes held at once (more: merged into the newest) */
 #define IDLE_MPS        1.f           /* a car slower than this stands */
 #define IDLE_US         60000000      /* a car that has stood this long is passable */
 #define DOOR_M          20.f          /* a car this near a door's trigger is passable */
@@ -291,6 +296,7 @@ static struct {
     int on, test, collide, max_cars, rate, delay_ms, extrap_ms, carpool_kb, labels, spawn_m;
     int test_owncars;                         /* NFSU2_ROAM_TEST_OWNCARS (test aid): friends only in cars of our own (slots 3 and up) */
     int test_outside;                         /* NFSU2_ROAM_TEST_OUTSIDE (test aid): every car of our own outside the car index */
+    int hit_share;                            /* NFSU2_ROAM_HIT_SHARE: % of a hit with a friend's car the player's car keeps (roam_game_contact) */
     char name[RC_NAME_MAX + 1], room[64];
 } O;
 
@@ -300,6 +306,7 @@ static int g_inited, g_net_ok;
 static long g_frame0;
 /* sync clock (µs): world time pulled to the host clock */
 static double g_sync; static int g_sync_paused, g_in_roam;
+static uint32_t g_step;                       /* frames (world steps) counted here: roam_game_contact's passes of one step */
 static double g_vscale = 1.0;                 /* world seconds per stamp second (velocities on the wire) */
 static int64_t g_last_host;
 /* local car */
@@ -340,6 +347,15 @@ typedef struct {
     int      soft;                            /* passable now (SOFT_*): no collision body, whatever the ghost rule */
     int64_t  idle_since;                      /* the friend's car stands since (0: it moves) */
     float    drawn[3];                        /* where the car was drawn last frame (+0x60) */
+    float    drawn_v[3];                      /* ...and its velocity there (+0x70) */
+    /* hits with the player's car push it on this screen (push_pose) */
+    struct { float v[3], v0[3]; int64_t t; } pq[PUSH_Q]; int pqn;   /* the pushes the friend's game has not reported yet, oldest first
+                                                                       (v0: the friend's velocity as their game had it then; t: the hit, in their time) */
+    int64_t  rt;                              /* the friend's time the car was drawn at last frame (rc_interp_eval) */
+    float    net_v[3];                        /* ...and its velocity there, as their game has it */
+    float    push_v[3], push_u[3];            /* their sum (m/s), and how far they have moved the car since (m) */
+    float    push_r[3];                       /* a leftover offset, fading (m) */
+    uint32_t hit_step;                        /* g_step of the last hit */
     float    com[3];                          /* centre-of-mass offset in the car's frame (forward, left, up) */
     float    spin[4], steer;                  /* the wheels' angles about the axle and the front wheels' steering (rad) */
     float    susp[4];                         /* the wheels' suspension offsets as wheels_pose left them (CAR_SUSP) */
@@ -350,6 +366,7 @@ typedef struct {
     uint32_t loads, remode, pose_frames, wakes;   /* wakes: the game's wake-ups refused (roam_game_inert) */
     uint32_t moded, wheelfix;                 /* other physics modes the game set (roam_game_inert); frames the wheels were put back (wheels_pose) */
     uint32_t blinks;                          /* times the game blinked the car out (unblink) */
+    uint32_t hits; float hit_max;             /* hits with the player's car; the most speed the game gave the player's car in one (m/s) */
 } Slot;
 static Slot g_sl[NSLOT];
 static uint32_t g_world_seen;
@@ -1637,6 +1654,62 @@ static void apply_pose(CPU *c, Slot *s, const rc_pose *P, float dt){
     slip_pose(s, P);
     s->pose_frames++;
 }
+/* A hit with the player's car pushes a friend's car on this screen
+ * (roam_game_contact): each push holds (the car drawn where the friend's
+ * game has it, moved on by the pushes since their hits) until the friend's
+ * snapshots from after its hit come, which carry the push their own game
+ * gave the car, or HIT_HOLD_US at most (a friend whose snapshots stop, or
+ * whose game saw no hit).  Times are the friend's: the snapshots' stamps,
+ * and rt, the time the car is drawn at (rc_interp_eval: now, in the
+ * friend's clock, give or take the prediction), which a hit is stamped with.
+ * Then the car goes on from where it was going to be drawn, the difference
+ * to where their game has it (and the pushes still held) fading as the
+ * interpolation fades the jump the report makes, so the two cancel.  One
+ * push at a time was not enough: a car rolling on against the other touched
+ * it again and again, each touch held the whole push anew, and the friend's
+ * car ran at twice their speed. */
+static void push_off(Slot *s){
+    s->pqn = 0;
+    for (int i = 0; i < 3; i++){ s->push_v[i] = 0; s->push_u[i] = 0; s->push_r[i] = 0; }
+}
+/* the friend's game has reported the push: their velocity has moved by half
+ * of it at least (the interpolation hands the newest snapshots' velocity on
+ * unsmoothed), or a snapshot from HIT_REPORT_US after the hit has come, or
+ * never will (HIT_HOLD_US).  By time alone a hit was held up to a snapshot
+ * too long, the first one after it already carrying the friend's own: 0.5 m
+ * off where their game had the car for 0.2 s.  A nudge, which driving could
+ * hide, goes with the first snapshot after it: a car leaning on the other
+ * nudges it every frame, and nudges held for HIT_REPORT_US drew the car
+ * 0.5 m off for as long as the two leant on each other. */
+static int push_reported(const Slot *s, int j, const rc_pose *P, int64_t newest, int64_t rt){
+    float dot = 0, pp = 0;
+    for (int i = 0; i < 3; i++){ dot += (P->v[i] - s->pq[j].v0[i]) * s->pq[j].v[i]; pp += s->pq[j].v[i] * s->pq[j].v[i]; }
+    if (rt - s->pq[j].t >= HIT_HOLD_US) return 1;
+    if (pp <= 1.f) return newest >= s->pq[j].t + NUDGE_REPORT_US;
+    return dot >= 0.5f * pp || newest >= s->pq[j].t + HIT_REPORT_US;
+}
+static void push_pose(Slot *s, rc_pose *P, int64_t newest, int64_t rt, float dt){
+    for (int i = 0; i < 3; i++) s->net_v[i] = P->v[i];
+    if (!s->pqn && s->push_r[0] == 0.f && s->push_r[1] == 0.f && s->push_r[2] == 0.f) return;
+    for (int i = 0; i < 3; i++) s->push_u[i] += s->push_v[i] * dt;
+    int done = 0;
+    while (done < s->pqn && push_reported(s, done, P, newest, rt)){
+        float since = (float)(rt - s->pq[done].t) / 1e6f;
+        for (int i = 0; i < 3; i++){ s->push_v[i] -= s->pq[done].v[i]; s->push_u[i] -= s->pq[done].v[i] * (since > 0.f ? since : 0.f); }
+        done++;
+    }
+    if (done){
+        for (int j = done; j < s->pqn; j++) s->pq[j - done] = s->pq[j];
+        s->pqn -= done;
+        if (!s->pqn) for (int i = 0; i < 3; i++){ s->push_v[i] = 0; s->push_u[i] = 0; }
+        for (int i = 0; i < 3; i++) s->push_r[i] = s->drawn[i] + s->drawn_v[i] * dt - P->p[i] - s->push_u[i];
+    } else {
+        float k = rc_expneg(dt * 1e6f / (float)HIT_FADE_US), m = 0;
+        for (int i = 0; i < 3; i++){ s->push_r[i] *= k; m += s->push_r[i] * s->push_r[i]; }
+        if (m < 1e-4f) for (int i = 0; i < 3; i++) s->push_r[i] = 0;
+    }
+    for (int i = 0; i < 3; i++){ P->p[i] += s->push_u[i] + s->push_r[i]; P->v[i] += s->push_v[i]; }
+}
 
 /* ---- names over friends' cars --------------------------------------------------------------------- */
 /* In the game's own LAN races the HUD's online part (made by 0x4F80E0 for a
@@ -2113,7 +2186,8 @@ typedef struct { int idx; uint32_t id; char name[RC_NAME_MAX + 1]; int visible, 
                  int duels;            /* takes outrun challenges (its HELLO) */
                  int has_cfg;          /* a complete car record is held */
                  int cfg_len;          /* > 0: the record is copied here (a slot needs it) */
-                 uint8_t cfg[RC_CFG_MAX]; int have_pose; rc_pose pose; float err; uint32_t look; } PeerView;
+                 uint8_t cfg[RC_CFG_MAX]; int have_pose; rc_pose pose; float err; uint32_t look;
+                 int64_t newest, rt;   /* the sender's time of its newest snapshot, and the one the car is drawn at (push_pose) */ } PeerView;
 static PeerView g_pv[RC_TABLE]; static int g_npv;
 
 /* ---- horns, friends' nitrous and hydraulics -------------------------------------------------------- */
@@ -2654,6 +2728,7 @@ static void init_once(CPU *c){
 #endif
     O.labels = env_int("NFSU2_ROAM_LABELS", 1, 0, 1);
     O.spawn_m = env_int("NFSU2_ROAM_SPAWN_M", SPAWN_M, 0, 1000);
+    O.hit_share = env_int("NFSU2_ROAM_HIT_SHARE", 50, 0, 100);
     O.test_owncars = env_int("NFSU2_ROAM_TEST_OWNCARS", 0, 0, 1);
     O.test_outside = env_int("NFSU2_ROAM_TEST_OUTSIDE", 0, 0, 1);
     O.max_cars = env_int("NFSU2_ROAM_MAX_CARS", MAX_CARS, 0, MAX_CARS);
@@ -2885,6 +2960,7 @@ static void world_changed(CPU *c, uint32_t w){
 void roam_game_frame(CPU *c){
     if (!g_inited) init_once(c);
     if (!O.on) return;
+    g_step++;
     uint64_t t0 = rh_ns();
     int64_t host = roam_plat_now_us();
     int in_roam = roaming();
@@ -3021,6 +3097,7 @@ void roam_game_frame(CPU *c){
             if (p->cfg_len && (slotted < 0 || g_sl[slotted].cfg_gen != p->cfg_gen)){
                 memcpy(v->cfg, p->cfg, (size_t)p->cfg_len); v->cfg_len = p->cfg_len; v->look = rc_fnv1a_bytes(p->cfg, (uint32_t)p->cfg_len); }
             v->have_pose = 0;
+            v->newest = p->mo.n > 0 ? p->mo.t[p->mo.n - 1] : 0;
             if (v->visible){
                 if (slotted >= 0 && g_sl[slotted].st == SL_ACTIVE){
                     /* the car was not drawn last frame (just loaded, the
@@ -3032,6 +3109,7 @@ void roam_game_frame(CPU *c){
                     if (g_sl[slotted].hidden) p->mo.snap_pending = 1;
                     v->have_pose = rc_interp_eval(&p->mo, (int64_t)g_sync, frame_dt, render_delay(i, p, frame_dt),
                                                   (int64_t)O.extrap_ms * 1000, &v->pose);
+                    v->rt = p->mo.prev_rt;
                 }
                 else v->have_pose = rc_interp_peek(&p->mo, p->mo.t[p->mo.n - 1], 0, &v->pose);
                 /* at the new career's start: not shown, as in a shop (its slot
@@ -3096,14 +3174,21 @@ void roam_game_frame(CPU *c){
             }
             if (v->visible && v->have_pose){
                 make_inert(c, s->car);
+                if (s->hidden) push_off(s);
+                push_pose(s, &v->pose, v->newest, v->rt, (float)frame_dt / 1e6f);
+                s->rt = v->rt;
                 /* appearing, or a jump (the friend's teleport, a snap): a
                  * ghost until clear, never shoving the player's car out */
                 float jx = v->pose.p[0] - s->drawn[0], jy = v->pose.p[1] - s->drawn[1], jz = v->pose.p[2] - s->drawn[2];
-                if (s->hidden || jx * jx + jy * jy + jz * jz > JUMP_M * JUMP_M) s->ghost = 1;
+                if (s->hidden || jx * jx + jy * jy + jz * jz > JUMP_M * JUMP_M){
+                    s->ghost = 1;
+                    for (int i = 0; i < 3; i++){ v->pose.p[i] -= s->push_u[i] + s->push_r[i]; v->pose.v[i] -= s->push_v[i]; }
+                    push_off(s);
+                }
                 apply_pose(c, s, &v->pose, (float)frame_dt / 1e6f);
                 soft_update(s, &v->pose, host);
                 body_update(c, k);
-                for (int i = 0; i < 3; i++) s->drawn[i] = v->pose.p[i];
+                for (int i = 0; i < 3; i++){ s->drawn[i] = v->pose.p[i]; s->drawn_v[i] = v->pose.v[i]; }
                 s->hidden = 0; MR8(s->car + CAR_ACTIVE) = 1;
                 unblink(s);
                 if (g_poselog)
@@ -3237,12 +3322,13 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
                     car ? MR32(car + 0x24u) : 0, car ? MR32(car + 0x28u) : 0, car ? MR32(car + 0x554u) : 0, car ? (int16_t)MR16(car + 8u) : -1,
                     car ? (double)MRF32(car + 0x50u) : 0, car ? (double)MRF32(car + 0x54u) : 0, car ? (double)MRF32(car + 0x58u) : 0);
             uint32_t body = car ? rd32(car + 0x3cu) : 0;
-            if (car) rlog("[roam]     %s%s%s%s%s%s%s%s; collision body %s%s\n", g_sl[k].soft ? "passable:" : g_sl[k].ghost ? "a ghost" : "solid",
+            if (car) rlog("[roam]     %s%s%s%s%s%s%s%s; collision body %s%s; %u hit(s) with my car (at most %.1f m/s)\n", g_sl[k].soft ? "passable:" : g_sl[k].ghost ? "a ghost" : "solid",
                           g_sl[k].soft & SOFT_PAUSED ? " paused" : "", g_sl[k].soft & SOFT_IDLE ? " standing" : "",
                           g_sl[k].soft & SOFT_DOOR ? " near a door" : "", g_sl[k].soft & SOFT_SPAWN ? " at the start" : "",
                           g_sl[k].soft & SOFT_EVENT ? " near my event" : "", g_sl[k].soft & SOFT_SAYS ? " says so" : "",
                           g_sl[k].soft && g_sl[k].ghost ? " (then a ghost)" : "",
-                          !ok(body, 0x20) ? "none" : MR8(body + 0x17u) ? "off" : "on", DUELS && du_busy(k) ? "; takes no outrun now" : "");
+                          !ok(body, 0x20) ? "none" : MR8(body + 0x17u) ? "off" : "on", DUELS && du_busy(k) ? "; takes no outrun now" : "",
+                          g_sl[k].hits, (double)g_sl[k].hit_max);
             if (car) rlog("[roam]     nitrous %u%% (the game sounds it: %s), wheels at %.3f %.3f %.3f %.3f m in the car, front spinners at %.2f rad turning %.2f rad/s, "
                           "blinked out %u (blink from %u)\n",
                           nos_left(car), game_sounds_nos(car) ? "yes" : "no", (double)MRF32(car + 0x168u), (double)MRF32(car + 0x1a8u), (double)MRF32(car + 0x1e8u),
@@ -3617,6 +3703,89 @@ int roam_game_inert(uint32_t car, uint32_t mode, uint32_t from){
         return 1;
     }
     return 0;
+}
+/* The player's car's motion that a pair changes, in its body's rigid body
+ * ([body +0x68]): the momentum (+0x70, the velocity times the mass in
+ * tonnes: 1.365 for the prologue's 350Z) and the angular momentum (+0x80),
+ * from which each step works the velocity and the spin out again, and
+ * those (+0xA0, +0xC0: 0x593B70, 0x593BD0), which the car has too (+0x70,
+ * +0x110).  Measured by what the pair changed; a velocity set without the
+ * momentum was gone the next step (the car went on at 0.1 m/s). */
+enum { CS_V = 6, CS_W = 9 };                  /* st[]: momentum, angular momentum, velocity, spin */
+static const uint32_t g_cs_off[4] = { 0x70u, 0x80u, 0xa0u, 0xc0u };
+static void contact_get(uint32_t rb, float *st){
+    for (int j = 0; j < 4; j++) rd3(rb + g_cs_off[j], st + 3 * j);
+}
+static void contact_set(uint32_t car, uint32_t rb, const float *st){
+    for (int j = 0; j < 4; j++) for (int i = 0; i < 3; i++) MRF32(rb + g_cs_off[j] + 4u * (uint32_t)i) = st[3 * j + i];
+    for (int i = 0; i < 3; i++){ MRF32(car + 0x70u + 4u * (uint32_t)i) = st[CS_V + i]; MRF32(car + 0x110u + 4u * (uint32_t)i) = st[CS_W + i]; }
+}
+/* a push on a friend's car, held until their game reports it (push_pose) */
+static void push_add(Slot *s, const float *v, int64_t t){
+    if (s->pqn == PUSH_Q) s->pqn--;                                     /* merged into the newest */
+    else for (int i = 0; i < 3; i++){ s->pq[s->pqn].v[i] = 0; s->pq[s->pqn].v0[i] = s->net_v[i]; }
+    for (int i = 0; i < 3; i++){ s->pq[s->pqn].v[i] += v[i]; s->push_v[i] += v[i]; }
+    s->pq[s->pqn++].t = t;
+}
+/* roam.c, a touching pair (0x5B2610, thiscall: the pair, its bodies at +0xC
+ * and +0x10, from the collision step 0x5FFA50): the two are rewound to the
+ * moment they touch, the impulse (0x5AF0E0) goes into the bodies' own state,
+ * their physics takes it ([body]+0x38) and they move on through the rest of
+ * the step.  A friend's car has no physics here (mode 0: its body's
+ * velocity is the car's own +0x70, 0x593B70), so the game hits it as an
+ * immovable thing, and the friend's game hits the player's car the same
+ * way: both cars took the whole hit.  Measured with two players and no
+ * network delay: a car driven at 10.6 m/s into a standing one stopped dead
+ * in one step (0.1 m/s) on its screen, and the standing one left at 10 m/s
+ * within three on its own, where two equal cars both go on at about 5.  So
+ * the player's car keeps O.hit_share of the change the game gave its motion
+ * (contact_set), and the friend's car takes the rest of the momentum (equal
+ * masses) as a push on the car as drawn here, from the next frame until the
+ * friend's own report of the hit comes (push_pose).  Each game does the same
+ * with its own car, so the hit is shared on both screens: the same ram now
+ * left the two at 5.6 and 4.4 m/s. */
+void roam_game_contact(CPU *c, void (*orig)(CPU *)){
+    uint32_t pair = c->ecx, me = O.on && O.collide && O.hit_share < 100 ? player_car() : 0;
+    uint32_t mb = ok(me, 0x40) ? rd32(me + 0x3cu) : 0;
+    uint32_t a = mb && ok(pair, 0x14) ? MR32(pair + 0xcu) : 0, b = a ? MR32(pair + 0x10u) : 0;
+    int k = -1;
+    if (a == mb || b == mb){
+        uint32_t other = a == mb ? b : a;
+        for (int j = 0; j < NSLOT && other; j++)
+            if (g_sl[j].st == SL_ACTIVE && !g_sl[j].hidden && ok(g_sl[j].car, 0x9e0) && MR32(g_sl[j].car + 0x3cu) == other) k = j;
+    }
+    uint32_t rb = k >= 0 && ok(mb, 0x6c) && MR32(mb + 0x5cu) ? rd32(mb + 0x68u) : 0;
+    if (!ok(rb, 0xcc)){ orig(c); return; }
+    Slot *s = &g_sl[k];
+    float st0[12], st[12];
+    contact_get(rb, st0);
+    orig(c);
+    if (s->hits && s->hit_step == g_step){
+        /* the pair again in the same step's next pass: the friend's car
+         * stood where it was for the step (a body without physics moves
+         * only with the pose, next frame), so the game met it again and
+         * took the rest of the player's speed (10.6 -> 5.5 -> 3.0 m/s in
+         * the tests); the pushed car would have moved on, so the player's
+         * car keeps the velocity the first pass left it */
+        contact_set(me, rb, st0);
+        return;
+    }
+    s->hit_step = g_step;
+    contact_get(rb, st);
+    float keep = (float)O.hit_share / 100.f, dv[3], push[3], d2 = 0;
+    for (int i = 0; i < 12; i++) if (!__builtin_isfinite(st[i])) return;
+    for (int i = 0; i < 3; i++){ dv[i] = st[CS_V + i] - st0[CS_V + i]; d2 += dv[i] * dv[i]; push[i] = -(1.f - keep) * dv[i]; }
+    for (int i = 0; i < 12; i++) st[i] = st0[i] + keep * (st[i] - st0[i]);
+    contact_set(me, rb, st);
+    float wdt = MRF32(G_WORLDDT);                                   /* the hit is a step after the car was drawn at s->rt */
+    push_add(s, push, s->rt + (__builtin_isfinite(wdt) && wdt > 0.f && wdt < 1.f ? (int64_t)(wdt * 1e6f) : 0));
+    float d = rc_sqrtf(d2);
+    if (d > s->hit_max) s->hit_max = d;
+    if (++s->hits <= 8 || d > 4.f)
+        rlog("[roam] f=%ld hit with %s's car: the game changed my car's velocity by %.2f m/s (%.2f %.2f %.2f), kept %d %%; "
+             "my velocity now %.2f %.2f %.2f, the push on theirs %.2f %.2f %.2f\n", rh_frame(), s->name, (double)d,
+             (double)dv[0], (double)dv[1], (double)dv[2], O.hit_share, (double)st[CS_V], (double)st[CS_V + 1], (double)st[CS_V + 2],
+             (double)s->push_v[0], (double)s->push_v[1], (double)s->push_v[2]);
 }
 /* roam.c, 0x42CD60, from the race's end (0x5F8490 -> 0x42EFB0): every car of
  * the World's AI range that is out gets a new goal from its brain (car +0x2C):

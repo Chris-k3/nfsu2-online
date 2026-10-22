@@ -587,6 +587,12 @@ void sub_005f46a0(CPU *c){
                 MR32(c->esp + 4u), MR32(c->esp), MR32(G.car + 0x28u));
     sub_005f46a0_orig(c);
 }
+/* A touching pair of collision bodies (0x5B2610, thiscall, from the
+ * collision step 0x5FFA50 only): a hit between the player's car and a
+ * friend's car is shared between the two (roam_game.c, roam_game_contact) */
+void sub_005b2610_orig(CPU *c);
+void roam_game_contact(CPU *c, void (*orig)(CPU *));
+void sub_005b2610(CPU *c){ roam_game_contact(c, sub_005b2610_orig); }
 /* The race's end, for the random encounters (0x42EFB0): new goals for the AI
  * range's cars that are out, through their brains; friends' cars have none
  * to give up and are left out (roam_game.c, roam_game_goals) */
