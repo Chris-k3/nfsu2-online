@@ -153,6 +153,7 @@
 #define FN_LOADER_WAIT  0x0061ca50u   /* thiscall (handle) */
 #define FN_LOADER_UNLOAD 0x0063ae00u  /* thiscall (handle) */
 #define FN_LOADER_PURGE 0x0063a1b0u   /* thiscall (phase), callee pops: phase 0 unloads one unreferenced entry -> 1, none -> 0 */
+#define LOADER_BUSY     0x14u         /* CarLoader +0x14 (0x8A329C): a step of a load under way (a pack, its textures; one at a time) */
 #define FN_CREATECAR    0x00606480u   /* ecx grid {vec3, +0x10 u16 heading}, edx record, (driver, start) */
 #define FN_INDEXCARS    0x005f0d20u   /* thiscall World */
 #define FN_MM_REBUILD   0x004f92a0u   /* cdecl (): the minimap's icons made again (0x4ECC80), as Player 0x5EA980 does */
@@ -1122,11 +1123,18 @@ static void restore(CPU *c, int k){
  * pool fills after about a dozen car types in one world and every new look
  * would be refused.  The unreferenced entries go first (phase 0, one per
  * call); entries in use (the player's, traffic's, parked friends' cars) are
- * not touched.  No room: logged once per friend every 1,200 frames. */
+ * not touched.  No room: logged once per friend every 1,200 frames.
+ * The purge frees an unreferenced entry whatever it is doing, and a friend
+ * who leaves while their car loads leaves one in the middle of its load: its
+ * step under way (a pack, its textures) ends later in a callback that writes
+ * into the freed entry or pack record, or whatever took its place, and goes
+ * on with it.  So it runs only with the loader idle, as the game's own purge
+ * does (0x63AE70 services the loader until +0x14 is 0); busy: the next frame. */
 #define POOL_NEED (3600u * 1024u)
 static struct { uint32_t id; long next; } g_memnote[RC_TABLE];
 static int pool_room(CPU *c, const Slot *s, const char *car /* 0: a car of our own */){
     if (pool_free() >= POOL_NEED) return 1;
+    if (rd32(G_CARLOADER + LOADER_BUSY)) return 0;
     int n = 0;
     while (pool_free() < POOL_NEED && n < 64 && (gcall1(c, FN_LOADER_PURGE, G_CARLOADER, 0) & 0xffu)) n++;
     if (n){ rlog("[roam] f=%ld car pool: %d unused model(s) unloaded\n", rh_frame(), n); pool_log("unloaded"); }
