@@ -146,11 +146,8 @@ export class ScreenshotsPart {
   private at() { return this.shots.findIndex(s => s.path === this.open); }
 
   private render() {
-    const n = this.shots.length, bytes = this.shots.reduce((t, s) => t + s.size, 0);
-    const kbd = Object.assign(document.createElement('kbd'), { textContent: 'F12' });
-    this.root.querySelector('#shots-info')!.replaceChildren(
-      n ? `${n} ${n === 1 ? 'screenshot' : 'screenshots'}, ${fmtBytes(bytes)}. Press ` : 'None yet. Press ', kbd,
-      n ? ' while playing.' : ' while playing: they are kept here with your saves, and in backups.');
+    const n = this.shots.length;
+    this.root.querySelector<HTMLElement>('#shots-info')!.hidden = n > 0;
     const ul = this.root.querySelector<HTMLUListElement>('#shots')!;
     const cut = !this.all && n > SHOWN ? SHOWN - 1 : n;
     ul.replaceChildren(...this.shots.slice(0, cut).map((s, i) => {

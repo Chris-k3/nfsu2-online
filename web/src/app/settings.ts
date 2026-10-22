@@ -146,7 +146,7 @@ export const TEMPLATE = `# NFSU2 settings, read at every launch.
 # option below is commented out and shows its built-in default: remove the
 # '#' to change it (or use Settings on the start page, which edits this file).
 # In the browser this file lives in the save storage of this browser for this
-# server, next to registry.txt and the profiles; "Download a backup" in Saves
+# server, next to registry.txt and the profiles; "Download backup" in Saves
 # includes it.  On a development server, an environment variable of the same
 # meaning (shown in brackets) can be given in the page address,
 # ?env=NAME=value, and overrides this file.  Any other runtime variable can be

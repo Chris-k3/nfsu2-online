@@ -73,6 +73,14 @@ h1 { font-size: 32px; line-height: 40px; }
 h2 { font-size: 20px; line-height: 28px; color: var(--lime); margin-bottom: 16px; }
 h3 { font-size: 16px; line-height: 24px; color: var(--lime); margin: 32px 0 8px; }
 .panel > h2 + .hint { margin: -12px 0 16px; }
+/* a heading with its buttons or a note at the right (Saves), under it on a narrow screen; the heading on the
+ * buttons' 40 px line, the note on the h3's 24 px line, so both stay on the grid */
+.panel-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-bottom: 16px; }
+.panel-head.sub { margin: 32px 0 8px; }
+.panel-head h2 { margin: 0; line-height: 40px; }
+.panel-head h3 { margin: 0; }
+.panel-head .hint { line-height: 24px; }
+.panel-head + .msg { margin: -12px 0 16px; }
 #settings[data-readonly] #settings-note, #online[data-readonly] #online-note { color: var(--warn); }
 
 /* the game's slider bar under its header, here the download */
@@ -224,11 +232,9 @@ summary:hover { color: var(--text); }
 .profiles li > .text-btn { height: 24px; }            /* a row stays as tall as its name */
 .profiles li.renaming { flex-direction: column; align-items: stretch; gap: 8px; }
 .profiles li.renaming .msg { margin-top: 0; }
-#saves .hint + .row { margin-top: 12px; }
-#saves h3 + .hint { margin-bottom: 0; }
 /* the screenshots (shots.ts): four to a row, each cut to 16:9, the game's glow on the one pointed at; "+N" over
  * the eighth until all are shown */
-.shots { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; margin-top: 8px; }
+.shots { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
 .shots:empty { display: none; }
 .shot {
   position: relative; display: block; width: 100%; padding: 0; border: 2px solid transparent; border-radius: 4px;

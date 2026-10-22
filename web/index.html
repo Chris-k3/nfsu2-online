@@ -117,21 +117,23 @@
 
   <div class="content">
     <section class="panel" id="saves" aria-labelledby="saves-title">
-      <h2 id="saves-title">Saves</h2>
-      <ul class="profiles" id="profiles" aria-label="Profiles in this browser"></ul>
-      <p class="hint">Quit from the game's main menu, or <kbd>F9</kbd> then Quit game, so a save in progress is never cut short.</p>
-      <h3>Screenshots</h3>
-      <p class="hint" id="shots-info">Counting…</p>
-      <ul class="shots" id="shots" aria-label="Screenshots in this browser"></ul>
-      <div class="row" id="shots-fewer" hidden><button type="button" class="text-btn">Show fewer</button></div>
-      <h3>Backup</h3>
-      <p class="hint">One zip with your profiles, the game's options, settings.ini and F12 screenshots. Restoring a backup replaces all of them in this browser.
-        Profiles from the PC game restore too, beside the ones here: zip the folder <code>%LOCALAPPDATA%\NFS Underground 2</code>, or pick a profile's own file in it.</p>
-      <div class="row">
-        <button type="button" class="btn" id="export">Download a backup</button>
-        <label class="btn file-btn">Restore a backup<input type="file" id="import"></label>
+      <div class="panel-head">
+        <h2 id="saves-title">Saves</h2>
+        <div class="row">
+          <button type="button" class="btn" id="export">Download backup</button>
+          <label class="btn file-btn">Restore<input type="file" id="import"></label>
+        </div>
       </div>
       <p class="msg" id="saves-msg" role="status"></p>
+      <ul class="profiles" id="profiles" aria-label="Profiles in this browser"></ul>
+      <p class="hint">To save while playing, press <kbd>Esc</kbd>, go to the garage and save.</p>
+      <div class="panel-head sub">
+        <h3>Screenshots</h3>
+        <p class="hint">Screenshot with <kbd>F12</kbd></p>
+      </div>
+      <p class="hint" id="shots-info" hidden>None yet.</p>
+      <ul class="shots" id="shots" aria-label="Screenshots in this browser"></ul>
+      <div class="row" id="shots-fewer" hidden><button type="button" class="text-btn">Show fewer</button></div>
       <p class="msg warn" id="storage-note" hidden></p>
     </section>
 
