@@ -975,3 +975,44 @@ async fn compact_bundles_carry_the_same_frames_in_fewer_bytes() {
     small.close().await;
     sw.close().await;
 }
+
+// a frame of 12 to 15 bytes (the reader takes it: no ports, no data) reaches a page that takes compact bundles as it
+// is, and the page stays connected (the third audit: one such broadcast panicked every compact page's writer)
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_frame_without_ports_reaches_a_compact_page_whole() {
+    let _s = serial().await;
+    let sw = start(unlimited()).await;
+    let mut small = Client::with(sw.port, "Small", "", Opts { bundle: true, compact: true, ..Opts::default() }).await;
+    small.welcome().await;
+    let mut s = Client::connect(sw.port, "Sender").await;
+    s.welcome().await;
+    sleep(100).await;
+    let short = |kind: u8, dst: u32, len: usize| {
+        let mut f = vec![kind, 0, 0, 0, 0, 0, 0, 0];
+        f.extend_from_slice(&dst.to_be_bytes());
+        f.resize(len, 0xAB);
+        f
+    };
+    s.binary(short(1, BROADCAST, 12));
+    s.binary(short(1, small.vip, 15));
+    s.send_bundle(&[(short(3, BROADCAST, 13), vec![]), (short(5, small.vip, 14), vec![])]);
+    s.udp(small.vip, 47210, 47210, b"after", 1, 0);
+    let frames = || -> Vec<Vec<u8>> {
+        small.got().frames.iter().flat_map(|(b, _)| if b[0] == 33 { unpack_compact(b, small.vip) } else { vec![b.clone()] }).collect()
+    };
+    let t0 = Instant::now();
+    while frames().last().is_none_or(|f| f.len() < 16 || &f[16..] != b"after") {
+        assert!(t0.elapsed().as_secs() < 5, "the frame after: {:?}", frames());
+        sleep(20).await;
+    }
+    let got = frames();
+    assert_eq!(got.len(), 5, "{got:?}");
+    for (f, (kind, len)) in got.iter().zip([(1u8, 12usize), (1, 15), (3, 13), (5, 14)]) {
+        assert_eq!((f[0], f.len()), (kind, len));
+        assert_eq!(f[4..8], s.vip.to_be_bytes(), "from the sender");
+        assert!(f[12..].iter().all(|&b| b == 0xAB), "its bytes as they were");
+    }
+    s.close().await;
+    small.close().await;
+    sw.close().await;
+}

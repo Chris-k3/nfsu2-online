@@ -54,10 +54,13 @@ pub(crate) fn mark(data: &[u8]) -> Bytes {
     Bytes::from(v)
 }
 
-/// an entry's flags and the bytes it takes, for a datagram of `data` from src to dst at a page holding `own`
+/// an entry's flags and the bytes it takes, for a datagram of `data` from src to dst at a page holding `own`.  A frame
+/// shorter than the 16 bytes of a header with ports goes whole: the reader takes any frame of 12 bytes or more, and
+/// the compact form reads the ports and what follows them (the third audit: one 12-byte broadcast panicked the writer
+/// of every page that takes compact bundles, which dropped them all)
 fn plan(data: &[u8], src: u32, dst: u32, own: u32) -> (u8, usize) {
     let kind = data[0];
-    if kind == 0 || kind > 7 || src >> 16 != BASE >> 16 || (dst != own && dst != BROADCAST) {
+    if data.len() < 16 || kind == 0 || kind > 7 || src >> 16 != BASE >> 16 || (dst != own && dst != BROADCAST) {
         return (F_WHOLE, ENTRY + data.len());
     }
     let mut flags = kind;
@@ -224,6 +227,27 @@ pub(crate) mod tests {
         assert_eq!(snap.len(), 90);
         assert_eq!(entry_len(&m, a, own, own), 84);
         assert_eq!(mark(&cases[3].0)[1], 0, "a broken CRC is not left out");
+    }
+
+    // a frame too short for its ports (12 to 15 bytes: the reader takes them) goes whole, broadcast or not
+    #[test]
+    fn a_frame_without_ports_goes_whole() {
+        let (own, a) = (BASE | 0x0305, BASE | 0x0102);
+        let mut b = vec![KIND_COMPACT, 0, 0, 0];
+        let mut want = Vec::new();
+        for (kind, dst, len) in [(1u8, BROADCAST, 12usize), (1, own, 15), (3, BROADCAST, 13), (5, own, 14)] {
+            let mut f = vec![kind, 0, 0, 0];
+            f.extend_from_slice(&a.to_be_bytes());
+            f.extend_from_slice(&dst.to_be_bytes());
+            f.resize(len, 0xAB);
+            let m = mark(&f);
+            let before = b.len();
+            entry(&mut b, &m, a, dst, own);
+            assert_eq!(b.len() - before, entry_len(&m, a, dst, own));
+            assert_eq!(b[before], F_WHOLE);
+            want.push(f);
+        }
+        assert_eq!(unpack(&b, own), want);
     }
 
     // byte 1 of the switch's copy is its own: what a client wrote there never says "checked"
