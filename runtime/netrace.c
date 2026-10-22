@@ -1,12 +1,14 @@
 /* netrace.c -- network races (Online and LAN): every track open, 2 laps, 6
- * players.
+ * players, drift from 2 laps.
  *
  * In a race between players the career's unlocks only get in the way, so a
  * network game can be created on any track, either direction, whatever the
  * profile has unlocked; and a new game starts at 2 laps instead of 3.  Career,
  * Quick Race, cars and parts keep the game's own unlocks.  A game takes up to
  * 6 players in every mode but drag, as the game's own URL races do; drag
- * keeps one car per lane.
+ * keeps one car per lane.  A drift game takes 2 laps or more, as a circuit,
+ * ranked or not (the game's least was 4, longer than any of the career's
+ * stadium and parkade drifts: 2 or 3 laps).
  *
  * The game (SPEED2.EXE v1.2 NA, static reading):
  *  - The track lock is 0x5156f0, cdecl (mask, track, reverse, 0) -> al: 1
@@ -21,8 +23,15 @@
  *    the game state's constructor 0x53ed20 (static init, 0x77d390) gives it a
  *    default, 3 (0x53ed6b); the save keeps none of it but the login (0x515bf0).
  *    The options' Laps (0x4b3e40, the arrows 0x4b3f10) keep it between the
- *    mode's minimum (1, 2 or 4) and 10, the arrows wrapping round; a joiner
- *    takes the host's (0x601d20).
+ *    mode's least (the option's word +0x54: 2 for circuit (0) and URL (4), 4
+ *    for drift (3), Street X (0xA) and mode 5, else 1) and 10, the arrows
+ *    wrapping round; a joiner takes the host's (0x601d20).  The constructor
+ *    sets the least and raises the laps to it; in a ranked online game
+ *    ([0x850098]) the options screen (0x4ef620) raises them again on its
+ *    updates, with the least's getter 0x498400 (the same table).  Quick
+ *    Race's Laps (0x4b3d60) is 1 to 10 in every mode.  The race's setup takes
+ *    the laps as they are (drift 0x53f830), 1 on a point-to-point track (its
+ *    info +0x80 = 1: downhill drift; +0x85, 0x53fdea).
  *  - Max Players is the byte [0x850080] (MAXPLYS, the gcre MAXSIZE), its
  *    least [0x850081] = 2, 3 for a ranked game ([0x850098]).  The option's
  *    constructor 0x4b3110 sets it to the mode's most: 6 for URL (mode
@@ -40,6 +49,9 @@
 #define G_NET_MIN   0x00850081u    /* byte: its least */
 #define G_NET_MODE  0x00850088u    /* int: 0 circuit, 1 sprint, 2 drag, 3 drift, 4 URL, 0xA Street X */
 #define MODE_DRAG   2u
+#define MODE_DRIFT  3u
+#define LAPS_LEAST  0x54u          /* word: the Laps option's least */
+#define DRIFT_LEAST 2u             /* a circuit's */
 #define NET_MOST    6u             /* the race coordinator's racer entries */
 #define MSG_LEFT    0x9120409eu
 #define MSG_RIGHT   0xb5971bf1u
@@ -58,6 +70,28 @@ void sub_0053ed20_orig(CPU *c);
 void sub_0053ed20(CPU *c){
     sub_0053ed20_orig(c);
     MR16(G_NET_LAPS) = 2;
+}
+
+/* the Laps option's constructor (thiscall, 5 arguments, returns this): drift
+ * from 2 laps, and the laps kept that its least of 4 raised */
+void sub_004b3e40_orig(CPU *c);
+void sub_004b3e40(CPU *c){
+    uint32_t self = c->ecx, laps = MR16(G_NET_LAPS);
+    sub_004b3e40_orig(c);
+    if (MR32(G_NET_MODE) != MODE_DRIFT) return;
+    MR16(self + LAPS_LEAST) = DRIFT_LEAST;
+    MR16(G_NET_LAPS) = (uint16_t)(laps < DRIFT_LEAST ? DRIFT_LEAST : laps > 10u ? 10u : laps);
+}
+
+/* its least's getter (thiscall, -> ax, also into the option's +0x54), a
+ * ranked game's: drift 2 */
+void sub_00498400_orig(CPU *c);
+void sub_00498400(CPU *c){
+    uint32_t self = c->ecx;
+    sub_00498400_orig(c);
+    if (MR32(G_NET_MODE) != MODE_DRIFT) return;
+    MR16(self + LAPS_LEAST) = DRIFT_LEAST;
+    c->eax = (c->eax & 0xffff0000u) | DRIFT_LEAST;
 }
 
 /* Max Players' constructor (thiscall, 5 arguments, returns this): 6, drag as

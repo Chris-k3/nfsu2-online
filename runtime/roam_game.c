@@ -3572,15 +3572,16 @@ static void js_val(MpJs *j, const char *v){
 }
 static void js_str(MpJs *j, const char *k, const char *v){ js_key(j, k); js_val(j, v); }
 static void js_int(MpJs *j, const char *k, int v){ char t[16]; snprintf(t, sizeof t, "%d", v); js_key(j, k); js_raw(j, t); }
-/* the race: its kind, track and laps (a LAN race takes at least 2, drift and Street X 4, as mprace.c sets them) */
+/* the race: its kind, track and laps (a LAN race takes at least 2, Street X 4, as mprace.c sets them; a downhill
+ * drift, 1 lap in the career, is one run and shows none, as a sprint) */
 static void js_race(MpJs *j, uint32_t r){
     static uint32_t cr; static char tn[64];
     if (!r) return;
     if (r != cr){ cr = r; track_name(MR16(r + 0x18u), MR8(r + 0x1au) & 1, tn, sizeof tn); }
     js_str(j, "kind", race_kind(r));
     if (tn[0]) js_str(j, "track", tn);
-    uint8_t ty = MR8(r + 0xfu); int laps = MR8(r + 0x1bu), lo = ty == 2 || ty == 5 ? 4 : 2;
-    if (MR8(r + 0x34u) != 2u && (ty == 0 || ty == 2 || ty == 5)) js_int(j, "laps", laps < lo ? lo : laps > 10 ? 10 : laps);
+    uint8_t ty = MR8(r + 0xfu); int laps = MR8(r + 0x1bu), lo = ty == 2 ? 4 : 2;
+    if (MR8(r + 0x34u) != 2u && (ty == 0 || ty == 2 || ty == 5) && laps > 1) js_int(j, "laps", laps < lo ? lo : laps > 10 ? 10 : laps);
 }
 static void js_players(MpJs *j, const MpLobby *l){
     js_key(j, "names"); js_raw(j, "[");

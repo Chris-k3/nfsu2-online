@@ -398,9 +398,12 @@ static void write_settings(int host){
     MR8(b + N_RESTRICT) = 1; MR8(b + N_COLLIDE) = 1; MR8(b + N_RANKED) = 0; MR8(b + N_PRIVATE) = 0;
     MR8(b + N_BREAKER) = (M.r.mode == 3 || M.r.mode == 0xa) ? 0 : 1;
     if (!host) return;
+    /* the career race's laps within the network race's least (netrace.c):
+     * circuit and drift 2 (the career's stadium and parkade drifts: 2 or 3;
+     * a downhill drift is one run whatever its laps), Street X 4 */
     int laps = M.r.laps;
     if (M.r.mode == 1 || M.r.mode == 2) laps = 1;
-    else { int lo = (M.r.mode == 3 || M.r.mode == 0xa) ? 4 : 2; if (laps < lo) laps = lo; }
+    else { int lo = M.r.mode == 0xa ? 4 : 2; if (laps < lo) laps = lo; }
     if (laps > 10) laps = 10;
     MR16(b + N_TRACK) = (uint16_t)M.r.track; MR16(b + N_LAPS) = (uint16_t)laps; MR32(b + N_DIR) = M.r.reverse ? 1u : 0u;
     int mx = M.r.players < 2 ? 2 : M.r.players > 6 ? 6 : M.r.players;

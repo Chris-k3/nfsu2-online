@@ -293,8 +293,8 @@ Good to know:
   - **The host presses Enter** to start once another player is in. After a 5-second countdown every game in the lobby
     goes to the race by itself, behind a screen with the lobby on it and where the trip is ("Loading the race"): out
     of free roam and through the LAN menus (your keys and controller do nothing meanwhile) to the race on the career
-    race's track, direction and laps (a URL event: its first race; a LAN race takes at least 2 laps, drift and Street
-    X 4), with no traffic and no AI racers. You drive the race. After the results every game goes back by itself,
+    race's track, direction and laps (a URL event: its first race; a LAN race takes at least 2 laps, Street X 4),
+    with no traffic and no AI racers. You drive the race. After the results every game goes back by itself,
     behind the same screen, through the main menu and your crib, to where it left free roam, and the panel says your
     place and prize: about a minute for the way out and back.
   - **Your career is not touched:** the race does not count in it, is neither won nor lost there and opens nothing.
@@ -356,8 +356,9 @@ Good to know:
   it. The server keeps no copy of it, only a check value for that game while it is open, and never shows or logs it.
 - **Others see** your name, your game, your chat and your results, never your real address.
 - **Every track is open** when you create a game, either direction, whatever your career has unlocked, and a new
-  game starts at **2 laps** (the game's own default was 3; Options, Laps changes it). The same goes for the game's
-  LAN races. The career and Quick Race keep their unlocks.
+  game starts at **2 laps** (the game's own default was 3; Options, Laps changes it). A drift game takes **2 laps** or
+  more, as a circuit, ranked too (the game's own least was 4). The same goes for the game's LAN races. The career and
+  Quick Race keep their unlocks.
 - **Up to 6 players** race in one game (Options, Max Players; the game's own most was 4, and 6 only in URL races).
   Drag keeps one car per lane: 4, or 3 on the track with three lanes.
 - **Horn:** N (or the controller's left stick click) honks in a race too, as in free roam: the others hear the horn you
