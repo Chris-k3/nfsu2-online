@@ -538,6 +538,12 @@ What follows from this setup:
   limits per client address hold.
 - **Settings:** 7 and 9 of the proxy's list above apply too (8 is step 4 here). Authenticated Origin Pulls is not
   needed: the server is reached through cloudflared alone.
+- **Three copies of cloudflared** (`nfsu2-web-cloudflared-1` to `-3`), each with 4 connections to Cloudflare.
+  Each player's connection goes over one of them. A connection that went to a far or lossy Cloudflare site slows
+  every player on it: on nfsu2.xyz (2026-10-22, 2,950 players) two connections had gone to Amsterdam, and about 600
+  players got the other cars seconds late while the server was idle. A copy's sites are in its log:
+  `docker logs nfsu2-web-cloudflared-1 2>&1 | grep 'Registered tunnel connection'`. Restart only the copy with the
+  bad site (`docker restart nfsu2-web-cloudflared-1`); `docker compose restart cloudflared` drops every player.
 
 A real tunnel was **not** opened here (**UNVERIFIED**). The layout was: `cloudflared` stood in by a container that
 reaches the server on 127.0.0.1, crashes of either side, a reboot.

@@ -18,8 +18,13 @@ services:
     image: registry.k8s.io/pause:3.10
     restart: unless-stopped
     cgroup_parent: ${NFSU2_SLICE:-nfsu2.slice}
+  # three copies of the tunnel, 4 connections to Cloudflare each: a connection to a far or lossy Cloudflare site
+  # slows every player on it (nfsu2.xyz, 2026-10-22: two of one copy's four went to Amsterdam, lost ~100 times
+  # the packets of the Helsinki ones, and ~600 of 2,950 players got the others' cars seconds late).  Restart only
+  # the copy that has one (docker restart nfsu2-web-cloudflared-N; docker compose restart restarts them all).
   cloudflared:
     image: cloudflare/cloudflared:2026.9.3
+    scale: 3
     restart: unless-stopped
     network_mode: service:net
     command: ["tunnel", "--no-autoupdate", "run"]
