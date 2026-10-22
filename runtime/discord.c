@@ -1177,12 +1177,15 @@ static void ds_sample(Presence *p){
                 career_stage(d, dz);
                 uint8_t raw[16]; gstr(G_PROFILE, raw, sizeof raw);
                 char prof[64]; guest_to_utf8(prof, sizeof prof, raw, sizeof raw);
+                /* runtime/language.c: the game's "No Profile" in its language, in the game's bytes */
+                int language_no_profile(const char *name);
+                char rawz[17]; memcpy(rawz, raw, 16); rawz[16] = 0;
                 /* free-roam multiplayer (roam_game.c):
                  * with friends connected, that is what the second line says */
                 int friends = paused ? 0 : roam_game_friends();
                 if (paused) snprintf(st, sz, "Paused");
                 else if (friends > 0) snprintf(st, sz, "Free roam with %d friend%s", friends, friends == 1 ? "" : "s");
-                else if (prof[0] && strcmp(prof, "No Profile")) snprintf(st, sz, "Free roaming as %s", prof);
+                else if (prof[0] && !language_no_profile(rawz)) snprintf(st, sz, "Free roaming as %s", prof);
                 else snprintf(st, sz, "Free roaming");
             } else {
                 snprintf(d, dz, "Free Run");

@@ -17,6 +17,8 @@ You copy your own NFS Underground 2 folder to the VPS yourself.
    only the game's own files (the server serves nothing else), then make them readable on the VPS:
    `rsync -rlt SPEED2.EXE server.dll server.cfg CARS CREDITS FRONTEND GLOBAL LANGUAGES memcard MOVIES NIS pfdata SOUND speech SUBTITLES TRACKS root@<vps>:/srv/nfsu2/game/`
    `ssh root@<vps> chmod -R u=rwX,go=rX /srv/nfsu2/game`
+   The other languages' voices and movies, if you built them (`LANGPACKS`, docs/web/VPS.md "Languages"), the same
+   way: `rsync -rlt LANGPACKS root@<vps>:/srv/nfsu2/game/`, then the `chmod` again.
 4. **TLS**, in one of these ways:
    - Caddy in front: `deploy/Caddyfile`. Simplest: a Let's Encrypt certificate,
      renewed by Caddy.

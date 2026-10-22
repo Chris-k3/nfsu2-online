@@ -35,7 +35,9 @@ web/start.sh --data "/path/to/Need for Speed Underground 2"
 ```
 
 Open **http://localhost:8080/** in Chrome or Firefox and press **Play**. The start page has the settings, your saves
-and the controls. The player's guide is [docs/web/PLAYING.md](docs/web/PLAYING.md).
+and the controls. The player's guide is [docs/web/PLAYING.md](docs/web/PLAYING.md). The game plays in any of its
+thirteen languages; the dubbed voices and movies come from a mod, as language packs
+([docs/web/VPS.md](docs/web/VPS.md#languages)).
 
 To play with friends, run the server behind HTTPS, for example on a small VPS with Docker:
 [docs/web/VPS.md](docs/web/VPS.md).
@@ -58,7 +60,8 @@ More in [docs/web/DESIGN.md](docs/web/DESIGN.md). The same tree still builds the
 
 Based on Talha Müderrisoğlu's static recompilation of NFSU2 for Apple Silicon, which in turn follows the method of
 [N64: Recompiled](https://github.com/N64Recomp/N64Recomp) and [XenonRecomp](https://github.com/hedge-dev/XenonRecomp).
-Built with the help of Claude Code.
+The language packs are built from KyoriAsh's [Multi 13 languages mod](https://nfsmods.xyz/mod/5749) (with Lee-Ryo's
+Thai support, whose patch `runtime/language.c` follows). Built with the help of Claude Code.
 
 ## License
 

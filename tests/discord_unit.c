@@ -60,6 +60,8 @@ const char *autotest_screen_batch(int i){
 /* ---- stub for roam_game.c: free-roam friends connected ---------------- */
 static int g_test_friends;
 int roam_game_friends(void){ return g_test_friends; }
+/* ---- stub for language.c: the game's "No Profile" (English here) -------- */
+int language_no_profile(const char *name){ return !strcasecmp(name, "No Profile"); }
 /* ---- stub for winsock.c: a LAN session is open ------------------------ */
 static int g_test_lan;
 int winsock_session_active(void){ return g_test_lan; }

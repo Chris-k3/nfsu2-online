@@ -186,6 +186,15 @@ kbd {
   background: var(--field); color: var(--lime); font: italic 700 16px/24px var(--font);
 }
 .set input::placeholder { color: var(--edge); font-weight: 400; }
+/* a choice of many: the same value box, with a chevron */
+.set select {
+  appearance: none; width: 240px; height: 40px; padding: 0 36px 0 12px; border: 2px solid var(--edge); border-radius: 8px;
+  background: linear-gradient(45deg, transparent 50%, var(--lime) 50%) calc(100% - 20px) 50% / 6px 6px no-repeat,
+    linear-gradient(135deg, var(--lime) 50%, transparent 50%) calc(100% - 14px) 50% / 6px 6px no-repeat, var(--field);
+  color: var(--lime); font: italic 700 16px/24px var(--font); cursor: pointer;
+}
+.set select option { background: var(--field); color: var(--text); font-style: normal; }
+.set select:disabled { cursor: not-allowed; opacity: 0.5; }
 /* a small action as underlined text: a setting's Reset, the hero's Download log, Rename and Cancel in Saves */
 .text-btn {
   height: 32px; padding: 0 8px; border: 0; border-radius: 8px; background: none;

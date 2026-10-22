@@ -89,6 +89,7 @@ int main(int argc, char **argv){
           fprintf(stderr, "file: game folder is read-only (NFSU2_READONLY_DATA)\n"); } }
     dispatch_init(); win32_init();
     { extern void overrides_install(void); overrides_install(); }
+    { extern void language_install(void); language_install(); }   /* NFSU2_LANGUAGE: the language pack, the exe's tables */
     { extern void autotest_init(void); autotest_init(); }       /* NFSU2_INPUT_SCRIPT ... */
     { extern void status_web_start(void); status_web_start(); }  /* counters for the page overlay */
     { extern void input_web_init(void); input_web_init(); }     /* the page's keys, mouse, pad, focus */

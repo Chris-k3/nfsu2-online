@@ -53,7 +53,8 @@ rsync -rlt SPEED2.EXE server.dll server.cfg CARS CREDITS FRONTEND GLOBAL LANGUAG
 ssh root@<vps> chmod -R u=rwX,go=rX /srv/nfsu2/game /srv/nfsu2/module
 ```
 
-The game takes about 3 GB. Why these lines: [Copying the game](#copying-the-game).
+The game takes about 3 GB. Why these lines: [Copying the game](#copying-the-game). The voices and movies of other
+languages are an optional extra 1.6 GB: [Languages](#languages).
 
 **3. The firewall** must let in HTTP and HTTPS (443 for TCP and for HTTP/3's UDP; with `compose.443.yml` only
 443). On the VPS, `ufw status`:
@@ -111,7 +112,8 @@ The rest of this guide is reference.
 - **What it serves:** the page, the game module, the game's own files from your game folder (read-only) and the
   multiplayer switch. Of the game folder it serves only `SPEED2.EXE`, `server.dll`, `server.cfg` and the game's
   data folders (`CARS`, `CREDITS`, `FRONTEND`, `GLOBAL`, `LANGUAGES`, `memcard`, `MOVIES`, `NIS`, `pfdata`, `SOUND`,
-  `speech`, `SUBTITLES`, `TRACKS`), compared without case, and everything in those folders except dot files.
+  `speech`, `SUBTITLES`, `TRACKS`), the language packs (`LANGPACKS`, [Languages](#languages)), compared without
+  case, and everything in those folders except dot files.
   Nothing else at the top of the folder: never an installer's log (`unins000.dat` names the PC, the Windows account
   and the install time), a `SAVE` folder, mod plugins and their settings, or anything else you keep there.
 - **What it never shows:** anything about the VPS or the other players (`web/test/deploy.test.mjs` checks what is
@@ -278,6 +280,27 @@ players the evening before.
   they are `./game` and `./module` next to `compose.yml`.
 - **Copyright.** The game folder is EA's copyrighted content, and the server hands it to anyone who can reach it.
   That is one more reason to keep the firewall tight.
+
+## Languages
+
+Every player picks the game's language in Settings. The North American game folder has the text of all thirteen,
+but English voices and movies only, and short early versions of the Chinese, Japanese and Thai text. The rest comes
+from KyoriAsh's "Multi 13 languages" mod ([nfsmods.xyz/mod/5749](https://nfsmods.xyz/mod/5749)), as language
+packs: a `LANGPACKS` folder in the game folder, one folder per language, whose files a game in that language reads
+in place of the game folder's (`runtime/language.c`). The game folder itself stays as it is.
+
+1. Download the mod's archives (Core and the dubs) and extract them all into one empty folder, not the game folder.
+   The dubs need RAR 7's `unrar` (`unrar x`): libarchive (`bsdtar`, Windows' `tar`) cannot read them.
+2. `tools/langpacks.py "<that folder>" "<your game folder>"` builds `LANGPACKS` (1.6 GB) and prints what each
+   language got: the dubbed voices and movies of French, German, Italian, Spanish, Japanese and Russian, the full
+   Chinese, Japanese and Thai text with their fonts, Russian in English's place, and the Danish, Dutch and Swedish
+   EA logos. Korean needs nothing.
+3. Copy it like the rest, from inside the game folder:
+   `rsync -rlt LANGPACKS root@<vps>:/srv/nfsu2/game/`, then the same `chmod`.
+
+A player's browser fetches only their own language's pack: "Preload the game data" adds about 50 MB of dubbed
+voices (Russian 94 MB), and the dubbed movies (206 MB in all) stream in place of the English ones (725 MB). Without
+`LANGPACKS` every language still plays its text, with English voices and movies.
 
 ## How it runs
 

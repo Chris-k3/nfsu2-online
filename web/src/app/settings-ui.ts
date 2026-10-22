@@ -12,6 +12,8 @@ import { readText, writeFile } from './savefs';
 type Control =
   | { t: 'switch' }
   | { t: 'seg'; opts: [value: string, label: string][] }
+  /** a choice of more than a row of buttons holds: a drop-down list */
+  | { t: 'select'; opts: [value: string, label: string][] }
   | { t: 'num'; min?: number; max?: number; step?: number; unit?: string }
   | { t: 'text'; placeholder?: string };
 
@@ -38,6 +40,11 @@ const GROUPS: Group[] = [
     { key: 'roam_carpool_kb', label: 'Car memory pool', help: 'In KB; never below the game\'s own 11000.', c: { t: 'num', min: 0, max: 128000, step: 1000, unit: 'KB' }, more: true },
   ] },
   { title: 'Game', items: [
+    { key: 'language', label: 'Language', help: 'The game\'s menus and text. French, German, Italian, Spanish, Japanese and Russian also have their dubbed voices and movies where this server has them.', c: { t: 'select', opts: [
+      ['english', 'English'], ['french', 'French · Français'], ['german', 'German · Deutsch'], ['italian', 'Italian · Italiano'],
+      ['spanish', 'Spanish · Español'], ['dutch', 'Dutch · Nederlands'], ['swedish', 'Swedish · Svenska'], ['danish', 'Danish · Dansk'],
+      ['korean', 'Korean · 한국어'], ['chinese', 'Chinese · 繁體中文'], ['japanese', 'Japanese · 日本語'], ['russian', 'Russian · Русский'],
+      ['thai', 'Thai · ไทย']] } },
     { key: 'movies', label: 'Movies', help: 'Intro, story and FMV movies.', c: { t: 'switch' } },
     { key: 'autosave', label: 'Autosave', help: 'Sets each profile\'s Save option in the game to Autosave once, so races, purchases and changes are saved without asking. Prompt or Off chosen afterwards in the game\'s Options, Gameplay stays.', c: { t: 'switch' } },
     { key: 'intro', label: 'Startup movies', help: 'The EA and THX logos, the PSA and the intro. Skippable: Enter, Esc, Space, a left click, or A, B or Start ends each one. Original: as in the game, where only the intro ends early.', c: { t: 'seg', opts: [['skippable', 'Skippable'], ['original', 'Original'], ['off', 'Off']] }, more: true },
@@ -84,7 +91,7 @@ const READ_ONLY = 'Read only here: another tab of this browser runs the game and
 function shown(it: Item, v: string): string {
   const c = it.c;
   if (c.t === 'switch') return v === 'on' ? 'on' : 'off';
-  if (c.t === 'seg') return c.opts.find(([x]) => x.toLowerCase() === v.toLowerCase())?.[1] ?? v;
+  if (c.t === 'seg' || c.t === 'select') return c.opts.find(([x]) => x.toLowerCase() === v.toLowerCase())?.[1] ?? v;
   if (v === '') return 'empty';
   return c.t === 'num' && c.unit ? `${v} ${c.unit}` : v;
 }
@@ -321,6 +328,18 @@ export class SettingsPanel {
       });
       ctl.append(seg);
       described = seg;
+    } else if (c.t === 'select') {
+      const sel = document.createElement('select'); sel.id = id;
+      const opts = [...c.opts];
+      if (cur && !opts.some(([v]) => v.toLowerCase() === cur.toLowerCase())) opts.push([cur, cur]);   // a value set in the file
+      for (const [v, l] of opts) {
+        const o = document.createElement('option'); o.value = v; o.textContent = l;
+        o.selected = v.toLowerCase() === (cur || '').toLowerCase();
+        sel.append(o);
+      }
+      sel.onchange = () => void this.put(it.key, sel.value);
+      ctl.append(sel);
+      described = sel;
     } else {
       const inp = document.createElement('input'); inp.id = id;
       inp.type = c.t === 'num' ? 'number' : 'text';
@@ -357,7 +376,7 @@ export class SettingsPanel {
     const envName = def.env;
     if (envName in this.deps.environment) this.state(row, `The page address sets ${envName}=${this.deps.environment[envName]}, which wins over this setting.`, 'env');
     this.describe(described, row);
-    if (this.ro()) for (const el of row.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button, input')) el.disabled = true;
+    if (this.ro()) for (const el of row.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>('button, input, select')) el.disabled = true;
     return row;
   }
 

@@ -13,6 +13,8 @@
 //   play      Play pauses a running download (its worker is gone while the game runs), the game's end resumes it
 //   tabs      a second tab on the same saves cannot start one
 //   delete    "Delete the game data on this PC" while it preloads stops it and leaves nothing
+//   language  with French chosen in Settings: the French language pack's files but its movies, the folder's
+//             but the file the pack has in its place, and no other language's
 // The game module is out/web/nfsu2.wasm, as for the server (--wasm to use another).
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
@@ -54,10 +56,23 @@ make('MOVIES/BIG.VP6', 40 * M + 123);
 make('SOUND/TINY.BIN', 100);
 make('SOUND/SFX/Name With Space & #.bin', 2 * M - 1);
 for (let i = 0; i < 24; i++) make(`CARS/CAR${String(i).padStart(2, '0')}/GEOMETRY.BIN`, 1000 + (i * 397_000) % (3 * M), i % 2 === 0);
+// language packs (runtime/language.c): a file there is read in place of the folder's file of the same path
+make('LANGPACKS/french/SOUND/TINY.BIN', 300);
+make('LANGPACKS/french/speech/UG2_Speech_FR.big', 3 * M + 5, true);
+make('LANGPACKS/french/MOVIES/BIG.VP6', 5 * M);
+make('LANGPACKS/german/speech/UG2_Speech_GR.big', 2 * M);
 fs.writeFileSync(path.join(DATA, 'NOTES.TXT'), 'not the game: never served');
-// what the download fetches: all but the movies
-const AHEAD = [...files.keys()].filter(f => !f.startsWith('MOVIES/'));
-const TOTAL = AHEAD.reduce((a, f) => a + fs.statSync(path.join(DATA, f)).size, 0);
+// what the download fetches for a game in this language: all but the movies, of the language packs only its own,
+// and not the folder's files its pack has in their place
+function aheadOf(lang) {
+  const own = [...files.keys()].filter(f => f.startsWith(`LANGPACKS/${lang}/`));
+  const covered = new Set(own.map(f => f.split('/').slice(2).join('/')));
+  return [...files.keys()].filter(f => !f.startsWith('LANGPACKS/') && !covered.has(f)).concat(own)
+    .filter(f => f.split('/')[f.startsWith('LANGPACKS/') ? 2 : 0] !== 'MOVIES');
+}
+const AHEAD = aheadOf('english');
+const sizeOf = list => list.reduce((a, f) => a + fs.statSync(path.join(DATA, f)).size, 0);
+const TOTAL = sizeOf(AHEAD);
 
 // ---- the server ----
 const server = spawn(...serverCommand(['--data', DATA, '--http-port', String(PORT), '--dev', '--state', path.join(OUT, 'state'), '--wasm', WASM]),
@@ -115,9 +130,9 @@ async function until(f, ms = 60000) {
   const t0 = Date.now();
   for (;;) { const s = await status(); if (f(s)) return s; if (Date.now() - t0 > ms) return s; await page.waitForTimeout(50); }
 }
-/** every file of the folder but the movies, as the cache holds it: all blocks marked and the bytes the server
- *  has; and no movie */
-async function cacheMatches() {
+/** every file the download fetches (aheadOf), as the cache holds it: all blocks marked and the bytes the server
+ *  has; and nothing else, no movie */
+async function cacheMatches(ahead = AHEAD) {
   const got = await page.evaluate(async () => {
     const m = await (await fetch('/data-manifest')).json();
     const d = await (await navigator.storage.getDirectory()).getDirectoryHandle('cache').catch(() => null);
@@ -134,8 +149,8 @@ async function cacheMatches() {
     return out;
   });
   // an empty file needs nothing in the cache (a read of it never asks)
-  const bad = AHEAD.filter(p => got[p] ? !got[p].full || got[p].hex !== files.get(p) : fs.statSync(path.join(DATA, p)).size > 0);
-  const extra = Object.keys(got).filter(p => got[p] && (!files.has(p) || p.startsWith('MOVIES/')));
+  const bad = ahead.filter(p => got[p] ? !got[p].full || got[p].hex !== files.get(p) : fs.statSync(path.join(DATA, p)).size > 0);
+  const extra = Object.keys(got).filter(p => got[p] && !ahead.includes(p));
   return { ok: !bad.length && !extra.length && Object.keys(got).length === files.size, bad, extra };
 }
 async function clearData() {
@@ -295,6 +310,21 @@ try {
     const left = await page.evaluate(async () => { try { await (await navigator.storage.getDirectory()).getDirectoryHandle('cache'); return true; } catch { return false; } });
     const info = await text('#cache-info');
     report('delete', /stops preloading/.test(ask) && st.state === 'idle' && !left && /^Nothing here yet/.test(info), { ask, state: st.state, cacheLeft: left, info });
+  }
+
+  // --------------------------------------------------------- language --
+  {
+    const fr = aheadOf('french'), total = sizeOf(fr), want = `Preload the game data (${(total / 1e6).toFixed(1)} MB)`;
+    await page.$eval('#set-language', el => { el.value = 'french'; el.dispatchEvent(new Event('change')); });
+    const btn = await page.waitForFunction(w => document.querySelector('#fetch-all').textContent === w && w, want, { timeout: 15000 })
+      .then(h => h.jsonValue()).catch(() => text('#fetch-all'));
+    await page.click('#fetch-all');
+    const s = await until(s => s.state === 'done' || s.state === 'error');
+    await page.waitForTimeout(300);
+    const c = await cacheMatches(fr);
+    report('language', btn === want && s.state === 'done' && s.have === total && s.total === total && c.ok &&
+      fr.includes('LANGPACKS/french/SOUND/TINY.BIN') && !fr.includes('SOUND/TINY.BIN') && !fr.some(f => /german|MOVIES/.test(f)),
+      { btn, want, state: s.state, have: s.have, total, mismatched: c.bad, extra: c.extra });
   }
 } catch (e) {
   report('run', false, String(e?.stack ?? e));

@@ -25,7 +25,7 @@ use super::etag;
 use crate::options::within;
 
 /// what /data/ and /data-blocks/ serve: the top-level entries of the install folder that are the game's
-pub const GAME_ENTRIES: [&str; 16] = [
+pub const GAME_ENTRIES: [&str; 17] = [
     "speed2.exe",
     "server.dll",
     "server.cfg",
@@ -33,6 +33,7 @@ pub const GAME_ENTRIES: [&str; 16] = [
     "credits",
     "frontend",
     "global",
+    "langpacks", // the language packs (tools/langpacks.py), if the folder has them
     "languages",
     "memcard",
     "movies",
@@ -256,7 +257,7 @@ mod tests {
         let script = r#"
 import fsp from 'node:fs/promises'; import path from 'node:path';
 const GAME_ENTRIES = ['speed2.exe', 'server.dll', 'server.cfg',
-  'cars', 'credits', 'frontend', 'global', 'languages', 'memcard', 'movies', 'nis', 'pfdata', 'sound', 'speech', 'subtitles', 'tracks'];
+  'cars', 'credits', 'frontend', 'global', 'langpacks', 'languages', 'memcard', 'movies', 'nis', 'pfdata', 'sound', 'speech', 'subtitles', 'tracks'];
 const GAME_TOP = new Set(GAME_ENTRIES);
 const gameEntry = name => GAME_TOP.has(name.toLowerCase());
 const within = (a, b) => { const x = a.toLowerCase(), y = b.toLowerCase(); return x === y || x.startsWith(y.endsWith(path.sep) ? y : y + path.sep); };

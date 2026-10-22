@@ -92,10 +92,14 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
 | Group | Settings |
 |---|---|
 | Online | its own section under Saves: how many play on this server now, free roam with others, your name (in free roam and online), room, the game's Online mode (on by default); more: solid cars and the free-roam network |
-| Game | movies, autosave; more: startup movies (skippable, original or off), sound, pause or keep running in the background, sound output latency |
+| Game | language, movies, autosave; more: startup movies (skippable, original or off), sound, pause or keep running in the background, sound output latency |
 | Display | full screen on Play (off: the game plays in the browser window), resolution scale, frame rate (auto follows the screen: 120 on a 120 Hz display, 240 on a 240 Hz one; 60, 120 or 240; Online and LAN races at most 120); more: HUD layout, movie framing, cutscene bars, other cars' headlights (players, all cars, off), frame-rate counter |
 | Controller | rumble; more: controller on or off, menu buttons, dead zones |
 
+- **Language:** English, French, German, Italian, Spanish, Dutch, Swedish, Danish, Korean, Chinese, Japanese, Russian
+  or Thai, for the menus and all the game's text. Where the server has the [language packs](VPS.md#languages), French, German, Italian, Spanish, Japanese and Russian also play with their dubbed voices and movies, and
+  Chinese, Japanese and Thai with their full text. Your browser fetches only your language's files: the dubbed
+  voices are about 50 MB (Russian 94 MB), and the dubbed movies are smaller than the English ones they replace.
 - **More settings:** each group's "More … settings" has the less common ones, and says how many of them you
   changed. **Reset** next to a changed setting puts its default back.
 - **Edit the file:** "Edit settings.ini as text" opens the file itself. A line the game would ignore is shown with

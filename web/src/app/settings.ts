@@ -44,6 +44,10 @@ export interface KeyDef {
 // on/lan = the server's virtual LAN, off = none; lan_adapter_id, lan_host_name,
 // lan_timing) are 'web' but have no template paragraph: the player's page does
 // not offer the game's LAN races yet (PLAYING.md).
+/** the game's languages (runtime/language.c), the setting's values; english is the default */
+export const LANGUAGES = ['english', 'french', 'german', 'italian', 'spanish', 'dutch', 'swedish', 'danish', 'korean',
+  'chinese', 'japanese', 'russian', 'thai'] as const;
+
 export const KEYS: readonly KeyDef[] = [
   // app
   { key: 'game_folder', env: 'NFSU2_DATA', kind: 'path', scope: 'mac' },
@@ -122,6 +126,9 @@ export const KEYS: readonly KeyDef[] = [
   { key: 'online', env: 'NFSU2_ONLINE', kind: 'bool', scope: 'web' },
   // each profile's Save option set to Autosave once, before Play (the page's own: profile.ts turnOnAutosave)
   { key: 'autosave', env: 'NFSU2_AUTOSAVE', kind: 'bool', scope: 'web' },
+  // the game's language (runtime/language.c; the page fetches ahead only its language pack: datacache.ts).  Not in
+  // bundle.m's table: there a lower-case key, so it reaches the runtime as NFSU2_LANGUAGE all the same
+  { key: 'language', env: 'NFSU2_LANGUAGE', kind: 'enum', vals: LANGUAGES.join('|'), scope: 'web' },
 ];
 
 /** strcasecmp's and toupper's folding: ASCII letters only (String.toLowerCase would also fold the Kelvin sign to 'k') */
@@ -159,6 +166,12 @@ export const TEMPLATE = `# NFSU2 settings, read at every launch.
 # one; original = as in the game, where only the intro ends early; off = they
 # are not played.  [NFSU2_INTRO]
 #intro = skippable
+
+# The game's language: english, french, german, italian, spanish, dutch,
+# swedish, danish, korean, chinese, japanese, russian or thai.  French, German,
+# Italian, Spanish, Japanese and Russian come with their dubbed voices and
+# movies where the server has the language packs.  [NFSU2_LANGUAGE]
+#language = english
 
 # Sound output.  [NOSOUND, inverted]
 #sound = on

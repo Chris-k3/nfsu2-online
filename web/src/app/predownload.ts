@@ -5,7 +5,7 @@
 // goes on after the game ends.
 
 import type { FromPredownload, ToPredownload } from '../host/predownload-worker';
-import { DATA_BASE, MANIFEST_URL, fetchedAhead, manifestFiles, scanCache, type Manifest } from '../host/datacache';
+import { DATA_BASE, MANIFEST_URL, aheadFiles, languageMovies, manifestFiles, scanCache, type Manifest } from '../host/datacache';
 
 export type DownloadState = 'idle' | 'running' | 'paused' | 'done' | 'error';
 export interface DownloadStatus {
@@ -19,19 +19,20 @@ export interface DownloadStatus {
 
 const STOP_WAIT_MS = 3000;
 
-/** Whether every movie is in this browser's cache (they are not downloaded ahead: only one that played is). */
-export async function moviesKept(): Promise<boolean> {
+/** Whether every movie a game in this language can play is in this browser's cache (they are not downloaded ahead:
+ *  only one that played is). */
+export async function moviesKept(language: string): Promise<boolean> {
   const r = await fetch(MANIFEST_URL, { cache: 'no-cache' });
   if (!r.ok) return false;
-  const s = await scanCache(manifestFiles(await r.json() as Manifest).filter(f => !fetchedAhead(f)));
+  const s = await scanCache(languageMovies(manifestFiles(await r.json() as Manifest), language));
   return s.have >= s.total;
 }
 
 /** How much of what the download fetches (all but the movies) this browser keeps: bytes in the cache, of their total. */
-export async function gameDataKept(): Promise<{ have: number; total: number }> {
+export async function gameDataKept(language: string): Promise<{ have: number; total: number }> {
   const r = await fetch(MANIFEST_URL, { cache: 'no-cache' });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const s = await scanCache(manifestFiles(await r.json() as Manifest).filter(fetchedAhead));
+  const s = await scanCache(aheadFiles(manifestFiles(await r.json() as Manifest), language));
   return { have: s.have, total: s.total };
 }
 
@@ -41,7 +42,8 @@ export class Predownload {
   private ended: (() => void) | null = null;
   private samples: { t: number; have: number }[] = [];
 
-  constructor(private onChange: (s: DownloadStatus) => void, private log: (line: string) => void) {}
+  /** language: the game's language now (settings.ini): only its language pack is fetched */
+  constructor(private onChange: (s: DownloadStatus) => void, private log: (line: string) => void, readonly language: () => string) {}
 
   get running() { return this.w !== null; }
 
@@ -51,7 +53,7 @@ export class Predownload {
     this.samples = [];
     w.onmessage = (e: MessageEvent<FromPredownload>) => this.message(w, e.data);
     w.onerror = e => this.message(w, { t: 'error', msg: e.message || 'it stopped unexpectedly' });
-    w.postMessage({ t: 'start', manifestUrl: MANIFEST_URL, dataBase: DATA_BASE } satisfies ToPredownload);
+    w.postMessage({ t: 'start', manifestUrl: MANIFEST_URL, dataBase: DATA_BASE, language: this.language() } satisfies ToPredownload);
     this.set({ state: 'running', have: 0, total: 0, rate: 0, error: undefined });     // counted again by the worker
     this.log('[app] predownload: started');
   }

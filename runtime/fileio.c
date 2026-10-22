@@ -174,13 +174,65 @@ static int overlay_cannot_have(const char *win){
     g_ovc_skips++;
     return 1;
 }
-/* Read: the write root if the file is there, otherwise the game root. */
+/* --- language pack (runtime/language.c) ---------------------------------
+ * LANGPACKS/<language> in the game folder holds the files a language plays
+ * with in place of the game folder's: a file there is read instead of the
+ * game's file of the same path (case-insensitive), as long as the save
+ * overlay has no copy of its own.  Its list is read once, so every other
+ * open costs nothing more. */
+static char g_lroot[1024];
+static struct lfile { char *key, *rel; } *g_lf;     /* sorted by key: the path lower-cased */
+static int g_lnf, g_lcap;
+static int lfile_cmp(const void *a, const void *b){
+    return strcmp(((const struct lfile *)a)->key, ((const struct lfile *)b)->key);
+}
+static void lpack_walk(const char *dir, const char *rel){
+    DIR *d = opendir(dir); if (!d) return;
+    struct dirent *e;
+    while ((e = readdir(d))){
+        if (e->d_name[0] == '.') continue;
+        char p[1100], r[1024]; struct stat st;
+        snprintf(p, sizeof p, "%s/%s", dir, e->d_name);
+        snprintf(r, sizeof r, "%s%s%s", rel, rel[0] ? "/" : "", e->d_name);
+        if (stat(p, &st) != 0) continue;
+        if (S_ISDIR(st.st_mode)){ lpack_walk(p, r); continue; }
+        if (!S_ISREG(st.st_mode)) continue;
+        if (g_lnf == g_lcap){
+            g_lcap = g_lcap ? 2*g_lcap : 64;
+            struct lfile *nf = realloc(g_lf, (size_t)g_lcap * sizeof *g_lf); if (!nf) break;
+            g_lf = nf;
+        }
+        g_lf[g_lnf].rel = strdup(r); g_lf[g_lnf].key = strdup(r);
+        for (char *k = g_lf[g_lnf].key; *k; k++) *k = (char)tolower((unsigned char)*k);
+        g_lnf++;
+    }
+    closedir(d);
+}
+/* -> how many files the pack has (0: none, or no such folder) */
+int fileio_set_language_pack(const char *rel){
+    if (!resolve_in(g_root, rel, g_lroot, sizeof g_lroot)) return 0;
+    lpack_walk(g_lroot, "");
+    qsort(g_lf, (size_t)g_lnf, sizeof *g_lf, lfile_cmp);
+    return g_lnf;
+}
+static int lpack_resolve(const char *win, char *out, size_t outsz){
+    if (!g_lnf) return 0;
+    char rel[1024]; rel_of(win, rel, sizeof rel);
+    for (char *k = rel; *k; k++) *k = (char)tolower((unsigned char)*k);
+    struct lfile key = { rel, 0 };
+    const struct lfile *f = bsearch(&key, g_lf, (size_t)g_lnf, sizeof *g_lf, lfile_cmp);
+    if (!f) return 0;
+    snprintf(out, outsz, "%s/%s", g_lroot, f->rel);
+    return 1;
+}
+/* Read: the write root if the file is there, then the language pack, otherwise the game root. */
 static int resolve(const char *win, char *out, size_t outsz){
     if (g_wroot[0] && !overlay_cannot_have(win)){
         char w[1024];
         if (resolve_in(g_wroot, win, w, sizeof w) && strcmp(w, g_wroot) != 0){
             snprintf(out, outsz, "%s", w); return 1; }
     }
+    if (lpack_resolve(win, out, outsz)) return 1;
     return resolve_in(g_root, win, out, outsz);
 }
 /* Write: ALWAYS the write root if there is one. */

@@ -120,7 +120,8 @@ static int player_name(char out[16], const char **from){
     for (n = 0; n < 16 && MR8(G_PROFILE_NAME + (uint32_t)n); n++) pn[n] = (char)MR8(G_PROFILE_NAME + (uint32_t)n);
     pn[n] = 0;
     *from = "the profile's name";
-    return strcasecmp(pn, "No Profile") && clean(out, pn);
+    int language_no_profile(const char *name);           /* runtime/language.c: in the game's language */
+    return !language_no_profile(pn) && clean(out, pn);
 }
 
 /* a guest call with every register restored afterwards (any convention):

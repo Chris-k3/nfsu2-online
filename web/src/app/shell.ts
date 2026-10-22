@@ -184,6 +184,8 @@ async function loadSettings(): Promise<string | null> {
   return text;
 }
 function resolved(host: Record<string, string> = {}): Resolved { return resolveEnv(settingsText, ENVIRONMENT, host); }
+/** the game's language (runtime/language.c): which language pack the page fetches ahead and counts */
+const language = (r: Resolved = resolved()) => (r.env.NFSU2_LANGUAGE ?? 'english').toLowerCase();
 
 // ----------------------------------------------------------------- play --
 function stageCanvas(): HTMLCanvasElement {
@@ -309,7 +311,7 @@ async function startGame() {
   let offlineNote = '';
   if (offline) {
     log.add('[app] offline: the server does not answer, the game runs from this PC (no free roam or Online)');
-    if (r.env.NOMOVIES !== '1' && !await moviesKept().catch(() => false)) {
+    if (r.env.NOMOVIES !== '1' && !await moviesKept(language(r)).catch(() => false)) {
       r.env.NOMOVIES = '1';
       log.add('[app] offline: not every movie is on this PC, so the movies are off for this game');
       offlineNote = 'Offline: the movies are off for this game. ';
@@ -846,7 +848,8 @@ export async function boot() {
   // made here once: a closure made per game (in startGame) would keep that game's scope reachable
   fps.extra = () => session?.stats() ?? {};
   settings = new SettingsPanel($('#settings'), {
-    saveDir: SAVE, environment: ENVIRONMENT, onSaved: t => { settingsText = t; },
+    // another language counts other files as the game data (its language pack)
+    saveDir: SAVE, environment: ENVIRONMENT, onSaved: t => { const was = language(); settingsText = t; if (language() !== was) void saves.refresh(); },
     // the tab that owns the saves is the one whose Play reads the file: another tab only looks
     readOnly: () => !instance.owner, say: pageToast,
   }, $('#online'));
@@ -854,7 +857,7 @@ export async function boot() {
   players = watchPlayers(line => settings.setStatus(line), () => !session && !starting, setReach);
   window.addEventListener('online', () => players?.now());
   window.addEventListener('resize', placeNotices);
-  download = new Predownload(s => saves.showData(s), logLine);
+  download = new Predownload(s => saves.showData(s), logLine, () => language());
   saves = new SavesPanel($('#saves'), $('#game-data'), {
     saveDir: SAVE, busy: () => !!session || starting || !instance.owner, confirm: confirmBox,
     onRestored: () => { void loadSettings(); void settings.refresh(); }, download,

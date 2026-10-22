@@ -164,6 +164,7 @@ int main(int argc,char**argv){
           fprintf(stderr,"file: game folder is read-only (NFSU2_READONLY_DATA)\n"); } }
     dispatch_init(); win32_init();
     { extern void overrides_install(void); overrides_install(); }
+    { extern void language_install(void); language_install(); }   /* NFSU2_LANGUAGE: the language pack, the exe's tables */
     { extern void autotest_init(void); autotest_init(); }       /* NFSU2_INPUT_SCRIPT ... */
     if (getenv("BT")) g_bt_on = 1;
     g_report_fn = all_reports;

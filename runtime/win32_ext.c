@@ -1246,7 +1246,9 @@ int win32_ext_call(CPU *c, const char *n, uint32_t *out){
             fprintf(stderr,"  [registry] QueryValue(\"%s\")\n", vn);
 
         const char *sval = 0; uint32_t dval = 0; int have_d = 0;
-        { int ri = reg_find(vn);            /* look at the STORED value first */
+        const char *language_registry(void);
+        /* look at the STORED value first; the language is always the setting's */
+        { int ri = strcasecmp(vn, "Language") ? reg_find(vn) : -1;
           if (ri >= 0){
               if (g_reg[ri].is_str) sval = g_reg[ri].sv;
               else { dval = g_reg[ri].dw; have_d = 1; }
@@ -1266,7 +1268,7 @@ int win32_ext_call(CPU *c, const char *n, uint32_t *out){
          * speed as rdtsc. */
         else if (!strcasecmp(vn,"~MHz")){
             const char *e = getenv("NFSU2_TSC_MHZ"); dval = e && *e ? (uint32_t)strtoul(e,0,0) : 3000u; have_d=1; }
-        else if (!strcasecmp(vn,"Language"))      sval="English";
+        else if (!strcasecmp(vn,"Language"))      sval=language_registry();   /* runtime/language.c */
         else if (!strcasecmp(vn,"Install Dir"))   sval="C:\\NFSU2";
         else if (!strcasecmp(vn,"CD Drive"))      sval="C:\\NFSU2";
         else if (!strcasecmp(vn,"StreamingInstall")){ dval=0; have_d=1; }
