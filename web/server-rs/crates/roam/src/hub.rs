@@ -23,7 +23,7 @@ const DEGREE_V1: usize = 7;
 const NONE: u32 = u32::MAX;
 
 /// a race lobby a player hosts (roam_core.h RC_MSG_LOBBY, an advert to the hub): its id, the race, where it starts,
-/// its players, the most it takes and its state
+/// its players (n, the host first), the most it takes and its state
 #[derive(Clone, Copy, Debug)]
 struct HubLobby {
     id: u32,
@@ -33,10 +33,19 @@ struct HubLobby {
     n: u8,
     max: u8,
     state: u8,
+    ids: [u32; wire::LOBBY_PLAYERS],
 }
 
 /// an advert older than this is a lobby gone (its host sends one every second)
 const LOBBY_STALE_MS: f64 = 3000.0;
+/// A lobby's host is linked with the players in free roam this near its start before any other link (the nearest
+/// LOBBY_NEAR_MAX of them, three quarters of the 32): any of them may join it (roam_game.c MP_JOIN_M, 15 m from the
+/// start, as the host sees them)
+const LOBBY_NEAR_M: f64 = 20.0;
+const LOBBY_NEAR_MAX: usize = 24;
+/// a player's ask to join a lobby (its JOIN's copy to the hub) links it with the host first for this long (it asks
+/// again every half second while it waits; once in, it is one of the lobby's players)
+const LOBBY_JOIN_MS: f64 = 6000.0;
 
 /// a link: the player it is to, and since when
 #[derive(Clone, Copy, Debug)]
@@ -69,6 +78,8 @@ struct Player {
     lobbies: bool,
     /// the race lobby it hosts, as its last advert to the hub had it, and when that came
     lobby: Option<(HubLobby, f64)>,
+    /// the lobby it asked to join (its id), and when
+    join: Option<(u32, f64)>,
     /// its links after the last tick (a HELLO of another start of the game empties them)
     links: Vec<Link>,
     /// its place in `order`
@@ -131,6 +142,8 @@ struct Stats {
     tick_ms_max: f64,
     busy: f64,
     cap_cuts: u64,
+    /// links a race lobby needed made before the others (`lobby_pairs`), at the last tick
+    lobby_links: u64,
 }
 
 /// one pair of a room weighed (every pair of a room of at most `exact_room` players): since when it is linked; a and b
@@ -168,6 +181,12 @@ struct Scratch {
     near_a: Vec<Near>,
     /// each Near's vectors of what it found, kept for the next tick
     found: Vec<Found>,
+    /// the race lobbies' pairs (`lobby_pairs`), places in the room, the host first; the room's ids to places; the
+    /// players asking to join a lobby (its id, their place); the players near a lobby's start
+    lpairs: Vec<(u32, u32)>,
+    lids: HashMap<u32, u32>,
+    ljoin: Vec<(u32, u32)>,
+    lnear: Vec<(f64, u32)>,
     /// a large room's links of the last tick, sorted (`link_many`)
     olds: Vec<Cand>,
     /// each place's links of the last tick as places in the room: `olinks[ostart[i]..ostart[i + 1]]`
@@ -418,6 +437,7 @@ impl Hub {
                     seen: 0.0,
                     lobbies: false,
                     lobby: None,
+                    join: None,
                     links: Vec::new(),
                     at: 0,
                 })
@@ -453,9 +473,10 @@ impl Hub {
                 p.status = status;
             }
             Msg::MapReq { req } if sender == p.id => ask = Some(req),
-            Msg::Lobby { op, to: 0, lobby, race, x, y, n, max, state } if sender == p.id => match op {
-                wire::LOBBY_ADVERT => p.lobby = Some((HubLobby { id: lobby, race, x, y, n, max, state }, now)),
+            Msg::Lobby { op, to: 0, lobby, race, x, y, n, max, state, ids } if sender == p.id => match op {
+                wire::LOBBY_ADVERT => p.lobby = Some((HubLobby { id: lobby, race, x, y, n, max, state, ids }, now)),
                 wire::LOBBY_CLOSE if p.lobby.is_some_and(|(l, _)| l.id == lobby) => p.lobby = None,
+                wire::LOBBY_JOIN => p.join = Some((lobby, now)),
                 _ => {}
             },
             _ => {}
@@ -589,19 +610,22 @@ impl Hub {
         s.local.clear();
         s.local.resize(self.slots.len(), NONE);
         let w = Weigh { now, hold_ms: self.o.hold_ms, keep: self.o.keep };
+        let mut lobby_links = 0;
         for r in 0..rooms {
             let list = std::mem::take(&mut s.rooms[r]);
             prepare(&self.slots, &list, self.cap, self.o.look_ms / 1000.0, s);
-            if list.len() > self.o.exact_room {
-                link_many(&self.slots, &list, &w, s);
+            lobby_pairs(&self.slots, &list, now, s);
+            lobby_links += if list.len() > self.o.exact_room {
+                link_many(&self.slots, &list, &w, s)
             } else {
-                link_every_pair(&self.slots, &list, &w, s);
-            }
+                link_every_pair(&self.slots, &list, &w, s)
+            };
             for &slot in &list {
                 s.local[slot as usize] = NONE;
             }
             s.rooms[r] = list;
         }
+        self.st.lobby_links = lobby_links;
         self.lists();
         let ms = t0.elapsed().as_secs_f64() * 1000.0;
         self.st.ticks += 1;
@@ -714,6 +738,7 @@ impl Hub {
             "tickMsMax": num(st.tick_ms_max),
             "busy": num(st.busy),
             "capCuts": st.cap_cuts,
+            "lobbyLinks": st.lobby_links,
         })
     }
 
@@ -756,11 +781,79 @@ fn join(fresh: &mut [Vec<Link>], a: u32, b: u32, since: f64) {
     fresh[b as usize].push(Link { slot: a, since });
 }
 
+/// since when the players in slots a and b are linked: since the link of the last tick, or now
+fn since_of(slots: &[Option<Player>], a: u32, b: u32, now: f64) -> f64 {
+    player(slots, a).and_then(|p| p.links.iter().find(|l| l.slot == b)).map_or(now, |l| l.since)
+}
+
+/// The links a race lobby needs before any other (roam_game.c mp_*: its messages go between linked players only): its
+/// host with each of its players, with each player asking to join it (LOBBY_JOIN_MS), and with the LOBBY_NEAR_MAX
+/// nearest players in free roam within LOBBY_NEAR_M of its start.  Without them a host at a busy start (the players around it, and the ones who went into the career race
+/// there, whose places count for `stale_ms`) had its links full of nearer players than one who stopped there to join:
+/// that one's link came and went, it heard of the lobby now and then, and its Enter went nowhere.  Into `s.lpairs`, as
+/// places in the room, the host first; the link functions make them first, while both ends have room.
+fn lobby_pairs(slots: &[Option<Player>], list: &[u32], now: f64, s: &mut Scratch) {
+    let Scratch { pos, lpairs, lids, ljoin, lnear, .. } = s;
+    lpairs.clear();
+    lids.clear();
+    ljoin.clear();
+    for (j, &q) in list.iter().enumerate() {
+        if let Some((id, _)) = player(slots, q).and_then(|o| o.join).filter(|&(_, t)| now - t <= LOBBY_JOIN_MS) {
+            ljoin.push((id, j as u32));
+        }
+    }
+    for (i, &slot) in list.iter().enumerate() {
+        let Some((l, t)) = player(slots, slot).and_then(|p| p.lobby) else { continue };
+        // open or starting (RC_LS_*), its advert fresh
+        if now - t > LOBBY_STALE_MS || l.state > 1 {
+            continue;
+        }
+        if lids.is_empty() {
+            for (j, &q) in list.iter().enumerate() {
+                if let Some(o) = player(slots, q) {
+                    lids.insert(o.id, j as u32);
+                }
+            }
+        }
+        for id in &l.ids[1..(l.n as usize).clamp(1, wire::LOBBY_PLAYERS)] {
+            if let Some(&j) = lids.get(id).filter(|&&j| j != i as u32) {
+                lpairs.push((i as u32, j));
+            }
+        }
+        lpairs.extend(ljoin.iter().filter(|&&(id, j)| id == l.id && j != i as u32).map(|&(_, j)| (i as u32, j)));
+        lnear.clear();
+        let (x, y) = (f64::from(l.x), f64::from(l.y));
+        for (j, &q) in list.iter().enumerate() {
+            // in free roam or paused there (RC_ST_ROAM, RC_ST_PAUSED), as the map's
+            if j == i || !player(slots, q).is_some_and(|o| matches!(o.status, 2 | 5)) {
+                continue;
+            }
+            let d = (pos[j][0] - x).powi(2) + (pos[j][1] - y).powi(2);
+            if d <= LOBBY_NEAR_M * LOBBY_NEAR_M {
+                lnear.push((d, j as u32));
+            }
+        }
+        lnear.sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        lpairs.extend(lnear.iter().take(LOBBY_NEAR_MAX).map(|&(_, j)| (i as u32, j)));
+    }
+}
+
 /// The links of a room of at most `exact_room` players: every pair of them, nearest first (a link younger than
 /// `hold_ms` before them all, an older one at `keep` its distance), into the links while both ends have room.
-fn link_every_pair(slots: &[Option<Player>], list: &[u32], w: &Weigh, s: &mut Scratch) {
+fn link_every_pair(slots: &[Option<Player>], list: &[u32], w: &Weigh, s: &mut Scratch) -> u64 {
     let m = list.len();
-    let Scratch { pos, ahead, deg, mark, since, pairs, order, sorting, local: at, fresh, .. } = s;
+    let Scratch { pos, ahead, deg, mark, since, pairs, order, sorting, local: at, fresh, lpairs, .. } = s;
+    // the race lobbies' links first
+    let linked = |fresh: &[Vec<Link>], a: u32, b: u32| fresh[a as usize].iter().any(|l| l.slot == b);
+    let mut made = 0;
+    for &(a, b) in lpairs.iter() {
+        let (a, b) = (a as usize, b as usize);
+        let (sa, sb) = (list[a], list[b]);
+        if fresh[sa as usize].len() < deg[a] && fresh[sb as usize].len() < deg[b] && !linked(fresh, sa, sb) {
+            join(fresh, sa, sb, since_of(slots, sa, sb, w.now));
+            made += 1;
+        }
+    }
     pairs.clear();
     order.clear();
     mark.clear();
@@ -792,7 +885,7 @@ fn link_every_pair(slots: &[Option<Player>], list: &[u32], w: &Weigh, s: &mut Sc
     // a stable sort by d: at one d, the pairs in the order they were weighed
     sort_stable(order, sorting);
     // a link takes two with room: once fewer than two have it, the rest of the pairs make none
-    let mut open = deg.iter().filter(|&&d| d > 0).count();
+    let mut open = (0..m).filter(|&i| fresh[list[i] as usize].len() < deg[i]).count();
     for &(_, k) in order.iter() {
         if open < 2 {
             break;
@@ -800,11 +893,12 @@ fn link_every_pair(slots: &[Option<Player>], list: &[u32], w: &Weigh, s: &mut Sc
         let p = &pairs[k as usize];
         let (a, b) = (p.a as usize, p.b as usize);
         let (sa, sb) = (list[a], list[b]);
-        if fresh[sa as usize].len() < deg[a] && fresh[sb as usize].len() < deg[b] {
+        if fresh[sa as usize].len() < deg[a] && fresh[sb as usize].len() < deg[b] && (made == 0 || !linked(fresh, sa, sb)) {
             join(fresh, sa, sb, p.since);
             open -= (fresh[sa as usize].len() == deg[a]) as usize + (fresh[sb as usize].len() == deg[b]) as usize;
         }
     }
+    made
 }
 
 /// whether `places` has `j` (every one compared, without a branch: there are at most a degree of them, and this
@@ -831,10 +925,27 @@ fn has_place(places: &[u32], j: u32) -> bool {
 /// by place in the room (a player's last links and its new ones, as places), not from the players.  (Not inlined
 /// into the tick: there it made the every-pair loop of the small rooms 1 % slower.)
 #[inline(never)]
-fn link_many(slots: &[Option<Player>], list: &[u32], w: &Weigh, s: &mut Scratch) {
+fn link_many(slots: &[Option<Player>], list: &[u32], w: &Weigh, s: &mut Scratch) -> u64 {
     let m = list.len();
     let Scratch {
-        pos, ahead, deg, local: at, fresh, grid, heap, near, grid_a, near_a, found, olds, olinks, ostart, fcount, flinks, ..
+        pos,
+        ahead,
+        deg,
+        local: at,
+        fresh,
+        grid,
+        heap,
+        near,
+        grid_a,
+        near_a,
+        found,
+        olds,
+        olinks,
+        ostart,
+        fcount,
+        flinks,
+        lpairs,
+        ..
     } = s;
     let cand = |d: f64, i: usize, j: usize, nearest: bool| Cand::new(d, i as u32, j as u32, nearest);
     grid.build(pos);
@@ -882,6 +993,19 @@ fn link_many(slots: &[Option<Player>], list: &[u32], w: &Weigh, s: &mut Scratch)
     flinks.clear();
     flinks.resize(m * stride, 0);
     let room = |fcount: &[u32], i: usize| (fcount[i] as usize) < deg[i];
+    // the race lobbies' links first
+    let mut made = 0;
+    for &(a, b) in lpairs.iter() {
+        let (i, j) = (a as usize, b as usize);
+        if room(fcount, i) && room(fcount, j) && !has_place(&flinks[i * stride..i * stride + fcount[i] as usize], b) {
+            join(fresh, list[i], list[j], since_of(slots, list[i], list[j], w.now));
+            for (a, b) in [(i, j), (j, i)] {
+                flinks[a * stride + fcount[a] as usize] = b as u32;
+                fcount[a] += 1;
+            }
+            made += 1;
+        }
+    }
     let mut o = 0;
     loop {
         // the next in the order: the heap's nearest one or the next link of the last tick
@@ -934,4 +1058,5 @@ fn link_many(slots: &[Option<Player>], list: &[u32], w: &Weigh, s: &mut Scratch)
     for n in near.drain(..).chain(near_a.drain(..)) {
         found.push(n.into_found());
     }
+    made
 }

@@ -395,6 +395,47 @@ html:has(> body > .stage:not([hidden])) { overflow: hidden; }
 .notices div { animation: notice-fade 5s linear both; }
 .notices b { font-weight: 700; color: rgba(200, 240, 136, 0.9); }    /* --lime */
 @keyframes notice-fade { 0% { opacity: 0; } 4%, 84% { opacity: 1; } 100% { opacity: 0; } }
+/* free roam: the race lobby (lobby.ts): a card on the right, sized with the HUD (--u: one HUD unit), and over the
+ * trip to the race and back a cover of the whole picture with the lobby in the middle */
+.lobby {
+  --u: 1px;
+  position: absolute; left: 0; top: 0; z-index: 3; transform: translateX(-100%);
+  width: calc(150 * var(--u)); min-width: 180px; padding: calc(7 * var(--u)) calc(8 * var(--u));
+  border-left: 3px solid var(--lime); border-radius: 4px; background: rgba(13, 13, 13, 0.78);
+  font: 400 max(11px, calc(6 * var(--u))) / 1.35 var(--font); color: var(--text); pointer-events: none;
+}
+.lobby-title { font-weight: 700; font-style: italic; text-transform: uppercase; letter-spacing: 0.02em; color: var(--lime); }
+.lobby-sub, .lobby-hint { color: var(--muted); font-size: 0.85em; }
+.lobby-why { margin-top: 0.4em; color: var(--muted); }
+.lobby-places { list-style: none; margin: 0.5em 0 0; padding: 0; }
+.lobby-places li { display: flex; gap: 0.6em; align-items: baseline; padding: 0.12em 0; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.lobby-places li.open { color: rgba(255, 255, 255, 0.35); font-style: italic; }
+.lobby-places.dim li.taken { opacity: 0.6; }
+.lobby-n { width: 1em; text-align: right; color: var(--muted); }
+.lobby-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lobby-tag { font-size: 0.75em; text-transform: uppercase; color: var(--lime); }
+.lobby-act { display: flex; gap: 0.5em; align-items: center; margin-top: 0.6em; }
+.lobby-act kbd {
+  padding: 0 0.4em; border: 1px solid var(--edge); border-radius: 3px; background: var(--field);
+  font: 700 0.85em/1.5 var(--font); color: var(--text);
+}
+.lobby-count { margin-top: 0.5em; font-size: 1.5em; font-weight: 700; font-style: italic; color: var(--lime); }
+.lobby-note { color: var(--text); }
+.lobby-cover {
+  --u: 1px;
+  position: absolute; inset: 0; z-index: 4; display: grid; place-items: center;
+  background: radial-gradient(60% 60% at 50% 45%, #202020, #0a0a0a);
+  font: 400 max(13px, calc(8 * var(--u))) / 1.4 var(--font); color: var(--text);
+}
+.lobby-cover[hidden] { display: none; }
+.lobby-card { width: min(calc(220 * var(--u)), calc(100% - 32px)); min-width: 240px; }
+.lobby-card .lobby-title { font-size: 1.4em; }
+.lobby-step { display: flex; gap: 0.6em; align-items: center; margin-top: 1em; color: var(--muted); }
+.lobby-spin {
+  width: 1em; height: 1em; border: 2px solid rgba(255, 255, 255, 0.2); border-top-color: var(--lime); border-radius: 50%;
+  animation: lobby-spin 0.9s linear infinite;
+}
+@keyframes lobby-spin { to { transform: rotate(1turn); } }
 
 /* --------------------------------------------------------------- dialogs */
 dialog { color: var(--text); }

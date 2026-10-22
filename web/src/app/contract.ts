@@ -50,6 +50,8 @@ export interface NetOptions extends CommonOptions {
   name: string;
   /** a line for the player from the game (a friend joined, left, went into a race) */
   notice?: (text: string, who?: string) => void;
+  /** free roam: the race lobby's panel, its state as JSON from the game ("{}": none) */
+  lobby?: (json: string) => void;
   /** the server's LAN took this page back after the link was lost (a server restart, as for a deploy) */
   back?: () => void;
 }

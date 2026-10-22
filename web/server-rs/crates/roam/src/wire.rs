@@ -18,12 +18,16 @@ pub(crate) const MSG_LOBBY: u8 = 12;
 pub(crate) const MSG_LOBBIES: u8 = 13;
 /// HELLO's flag: this player takes race lobbies (roam_core.h RC_HF_LOBBY)
 pub(crate) const HF_LOBBY: u16 = 0x0080;
-/// a LOBBY's ops (roam_core.h RC_LOBBY_*) the hub keeps: the host's advert and its end
+/// a LOBBY's ops (roam_core.h RC_LOBBY_*) the hub keeps: the host's advert and its end, and a player's ask to join
 pub(crate) const LOBBY_ADVERT: u8 = 1;
+/// a player's ask to join (to its host, and a copy to the hub: the hub links the two first)
+pub(crate) const LOBBY_JOIN: u8 = 2;
 pub(crate) const LOBBY_CLOSE: u8 = 5;
 /// a LOBBIES entry: x, y (i16 LE, m), race (u32 LE), players, most players, state (u8); at most LOBBIES_MAX of them
 pub(crate) const LOBBIES_ENTRY: usize = 11;
 pub(crate) const LOBBIES_MAX: usize = 96;
+/// the most players a lobby takes (roam_core.h RC_LOBBY_MAX)
+pub(crate) const LOBBY_PLAYERS: usize = 6;
 /// a MAP entry: x, y (i16 LE, m), heading (u8, 256 a turn); at most MAP_PER of them a datagram (roam_core.h)
 pub(crate) const MAP_ENTRY: usize = 5;
 pub(crate) const MAP_PER: usize = 230;
@@ -68,6 +72,8 @@ pub(crate) enum Msg<'a> {
         n: u8,
         max: u8,
         state: u8,
+        /// its players (n of them, the host first), 0 after them
+        ids: [u32; LOBBY_PLAYERS],
     },
     Bye,
     Other,
@@ -157,22 +163,15 @@ pub(crate) fn decode(d: &[u8]) -> Option<(u8, u32, Msg<'_>)> {
             if !(1..6).contains(&op) || arg >= 5 || state >= 3 || !(2..=6).contains(&max) || n > max as usize || end != HDR + 24 + 4 * n {
                 return None;
             }
-            let ids: Vec<u32> = (0..n).map(|i| u32_le(d, HDR + 24 + 4 * i)).collect();
+            let mut ids = [0u32; LOBBY_PLAYERS];
+            for (i, v) in ids.iter_mut().enumerate().take(n) {
+                *v = u32_le(d, HDR + 24 + 4 * i);
+            }
             let (lobby, race) = (u32_le(d, 24), u32_le(d, 28));
-            if lobby == 0 || race == 0 || ids.iter().enumerate().any(|(i, &v)| v == 0 || ids[..i].contains(&v)) {
+            if lobby == 0 || race == 0 || ids[..n].iter().enumerate().any(|(i, &v)| v == 0 || ids[..i].contains(&v)) {
                 return None;
             }
-            Msg::Lobby {
-                op,
-                to: u32_le(d, 20),
-                lobby,
-                race,
-                x: u16_le(d, 32) as i16,
-                y: u16_le(d, 34) as i16,
-                n: n as u8,
-                max,
-                state,
-            }
+            Msg::Lobby { op, to: u32_le(d, 20), lobby, race, x: u16_le(d, 32) as i16, y: u16_le(d, 34) as i16, n: n as u8, max, state, ids }
         }
         MSG_BYE => Msg::Bye,
         _ => Msg::Other,

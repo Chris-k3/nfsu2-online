@@ -13,7 +13,10 @@
 //                    errors the pages ignore instead of trusting it
 //        [--page app]  each instance is the player's start page (web/index.html): Play is clicked, the
 //                    renderer, audio, input and network are the app's (free roam from the page address's
-//                    NFSU2_ROAM=1); the default is test/hostcheck.html (null renderer, net=<name>)
+//                    NFSU2_ROAM=1); the default is test/hostcheck.html (null renderer, net=<name>).  A page of
+//                    1600x900 (--size), and a script line `log SHOT <name>` saves the page as the player sees it
+//                    (the game and the page's own overlays) as <out>/<instance>-<name>.png; `log SHOT clean_<name>`
+//                    without the race lobby's panel (tests/scripts/mprace_shots_a/b.txt)
 //        [--page play [--size 960x540] [--play-only Bob]]   the renderer's test page (test/play.html, WebGPU)
 //                    instead: frame dumps go to the server's /artifacts/ as <name>-*.png (a server of our own
 //                    gets --artifacts <out>); --play-only: only that instance renders, the others run hostcheck
@@ -72,7 +75,7 @@ const SPECS = (argv.includes('--solo') ? [opt('a', 'Alice:roam_mp_drive.txt')]
   .filter(Boolean).map(x => x.split(':'));
 const N = SPECS.length;
 const APP = opt('page', 'test') === 'app';
-const PLAY = opt('page', 'test') === 'play', SIZE = opt('size', '960x540').split('x').map(Number), PLAY_ONLY = opt('play-only', '');
+const PLAY = opt('page', 'test') === 'play', SIZE = opt('size', opt('page', 'test') === 'app' ? '1600x900' : '960x540').split('x').map(Number), PLAY_ONLY = opt('play-only', '');
 const FETCH = opts('fetch');                 // files of each page's save folder to copy out, as <out>/<name>.<file>
 const SEED = opt('seed', '');               // a save tree each page starts from
 const HIDE = opts('hide').map(x => { const [n, at, dur] = x.split(':'); return { name: n, at: +at * 1000, dur: +(dur ?? 8) * 1000 }; });
@@ -146,11 +149,18 @@ const browser = await chromium.launch({ channel: 'chrome', headless: !argv.inclu
 const t0 = Date.now();
 const inst = [];
 async function start(i, name, script, own) {
-  const ctx = await browser.newContext(HTTPS ? { ignoreHTTPSErrors: true } : {});
+  const ctx = await browser.newContext({ ...(HTTPS ? { ignoreHTTPSErrors: true } : {}), ...(APP ? { viewport: { width: SIZE[0], height: SIZE[1] } } : {}) });
   const page = await ctx.newPage();
   const log = fs.createWriteStream(path.join(OUT, `${name}.log`));
   const w = (s) => log.write(`${((Date.now() - t0) / 1000).toFixed(3)} ${s}\n`);
-  page.on('console', m => w(m.text()));
+  page.on('console', m => {
+    w(m.text());
+    // the app page as the player sees it, at a script's `log SHOT <name>` (clean_*: without the lobby's panel)
+    const k = APP && /LOG SHOT (\S+)/.exec(m.text());
+    if (k) void (k[1].startsWith('clean') ? page.evaluate(() => { for (const id of ['lobby', 'lobby-cover']) document.getElementById(id).hidden = true; }) : Promise.resolve())
+      .then(() => page.screenshot({ path: path.join(OUT, `${name}-${k[1]}.png`) }))
+      .then(() => w(`[shot] ${k[1]}`), e => w(`[shot] ${k[1]} failed: ${e}`));
+  });
   page.on('pageerror', e => w('PAGEERROR ' + e));
   const u = url(i, name, script, own);
   if (SEED) w(`[roam-pair] save seed: ${await seedSave(page, BASE, `roam-${name}`, SEED)} files from ${SEED}`);

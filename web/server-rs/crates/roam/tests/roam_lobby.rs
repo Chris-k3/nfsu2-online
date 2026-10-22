@@ -1,5 +1,5 @@
-//! Race lobbies (roam_core.h RC_MSG_LOBBY, RC_MSG_LOBBIES): a host's advert to the hub, and the open lobbies of a
-//! room with the world map's answer to a player that takes them.
+//! Race lobbies (roam_core.h RC_MSG_LOBBY, RC_MSG_LOBBIES): a host's advert to the hub, the open lobbies of a room
+//! with the world map's answer to a player that takes them, and the links a lobby needs first.
 
 mod kit;
 
@@ -172,4 +172,70 @@ fn lobbies_on_the_wire_roam_core_and_the_hub_agree() {
     args.extend(frames);
     let got = run(&args);
     assert_eq!(got.lines().last(), Some(format!("lobbies 1 1 -1234,567,{},2,6,0", 0x0BADF00Du32).as_str()), "{got}");
+}
+
+// a lobby's host is linked with its players and with the players in free roam near its start before any nearer one
+// (every pair | the grid): with the start crowded by players who went into its career race (their places count for
+// a minute) and 4 links a player, its player 300 m off and one stopped 12 m out are linked with the host, ones in
+// free roam 25 or 40 m out are not; once its advert is stale (and the links' hold is over), the nearest again
+#[test]
+fn a_lobbys_host_is_linked_with_its_players_and_the_ones_at_its_start_first() {
+    for (how, o) in ways() {
+        let mut k = Kit::new(RoamOptions { degree: 4, ..o });
+        for i in 0..9 {
+            join(&mut k, i, "", true);
+        }
+        // 0 the host at the start (0, 0); 1 to 4 in a race, 1 m from it all round (its 4 nearest); 5 a player of the
+        // lobby 300 m off; 6 stopped 12 m out; 7 at 25 m; 8 at 40 m
+        let snaps = |k: &mut Kit| {
+            k.from(W(0), &snap(100, [0.0, 0.0, 0.0]));
+            for (i, at) in [[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0], [0.0, -1.0]].iter().enumerate() {
+                k.from(W(1 + i as u32), &snap_n(101 + i as u32, [at[0], at[1], 0.0], 3, 1));
+            }
+            k.from(W(5), &snap(105, [300.0, 0.0, 0.0]));
+            k.from(W(6), &snap(106, [12.0, 0.0, 0.0]));
+            k.from(W(7), &snap(107, [25.0, 0.0, 0.0]));
+            k.from(W(8), &snap(108, [40.0, 0.0, 0.0]));
+        };
+        let linked = |k: &Kit, a: u32, b: u32| {
+            let l = k.lists();
+            let has = |x: u32, y: u32| l.get(&format!("{}:47210", W(x))).is_some_and(|v| v.iter().any(|e| e.vip == W(y)));
+            assert_eq!(has(a, b), has(b, a), "{how}: a link is listed at both ends");
+            has(a, b)
+        };
+        snaps(&mut k);
+        k.hub.tick();
+        assert!(!linked(&k, 0, 5) && !linked(&k, 0, 6), "{how}: without a lobby, the nearest");
+        // the advert: the host and 5 in it
+        k.from(W(0), &lobby(100, 1, 0, 0xA0, 0x1111, 0, 0, 0, 6, &[100, 105]));
+        k.step(1000.0);
+        snaps(&mut k);
+        k.clear();
+        k.hub.tick();
+        assert!(linked(&k, 0, 5), "{how}: its player 300 m off");
+        assert!(linked(&k, 0, 6), "{how}: the one 12 m out");
+        assert!(!linked(&k, 0, 7) && !linked(&k, 0, 8), "{how}: not the ones 25 and 40 m out");
+        assert_eq!(k.info("lobbyLinks"), 2.0, "{how}: 2 links for the lobby");
+        // 7, 25 m out, asks to join (its JOIN's copy to the hub; one for another lobby counts for nothing): linked
+        // with the host too
+        k.from(W(7), &lobby(107, 2, 0, 0xA0, 0x1111, 0, 0, 0, 6, &[100, 105]));
+        k.from(W(8), &lobby(108, 2, 0, 0xEE, 0x1111, 0, 0, 0, 6, &[100, 105]));
+        k.from(W(0), &lobby(100, 1, 0, 0xA0, 0x1111, 0, 0, 0, 6, &[100, 105]));
+        k.step(1000.0);
+        snaps(&mut k);
+        k.clear();
+        k.hub.tick();
+        assert!(linked(&k, 0, 7), "{how}: the one asking to join, 25 m out");
+        assert!(!linked(&k, 0, 8), "{how}: not one asking to join another lobby");
+        assert_eq!(k.info("lobbyLinks"), 3.0, "{how}: 3 links for the lobby");
+        // no advert since: stale; past the links' hold, the nearest
+        for _ in 0..3 {
+            k.step(2500.0);
+            snaps(&mut k);
+            k.clear();
+            k.hub.tick();
+        }
+        assert!(!linked(&k, 0, 5) && !linked(&k, 0, 6) && !linked(&k, 0, 7), "{how}: its advert stale, the nearest again");
+        assert_eq!(k.info("lobbyLinks"), 0.0, "{how}: none for a lobby gone");
+    }
 }

@@ -51,6 +51,11 @@ void     roam_plat_get_stats(roam_plat_stats *out);
 /* a message over the game ("<name><what>", as the joins and leaves): the
  * page shows it (web); elsewhere a log line.  With the session lock held */
 void     roam_plat_notice(const char *name, const char *what);
+/* the race lobby's panel over the game (roam_game.c mp_panel): its state as
+ * a JSON object, "{}" for none, sent when it changes.  1: the page shows it
+ * (web); 0: this platform has no panel, the game's top line says it.  With
+ * the session lock held */
+int      roam_plat_lobby(const char *json);
 const char *roam_ip_str(uint32_t ip, char *buf);   /* buf >= 16 */
 
 #endif

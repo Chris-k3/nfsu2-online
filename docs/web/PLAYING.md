@@ -264,23 +264,26 @@ Good to know:
   - **An open race** (its marker in the street): its card asks Accept or Decline as always, and Accept asks once more:
     **Solo** (the career race, as before) or **Multiplayer**.
   - **A race that is not open** in your career has no marker of the game's. Within about 50 m its start shows
-    "Circuit (multiplayer)" or the like, and there the top of the screen says why it is not open (you won it, your
-    sponsor's contract has no place for it, a URL race before its wins, an SUV race without an SUV, not open yet) and
-    that Enter races it with others. A spot offers the race of your stage there, else the last one you won there:
-    never one of a stage you have not reached. None in the prologue, none while a story task runs.
-  - **Multiplayer opens a lobby** at the start. The players near see "Thom's circuit (1/6)" over it (from about
-    250 m) and a message ("Thom is starting a multiplayer circuit nearby"); everyone in free roam sees its race's icon
-    on the world map (M), with the same words beside it ("Multiplayer circuit (1/6)" from far away). They join at
-    the start: Enter (at an open race: its card's Accept, then **Join**). Up to 6 players; drag 4, 3 on the
-    three-lane track; at a full one the top of the screen says so, and Enter starts another. Drive more than 40 m
-    from the start to leave a lobby; the host leaving calls it off. A lobby is within your Room, as everything in
-    free roam. At a race's start Enter is for the race: no outrun is offered there.
+    "Circuit (multiplayer)" or the like, and at the start a panel on the right (under Bank) says it is multiplayer
+    only there and why (you won it in your career, your sponsor's contract has no place for it, a URL race before
+    its wins, an SUV race without an SUV, not open yet), and that Enter opens a lobby. A spot offers the race of your
+    stage there, else the last one you won there: never one of a stage you have not reached. None in the prologue,
+    none while a story task runs.
+  - **Multiplayer opens a lobby** at the start: the panel shows it, its race, track and laps and its six places (drag
+    4, 3 on the three-lane track) with the players in them, the host first and yours marked. The players near see
+    "Thom's circuit (1/6)" over the start (from about 250 m); everyone in free roam sees its race's icon on the world
+    map (M), and the nearest four lobbies their words beside it ("Circuit 1/6"). They join at the start: within 15 m
+    of it the panel shows the lobby and Enter joins (at an open race: its card's Accept, then **Join**). Up to 6
+    players; at a full one the panel says so, and Enter starts another. Drive more than 40 m from the start to leave
+    a lobby; the host leaving calls it off. A lobby is within your Room, as everything in free roam. At a race's
+    start Enter is for the race: no outrun is offered there.
   - **The host presses Enter** to start once another player is in. After a 5-second countdown every game in the lobby
-    goes to the race by itself: out of free roam, the LAN menus (your keys and controller do nothing meanwhile), the
-    race on the career race's track, direction and laps (a URL event: its first race; a LAN race takes at least 2
-    laps, drift and Street X 4), with no traffic and no AI racers. You drive the race. After the results every game
-    goes back by itself, through the main menu and your crib, to where it left free roam: about a minute and a half
-    for the way out and back.
+    goes to the race by itself, behind a screen with the lobby on it and where the trip is ("Loading the race"): out
+    of free roam and through the LAN menus (your keys and controller do nothing meanwhile) to the race on the career
+    race's track, direction and laps (a URL event: its first race; a LAN race takes at least 2 laps, drift and Street
+    X 4), with no traffic and no AI racers. You drive the race. After the results every game goes back by itself,
+    behind the same screen, through the main menu and your crib, to where it left free roam, and the panel says your
+    place and prize: about a minute for the way out and back.
   - **Your career is not touched:** the race does not count in it, is neither won nor lost there and opens nothing.
     Only your bank changes: 1st $400, 2nd $300, 3rd $200, 4th $100, nothing for 5th, 6th or a race you left. It goes in
     at the crib on the way back, and the crib's autosave saves it with your profile (with the game's Save option at

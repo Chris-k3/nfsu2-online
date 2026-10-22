@@ -267,6 +267,13 @@ static void notice(const char *name, const char *what){
     if (MB && n > 0) tx_push(NET_KIND_NOTICE, 0, 0, (const uint8_t *)t, n);
 }
 void roam_plat_notice(const char *name, const char *what){ notice(name, what); }
+/* the race lobby's panel: its state to the page (NET_KIND_LOBBY), in a race too; -1: the ring is full, again later */
+int roam_plat_lobby(const char *json){
+    int n = (int)strlen(json);
+    if (!MB) return -1;
+    if (n <= 0 || n > (int)NET_MAX_PAYLOAD) return 1;
+    return tx_push(NET_KIND_LOBBY, 0, 0, (const uint8_t *)json, n) ? 1 : -1;
+}
 static uint8_t place(const rc_peer *p){ return p->status == RC_ST_PAUSED ? RC_ST_ROAM : p->status; }
 /* we are in free roam and the friend's car was within NEAR_M of ours (on the
  * ground) when last seen: SNAPs come only from free roam, so its newest state

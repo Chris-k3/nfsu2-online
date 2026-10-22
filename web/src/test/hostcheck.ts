@@ -38,7 +38,7 @@ const p = await startProcess({
   onNote: log,
 });
 // ?net=<name>: the virtual LAN (web/src/net) under that player name; the notices the app shows over the game, logged
-const net = q.has('net') ? attachNet(p, { name: q.get('net') || 'test', log, onNotice: t => log(`[notice] ${t}`) }) : null;
+const net = q.has('net') ? attachNet(p, { name: q.get('net') || 'test', log, onNotice: t => log(`[notice] ${t}`), onLobby: j => log(`[lobby] ${j}`) }) : null;
 (globalThis as any).nfsu2Net = net;
 const code = await p.exited;
 if (net) log(`NET ${JSON.stringify(net.stats())}`);

@@ -36,6 +36,7 @@ import { SavesPanel } from './saves-ui';
 import { saveScreenshot } from './shots';
 import { forgetLink, VaultPanel } from './vault-ui';
 import { FpsOverlay, FPS_MODES, type FpsMode } from './overlay';
+import { LobbyPanel } from './lobby';
 import { GameSession } from './game';
 import { AwayCheck, AWAY_LIMITS, type AwayLimits } from './away';
 import { moviesKept, Predownload } from './predownload';
@@ -90,6 +91,7 @@ let settingsText: string | null = null;
 let starting = false;                    // Play pressed, the session not there yet
 let fatal: string | null = null;         // why the running game had to be stopped
 let fps: FpsOverlay;
+let lobbyPanel: LobbyPanel;
 let settings: SettingsPanel;
 let players: { now(): void; last(): PlayerCounts | null } | null = null;
 let saves: SavesPanel;
@@ -381,7 +383,7 @@ async function startGame() {
     // longer than the game), and a closure from this function would keep its
     // scope, and with it this game, reachable
     session = await GameSession.start({
-      module: loaded!.module, info: loaded!.info, saveDir: SAVE, env: r.env, canvas, stage, audio, displayHz, netName, notice, netBack, onSaved,
+      module: loaded!.module, info: loaded!.info, saveDir: SAVE, env: r.env, canvas, stage, audio, displayHz, netName, notice, lobby, netBack, onSaved,
       artifacts: q.get('artifacts') ?? undefined, dumpScale: q.get('dumpscale') ? +q.get('dumpscale')! : undefined,
       toggleFullscreen, padPage: PAD_PAGE, log: logLine, onFatal: stopFatal,
     });
@@ -496,6 +498,7 @@ function endStage() {
   exitFullscreen();
   untrack?.(); untrack = null;
   fps.stop(); fps.reader = null; fps.memory = null;
+  lobbyPanel.clear();
   const menu = $<HTMLDialogElement>('#menu'); if (menu.open) menu.close();
   // a Quit question still open belongs to the game that ended (its answer would
   // do nothing, and the open question would keep that game reachable)
@@ -589,6 +592,15 @@ function notice(text: string, who?: string) {
   box.append(line);
   while (box.childElementCount > 4) box.firstElementChild!.remove();
   setTimeout(() => line.remove(), 5000);
+}
+/** free roam: the race lobby's panel, or the cover over the trip to the race and back (lobby.ts) */
+function lobby(json: string) {
+  placeLobby();
+  lobbyPanel.show(json);
+}
+function placeLobby() {
+  const v = session?.viewRect();
+  if (v && v.w && v.h) lobbyPanel.place(v, hudWide);
 }
 /** The notices' place: on the left, between the game's SMS icon (down to y -80 from the middle) and its radar
  *  (from +64; a GPS icon may sit just above it), lined up with the radar's left rim (x -301), in the game's HUD
@@ -894,6 +906,7 @@ export async function boot() {
   const given = takeParams(dev);
   instance = claimInstance(`nfsu2-saves:${SAVE}`);
   fps = new FpsOverlay($('#fps'));
+  lobbyPanel = new LobbyPanel($('#lobby'), $('#lobby-cover'), logLine);
   // made here once: a closure made per game (in startGame) would keep that game's scope reachable
   fps.extra = () => session?.stats() ?? {};
   settings = new SettingsPanel($('#settings'), {
@@ -906,6 +919,7 @@ export async function boot() {
   players = watchPlayers(line => settings.setStatus(line), () => !session && !starting, setReach);
   window.addEventListener('online', () => players?.now());
   window.addEventListener('resize', placeNotices);
+  window.addEventListener('resize', placeLobby);
   download = new Predownload(s => saves.showData(s), logLine, () => language());
   saves = new SavesPanel($('#saves'), $('#game-data'), {
     saveDir: SAVE, busy: () => !!session || starting || !instance.owner, confirm: confirmBox,

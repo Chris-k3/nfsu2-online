@@ -27,6 +27,13 @@
 //! 240 m changed links 28 times a second with 20 % instead).  The game shows a car for each of a player's links
 //! (runtime/roam_game.c).
 //!
+//! A race lobby's links come before all of these (its messages go between linked players only, roam_game.c mp_*):
+//! from its host's advert (to the hub every second, with its players), the host is linked with each of its players,
+//! with each player asking to join it (a copy of its JOIN to the hub, for 6 s), and with the 24 nearest players in
+//! free roam within 20 m of its start, while both ends have room.  By distance alone a host at a busy start had its
+//! links full of nearer players, the ones who went into the career race there among them: the link to a player who
+//! stopped there to join came and went, and its Enter went nowhere.
+//!
 //! A busy server gives every player fewer links: each link is two players' snapshots to each other, 20 a second each
 //! way (fewer for far ones), so a crowd costs its players times their links, all through the switch; a switch that
 //! cannot keep up delays every snapshot, and the cars stutter for everyone (nfsu2.xyz at 855 players, 2026-10-20:

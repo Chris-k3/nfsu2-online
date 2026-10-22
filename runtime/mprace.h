@@ -37,4 +37,10 @@ void mprace_host_gone(void);
 /* the game's input is the trip's own: the player's keys, mouse and pad are
  * not passed on (runtime/web/input_web.c, dinput_pad.c) */
 int  mprace_owns_input(void);
+/* the trip is in the game's menus (out of free roam, the LAN screens, the
+ * race's loading, the way back): the page covers them (the lobby's panel,
+ * roam_game.c mp_panel); not in the race, not on its results */
+int  mprace_covered(void);
+/* where the trip is, for the player: "Leaving free roam", "Loading the race", ... */
+const char *mprace_step(void);
 #endif

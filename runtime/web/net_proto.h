@@ -63,6 +63,9 @@
 #define NET_KIND_NOTICE   16u   /* TX ring only, never on the switch: a line of UTF-8 text the page shows
                                    over the game (free roam: a friend joined, left, went into a race);
                                    the friend's name first, ended by 0x1F */
+#define NET_KIND_LOBBY    17u   /* TX ring only, never on the switch: the free-roam race lobby's panel over
+                                   the game, its state as a JSON object ("{}": none), sent when it changes
+                                   (roam_game.c mp_panel) */
 #define NET_BROADCAST      0xFFFFFFFFu
 #define NET_ROAM_HUB       0x0A4D00FDu  /* 10.77.0.253: the server's free-roam hub (web/server-rs/crates/roam),
                                    an address the switch never hands out */

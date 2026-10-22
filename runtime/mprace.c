@@ -185,6 +185,7 @@ static struct {
     long     ready, dlg_at, wait_at;
     char     keys[16]; int nkeys; long key_at;     /* keys to press, one every 20 frames: L LEFT, R RETURN, E ESCAPE */
     char     why[96];
+    const char *step;                              /* where the trip is, for the player (mprace_step) */
 } M;
 
 static int okm(uint32_t a, uint32_t n){ return a && mem_is_committed(a) && mem_is_committed(a + n); }
@@ -232,6 +233,7 @@ static void fail(const char *why){
     snprintf(M.why, sizeof M.why, "%s", why);
     mlog("FAILED: %s: back to the career", why); state_log("failed");
     M.goal = G_CAREER_GOAL; M.phase = MPR_BACK; M.since = autotest_frame();
+    M.step = "Back to free roam";
 }
 static void to_phase(int ph){
     static const char *const nm[] = { "idle", "out of free roam", "in the LAN menus", "racing", "back to the career", "done", "failed" };
@@ -244,6 +246,7 @@ int mprace_start(const MpRace *r){
     if (rd(G_FLOW) != 6u || !(rd(G_GAMEMODE) & 1u)) return 0;
     memset(&M, 0, sizeof M);
     M.r = *r; M.goal = G_RACE_GOAL; M.frame0 = autotest_frame();
+    M.step = "Leaving free roam";
     to_phase(MPR_OUT);
     fprintf(stderr, "[mprace] f=%ld start: %s, mode %d, track %d%s, %d laps, %d players, LAN name %s%s%s\n", M.frame0,
             r->host ? "host" : "join", r->mode, r->track, r->reverse ? " reverse" : "", r->laps, r->players, r->name,
@@ -257,6 +260,8 @@ int mprace_prize(void){ return M.prize; }
 const char *mprace_why(void){ return M.why[0] ? M.why : "unknown"; }
 void mprace_host_gone(void){ if (!M.r.host && M.goal == G_RACE_GOAL && (M.phase == MPR_OUT || M.phase == MPR_LAN)) M.host_gone = 1; }
 int mprace_owns_input(void){ return __atomic_load_n(&M.owns, __ATOMIC_RELAXED); }   /* (the input thread asks) */
+int mprace_covered(void){ return M.phase == MPR_OUT || M.phase == MPR_LAN || (M.phase == MPR_BACK && M.owns); }
+const char *mprace_step(void){ return M.step ? M.step : ""; }
 
 static uint32_t screen_of(uint32_t vt){
     uint32_t n = rd(G_FEMGR);
@@ -378,6 +383,7 @@ static void step_race(CPU *c, long f){
             uint32_t a[5] = { S_MAIN, MSG_BUTTON, 0, 0, 0 };
             call(c, FN_MAIN_LAN, 0, 5, a);
             M.lan = 1; M.next = f + 60;
+            M.step = M.r.host ? "Setting up the race" : "Looking for the host's race";
             to_phase(MPR_LAN);
             return;
         }
@@ -392,11 +398,14 @@ static void step_race(CPU *c, long f){
             M.hosted = 1;
             mlog("host the LAN server%s", "");
         } else {
-            /* the host's server must be up: its advert among the servers found (by its address) */
+            /* the host's server should be up: its advert among the servers found (by its address), or 12 s
+             * (it starts in about 6); a LAN broadcast may never come on a crowded server (with 50 players on the
+             * switch it did not: the trip waited 45 s for it), and one not listening yet is asked again
+             * (the "reconnect?" dialog, below) */
             int seen = 0; uint32_t head = ss + SS_LIST;
             for (uint32_t n = rd(head), k = 0; n && n != head && k < 128; n = rd(n), k++) if (rd(n + 0x18u) == M.r.host_ip) seen = 1;
             if (!M.step_at) M.step_at = f;
-            if (!seen && f - M.step_at < 60 * 45) return;
+            if (!seen && f - M.step_at < 60 * 12) return;
             char ip[20]; snprintf(ip, sizeof ip, "%u.%u.%u.%u", M.r.host_ip >> 24, (M.r.host_ip >> 16) & 255u, (M.r.host_ip >> 8) & 255u, M.r.host_ip & 255u);
             MR8(G_LAN_HOST) = 0; gs(G_LAN_ADDR, ip, 40); MR16(G_LAN_PORT) = LAN_PORT;
             uint32_t a[3] = { S_SERVERSEL, S_LANNAME, 0 };
@@ -457,6 +466,7 @@ static void step_race(CPU *c, long f){
     }
     if (cb == CB_ROOM && okm(ctx, 0x1180)){
         if (!M.step_at) M.step_at = f;
+        M.step = M.started || MR8(ctx + 0x1178u) ? "Starting the race" : "Waiting for the others";
         uint32_t n = rd(G_GAME_COUNT);
         if (!M.r.host){
             /* ready (the join's own callback sent "not ready" first): again every 5 s until the game says so */
@@ -494,6 +504,7 @@ static void step_race(CPU *c, long f){
 /* ---- the race and its results ----------------------------------------------------------------- */
 static int step_racing(long f){
     if (rd(G_FLOW) == 6u && (rd(G_GAMEMODE) & 0x200u) && M.phase == MPR_LAN){ to_phase(MPR_RACE); M.raced = 1; mlog("the race is on%s", ""); }
+    if (M.phase == MPR_LAN && M.lan && rd(G_FLOW) != 3u) M.step = "Loading the race";      /* (the room's start: the race's world loads) */
     if (M.phase != MPR_RACE) return 0;
     if (on("UI_PostRaceResults.fng")){
         /* our place; while the results are up, again until there is one (our
@@ -517,11 +528,11 @@ static int step_racing(long f){
             fputc('\n', stderr);
         }
         /* the player reads them; Continue after 8 s, the host 4 s after the others (its leaving closes the server) */
-        if (f - M.results_at > 60 * (M.r.host ? 12 : 8)){ autotest_tap(K_RET, 6); M.goal = G_CAREER_GOAL; to_phase(MPR_BACK); M.next = f + 120; }
+        if (f - M.results_at > 60 * (M.r.host ? 12 : 8)){ autotest_tap(K_RET, 6); M.goal = G_CAREER_GOAL; M.step = "Back to free roam"; to_phase(MPR_BACK); M.next = f + 120; }
         return 1;
     }
     /* the player left the race (its pause menu's Quit to LAN Main Menu): no results */
-    if (rd(G_FLOW) == 3u && !M.results_at){ mlog("the race was left: not finished%s", ""); M.goal = G_CAREER_GOAL; to_phase(MPR_BACK); }
+    if (rd(G_FLOW) == 3u && !M.results_at){ mlog("the race was left: not finished%s", ""); M.goal = G_CAREER_GOAL; M.step = "Back to free roam"; to_phase(MPR_BACK); }
     return 1;
 }
 

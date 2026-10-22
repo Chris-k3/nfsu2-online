@@ -62,6 +62,8 @@ export interface NetOptions {
   /** a line for the player: from the game (NET_KIND_NOTICE: a friend joined, left, went into a race; who: the
    *  friend's name the text starts with), or the server full */
   onNotice?: (text: string, who?: string) => void;
+  /** the free-roam race lobby's panel from the game (NET_KIND_LOBBY): its state as JSON, "{}" for none */
+  onLobby?: (json: string) => void;
   /** the switch welcomed this page again after the link was lost (a server restart, as for a deploy) */
   onBack?: () => void;
   /** milliseconds between pings to the switch (default 2000) */
@@ -506,6 +508,9 @@ class Link implements NetLink {
           const t = new TextDecoder().decode(ep.u8.slice(s + P.S_DATA, s + P.S_DATA + len)), k = t.indexOf('\x1f');
           this.o.onNotice?.(k < 0 ? t : t.slice(0, k) + t.slice(k + 1), k < 0 ? undefined : t.slice(0, k));
         }
+      } else if (dv.getUint32(s + P.S_KIND, true) === P.NET_KIND_LOBBY) {
+        // the same: for this page only
+        if (len <= P.NET_MAX_PAYLOAD) this.o.onLobby?.(new TextDecoder().decode(ep.u8.slice(s + P.S_DATA, s + P.S_DATA + len)));
       } else if (open && len <= P.NET_MAX_PAYLOAD) {
         const f = new Uint8Array(P.F_DATA + len), fv = new DataView(f.buffer), dst = dv.getUint32(s + P.S_DST_IP, true);
         f[P.F_KIND] = dv.getUint32(s + P.S_KIND, true);

@@ -36,6 +36,7 @@ int64_t roam_plat_now_us(void){
 }
 uint32_t roam_plat_random(void){ uint32_t r; do r = arc4random(); while (!r); return r; }
 void roam_plat_notice(const char *name, const char *what){ fprintf(stderr, "[roam] notice: %s%s\n", name, what); }
+int roam_plat_lobby(const char *json){ (void)json; return 0; }      /* no panel: the game's top line */
 const char *roam_ip_str(uint32_t ip, char *b){
     snprintf(b, 16, "%u.%u.%u.%u", ip >> 24, (ip >> 16) & 255u, (ip >> 8) & 255u, ip & 255u); return b; }
 void roam_plat_get_stats(roam_plat_stats *o){ roam_plat_lock(); *o = g_st; roam_plat_unlock(); }
