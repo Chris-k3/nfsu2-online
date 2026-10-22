@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """The language packs: LANGPACKS/<language> in the game folder, from the
-"Multi 13 languages" mod for NFSU2 (KyoriAsh, nfsmods.xyz/mod/5749).
+"Multi 13 languages" mod for NFSU2 (KyoriAsh, nfsmods.xyz/mod/5749) and from
+TraduMix's and MixMods' Brazilian Portuguese translation.
 
-    tools/langpacks.py <mod folder> <game folder>
+    tools/langpacks.py <game folder> [--multi13 <mod folder>] [--ptbr <translation folder>]
+
+Each source builds its own languages' packs; the others are left as they are.
 
 <mod folder> holds every archive of the mod extracted into it, Core and the
 dubs (nfsug2Multi13Core.rar, nfsug2Multi13{Fr,De,It,Es,Ja,Ru}Dub.rar; the
@@ -27,9 +30,18 @@ of the same path.
     early versions) with the fonts drawn for them (LanguageTexturesGl), and
     Japanese's in-game textures (GlobalB_ja)
   - Russian, which takes English's place: its text, fonts and credits
+
+<translation folder> is the Brazilian Portuguese translation's archive
+extracted ("Tradução PT-BR, V1.1 (TraduMix e MixMods)", joao13traducoes.com;
+its password is "João13"), or any folder below which it has
+LANGUAGES/English.bin.  Portuguese takes English's place as Russian does: its
+text (accented in the game's own fonts) and credits, and the game folder's own
+Brazilian Portuguese memory-card texts ("Carregado." for "Load complete.").
+The rest of the archive is the Extra Options mod, for its ShowSubs: the port
+shows the subtitles itself (runtime/language.c).
 Rerunning it copies only what changed.  Prints what each pack holds.
 """
-import filecmp, os, shutil, struct, sys
+import argparse, filecmp, os, shutil, struct, sys
 
 LANGS = ['french', 'german', 'italian', 'spanish', 'dutch', 'swedish', 'danish',
          'korean', 'chinese', 'japanese', 'russian', 'thai']
@@ -59,6 +71,12 @@ FILES = [
     ('danish', 'Movies/ealogo_dn.vp6', 'MOVIES/ealogo.vp6'),
     ('dutch', 'Movies/ealogo_du.vp6', 'MOVIES/ealogo.vp6'),
     ('swedish', 'Movies/ealogo_sw.vp6', 'MOVIES/ealogo.vp6'),
+]
+# Brazilian Portuguese: (file in the translation, the game's file it stands in for)
+PTBR = [
+    ('LANGUAGES/English.bin', 'LANGUAGES/English.bin'),
+    ('CREDITS/NA_ENGLISH.TXT', 'CREDITS/NA_ENGLISH.TXT'),
+    ('CREDITS/NA_ENGLISH.TXT', 'CREDITS/UK_ENGLISH.TXT'),
 ]
 
 
@@ -132,10 +150,12 @@ class Pack:
             if not os.listdir(d): os.rmdir(d)
 
 
-def main():
-    if len(sys.argv) != 3: sys.exit(__doc__)
-    mod, game = sys.argv[1], sys.argv[2]
-    if not find(game, 'SPEED2.EXE'): sys.exit(f'{game}: no SPEED2.EXE, not the game folder')
+def done(p, lang):
+    p.drop_stale()
+    print(f'{lang:10} {p.files:3} files {p.bytes / 1048576:8.1f} MB  {p.root if p.files else "(none needed)"}')
+
+
+def multi13(mod, game):
     missing = [s for _, s, _ in FILES if not find(mod, s)]
     missing += [f'Lang/Sdata/sdat{x.lower()}.viv' for x in DUBS.values() if not find(mod, f'Lang/Sdata/sdat{x.lower()}.viv')]
     missing += [f'Lang/Movies/{x}' for x in DUBS.values() if not find(mod, f'Lang/Movies/{x}')]
@@ -153,8 +173,33 @@ def main():
                     f.seek(off); p.add_data(f.read(size), name)
             mdir = find(mod, f'Lang/Movies/{DUBS[lang]}')
             for n in sorted(os.listdir(mdir)): p.add_file(os.path.join(mdir, n), f'MOVIES/{n}')
-        p.drop_stale()
-        print(f'{lang:9} {p.files:3} files {p.bytes / 1048576:8.1f} MB  {p.root if p.files else "(none needed)"}')
+        done(p, lang)
+
+
+def ptbr(src, game):
+    root = next((d for d, _, _ in os.walk(src) if find(d, 'LANGUAGES/English.bin')), None)
+    if not root: sys.exit(f'{src}: no LANGUAGES/English.bin below it, not the translation')
+    missing = [s for s, _ in PTBR if not find(root, s)]
+    if missing: sys.exit(f'{root}: the translation is not all there, missing:\n  ' + '\n  '.join(missing))
+    p = Pack(game, 'portuguese')
+    if p.same_as_game('LANGUAGES/English.bin', src=find(root, 'LANGUAGES/English.bin')):
+        sys.exit(f'{root}: its LANGUAGES/English.bin is the game\'s own, not the translation')
+    for s, rel in PTBR: p.add_file(find(root, s), rel)
+    loc = find(game, 'memcard/LOCALE_BRAZILIAN_PORTUGUESE.loc')
+    if loc: p.add_file(loc, 'memcard/LOCALE_ENGLISH.loc')
+    done(p, 'portuguese')
+
+
+def main():
+    ap = argparse.ArgumentParser(usage='tools/langpacks.py <game folder> [--multi13 <mod folder>] [--ptbr <translation folder>]')
+    ap.add_argument('game')
+    ap.add_argument('--multi13', metavar='MOD', help='the Multi 13 languages mod, every archive extracted')
+    ap.add_argument('--ptbr', metavar='FOLDER', help='the Brazilian Portuguese translation, extracted')
+    a = ap.parse_args()
+    if not (a.multi13 or a.ptbr): sys.exit(__doc__)
+    if not find(a.game, 'SPEED2.EXE'): sys.exit(f'{a.game}: no SPEED2.EXE, not the game folder')
+    if a.multi13: multi13(a.multi13, a.game)
+    if a.ptbr: ptbr(a.ptbr, a.game)
 
 
 if __name__ == '__main__':

@@ -1,7 +1,7 @@
 /* language.c -- the game's language: NFSU2_LANGUAGE (settings.ini "language").
  *
  *   english (default), french, german, italian, spanish, dutch, swedish,
- *   danish, korean, chinese, japanese, russian, thai
+ *   danish, korean, chinese, japanese, russian, thai, portuguese
  *
  * SPEED2.EXE reads its language once at startup from the registry value
  * "Language" (0x5b7955, against the names at 0x7fca08: "English US" ...
@@ -15,10 +15,10 @@
  *
  * What a language needs beyond the retail folder (the dubbed speech and
  * movies, the full Chinese, Japanese and Thai text with the fonts drawn for
- * it, Russian) comes from LANGPACKS/<language> in the game folder, built by
- * tools/langpacks.py: fileio.c reads a file there in place of the game
- * folder's file of the same path.  A language without a pack plays its text
- * with English voices and movies.
+ * it, Russian, Portuguese) comes from LANGPACKS/<language> in the game
+ * folder, built by tools/langpacks.py: fileio.c reads a file there in place of
+ * the game folder's file of the same path.  A language without a pack plays
+ * its text with English voices and movies.
  *
  * Two things the North American exe cannot do by itself, which the
  * multilingual mod's U2_ThaiSupport.asi patches into its code; here they are
@@ -31,9 +31,18 @@
  *    but has no entry.  In a Thai game Japanese's entry becomes Thai's: its
  *    id, its name and file ("JAPANESE" -> "THAILAND", the same length) and
  *    the font hashes of its block.
- * Russian is no language of the game: it plays as English, with English's
- * files from LANGPACKS/russian. */
+ * Russian and Portuguese (Brazil's) are no languages of the game: they play
+ * as English, with English's files from LANGPACKS/russian or /portuguese.
+ *
+ * The movies' subtitles (SUBTITLES/<movie>: when to show which of the
+ * language's texts) are shown by the game's region ([0x864f24], 0x570a30),
+ * not by its language: in regions 2 and 5 for every language but English, in
+ * 4 and 12 for all, and in this exe's own, 0, never.  language_hook() shows
+ * them for a language whose text has the movies' lines: all but English and
+ * the dubbed French, German, Italian and Spanish, whose texts leave the lines
+ * their dubs speak empty (the game would still draw an empty line's bar). */
 #include "cpu.h"
+#include "widescreen.h"           /* HOOK_SITE */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -66,6 +75,7 @@ static const struct lang { const char *key, *reg; uint32_t fonts; int thai; } LA
     { "japanese", "Japanese", JA_FONTS, 0 },
     { "russian",  "English", 0, 0 },
     { "thai",     "Thai", JA_FONTS, 1 },          /* in Japanese's entry and block */
+    { "portuguese", "English", 0, 0 },
 };
 static const struct lang *g_lang = &LANGS[0];
 static const uint32_t THAI_FONTS[4] = { 0x4815619du, 0xa87927beu, 0xa73823ffu, 0xbbba71c2u };
@@ -94,6 +104,21 @@ int language_no_profile(const char *name){
     uint32_t s = game_text(0xcf4f80c2u);
     if (!s) s = game_text(0xc01a6f63u);
     return s && mem_is_committed(s) && mem_is_committed(s + 15u) && !strncasecmp(name, (const char *)(g_mem + s), 16);
+}
+
+/* The subtitles' check, 0x50d350 (the front end's movies and InGamePlayMovie's
+ * next one) and its copy in InGamePlayMovie's constructor: the last of its
+ * region tests, "region == 12", made true for a language other than English
+ * whose text has the movies' lines (the PSA's first, "Hi, I'm Brooke Burke"). */
+int language_hook(CPU *c, uint32_t ip){
+    switch (ip){
+    case HOOK_SITE(0x0050d388):           /* cmp eax, 0xc; sete al */
+    case HOOK_SITE(0x00553a62): {         /* cmp eax, 0xc; jne (no subtitles) */
+        uint32_t s = g_lang != &LANGS[0] ? game_text(0x03812413u) : 0;
+        if (s && mem_is_committed(s) && MR8(s)) c->eax = 0xc;
+        return 1; }
+    }
+    return 0;
 }
 
 /* what a font block's hashes add up to in the size table (0x4ff680's sum) */

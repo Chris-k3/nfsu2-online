@@ -95,6 +95,7 @@ void guest_hook(CPU *c, uint32_t ip){
     g_hook_hits++;
     { int ws_hook(CPU *, uint32_t); if (ws_hook(c, ip)) return; }
     { int roam_hook(CPU *, uint32_t); if (roam_hook(c, ip)) return; }
+    { int language_hook(CPU *, uint32_t); if (language_hook(c, ip)) return; }
     if (ip == 0x0065ae25u){
         uint32_t a1=MR32(c->esp+4u), a2=MR32(c->esp+8u), a3=MR32(c->esp+12u);
         if (!g_rec_esp0) g_rec_esp0 = c->esp;
