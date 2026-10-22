@@ -30,6 +30,7 @@ export const NET_KIND_NOTICE = 16;            // TX ring only, never sent: a lin
 export const NET_KIND_LOBBY = 17;             // TX ring only, never sent: the free-roam race lobby's panel, its state as JSON ("{}": none)
 export const NET_KIND_BUNDLE = 32;            // page and switch only (nfsu2-lan): several frames in one message
 export const NET_BUNDLE_MAX = 32 << 10;       // bytes in one bundle the page sends at most (the switch takes 64 KB)
+export const NET_KIND_COMPACT = 33;           // switch to page only (nfsu2-lan compact.rs): a bundle without what the page puts back
 export const NET_BROADCAST = 0xffffffff;
 export const NET_ROAM_HUB = 0x0a4d00fd;       // 10.77.0.253: the server's free-roam hub (web/server-rs/crates/roam)
 
@@ -85,4 +86,49 @@ export function ipNum(s: string): number | null {
   const b = m.slice(1).map(Number);
   if (b.some(x => x > 255)) return null;
   return ((b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3]) >>> 0;
+}
+
+// ---- compact bundles (kind 33, nfsu2-lan compact.rs) ----
+// The switch leaves out of each datagram what the page can put back exactly: the page's own address, free roam's
+// port, and a free-roam datagram's "N2FR", version, length and CRC (it checked the CRC first).  Each entry: [0] flags
+// (bits 0-2 the kind, 0x08 to the broadcast address, 0x10 the ports follow, 0x20 a free-roam datagram cut short,
+// 0x40 the whole frame as it is), [1..2] the source's low 16 bits (10.77.x.y), [3..4] the length of what follows.
+const C_BCAST = 0x08, C_PORTS = 0x10, C_ROAM = 0x20, C_WHOLE = 0x40, ROAM_PORT = 47210, ROAM_CUT = 11;
+const CRC_TABLE = (() => {
+  const t = new Int32Array(256);
+  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c; }
+  return t;
+})();
+/** zlib's CRC-32 of b's first n bytes (runtime/roam_core.c rc_crc32) */
+export function crc32(b: Uint8Array, n: number): number {
+  let c = -1;
+  for (let i = 0; i < n; i++) c = CRC_TABLE[(c ^ b[i]) & 255] ^ (c >>> 8);
+  return (c ^ -1) >>> 0;
+}
+/** a compact bundle's frames, each put together again byte for byte as the switch had it, to `take` in order; `own`
+ *  the address this page holds.  A broken entry ends it. */
+export function unpackCompact(u: Uint8Array, own: number, take: (f: ArrayBuffer) => void): void {
+  const dv = new DataView(u.buffer, u.byteOffset, u.byteLength);
+  for (let at = 4; at + 5 <= u.length;) {
+    const flags = u[at], end = at + 5 + dv.getUint16(at + 3);
+    let p = at + 5;
+    if (end > u.length) return;
+    at = end;
+    if (flags === C_WHOLE) { take(u.slice(p, end).buffer); continue; }
+    const data = end - p - (flags & C_PORTS ? 4 : 0), roam = (flags & C_ROAM) !== 0;
+    if (data < (roam ? 1 : 0)) return;
+    const len = roam ? data + ROAM_CUT : data, f = new Uint8Array(F_DATA + len), fv = new DataView(f.buffer);
+    f[F_KIND] = flags & 7;
+    fv.setUint32(F_SRC, (0x0a4d0000 | dv.getUint16(p - 4)) >>> 0);
+    fv.setUint32(F_DST, flags & C_BCAST ? NET_BROADCAST : own >>> 0);
+    if (flags & C_PORTS) { f.set(u.subarray(p, p + 4), F_SPORT); p += 4; }
+    else { fv.setUint16(F_SPORT, ROAM_PORT); fv.setUint16(F_DPORT, ROAM_PORT); }
+    if (roam) {
+      f.set([0x4e, 0x32, 0x46, 0x52, 1, u[p]], F_DATA);              // "N2FR", version 1, the type
+      fv.setUint16(F_DATA + 6, len, true);
+      f.set(u.subarray(p + 1, end), F_DATA + 8);
+      fv.setUint32(F_DATA + len - 4, crc32(f.subarray(F_DATA), len - 4), true);
+    } else f.set(u.subarray(p, end), F_DATA);
+    take(f.buffer);
+  }
 }

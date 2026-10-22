@@ -39,7 +39,9 @@
 // With a switch that takes bundles (its welcome's "bundle":1, nfsu2-lan) what C
 // queued at once goes as one message: free roam's snapshot to each friend, the
 // same bytes, once with the friends' addresses (TxBundle); and the switch sends
-// this page its datagrams as bundles too (the hello's "bundle":1).
+// this page its datagrams as bundles too (the hello's "bundle":1), compact ones
+// (kind 33: the same frames, about a quarter fewer bytes, proto.ts unpackCompact)
+// once its hello says "compact":1 as well.
 //
 // TCP frames are never dropped here: while the LAN RX ring is full they wait
 // in order (the C side's streams have no retransmission; the WebSocket and the
@@ -76,6 +78,8 @@ export type NetState = 'waiting' | 'connecting' | 'online' | 'offline' | 'idle' 
 export interface NetStats {
   state: NetState; vip: string | null; connections: number; reconnects: number;
   framesOut: number; bytesOut: number; framesIn: number; bytesIn: number;
+  /** compact bundles from the switch (kind 33: free roam's datagrams in about a quarter fewer bytes) */
+  compactIn: number;
   /** frames C queued while the switch was not connected (dropped, as UDP would) */
   txOfflineDrop: number;
   /** received frames dropped: RX ring full / larger than a slot / nobody listening on that kind */
@@ -252,7 +256,7 @@ class Link implements NetLink {
   /** the page's answers so far (AUTO_*): per sender (a vip of the switch, which writes the source), and all */
   private autoSrc = new Map<number, AutoBucket>();
   private autoAll = new AutoBucket();
-  private st = { connections: 0, reconnects: 0, framesOut: 0, bytesOut: 0, framesIn: 0, bytesIn: 0, rxFiltered: 0,
+  private st = { connections: 0, reconnects: 0, framesOut: 0, bytesOut: 0, framesIn: 0, bytesIn: 0, compactIn: 0, rxFiltered: 0,
     rttSum: 0, rttN: 0, rttMax: 0, mainMs: 0, mainCalls: 0, rxFull: 0, rxOversize: 0,
     lanOut: 0, lanIn: 0, lanWaited: 0, lanWaitedMax: 0, lanRefused: 0, lanRefuseHeld: 0, lanGone: 0 };
 
@@ -382,9 +386,10 @@ class Link implements NetLink {
     this.ws = ws;
     ws.onopen = () => {
       // deltas: the switch sends what changed on the peer list, not the whole list each time (nfsu2-lan); lan: LAN
-      // play is open, so it takes LAN broadcasts; bundle: this page takes bundles
+      // play is open, so it takes LAN broadcasts; bundle: this page takes bundles; compact: and compact ones (a
+      // switch of before ignores it and sends bundles as they were)
       this.lanSent = this.lanOpen();
-      ws.send(JSON.stringify({ t: 'hello', name: this.o.name ?? 'player', deltas: 1, lan: this.lanSent ? 1 : 0, bundle: 1,
+      ws.send(JSON.stringify({ t: 'hello', name: this.o.name ?? 'player', deltas: 1, lan: this.lanSent ? 1 : 0, bundle: 1, compact: 1,
         ...(resume ? { vip: P.ipStr(this.vipNum), token: this.token } : {}) }));
       this.pingTimer = setInterval(() => this.ping(), this.o.pingMs ?? 2000);
     };
@@ -551,6 +556,13 @@ class Link implements NetLink {
       }
       this.ringLater = null;
       for (const ep of ring) ep.ring();
+    } else if (u.length >= 4 && u[0] === P.NET_KIND_COMPACT) {
+      // the same, each frame put together again first (proto.ts unpackCompact)
+      const ring = this.ringLater = new Set();
+      this.st.compactIn++;
+      P.unpackCompact(u, this.vipNum, f => this.rxFrame(f));
+      this.ringLater = null;
+      for (const ep of ring) ep.ring();
     } else this.rxFrame(b);
     this.st.mainMs += performance.now() - c0; this.st.mainCalls++;
   }
@@ -632,7 +644,7 @@ class Link implements NetLink {
     }
     return {
       state: this.state, vip: this.vip, connections: s.connections, reconnects: s.reconnects,
-      framesOut: s.framesOut, bytesOut: s.bytesOut, framesIn: s.framesIn, bytesIn: s.bytesIn,
+      framesOut: s.framesOut, bytesOut: s.bytesOut, framesIn: s.framesIn, bytesIn: s.bytesIn, compactIn: s.compactIn,
       txOfflineDrop: off, rxFullDrop: s.rxFull, rxOversize: s.rxOversize, rxFiltered: s.rxFiltered,
       switchRttMs: f ? f[P.D_SWITCH_RTT_MS] : 0, switchRttMeanMs: s.rttN ? s.rttSum / s.rttN : 0, switchRttMaxMs: s.rttMax,
       txWaitMeanMs: txn ? tws / txn : 0, txWaitMaxMs: twm,

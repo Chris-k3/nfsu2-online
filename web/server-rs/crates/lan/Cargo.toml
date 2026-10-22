@@ -18,6 +18,7 @@ arc-swap.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 smallvec.workspace = true
+crc32fast.workspace = true
 unicode-normalization.workspace = true
 unicode-general-category.workspace = true
 # the maps and sets the switch keeps (peers, reservations, the peer list's changes) are in insertion order, and the

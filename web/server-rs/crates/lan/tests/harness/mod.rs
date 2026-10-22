@@ -296,6 +296,8 @@ pub struct Opts {
     pub deltas: bool,
     pub lan: Option<u8>,
     pub bundle: bool,
+    /// and compact bundles (kind 33): its frames come as they are in `frames`, `unpack_compact` takes them apart
+    pub compact: bool,
 }
 
 pub fn deltas() -> Opts {
@@ -344,6 +346,9 @@ impl Client {
         }
         if o.bundle {
             extra.insert("bundle".into(), 1.into());
+        }
+        if o.compact {
+            extra.insert("compact".into(), 1.into());
         }
         let q = match (resume.is_some(), query.is_empty()) {
             (true, true) => "?resume".to_string(),
@@ -707,4 +712,61 @@ pub fn q(sorted: &[f64], p: f64) -> f64 {
 
 pub fn ms_since(t: Instant) -> f64 {
     t.elapsed().as_secs_f64() * 1000.0
+}
+
+/// a compact bundle's frames (nfsu2-lan compact.rs), put together again as the page does (web/src/net/proto.ts
+/// unpackCompact) for a page holding `own`
+pub fn unpack_compact(b: &[u8], own: u32) -> Vec<Vec<u8>> {
+    assert_eq!(b[0], 33, "a compact bundle");
+    let mut out = Vec::new();
+    let mut at = 4;
+    while at + 5 <= b.len() {
+        let flags = b[at];
+        let mut p = at + 5;
+        let end = p + u16::from_be_bytes([b[at + 3], b[at + 4]]) as usize;
+        if flags == 0x40 {
+            out.push(b[p..end].to_vec());
+            at = end;
+            continue;
+        }
+        let mut f = vec![flags & 7, 0, 0, 0];
+        f.extend_from_slice(&(0x0A4D_0000 | u16::from_be_bytes([b[at + 1], b[at + 2]]) as u32).to_be_bytes());
+        f.extend_from_slice(&(if flags & 0x08 != 0 { BROADCAST } else { own }).to_be_bytes());
+        if flags & 0x10 != 0 {
+            f.extend_from_slice(&b[p..p + 4]);
+            p += 4;
+        } else {
+            f.extend_from_slice(&[0xB8, 0x6A, 0xB8, 0x6A]);
+        }
+        if flags & 0x20 != 0 {
+            let len = end - p + 11;
+            let mut d = b"N2FR".to_vec();
+            d.extend_from_slice(&[1, b[p]]);
+            d.extend_from_slice(&(len as u16).to_le_bytes());
+            d.extend_from_slice(&b[p + 1..end]);
+            let crc = crc32fast::hash(&d);
+            d.extend_from_slice(&crc.to_le_bytes());
+            f.extend_from_slice(&d);
+        } else {
+            f.extend_from_slice(&b[p..end]);
+        }
+        out.push(f);
+        at = end;
+    }
+    out
+}
+
+/// a free-roam datagram as runtime/roam_core.c rc_encode makes it: "N2FR", version 1, its type, the length and the
+/// CRC filled in, around a body of n bytes
+pub fn roam_datagram(kind: u8, n: usize) -> Vec<u8> {
+    let mut d = b"N2FR".to_vec();
+    d.extend_from_slice(&[1, kind, 0, 0]);
+    d.extend_from_slice(&0x1234_5678u32.to_le_bytes());
+    d.extend_from_slice(&[7, 0, 0, 0]);
+    d.extend((0..n).map(|i| (i * 37 + 11) as u8));
+    let len = (d.len() + 4) as u16;
+    d[6..8].copy_from_slice(&len.to_le_bytes());
+    let crc = crc32fast::hash(&d);
+    d.extend_from_slice(&crc.to_le_bytes());
+    d
 }

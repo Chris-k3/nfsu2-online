@@ -856,3 +856,79 @@ async fn a_player_behind_gets_a_share_of_the_snapshots_and_all_again_once_it_kee
     drop(laggy);
     sw.close().await;
 }
+
+// compact bundles: a page that takes them (its hello's "compact":1) gets the same frames as one that does not, byte for
+// byte, in about a quarter fewer bytes; a client cannot send one (it could name any source) (compact.rs)
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn compact_bundles_carry_the_same_frames_in_fewer_bytes() {
+    let _s = serial().await;
+    let sw = start(unlimited()).await;
+    let mut full = Client::with(sw.port, "Full", "", bundles()).await;
+    full.welcome().await;
+    let mut small = Client::with(sw.port, "Small", "", Opts { bundle: true, compact: true, ..Opts::default() }).await;
+    small.welcome().await;
+    let mut s = Client::connect(sw.port, "Sender").await;
+    s.welcome().await;
+    sleep(100).await;
+    let mut broken = roam_datagram(3, 70);
+    *broken.last_mut().unwrap() ^= 0x55;
+    let both = vec![full.vip, small.vip];
+    let frames = [
+        // free roam: snapshots to both, a HELLO broadcast (discovery), one on other ports, one whose CRC is wrong
+        (frame_of(0, &roam_datagram(3, 70), 1, 47210, 47210), both.clone()),
+        (frame_of(0, &roam_datagram(3, 82), 1, 47210, 47210), both.clone()),
+        (frame_of(BROADCAST, &roam_datagram(1, 40), 1, 47210, 47210), vec![]),
+        (frame_of(0, &roam_datagram(3, 70), 1, 47211, 47300), both.clone()),
+        (frame_of(0, &broken, 1, 47210, 47210), both.clone()),
+        // not free roam's: LAN play's UDP, some other bytes
+        (frame_of(0, &[1, 64, 0, 0, 0, 0, 0, 7, 42, 42, 42], 3, 6112, 6112), both.clone()),
+        (frame_of(0, b"just bytes", 1, 47210, 47210), both.clone()),
+    ];
+    for _ in 0..20 {
+        s.send_bundle(&frames);
+    }
+    let want = 20 * 7;
+    full.until_true(|g| g.dgrams().len() >= want).await;
+    let small_frames = || -> Vec<Vec<u8>> {
+        small.got().frames.iter().flat_map(|(b, _)| if b[0] == 33 { unpack_compact(b, small.vip) } else { vec![b.clone()] }).collect()
+    };
+    let t0 = Instant::now();
+    while small_frames().len() < want {
+        assert!(t0.elapsed().as_secs() < 5, "{} of {want} frames", small_frames().len());
+        sleep(20).await;
+    }
+    // the same frames, in the same order: to each its own address, the rest byte for byte
+    let mine = |f: &[u8], vip: u32| {
+        let mut f = f.to_vec();
+        if f[8..12] == vip.to_be_bytes() {
+            f[8..12].copy_from_slice(&[0, 0, 0, 0]);
+        }
+        f
+    };
+    let a: Vec<Vec<u8>> = full.dgrams().iter().map(|d| mine(&d.buf, full.vip)).collect();
+    let b: Vec<Vec<u8>> = small_frames().iter().map(|f| mine(f, small.vip)).collect();
+    assert_eq!(a.len(), b.len());
+    assert!(a == b, "the same frames");
+    assert!(small.got().frames.iter().all(|(m, _)| m[0] == 33), "all of them compact");
+    let bytes = |c: &Client| c.got().frames.iter().map(|(m, _)| m.len()).sum::<usize>();
+    let (bf, bs) = (bytes(&full), bytes(&small));
+    assert!(bs * 100 < bf * 85, "fewer bytes: {bs} against {bf}");
+    // a client's compact bundle, alone or in a bundle, reaches nobody
+    let before = (small.got().frames.len(), sw.info().await["limited"].as_u64().unwrap());
+    let mut fake = vec![33u8, 0, 0, 0, 0x01, 0x01, 0x02, 0x00, 0x04];
+    fake.extend_from_slice(b"evil");
+    s.binary(frame_of(small.vip, &fake, 33, 47210, 47210));
+    s.send_bundle(&[(frame_of(small.vip, &fake, 33, 47210, 47210), vec![])]);
+    s.udp(small.vip, 47210, 47210, b"after", 1, 0);
+    let t0 = Instant::now();
+    while small_frames().last().is_none_or(|f| &f[16..] != b"after") {
+        assert!(t0.elapsed().as_secs() < 5, "the frame after");
+        sleep(20).await;
+    }
+    assert_eq!(small.got().frames.len(), before.0 + 1, "only the frame after");
+    assert_eq!(sw.info().await["limited"].as_u64().unwrap(), before.1 + 2);
+    s.close().await;
+    full.close().await;
+    small.close().await;
+    sw.close().await;
+}

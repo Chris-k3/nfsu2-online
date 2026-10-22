@@ -130,6 +130,10 @@ delivering to the receiver, 11 % recvfrom).
   Who is on the switch changes under one lock; frames find their receivers without it (a table of the 4000
   addresses, a copy-on-write list of everyone).  Each receiver's writer takes everything queued into one write, and
   makes bundles of a page's datagrams on the bundle clock.  Counters every frame touches are sharded.
+- **Compact bundles** (nfsu2-lan `compact.rs`, kind 33): to a page whose hello says "compact":1 the datagrams go
+  without what the page puts back exactly (its own address, free roam's port, a free-roam datagram's magic,
+  version, length and CRC, which the switch checks first): the same bytes reach the game, a snapshot costs 84 bytes
+  on the wire instead of 110.  The port was the limit on nfsu2.xyz (486 Mbit/s of 1000 at 2960 players).
 - **A player behind on its path** (nfsu2-lan `lag.rs`): a WebSocket ping every second times each player's round trip,
   queues past the server included (the kernel's, cloudflared's, the tunnel's).  While its data waits there, the
   player gets only a share of free roam's snapshots (a half for each late round trip, a sixteenth at once past

@@ -143,6 +143,8 @@ impl LanSwitch {
             }
         }
         let now = nfsu2_util::mono_ms();
+        // (for its writer: a compact bundle leaves out the address a datagram was sent to, its own)
+        conn.vip.store(vip, std::sync::atomic::Ordering::Relaxed);
         let peer = Arc::new(Peer {
             vip,
             conn: conn.clone(),
@@ -542,6 +544,7 @@ fn greet(peer: &Peer, m: &Map<String, Value>) {
     peer.hello.store(true, Relaxed);
     peer.deltas.store(is_num(m.get("deltas"), 1.0), Relaxed);
     peer.bundle.store(is_num(m.get("bundle"), 1.0), Relaxed);
+    peer.conn.compact.store(is_num(m.get("compact"), 1.0), Relaxed);
     let lan = m.get("lan");
     if is_num(lan, 0.0) || is_num(lan, 1.0) {
         peer.lan.store(if is_num(lan, 1.0) { LAN_ON } else { LAN_OFF }, Relaxed);

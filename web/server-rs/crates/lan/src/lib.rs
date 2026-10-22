@@ -38,8 +38,12 @@
 //!   were 640 messages a second each way per player, and each message, not its bytes, is what the server and the
 //!   tunnel in front pay for.  LAN play's TCP segments (kind 4) are never bundled by the switch (they have a queue of
 //!   their own: `stream_queue`).
+//! - 33 (`KIND_COMPACT`): a compact bundle, from the switch to a client whose hello said "compact":1 too: its
+//!   datagrams without what the page puts back exactly (the receiver's own address, free roam's port, a free-roam
+//!   datagram's magic, version, length and CRC), about a quarter fewer bytes for the same frames (compact.rs).
+//!   Never routed from a client (it could name any source), as a bundle in a bundle never is.
 //!
-//! Text frames are JSON control messages: {"t":"hello","name":...,"deltas":1,"lan":0|1,"bundle":1},
+//! Text frames are JSON control messages: {"t":"hello","name":...,"deltas":1,"lan":0|1,"bundle":1,"compact":1},
 //! {"t":"lan","on":0|1} and {"t":"ping","id":n} from a client; {"t":"welcome","vip":...,"vipStr":...,"mask":...,
 //! "token":...,"bundle":1}, {"t":"peers",...}, {"t":"delta",...} and {"t":"pong","id":n} from the switch.
 //!
@@ -173,6 +177,7 @@
 //! `terminate()` ends it at once (1006).  A protocol error (nfsu2-ws `ReadError::Protocol`) sends that close
 //! frame (its code only, as ws did) and ends the connection.  Nothing the client sends after a close counts.
 
+mod compact;
 mod conn;
 mod impair;
 mod lag;
@@ -206,7 +211,7 @@ pub const MASK: &str = "255.255.240.0";
 pub const ADDRS: usize = 4000;
 pub const BROADCAST: u32 = 0xFFFF_FFFF;
 
-const BASE: u32 = (10 << 24) | (77 << 16);
+pub(crate) const BASE: u32 = (10 << 24) | (77 << 16);
 /// free roam's datagrams (and LAN play's broadcasts): dropped first (`roam_queue`)
 const KIND_UDP: u8 = 1;
 /// LAN play's UDP and ICMP (with TCP, kinds 3-5): broadcasts only to the browsers with LAN play open

@@ -12,6 +12,7 @@ use serde_json::{Map, Value};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::time::Instant;
 
+use crate::compact::KIND_COMPACT;
 use crate::conn::{Conn, Out};
 use crate::text::parse_json;
 use crate::{AttachCtx, Cut, KIND_BUNDLE, LanSwitch, Peer};
@@ -186,7 +187,7 @@ impl LanSwitch {
                 let len = u16::from_be_bytes([data[at + 2], data[at + 3]]) as usize;
                 let f = at + 4 + 4 * k;
                 let end = f + len;
-                if len < 12 || len > o.max_frame || end > n || data[f] == KIND_BUNDLE {
+                if len < 12 || len > o.max_frame || end > n || data[f] == KIND_BUNDLE || data[f] == KIND_COMPACT {
                     self.stats.limited.inc();
                     return;
                 }
@@ -203,7 +204,8 @@ impl LanSwitch {
             }
             return;
         }
-        if n > o.max_frame {
+        // (a compact bundle is the switch's own: the page takes its sources as they are)
+        if n > o.max_frame || data[0] == KIND_COMPACT {
             self.stats.limited.inc();
             return;
         }

@@ -11,6 +11,7 @@ use std::sync::atomic::{
 use bytes::{BufMut, Bytes, BytesMut};
 use nfsu2_util::{FrameCtx, mono_ms};
 
+use crate::compact;
 use crate::conn::{Conn, Out};
 use crate::lag::{self, SHARE_FULL};
 use crate::{BROADCAST, Cause, Cut, KIND_LAN_ICMP, KIND_LAN_UDP, KIND_STREAM, KIND_UDP, LanSwitch, Peer, STREAM_LOW, slot};
@@ -103,7 +104,7 @@ impl LanSwitch {
         // the frame's own copy for the browsers' queues, not the sender's read block (the crate doc's one copy)
         let own_copy;
         let data = if dsts.clone().take(paid).any(|d| Some(d) != self.roam_vip && Some(d) != self.online_vip) {
-            own_copy = Bytes::copy_from_slice(data);
+            own_copy = compact::mark(data);
             &own_copy
         } else {
             data

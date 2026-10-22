@@ -2,7 +2,7 @@
 //! and the ws library's states and close rules (the WebSocket library of the Node server: the crate doc's last part).
 
 use std::sync::atomic::{
-    AtomicBool, AtomicU8, AtomicU64, AtomicUsize,
+    AtomicBool, AtomicU8, AtomicU32, AtomicU64, AtomicUsize,
     Ordering::{AcqRel, Acquire, Relaxed, Release, SeqCst},
 };
 use std::sync::{Arc, Weak};
@@ -15,7 +15,7 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
-use crate::{AttachCtx, BUNDLE_OUT, CLOSE_TIMEOUT, KIND_BUNDLE, LanSwitch, Peer, Stats};
+use crate::{AttachCtx, BUNDLE_OUT, CLOSE_TIMEOUT, KIND_BUNDLE, LanSwitch, Peer, Stats, compact};
 
 /// ws's readyState
 const OPEN: u8 = 1;
@@ -123,6 +123,9 @@ pub(crate) struct Conn {
     pub(crate) peer: Mutex<Option<Arc<Peer>>>,
     /// stream segments wait at the switch for this connection (a hint for its writer: pump after each write)
     pub(crate) streaming: AtomicBool,
+    /// its datagrams go as compact bundles (its hello said "compact":1, compact.rs), to the address it holds
+    pub(crate) compact: AtomicBool,
+    pub(crate) vip: AtomicU32,
 }
 
 impl Conn {
@@ -142,6 +145,8 @@ impl Conn {
             close: Mutex::new(CloseState::default()),
             peer: Mutex::new(None),
             streaming: AtomicBool::new(false),
+            compact: AtomicBool::new(false),
+            vip: AtomicU32::new(0),
         }
     }
 
@@ -335,7 +340,8 @@ async fn write_loop<W: AsyncWrite + Unpin>(sw: Arc<LanSwitch>, conn: Arc<Conn>, 
                 std::mem::swap(&mut *q, &mut items);
                 conn.out.dgram.store(0, Relaxed);
             }
-            let e = encode(&sw.stats, &items, &mut buf, &mut close_sent);
+            let compact = conn.compact.load(Relaxed).then(|| conn.vip.load(Relaxed));
+            let e = encode(&sw.stats, &items, &mut buf, &mut close_sent, compact);
             conn.out.buffered.fetch_add(e.extra, Relaxed);
             // what the kernel takes leaves `buffered` as it goes (what was skipped after a close frame at the end)
             let mut at = 0;
@@ -391,12 +397,16 @@ struct Encoded {
     end: bool,
 }
 
-/// the items into `buf`: the datagrams first, as bundles, then the rest in order; nothing after a close frame
-fn encode(stats: &Stats, items: &[Out], buf: &mut Vec<u8>, close_sent: &mut bool) -> Encoded {
+/// the items into `buf`: the datagrams first, as bundles (compact ones for a page that takes them: the address it
+/// holds), then the rest in order; nothing after a close frame
+fn encode(stats: &Stats, items: &[Out], buf: &mut Vec<u8>, close_sent: &mut bool, compact: Option<u32>) -> Encoded {
     let mut e = Encoded::default();
     if !*close_sent {
         let start = buf.len();
-        bundle(stats, items, buf);
+        match compact {
+            Some(own) => bundle_compact(stats, items, buf, own),
+            None => bundle(stats, items, buf),
+        }
         e.extra = buf.len() - start;
     }
     for it in items {
@@ -426,9 +436,10 @@ fn encode(stats: &Stats, items: &[Out], buf: &mut Vec<u8>, close_sent: &mut bool
     e
 }
 
-/// a frame with its source and destination written in (the one copy a datagram gets)
-fn with_addrs(buf: &mut Vec<u8>, data: &[u8], src: u32, dst: u32) {
-    buf.extend_from_slice(&data[..4]);
+/// a frame with its source and destination written in (the one copy a datagram gets); bytes 1-3 are reserved: 0 on
+/// the wire, whatever the switch's copy holds there (compact.rs `mark`)
+pub(crate) fn with_addrs(buf: &mut Vec<u8>, data: &[u8], src: u32, dst: u32) {
+    buf.extend_from_slice(&[data[0], 0, 0, 0]);
     buf.extend_from_slice(&src.to_be_bytes());
     buf.extend_from_slice(&dst.to_be_bytes());
     buf.extend_from_slice(&data[12..]);
@@ -484,6 +495,38 @@ fn bundle(stats: &Stats, items: &[Out], buf: &mut Vec<u8>) {
             Some(d) => next = d,
             None => return,
         }
+    }
+}
+
+/// the datagrams as compact bundles (compact.rs) of BUNDLE_OUT at most, a datagram alone in one too (its 16-byte
+/// header costs more than a bundle's 4 and an entry's 5)
+fn bundle_compact(stats: &Stats, items: &[Out], buf: &mut Vec<u8>, own: u32) {
+    let mut dgrams = items
+        .iter()
+        .filter_map(|it| match it {
+            Out::Dgram { data, src, dst } => Some((data, *src, *dst)),
+            _ => None,
+        })
+        .peekable();
+    let mut chunk: smallvec::SmallVec<[(&Bytes, u32, u32); 32]> = smallvec::SmallVec::new();
+    while dgrams.peek().is_some() {
+        chunk.clear();
+        let mut sum = 4;
+        while let Some(&(d, src, dst)) = dgrams.peek() {
+            let l = compact::entry_len(d, src, dst, own);
+            if !chunk.is_empty() && sum + l > BUNDLE_OUT {
+                break;
+            }
+            sum += l;
+            chunk.push((d, src, dst));
+            dgrams.next();
+        }
+        frame::header(frame::BINARY, sum, buf);
+        buf.extend_from_slice(&[compact::KIND_COMPACT, 0, 0, 0]);
+        for (d, src, dst) in &chunk {
+            compact::entry(buf, d, *src, *dst, own);
+        }
+        stats.bundles_out.inc();
     }
 }
 
@@ -577,7 +620,7 @@ mod tests {
         // one alone: as it is, its addresses written in
         let mut buf = Vec::new();
         let mut cs = false;
-        let e = encode(&stats, &[dg(20, 0x0A4D_0103)], &mut buf, &mut cs);
+        let e = encode(&stats, &[dg(20, 0x0A4D_0103)], &mut buf, &mut cs, None);
         assert_eq!(e.extra, buf.len());
         assert_eq!(buf[0], 0x82);
         assert_eq!(buf[1] as usize, 20);
@@ -587,7 +630,7 @@ mod tests {
         // 8 KB datagrams: four to a bundle (4 x 8004 bytes fit in 32 KB), then the fifth alone
         let items: Vec<Out> = (0..5).map(|i| dg(8000, i)).collect();
         buf.clear();
-        encode(&stats, &items, &mut buf, &mut cs);
+        encode(&stats, &items, &mut buf, &mut cs, None);
         assert_eq!(stats.bundles_out.get(), 1);
         assert_eq!(buf[0], 0x82);
         assert_eq!(buf[1], 126);
@@ -601,7 +644,7 @@ mod tests {
         // 4 x 8192 + 4 x 4 is over 32 KB: three, then one alone
         let items: Vec<Out> = (0..4).map(|i| dg(8192, i)).collect();
         buf.clear();
-        encode(&stats, &items, &mut buf, &mut cs);
+        encode(&stats, &items, &mut buf, &mut cs, None);
         assert_eq!(stats.bundles_out.get(), 2);
         assert_eq!(u16::from_be_bytes([buf[2], buf[3]]) as usize, 4 + 3 * 8196);
     }
@@ -613,7 +656,7 @@ mod tests {
         let mut cs = false;
         let items =
             vec![Out::Text(Bytes::from_static(b"a")), Out::Close(Bytes::from_static(&[3, 0xF5])), Out::Text(Bytes::from_static(b"b"))];
-        let e = encode(&stats, &items, &mut buf, &mut cs);
+        let e = encode(&stats, &items, &mut buf, &mut cs, None);
         assert!(e.close && cs);
         assert_eq!(buf, [0x81, 1, b'a', 0x88, 2, 3, 0xF5]);
         assert_eq!(e.counted, 3 + 4 + 3);

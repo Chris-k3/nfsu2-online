@@ -4,6 +4,7 @@
 //   node page.mjs <case> <port> [<port> ...]
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { WebSocket } from 'ws';
 import * as esbuild from 'esbuild';
@@ -117,6 +118,27 @@ function rxTake(memory, mb) {
   }
   Atomics.store(w, P.W_RX_TAIL, tail);
   return out;
+}
+/** the same with each datagram's bytes and ports, as the game reads them */
+function rxTakeRaw(memory, mb) {
+  const w = mb.w, dv = new DataView(memory.buffer), out = [];
+  let tail = Atomics.load(w, P.W_RX_TAIL);
+  for (const head = Atomics.load(w, P.W_RX_HEAD); tail !== head; tail = (tail + 1) | 0) {
+    const s = mb.ptr + w[P.W_RX_OFF] + ((tail >>> 0) % P.NET_RX_SLOTS) * P.NET_SLOT_BYTES;
+    out.push({ src: dv.getUint32(s + P.S_SRC_IP, true), dst: dv.getUint32(s + P.S_DST_IP, true),
+      sport: dv.getUint16(s + P.S_SRC_PORT, true), dport: dv.getUint16(s + P.S_DST_PORT, true),
+      data: Buffer.from(new Uint8Array(memory.buffer, s + P.S_DATA, dv.getUint32(s + P.S_LEN, true))) });
+  }
+  Atomics.store(w, P.W_RX_TAIL, tail);
+  return out;
+}
+/** a free-roam datagram as runtime/roam_core.c rc_encode makes it: "N2FR", version 1, a type, its length and CRC */
+function roamDatagram(type, n) {
+  const d = Buffer.alloc(16 + n + 4);
+  d.write('N2FR', 0, 'latin1'); d[4] = 1; d[5] = type; d.writeUInt16LE(d.length, 6); d.writeUInt32LE(0x12345678, 8); d[12] = 7;
+  for (let i = 0; i < n; i++) d[16 + i] = (i * 37 + 11) & 255;
+  d.writeUInt32LE(zlib.crc32(d.subarray(0, d.length - 4)), d.length - 4);
+  return d;
 }
 
 const cases = {
@@ -294,6 +316,22 @@ const cases = {
       assert.ok((await state(port)).info.bundlesOut >= 1, 'to the page as a bundle');
       const s = link.stats();
       assert.equal(s.framesOut, 4); assert.equal(s.framesIn, 3, 'frames counted one by one');
+      // its hello took compact bundles (nfsu2-lan compact.rs): free roam's datagrams come without their magic,
+      // version, length and CRC, and the game still reads them byte for byte, as it does a broadcast, other ports,
+      // a broken CRC and LAN play's UDP
+      const snap = roamDatagram(3, 70), hello = roamDatagram(1, 40), broken = roamDatagram(3, 70);
+      broken[broken.length - 1] ^= 0x55;
+      const sent = [{ f: frameOf(me, snap, 1, 47210, 47210), dst: me, sport: 47210, dport: 47210, data: snap },
+        { f: frameOf(P.NET_BROADCAST, hello, 1, 47210, 47210), dst: P.NET_BROADCAST, sport: 47210, dport: 47210, data: hello },
+        { f: frameOf(me, snap, 1, 47211, 47300), dst: me, sport: 47211, dport: 47300, data: snap },
+        { f: frameOf(me, broken, 1, 47210, 47210), dst: me, sport: 47210, dport: 47210, data: broken }];
+      c.sendBundle(sent.map(({ f }) => ({ f })));
+      await until(() => Atomics.load(roam.w, P.W_RX_HEAD) - Atomics.load(roam.w, P.W_RX_TAIL) >= sent.length);
+      const got = rxTakeRaw(memory, roam);
+      assert.deepEqual(got.map(g => [g.src === c.vip, g.dst >>> 0, g.sport, g.dport, g.data.toString('hex')]),
+        sent.map(x => [true, x.dst >>> 0, x.sport, x.dport, x.data.toString('hex')]), 'byte for byte');
+      assert.equal(link.stats().framesIn, 3 + sent.length);
+      assert.ok(link.stats().compactIn >= 2, 'as compact bundles');
       await b.close(); await c.close();
     } finally { link.close(); }
   },
