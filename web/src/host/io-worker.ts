@@ -69,13 +69,14 @@ const MEM_BUDGET = 768 << 20;
 const inflight = new Map<string, Promise<Uint8Array>>();
 let cacheDir: FileSystemDirectoryHandle | null = null;
 const cacheFiles = new Map<string, Promise<CacheFile | null>>();
+let keeping = true, kept = 0;                              // blocks still go into the cache (keepBlock)
 
 async function cacheFile(n: DNode) {
   if (!cacheDir) return null;
   const k = cacheKey(n);
   let p = cacheFiles.get(k);
   if (!p) {
-    p = openCacheFile(cacheDir, n).catch(e => { note(`[data] ${n.path} is not kept on this PC: ${e}`); return null; });
+    p = openCacheFile(cacheDir, n).catch(e => { if (keeping) note(`[data] ${n.path} is not kept on this PC: ${e}`); return null; });
     cacheFiles.set(k, p);
   }
   return p;
@@ -93,30 +94,38 @@ const note = (s: string) => (self as unknown as Worker).postMessage({ t: 'log', 
 // connection, a reset, a busy server's 429, 5xx or Cloudflare's 52x) or stalls (no byte for STALL_MS) is made
 // again after a pause, for as long as it takes, as the game's read of a slow disc would wait: the game cannot go
 // on without the bytes, and a failed read reaches it as one of 0 bytes.  Only an answer that cannot change by
-// asking again (another 4xx) fails the read, and a body of the wrong length after three tries.
+// asking again (another 4xx) fails the read, and a body of the wrong length after three tries.  After two tries
+// with no answer at all, every other try asks for the block as a byte range instead: another address, which no
+// shared cache keeps, uncompressed, from the server itself.  (A player's game waited minutes on one block whose
+// compressed address failed with "Failed to fetch" on every try, while Cloudflare gave it to everyone else.)
 // NFSU2_DATA_FAULT (tests, the web suite's datafault): fail:N fails every Nth try as a lost connection, hang:N
-// leaves every Nth unanswered until its stall timer, stall:MS sets that timer.
+// leaves every Nth unanswered until its stall timer, stall:MS sets that timer, deny:N loses every try at the
+// compressed address of each file's every Nth block (only its byte range comes), full:N fills this PC's cache
+// at the Nth block this game keeps.
 const FETCHES = 8, STALL_MS = 20000, SLOW_MS = 5000;
-let fetching = 0, tries = 0, fault: { fail: number; hang: number; stall: number } | null = null;
+let fetching = 0, tries = 0, fault: { fail: number; hang: number; stall: number; deny: number; full: number } | null = null;
 const fetchWait: (() => void)[] = [];
 function faults() {
   if (!fault) {
     const kv = new Map((cfg.env?.NFSU2_DATA_FAULT ?? '').split(',').map(p => p.split(':') as [string, string]));
-    fault = { fail: +(kv.get('fail') ?? 0) || 0, hang: +(kv.get('hang') ?? 0) || 0, stall: +(kv.get('stall') ?? 0) || STALL_MS };
+    const num = (k: string) => +(kv.get(k) ?? 0) || 0;
+    fault = { fail: num('fail'), hang: num('hang'), stall: num('stall') || STALL_MS, deny: num('deny'), full: num('full') };
   }
   return fault;
 }
-/** one try: the block, or why it failed and whether asking again can help */
-async function fetchOnce(url: string, start: number, len: number): Promise<Uint8Array | { why: string; again: boolean; size?: boolean }> {
+/** one try: the block (as a byte range of the file, or the server's compressed run of it), or why it failed and
+ *  whether asking again can help (lost: no answer at all) */
+async function fetchOnce(url: string, start: number, len: number, ranged: boolean, lose: boolean):
+    Promise<Uint8Array | { why: string; again: boolean; size?: boolean; lost?: boolean }> {
   const f = faults(), ac = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const alive = () => { clearTimeout(timer); timer = setTimeout(() => ac.abort(), f.stall); };
   alive();
   try {
     const k = ++tries;
-    if (f.fail && k % f.fail === 0) throw new TypeError('lost connection (NFSU2_DATA_FAULT)');
+    if (lose || f.fail && k % f.fail === 0) throw new TypeError('lost connection (NFSU2_DATA_FAULT)');
     if (f.hang && k % f.hang === 0) await new Promise((_, no) => ac.signal.addEventListener('abort', () => no(new Error('aborted'))));
-    const r = await fetch(url, { headers: runs ? {} : { Range: `bytes=${start}-${start + len - 1}` }, cache: 'no-store', signal: ac.signal });
+    const r = await fetch(url, { headers: ranged ? { Range: `bytes=${start}-${start + len - 1}` } : {}, cache: 'no-store', signal: ac.signal });
     if (r.status !== 206 && r.status !== 200) {
       await r.body?.cancel().catch(() => {});
       return { why: `HTTP ${r.status}`, again: r.status === 408 || r.status === 429 || r.status >= 500 };
@@ -132,10 +141,10 @@ async function fetchOnce(url: string, start: number, len: number): Promise<Uint8
     }
     let b = new Uint8Array(got);
     for (let i = 0, o = 0; i < parts.length; o += parts[i].length, i++) b.set(parts[i], o);
-    if (r.status === 200 && !runs) b = b.slice(start, start + len);           // a range answered with the whole file: our block of it
+    if (r.status === 200 && ranged) b = b.slice(start, start + len);          // a range answered with the whole file: our block of it
     return b.length === len ? b : { why: `${b.length} of ${len} bytes`, again: true, size: true };
   } catch (e) {
-    return { why: ac.signal.aborted ? `no answer for ${f.stall / 1000} s` : String((e as Error)?.message ?? e), again: true };
+    return { why: ac.signal.aborted ? `no answer for ${f.stall / 1000} s` : String((e as Error)?.message ?? e), again: true, lost: true };
   } finally { clearTimeout(timer); }
 }
 async function fetchBlock(n: DNode, bi: number, start: number, len: number): Promise<Uint8Array> {
@@ -144,19 +153,35 @@ async function fetchBlock(n: DNode, bi: number, start: number, len: number): Pro
   const what = `${n.path} block ${bi}`, t0 = performance.now();
   const slow = setTimeout(() => note(`[data] ${what}: waiting for the server for ${SLOW_MS / 1000} s`), SLOW_MS);
   try {
-    const url = runs ? runUrl(runs.url, n.path, bi, 1, n) : dataUrl(cfg.dataBase, n.path);
-    for (let k = 1, wait = 250, sized = 0; ; k++, wait = Math.min(wait * 2, 8000)) {
-      const r = await fetchOnce(url, start, len);
+    const run = runs ? runUrl(runs.url, n.path, bi, 1, n) : null, range = dataUrl(cfg.dataBase, n.path), f = faults();
+    for (let k = 1, wait = 250, sized = 0, lost = 0; ; k++, wait = Math.min(wait * 2, 8000)) {
+      const ranged = !run || lost >= 2 && k % 2 === 1, by = run && ranged ? ' (as a byte range)' : '';
+      const r = await fetchOnce(ranged ? range : run, start, len, ranged, !ranged && f.deny > 0 && (bi + 1) % f.deny === 0);
       if (r instanceof Uint8Array) {
         const s = (performance.now() - t0) / 1000;
-        if (k > 1 || s >= SLOW_MS / 1000) note(`[data] ${what}: in after ${s.toFixed(1)} s${k > 1 ? `, ${k} tries` : ''}`);
+        if (k > 1 || s >= SLOW_MS / 1000) note(`[data] ${what}: in after ${s.toFixed(1)} s${k > 1 ? `, ${k} tries` : ''}${by}`);
         return r;
       }
-      if (!r.again || (r.size && ++sized >= 3)) throw new Error(`${what}: ${r.why}`);
-      if (k <= 3 || k % 10 === 0) note(`[data] ${what}: ${r.why}; again in ${wait / 1000} s (try ${k + 1})`);
+      if (r.lost) lost++;
+      if (!r.again || (r.size && ++sized >= 3)) throw new Error(`${what}: ${r.why}${by}`);
+      if (k <= 3 || k % 10 === 0) note(`[data] ${what}: ${r.why}${by}; again in ${wait / 1000} s (try ${k + 1})`);
       await new Promise(res => setTimeout(res, wait));
     }
   } finally { clearTimeout(slow); fetching--; fetchWait.shift()?.(); }
+}
+// A block this PC has no room to keep (a full disk, or the browser's share of it used up: "No space available for
+// this operation") ends the keeping for this game, not the read: the game has the bytes either way.  (Thrown into
+// the read, it gave the game a failed one, and the game crashed.)
+function keepBlock(cf: CacheFile, n: DNode, bi: number, b: Uint8Array) {
+  if (!keeping) return;
+  try {
+    const f = faults();
+    if (f.full && ++kept >= f.full) throw new DOMException('No space available for this operation (NFSU2_DATA_FAULT)', 'QuotaExceededError');
+    putBlock(cf, bi, b);
+  } catch (e) {
+    keeping = false;
+    note(`[data] no room on this PC to keep more of the game data (${n.path} block ${bi}: ${(e as Error)?.message ?? e}); the rest comes from the server`);
+  }
 }
 async function getBlock(n: DNode, bi: number): Promise<Uint8Array> {
   const key = n.path + '#' + bi;
@@ -171,7 +196,7 @@ async function getBlock(n: DNode, bi: number): Promise<Uint8Array> {
       const b = new Uint8Array(len); cf.h.read(b, { at: start }); memPut(key, b); return b;
     }
     const b = await fetchBlock(n, bi, start, len);
-    if (cf) putBlock(cf, bi, b);
+    if (cf) keepBlock(cf, n, bi, b);
     memPut(key, b);
     return b;
   })();

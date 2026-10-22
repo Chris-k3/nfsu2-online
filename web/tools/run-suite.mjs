@@ -58,8 +58,10 @@ const TABLE = [
   ['careerbot', 'career_bot.txt', 'segment done', 'NFSU2_CAREER_BOT_RACES=2', 600],
   ['lan_host', 'lan_host_short.txt', "auth NAME 'SUITEHOST'", '', 400, null, 'suitehost'],
   // the browser's alone: the game data's server loses every 7th request and leaves every 29th unanswered, and the
-  // reads wait and ask again (web/src/host/io-worker.ts; a failed read gave the game 0 bytes, and it crashed at boot)
-  ['datafault', 'quickrace.txt', 'waitmem [0x008654a4]==6 satisfied', 'NFSU2_DATA_FAULT=fail:7,hang:29,stall:3000', 400],
+  // reads wait and ask again (web/src/host/io-worker.ts; a failed read gave the game 0 bytes, and it crashed at boot);
+  // every 16th block's compressed address never answers (its byte range does), and the cache on this PC fills up
+  // at the 40th block (a read failed with it, and the game crashed)
+  ['datafault', 'quickrace.txt', 'waitmem [0x008654a4]==6 satisfied', 'NFSU2_DATA_FAULT=fail:7,hang:29,stall:3000,deny:16,full:40', 400],
 ].map(([name, script, marker, extra, alarm, blocked, net]) => ({ name, script, marker, extra, alarm, blocked, net }));
 // opt-in (named only): needs a career save from stage 2 on (NFSU2_SAVE_SEED on the Mac)
 const SEED = process.env.NFSU2_SAVE_SEED ?? '';

@@ -53,9 +53,11 @@ export async function openCacheFile(dir: FileSystemDirectoryHandle, f: DataFile)
   return { h, have, haveH };
 }
 
-/** block bi of the file is in its cache file now */
+/** block bi of the file is in its cache file now (throws if it is not: no room for it, say) */
 export function putBlock(cf: CacheFile, bi: number, b: Uint8Array) {
-  cf.h.write(b, { at: bi * BLOCK }); cf.have[bi] = 1; cf.haveH.write(cf.have.subarray(bi, bi + 1), { at: bi });
+  const k = cf.h.write(b, { at: bi * BLOCK });
+  if (k !== b.length) throw new Error(`${k} of ${b.length} bytes written`);   // marked as there, a short block would stay
+  cf.have[bi] = 1; cf.haveH.write(cf.have.subarray(bi, bi + 1), { at: bi });
 }
 
 export interface Scan {
