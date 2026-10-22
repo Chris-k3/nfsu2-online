@@ -217,6 +217,21 @@ summary:hover { color: var(--text); }
 .profiles li.renaming .msg { margin-top: 0; }
 #saves .hint + .row { margin-top: 12px; }
 #saves h3 + .hint { margin-bottom: 0; }
+/* the screenshots (shots.ts): four to a row, each cut to 16:9, the game's glow on the one pointed at; "+N" over
+ * the eighth until all are shown */
+.shots { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; margin-top: 8px; }
+.shots:empty { display: none; }
+.shot {
+  position: relative; display: block; width: 100%; padding: 0; border: 2px solid transparent; border-radius: 4px;
+  background: var(--field); overflow: hidden; aspect-ratio: 16 / 9; cursor: zoom-in;
+}
+.shot img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.shot:hover { border-color: var(--lime); box-shadow: 0 0 12px var(--lime-glow); }
+.shot.more { cursor: pointer; }
+.shot.more span, .shot .kind { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+.shot.more span { background: rgba(0, 0, 0, 0.6); color: var(--lime); font: italic 700 20px/28px var(--font); }
+.shot .kind { color: var(--edge); font: italic 700 14px/20px var(--font); }     /* a file the page cannot draw */
+#shots-fewer { margin-top: 8px; }
 #cache-info { font-variant-numeric: tabular-nums; }
 #data-bar { margin: 0 0 16px; }
 .msg { font-size: 14px; line-height: 20px; margin-top: 12px; }
@@ -284,6 +299,15 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.64); }
 .dlg-field { display: flex; align-items: center; gap: 12px; }
 .dlg-field input[type="text"] { flex: 1; min-width: 0; }
 .dlg.help { width: min(560px, calc(100vw - 32px)); }
+/* one screenshot (shots.ts): as large as the window allows, under it its place, Download and Delete */
+.dlg.shot-view { width: min(1232px, calc(100vw - 32px)); }
+.shot-view .dlg-head .hint { margin: 0; }
+#shot-img {
+  display: block; width: 100%; max-height: calc(100dvh - 216px); aspect-ratio: auto 16 / 9; object-fit: contain;
+  border-radius: 8px; background: #000;
+}
+.shot-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 16px; }
+.shot-foot .hint { margin: 0 auto 0 8px; font-variant-numeric: tabular-nums; }
 .dlg-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 .dlg-head h2 { margin: 0; }
 .menu-actions { display: grid; gap: 8px; }

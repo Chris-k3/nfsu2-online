@@ -2,7 +2,7 @@
 // be renamed: profile.ts renameProfile), a backup of the whole save
 // overlay as a zip (profiles, registry.txt, settings.ini, screenshots) and
 // restoring one, or adding the PC game's profiles beside the ones here
-// (readBackup tells them apart).  And the section at the bottom of the page, the game data on
+// (readBackup tells them apart), and the F12 screenshots (shots.ts).  And the section at the bottom of the page, the game data on
 // this PC: how much of it, all of it downloaded ahead (predownload.ts), or
 // deleted.  The game data is never part of a backup and never written back:
 // it stays on the server.
@@ -14,6 +14,7 @@ import { downloadBlob, stamp } from './logs';
 import { fmtBytes } from './checks';
 import { resolveEnv } from './settings';
 import { gameDataKept, type DownloadState, type DownloadStatus, type Predownload } from './predownload';
+import { ScreenshotsPart } from './shots';
 
 export interface SavesDeps {
   saveDir: string;
@@ -218,7 +219,10 @@ export class SavesPanel {
     inp.onchange = () => { const f = inp.files?.[0]; inp.value = ''; if (f) void this.doImport(f); };
     dataPanel.querySelector<HTMLButtonElement>('#clear-cache')!.onclick = () => void this.doClearCache();
     dataPanel.querySelector<HTMLButtonElement>('#fetch-all')!.onclick = () => void this.doDownload();
+    this.shots = new ScreenshotsPart(root, { saveDir: deps.saveDir, confirm: deps.confirm, changed: () => void this.refresh() });
   }
+
+  private shots: ScreenshotsPart;
 
   private msg(s: string) { this.root.querySelector('#saves-msg')!.textContent = s; }
   private dataMsg(s: string, warn = false) { const m = this.dataPanel.querySelector('#data-msg')!; m.textContent = s; m.classList.toggle('warn', warn); }
@@ -239,10 +243,11 @@ export class SavesPanel {
   settled(): Promise<void> { return this.writing.then(() => {}, () => {}); }
   private write<T>(job: Promise<T>): Promise<T> { this.writing = job; return job; }
 
-  /** Show the profiles and the downloaded game data as they are now. */
+  /** Show the profiles, the screenshots and the downloaded game data as they are now. */
   async refresh() {
     const files = await listFiles(this.deps.saveDir);
     this.profiles = await listProfiles(this.deps.saveDir, files);
+    this.shots.show(files.filter(f => isScreenshot(f.path)));
     const busy = this.deps.busy();
     // a name being typed stays as it is (the list is shown again when the edit ends)
     if (!this.profiles.some(p => p.name === this.renaming)) { this.renaming = null; this.showProfiles(); }

@@ -91,7 +91,7 @@
         <dl class="keys">
           <div><dt><kbd>F9</kbd></dt><dd>Menu: full screen, controls, log, quit</dd></div>
           <div><dt><kbd>F8</kbd></dt><dd>Frame-rate counter</dd></div>
-          <div><dt><kbd>F12</kbd></dt><dd>Screenshot, saved with your profiles</dd></div>
+          <div><dt><kbd>F12</kbd></dt><dd>Screenshot, shown in Saves</dd></div>
           <div><dt>Hold <kbd>Esc</kbd></dt><dd>Leave full screen</dd></div>
         </dl>
         <p class="hint">In menus: arrow keys and Enter, Esc goes back. Change keys in the game's Options, Controls. Xbox and PlayStation controllers work too.</p>
@@ -120,6 +120,10 @@
       <h2 id="saves-title">Saves</h2>
       <ul class="profiles" id="profiles" aria-label="Profiles in this browser"></ul>
       <p class="hint">Quit from the game's main menu, or <kbd>F9</kbd> then Quit game, so a save in progress is never cut short.</p>
+      <h3>Screenshots</h3>
+      <p class="hint" id="shots-info">Counting…</p>
+      <ul class="shots" id="shots" aria-label="Screenshots in this browser"></ul>
+      <div class="row" id="shots-fewer" hidden><button type="button" class="text-btn">Show fewer</button></div>
       <h3>Backup</h3>
       <p class="hint">One zip with your profiles, the game's options, settings.ini and F12 screenshots. Restoring a backup replaces all of them in this browser.
         Profiles from the PC game restore too, beside the ones here: zip the folder <code>%LOCALAPPDATA%\NFS Underground 2</code>, or pick a profile's own file in it.</p>
@@ -198,6 +202,24 @@
     <button type="button" class="btn" data-act="help">Controls</button>
     <button type="button" class="btn" data-act="log">Download log</button>
     <button type="button" class="btn danger" data-act="quit">Quit game</button>
+  </div>
+</dialog>
+
+<dialog class="dlg shot-view" id="shot-view" aria-labelledby="shot-title">
+  <form method="dialog" class="dlg-head">
+    <div>
+      <h2 id="shot-title">Screenshot</h2>
+      <p class="hint" id="shot-when"></p>
+    </div>
+    <button class="btn" value="close">Close</button>
+  </form>
+  <img id="shot-img" alt="">
+  <div class="shot-foot">
+    <button type="button" class="btn" data-act="newer" aria-keyshortcuts="ArrowLeft">‹ Newer</button>
+    <button type="button" class="btn" data-act="older" aria-keyshortcuts="ArrowRight">Older ›</button>
+    <span class="hint" id="shot-meta"></span>
+    <button type="button" class="btn" data-act="download">Download</button>
+    <button type="button" class="btn danger" data-act="delete">Delete</button>
   </div>
 </dialog>
 

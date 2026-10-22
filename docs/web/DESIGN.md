@@ -219,7 +219,8 @@ The game thread keeps `com.c` (D3D9 state, shader translation) and records throu
      never waits on JS or WebGPU except for frames in flight (≤ 2) and explicit readbacks.
 - The TypeScript side (`web/src/gpu/`) reads those structures **zero-copy** from the wasm memory and uploads arenas with
   one `queue.writeBuffer` each per frame. It keeps pipeline and bind-group caches and encodes the passes. It presents to
-  the canvas at native resolution, aspect-fit, and serves screenshot dumps for tests. When the game's device size is
+  the canvas at native resolution, aspect-fit, and reads frames back for the tests' dumps and F12 screenshots (the
+  PNGs are made in a worker, `png-worker.ts`, off the thread that draws). When the game's device size is
   the canvas's (the usual case) the frame draws its screen straight into the canvas texture: no back buffer and no
   composite pass. A frame that copies from the screen before drawing to it keeps the back buffer (it reads the
   previous frame); none of the checked scenes did. `?direct=0` on the test page turns the direct path off.

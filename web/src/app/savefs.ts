@@ -5,6 +5,8 @@
 //
 // Writes from the page happen only while no game runs in this tab (the
 // shell enforces it), so they never race the I/O worker's sync handles.
+// But an F12 screenshot (shots.ts saveScreenshot): a new file of its own,
+// which the game never opens.
 
 import { BLOCK, CACHE_DIR } from '../host/datacache';
 import { coverOf } from './profile';
@@ -48,7 +50,7 @@ export async function exists(saveDir: string, path: string): Promise<boolean> {
 }
 
 /** Write a whole file (creating its folders). */
-export async function writeFile(saveDir: string, path: string, data: string | Uint8Array): Promise<void> {
+export async function writeFile(saveDir: string, path: string, data: string | Uint8Array | Blob): Promise<void> {
   const p = parts(path);
   if (!p.length) throw new Error('empty path');
   const d = await dirOf(await saveRoot(saveDir), p.slice(0, -1), true);

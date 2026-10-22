@@ -29,6 +29,7 @@ import { turnOnAutosave } from './profile';
 import { putKey, SettingsPanel } from './settings-ui';
 import { serverAnswers, watchPlayers, type PlayerCounts } from './players';
 import { SavesPanel } from './saves-ui';
+import { saveScreenshot } from './shots';
 import { FpsOverlay, FPS_MODES, type FpsMode } from './overlay';
 import { GameSession } from './game';
 import { AwayCheck, AWAY_LIMITS, type AwayLimits } from './away';
@@ -574,6 +575,22 @@ function toast(msg: string, ms: number) {
   (toast as any).timer = setTimeout(() => { t.hidden = true; }, ms);
 }
 
+/** F12: the next frame the renderer draws, as a PNG beside the saves (Saves on the start page shows it) */
+async function screenshot() {
+  const r = session?.renderer;
+  if (!r?.dump) { toast('No screenshot: the picture is not there yet.', 2500); return; }
+  try {
+    const png = await r.dump('screenshot');
+    if (!png.size) throw new Error('the game ended first');
+    const name = await saveScreenshot(SAVE, png);
+    log.add(`[app] screenshot ${name}, ${fmtBytes(png.size)}`);
+    toast('Screenshot saved: Saves on the start page shows it.', 2500);
+  } catch (e) {
+    log.add(`[app] the screenshot failed: ${e}`);
+    toast(`The screenshot failed: ${e instanceof Error ? e.message : e}`, 4000);
+  }
+}
+
 // ----------------------------------------------------------- page menu --
 function openMenu() {
   const m = $<HTMLDialogElement>('#menu');
@@ -850,12 +867,14 @@ export async function boot() {
   $('#menu').addEventListener('close', () => { $('#stage').classList.remove('cursor'); $('#stage').querySelector('canvas')?.focus(); });
 
   // F8 / F9 belong to the page while the game runs (the game binds neither,
-  // Chrome reserves neither); caught first, so the game never sees them.
+  // Chrome reserves neither); caught first, so the game never sees them.  F12
+  // too: the page's screenshot, not the game's (whose copy of the frame comes
+  // out black in this port) nor the browser's developer tools.
   window.addEventListener('keydown', e => {
-    if (session && (e.code === 'F8' || e.code === 'F9')) {
+    if (session && (e.code === 'F8' || e.code === 'F9' || e.code === 'F12')) {
       e.preventDefault(); e.stopImmediatePropagation();
       if (e.repeat) return;
-      if (e.code === 'F8') toast(`Frame-rate counter: ${fps.cycle()}`, 1500); else openMenu();
+      if (e.code === 'F8') toast(`Frame-rate counter: ${fps.cycle()}`, 1500); else if (e.code === 'F9') openMenu(); else void screenshot();
       return;
     }
     // Enter plays only when nothing else has the focus (or Play itself does): a

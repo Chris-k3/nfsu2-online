@@ -7,7 +7,8 @@
 //     onto the canvas at the canvas's own resolution, and submits;
 //   - publishes a display clock from requestAnimationFrame (HOST_KIND_VSYNC)
 //     that the game's frame pacer locks to;
-//   - reads frames back for the autotest "dump" command.
+//   - reads frames back for the autotest "dump" command and F12 (dump()), as
+//     PNGs made in png-worker.ts.
 // Triggers: Atomics.waitAsync on the game's doorbell, every rAF, and every
 // finished GPU frame.  The main thread never blocks.
 import type { GameProcess } from '../host/process';
@@ -15,6 +16,7 @@ import { HostKind } from '../host/abi';
 import * as P from './proto';
 import { C, F } from './proto';
 import { Encoder } from './encoder';
+import type { FromPng, ToPng } from './png-worker';
 
 export interface RendererOptions {
   /** where frame dumps go: a URL prefix that accepts PUT <prefix><name>.png (the dev server's /artifacts/) */
@@ -320,27 +322,27 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
   const linear = device.createSampler({ minFilter: 'linear', magFilter: 'linear' });
   const nearest = device.createSampler({ minFilter: 'nearest', magFilter: 'nearest' });
 
+  // the PNG is made in a worker (png-worker.ts), started at the first dump: here the frame is only copied out
+  let pngWorker: Worker | null = null, pngNext = 0;
+  const pngWaiting = new Map<number, { resolve: (b: Blob) => void; reject: (e: Error) => void }>();
   async function readback(rb: Readback): Promise<Blob> {
     await rb.buf.mapAsync(GPUMapMode.READ);
-    const src = new Uint8Array(rb.buf.getMappedRange());
-    const img = new ImageData(rb.w, rb.h);
-    const d = img.data;
-    for (let y = 0; y < rb.h; y++) {
-      let s = y * rb.bpr, o = y * rb.w * 4;
-      for (let x = 0; x < rb.w; x++, s += 4, o += 4) { d[o] = src[s + 2]; d[o + 1] = src[s + 1]; d[o + 2] = src[s]; d[o + 3] = 255; }
-    }
+    const px = rb.buf.getMappedRange().slice(0);
     rb.buf.unmap(); rb.buf.destroy();
-    let oc = new OffscreenCanvas(rb.w, rb.h);
-    oc.getContext('2d')!.putImageData(img, 0, 0);
-    const k = opts.dumpScale ?? 1;
-    if (k > 0 && k < 1) {
-      const o2 = new OffscreenCanvas(Math.max(1, Math.round(rb.w * k)), Math.max(1, Math.round(rb.h * k)));
-      const g = o2.getContext('2d')!;
-      g.imageSmoothingQuality = 'high';
-      g.drawImage(oc, 0, 0, o2.width, o2.height);
-      oc = o2;
+    if (!pngWorker) {
+      const w = pngWorker = new Worker(new URL('/gpu/png-worker.js', import.meta.url), { type: 'module', name: 'png' });
+      w.onmessage = (e: MessageEvent<FromPng>) => {
+        const p = pngWaiting.get(e.data.id);
+        pngWaiting.delete(e.data.id);
+        if ('png' in e.data) p?.resolve(e.data.png); else p?.reject(new Error(e.data.error));
+      };
+      w.onerror = e => { for (const p of pngWaiting.values()) p.reject(new Error(e.message || 'the PNG worker failed')); pngWaiting.clear(); };
     }
-    return oc.convertToBlob({ type: 'image/png' });
+    const id = pngNext++, msg: ToPng = { id, px, w: rb.w, h: rb.h, bpr: rb.bpr, scale: opts.dumpScale ?? 1 };
+    return new Promise((resolve, reject) => {
+      pngWaiting.set(id, { resolve, reject });
+      pngWorker!.postMessage(msg, [px]);
+    });
   }
 
   // ---- display clock (rAF) ----
@@ -443,6 +445,8 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
       Atomics.store(I, cw + C.attached, P.DETACHED);
       for (const w of [C.attached, C.state, C.rqTail, C.bell]) Atomics.notify(I, cw + w);
       for (const d of dumpWaiters.splice(0)) d.resolve(new Blob([], { type: 'image/png' }));
+      // a PNG the worker is making still comes (a screenshot taken just before the game ended)
+      void Promise.allSettled([...pending]).then(() => pngWorker?.terminate());
       try { ctx.unconfigure(); } catch { /* already gone */ }
       device.removeEventListener('uncapturederror', onError);
       device.destroy();

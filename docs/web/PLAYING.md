@@ -63,7 +63,7 @@ need the server; your saves are in the browser either way.
 | M, Tab | Map, messages |
 | Esc or P | Pause; Esc also goes back in menus |
 | Enter | Choose (menus); in free roam, start an event at its marker or take an outrun |
-| F12 | The game's screenshot, kept with your saves |
+| F12 | Screenshot (PNG), kept with your saves and shown in Saves on the start page |
 | **F8** | Frame-rate counter: off, on, detailed |
 | **F9** | The page menu: when the game last saved, full screen, counter, controls, log, **Quit game** |
 | **Hold Esc** | Leave full screen (a short press still goes to the game) |
@@ -123,6 +123,8 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
 - **Rename:** Rename next to a profile in Saves gives it another name: letters and digits, up to 7, as the game's
   own name field takes them. Its career, cars and DVD and magazine covers go with it. Quit the game first. When
   "Your name" is empty, the other players see the new name.
+- **Screenshots:** F12 while playing saves the picture as a PNG beside your saves. Saves on the start page shows
+  them, newest first; click one to see it large, page through with the arrow keys, download or delete it.
 - **Backup:** Saves, Download a backup gives one zip with your profiles, the game's options (`registry.txt`),
   `settings.ini` and F12 screenshots.
 - **Restore:** Saves, Restore a backup puts a zip back, on this PC or on another one. It replaces what this browser
