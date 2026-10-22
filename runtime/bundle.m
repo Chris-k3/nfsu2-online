@@ -360,7 +360,7 @@ static const char *const k_template =
 "# work.  Cutscenes stay at 30 fps in every mode.  [NFSU2_FPS]\n"
 "#fps = auto\n"
 "# Fixes for subsystems that count frames: default (all above 60 fps, none\n"
-"# at 60), all, none, or a list of ticks,timer,particles,trail,audio,rtf\n"
+"# at 60), all, none, or a list of ticks,timer,particles,trail,audio,rtf,rain\n"
 "# (a leading '-' removes one, e.g. default,-audio).  [NFSU2_HFR_FIX]\n"
 "#hfr_fixes = default\n"
 "# Length factor of the NOS / streak trail.  [NFSU2_NOS_TRAIL_LEN]\n"
@@ -603,7 +603,7 @@ static int value_ok(int kind, const char *v){
                   const char *h0 = e + 1; long h = strtol(h0, &e, 10);
                   return e != h0 && !*e && w >= 320 && w <= 16384 && h >= 320 && h <= 16384; }
     case K_FIXES: { static const char *const w[] = { "default", "all", "none", "ticks", "timer", "particles",
-                                                     "trail", "audio", "rtf", 0 };
+                                                     "trail", "audio", "rtf", "rain", 0 };
                     return list_ok(v, w, 1); }
     case K_IFNAME: { size_t n = strlen(v); if (!n || n > 15) return 0;
                      for (const char *p = v; *p; p++) if (!isalnum((unsigned char)*p)) return 0;
@@ -632,7 +632,7 @@ static const char *kind_text(int kind){
     case K_PATH: return "a folder (printable, under 1024 bytes)";
     case K_TEXT: return "text of 1 to 63 bytes without control characters";
     case K_WXH: return "<width>x<height> (320 to 16384 each)";
-    case K_FIXES: return "default, all, none or a list of ticks, timer, particles, trail, audio, rtf (-name removes one)";
+    case K_FIXES: return "default, all, none or a list of ticks, timer, particles, trail, audio, rtf, rain (-name removes one)";
     case K_IFNAME: return "a network interface name (letters and digits, e.g. en0)";
     case K_IPV4: return "an IPv4 address a.b.c.d";
     case K_MAC: return "xx:xx:xx:xx:xx:xx (hex, not all zero)";

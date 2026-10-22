@@ -21,7 +21,7 @@
  *       i.e. the timing of the port before this file existed.
  *       Aliases: native = auto, vanilla = game = off, max = uncapped.
  *   NFSU2_HFR_FIX = default | all | none | comma list of
- *       ticks,timer,particles,trail,audio,rtf; a '-' prefix removes one
+ *       ticks,timer,particles,trail,audio,rtf,rain; a '-' prefix removes one
  *       ("default,-audio").  default = all when the mode's content rate is
  *       above 60, none otherwise (60 stays the vanilla reference).  With
  *       auto the set follows the rate when the window moves to a screen
@@ -52,6 +52,7 @@
  *              1/60 s spacing (F3)
  *   audio      EAXSound::Update dt carried across its 15 ms gate (F4)
  *   rtf        RealTimeFrames without the forced minimum of 1 (F5)
+ *   rain       Rain::Update on every frame, its per-call steps per time (F6)
  */
 #include "cpu.h"
 #include <stdio.h>
@@ -67,8 +68,8 @@ void guest_sleep_frame_ns(int64_t ns);  /* win32_ext.c: sleeps with the GIL rele
 int  metal_display_hz(void);            /* metal.m: window's screen max fps, 0 = unknown */
 
 enum { FX_TICKS = 1, FX_TIMER = 2, FX_PARTICLES = 4, FX_TRAIL = 8, FX_AUDIO = 16, FX_RTF = 32,
-       FX_ALL = 63 };
-static const char *const g_fx_name[] = { "ticks", "timer", "particles", "trail", "audio", "rtf" };
+       FX_RAIN = 64, FX_ALL = 127 };
+static const char *const g_fx_name[] = { "ticks", "timer", "particles", "trail", "audio", "rtf", "rain" };
 
 #define M_OFF      (-1)
 #define M_UNCAPPED (-2)
@@ -174,7 +175,7 @@ static int parse_fix(int def, int warn){
         if (!strcasecmp(t, "all")) bit = FX_ALL;
         else if (!strcasecmp(t, "none")) { f = 0; continue; }
         else if (!strcasecmp(t, "default")) bit = def;
-        else for (int i = 0; i < 6; i++) if (!strcasecmp(t, g_fx_name[i])) bit = 1 << i;
+        else for (int i = 0; i < 7; i++) if (!strcasecmp(t, g_fx_name[i])) bit = 1 << i;
         if (!bit && strcasecmp(t, "default")){
             if (warn) fprintf(stderr, "[hfr] NFSU2_HFR_FIX: unknown fix '%s'\n", t);
             continue; }
@@ -184,7 +185,7 @@ static int parse_fix(int def, int warn){
 }
 static void fix_str(int f, char *out, size_t n){
     out[0] = 0;
-    for (int i = 0; i < 6; i++) if (f & (1 << i)){
+    for (int i = 0; i < 7; i++) if (f & (1 << i)){
         size_t l = strlen(out); snprintf(out + l, n - l, "%s%s", l ? "," : "", g_fx_name[i]); }
     if (!out[0]) snprintf(out, n, "none");
 }
@@ -894,6 +895,74 @@ void sub_00483b40(CPU *c){
     sub_00483b40_orig(c);
     if (MR32(self + 0xa4) != stamp){ g_f.au_upd++; g_f.au_dt += active ? d2 : 0.0; g_au_carry = 0; }
     else g_au_carry = (g_fix & FX_AUDIO) && active ? d2 : 0.0;
+}
+
+/* ---- F6: Rain::Update 0x61F120 --------------------------------------------
+ * __thiscall(ecx = the Rain at eView+0x64), once per frame in the world;
+ * overrides.c (FORCERAIN) calls it through hfr_rain_update.  It returns at
+ * once unless |world dt| > 9 ms ([0x7A8734], read only here), which is meant
+ * for a world that stands but also skips every 1/120 s frame.  At 120 the
+ * rain then ran only on frames that missed their slot, and only those
+ * frames armed its screen tint (0x5D75E0, the main view's lighting): in rain
+ * the picture jumped between tinted frames and ~20 % brighter ones, and the
+ * grey storm sky flashed.  Here a frame shorter than 1/60 s (s = 60 dt < 1)
+ * runs it too, with its per-call steps scaled to world time as at 60 fps
+ * (longer frames run it untouched, as F2):
+ *   a rain drop moves by its velocity (one of ten at Rain+0x5120) plus a
+ *   per-type share of the wind (Rain+0x4D4C..+0x4D68) a call (0x61EE8B,
+ *   both read only there, written at init and by the tweak 0x61E3E0): x s;
+ *   it also moves by -0.02 x the camera's velocity (camera +0x1E0, m/s),
+ *   flattened and capped at length 1 a call, i.e. 50 m/s (0x61E8B9): for
+ *   the call the rain sees that velocity capped at 50 m/s and x s, so the
+ *   game's cap never acts and the share is s x the 60 fps one.  Its length
+ *   (Rain+0x5090, written only there) lengthens every streak (0x613A70) and
+ *   is divided by s again afterwards;
+ *   lens drops slide out by [0x803AC4] x the camera speed a call (0x614141,
+ *   read only there): the constant makes up for the cap, the s is in the
+ *   velocity already;
+ *   the cloud cover eases 5 % / 0.15 % a call towards its target (0x61F2CC,
+ *   [0x7A67C0]/[0x7A67C4], read only here): 1 - (1 - f)^s.
+ * A streak's direction comes from the last step, which the scaling keeps.
+ * All of it is put back after the call (a drop value only if the call did
+ * not write it again). */
+void sub_0061f120_orig(CPU *c);
+#define A_RAIN_GATE   0x007a8734u   /* 0.009 s */
+#define A_RAIN_EASE   0x007a67c0u   /* cloud easing a call: towards clear, +4 towards overcast */
+#define A_RAIN_SLIDE  0x00803ac4u   /* lens drop slide per camera speed */
+#define RAIN_WIND     0x4d4cu       /* Rain: 4 drop types x {wind share, half of it} */
+#define RAIN_FALL     0x5120u       /* Rain: 10 drop velocities {x, y, z, -99999.9} */
+#define RAIN_STRETCH  0x5090u       /* Rain: streak length added for the camera speed */
+#define RAIN_VMAX     50.0          /* m/s: the game's cap, 1 / 0.02 */
+void hfr_rain_update(CPU *c){
+    uint32_t rain = c->ecx;
+    double s = 60.0 * MRF32(A_WORLDDT);
+    uint32_t view = rain && mem_is_committed(rain + RAIN_FALL + 0x9fu) ? MR32(rain + 0x1ecu) : 0;
+    uint32_t cam = view && mem_is_committed(view + 0x43u) ? MR32(view + 0x40u) : 0;
+    if (!(g_fix & FX_RAIN) || !(s > 0.0 && s < 1.0) || !cam || !mem_is_committed(cam + 0x1ebu)){
+        sub_0061f120_orig(c); return; }
+    float gate = MRF32(A_RAIN_GATE), up = MRF32(A_RAIN_EASE), down = MRF32(A_RAIN_EASE + 4u);
+    float slide = MRF32(A_RAIN_SLIDE), stretch = MRF32(rain + RAIN_STRETCH), old[38], v[3];
+    uint32_t at[38], put[38];
+    for (uint32_t i = 0; i < 8; i++) at[i] = rain + RAIN_WIND + 4u * i;
+    for (uint32_t i = 0; i < 30; i++) at[8 + i] = rain + RAIN_FALL + 16u * (i / 3) + 4u * (i % 3);
+    for (int i = 0; i < 38; i++){ old[i] = MRF32(at[i]); MRF32(at[i]) = (float)(old[i] * s); put[i] = MR32(at[i]); }
+    double vl = 0;
+    for (uint32_t i = 0; i < 3; i++){ v[i] = MRF32(cam + 0x1e0u + 4u * i); vl += (double)v[i] * v[i]; }
+    vl = sqrt(vl);
+    double cap = vl > RAIN_VMAX ? RAIN_VMAX / vl : 1.0;
+    for (uint32_t i = 0; i < 3; i++) MRF32(cam + 0x1e0u + 4u * i) = (float)(v[i] * cap * s);
+    MRF32(A_RAIN_SLIDE) = (float)(slide / cap);
+    MRF32(rain + RAIN_STRETCH) = -1.f;                       /* not computed this call: stays -1 */
+    MRF32(A_RAIN_GATE) = 0.f;
+    MRF32(A_RAIN_EASE) = (float)(1.0 - pow(1.0 - up, s));
+    MRF32(A_RAIN_EASE + 4u) = (float)(1.0 - pow(1.0 - down, s));
+    sub_0061f120_orig(c);
+    for (int i = 0; i < 38; i++) if (MR32(at[i]) == put[i]) MRF32(at[i]) = old[i];
+    for (uint32_t i = 0; i < 3; i++) MRF32(cam + 0x1e0u + 4u * i) = v[i];
+    float st = MRF32(rain + RAIN_STRETCH);
+    MRF32(rain + RAIN_STRETCH) = st < 0.f ? stretch : (float)fmin(st / s, 1.0);
+    MRF32(A_RAIN_GATE) = gate; MRF32(A_RAIN_EASE) = up; MRF32(A_RAIN_EASE + 4u) = down;
+    MRF32(A_RAIN_SLIDE) = slide;
 }
 
 /* ---- exit report -------------------------------------------------------- */
