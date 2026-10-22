@@ -16,6 +16,7 @@ use nfsu2_lan::{LanOptions, LanSwitch};
 use nfsu2_online::{LobbyTrace, OnlineHost, OnlineOptions};
 use nfsu2_roam::{RoamHub, RoamOptions};
 use nfsu2_util::{Host, log};
+use nfsu2_vault::{Sweep, Vault, VaultOptions};
 
 use super::{App, etag, limits};
 use crate::die;
@@ -24,6 +25,25 @@ use crate::paths;
 
 /// what the players on the switch do, every 5 minutes while any are on (counts only)
 const BREAKDOWN_EVERY: Duration = Duration::from_secs(5 * 60);
+/// keyphrase saves: counted at the start, then swept (the unused removed) and counted again every day
+const VAULT_SWEEP_EVERY: Duration = Duration::from_secs(24 * 3600);
+
+/// "1.2 GB", "340.5 MB"
+fn size(bytes: u64) -> String {
+    if bytes >= 1_000_000_000 { format!("{:.2} GB", bytes as f64 / 1e9) } else { format!("{:.1} MB", bytes as f64 / 1e6) }
+}
+
+/// the console's line for a sweep: counts only, never a keyphrase
+fn vault_line(s: &Sweep, max: u64, seconds: f64) -> String {
+    let mut l = format!("[vault] {} keyphrases, {} of {} (counted in {seconds:.1} s)", s.keyphrases, size(s.bytes), size(max));
+    if s.removed > 0 {
+        l.push_str(&format!("; {} removed after two years unused", s.removed));
+    }
+    if s.temps > 0 {
+        l.push_str(&format!("; {} unfinished writes cleared", s.temps));
+    }
+    l
+}
 
 /// a measurement knob from the environment (a whole number), else the default
 fn env_num(name: &str, def: u64) -> u64 {
@@ -97,6 +117,11 @@ pub async fn run(o: Options, cores: usize) {
     });
     // (its lines: the cap on the players' links going down while the server is busy and back up, at most one every 5 s)
     let roam = o.roam_hub.then(|| RoamHub::spawn(RoamOptions::default(), Arc::new(|line: &str| log::line(line))));
+    // keyphrase saves: a folder in the state folder (none with --vault-gb 0)
+    let vault = (o.vault_gb > 0.0).then(|| {
+        let dir = paths::join(&o.state, "vault");
+        Arc::new(Vault::open(VaultOptions::sized(PathBuf::from(&dir), o.vault_gb)).unwrap_or_else(|e| die(&format!("{dir}: {e}"))))
+    });
     let lan_sndbuf = env_num("NFSU2_LAN_SNDBUF", 0) as usize;
     // the bundle clock follows the crowd (nfsu2-lan); NFSU2_BUNDLE_MS fixes its tick (0: none), for measurements
     let d = LanOptions::default();
@@ -126,7 +151,7 @@ pub async fn run(o: Options, cores: usize) {
         h.attach_switch(lan.switch_send());
     }
 
-    let app = Arc::new(App::new(o, real_state, etag_key, lan.clone(), online, roam.clone(), (cores / 2).max(2), lan_sndbuf));
+    let app = Arc::new(App::new(o, real_state, etag_key, lan.clone(), online, roam.clone(), vault.clone(), (cores / 2).max(2), lan_sndbuf));
     let o = &app.o;
 
     // the switch's players, every 5 minutes while any are on
@@ -158,6 +183,9 @@ pub async fn run(o: Options, cores: usize) {
             loop {
                 every.tick().await;
                 app.lan_opens.prune();
+                if let Some(v) = &app.vault {
+                    v.prune();
+                }
             }
         });
     }
@@ -319,6 +347,21 @@ pub async fn run(o: Options, cores: usize) {
             "off (--online off)".into()
         }
     ));
+    lines.push(format!(
+        "  saves     : {}",
+        match &app.vault {
+            Some(v) => {
+                let vo = v.store.options();
+                format!(
+                    "keyphrase saves (/vault) in {}, up to {} (new keyphrases until {}); one unused for two years goes",
+                    vo.dir.display(),
+                    size(vo.max_bytes),
+                    size(vo.new_until)
+                )
+            }
+            None => "no keyphrase saves (--vault-gb 0)".into(),
+        }
+    ));
     if !o.online_trace.is_empty() {
         lines.push(format!("  trace     : lobby messages (secrets redacted) into {}", o.online_trace));
     }
@@ -330,6 +373,20 @@ pub async fn run(o: Options, cores: usize) {
     }
     lines.push("  access    : none: whoever reaches this server may play (the firewall decides who that is)".into());
     log::line(&lines.join("\n"));
+    // keyphrase saves: counted (the caps wait for it) and swept now (its line after the start-up lines), then daily
+    if let Some(v) = vault {
+        tokio::spawn(async move {
+            loop {
+                let (t0, st) = (std::time::Instant::now(), v.clone());
+                match tokio::task::spawn_blocking(move || st.sweep(nfsu2_util::now_ms())).await {
+                    Ok(Ok(s)) => log::line(&vault_line(&s, v.options().max_bytes, t0.elapsed().as_secs_f64())),
+                    Ok(Err(e)) => log::error(&format!("[vault] the count of the keyphrase saves stopped: {e}")),
+                    Err(e) => log::error(&format!("[vault] the count of the keyphrase saves stopped: {e}")),
+                }
+                tokio::time::sleep(VAULT_SWEEP_EVERY).await;
+            }
+        });
+    }
 
     std::future::pending::<()>().await;
 }

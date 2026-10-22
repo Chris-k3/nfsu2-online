@@ -178,7 +178,9 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
     for the game folder's own folders (`TRACKS`, `CARS`, ...) once until the next write (`runtime/fileio.c`): each
     look is OPFS calls in the I/O worker, 1.5 to 2 ms an open with the GIL held, and a race streams its track by
     opening `TRACKS\STREAM*.BUN` again and again, from the game thread too. Closing a file the game wrote
-    there posts `{ t: 'saved', path }` to the page (the "Progress saved" note, F9's last save, the end screen). Before
+    there posts `{ t: 'saved', path }` to the page (the "Progress saved" note, F9's last save, the end screen, and
+    keyphrase saves: `web/src/app/vault.ts` seals the overlay but its screenshots with a key made from the player's
+    keyphrase and keeps it in step with the server's `/vault`, which holds only the sealed bytes). Before
     each Play the page sets every profile still on the game's Save = Prompt to Autosave, once per profile
     (`web/src/app/profile.ts`, settings.ini `autosave`).
   - `/dev`: `null`, `zero`, `urandom`.

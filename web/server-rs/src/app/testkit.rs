@@ -72,7 +72,11 @@ impl Kit {
         let real_state = std::fs::canonicalize(&o.state).expect("the state folder").to_string_lossy().into_owned();
         let key = etag::load_key(&o.state).expect("the ETag key");
         let lan = LanSwitch::new(LanOptions { max_peers: o.max_peers, ..LanOptions::default() }, "", None, None, None, None);
-        let app = Arc::new(App::new(o, real_state, key, lan, None, None, 2, 0));
+        let vault = (o.vault_gb > 0.0).then(|| {
+            let opts = nfsu2_vault::VaultOptions::sized(std::path::PathBuf::from(&o.state).join("vault"), o.vault_gb);
+            Arc::new(nfsu2_vault::Vault::open(opts).expect("the vault"))
+        });
+        let app = Arc::new(App::new(o, real_state, key, lan, None, None, vault, 2, 0));
         app.refresh_manifest().await.expect("the manifest");
         let (listener, _) = nfsu2_http::bind("127.0.0.1", 0, None).await.expect("a port");
         let addr = listener.local_addr().expect("its address");
@@ -94,6 +98,25 @@ impl Kit {
         req.push_str("Connection: close\r\n\r\n");
         s.write_all(req.as_bytes()).await.expect("write");
         s
+    }
+
+    /// any request, with a body (a Content-Length for it when there is one): the whole answer
+    pub async fn request(&self, method: &str, path: &str, headers: &[(&str, &str)], body: &[u8]) -> Answer {
+        let mut s = TcpStream::connect(self.addr).await.expect("connect");
+        let mut req = format!("{method} {path} HTTP/1.1\r\nHost: localhost\r\n");
+        for (k, v) in headers {
+            req.push_str(&format!("{k}: {v}\r\n"));
+        }
+        if !body.is_empty() {
+            req.push_str(&format!("Content-Length: {}\r\n", body.len()));
+        }
+        req.push_str("Connection: close\r\n\r\n");
+        let mut all = req.into_bytes();
+        all.extend_from_slice(body);
+        s.write_all(&all).await.expect("write");
+        let mut b = Vec::new();
+        tokio::time::timeout(Duration::from_secs(10), s.read_to_end(&mut b)).await.expect("an answer in time").expect("read");
+        Answer::parse(&b)
     }
 
     /// GET path: the whole answer

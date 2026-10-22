@@ -22,6 +22,7 @@ mod run;
 #[cfg(test)]
 mod testkit;
 mod url;
+mod vault;
 mod wasm;
 
 use std::collections::HashMap;
@@ -147,7 +148,7 @@ const STATUS: [(u16, &str); 8] = [
     (503, "Service Unavailable"),
 ];
 
-pub const ROBOTS_TXT: &str = "User-agent: *\nAllow: /\nDisallow: /data/\nDisallow: /data-manifest\nDisallow: /game.wasm\nDisallow: /game.json\nDisallow: /players\nDisallow: /lan";
+pub const ROBOTS_TXT: &str = "User-agent: *\nAllow: /\nDisallow: /data/\nDisallow: /data-manifest\nDisallow: /game.wasm\nDisallow: /game.json\nDisallow: /players\nDisallow: /lan\nDisallow: /vault";
 
 /// what a client may ask a file to be sent as
 const TYPES: [(&str, &str); 11] = [
@@ -215,6 +216,8 @@ pub struct App {
     pub online: Option<Arc<OnlineHost>>,
     /// free roam's hub (its `crowded()` for /players), none with --roam-hub off
     pub roam: Option<Arc<nfsu2_roam::RoamHub>>,
+    /// keyphrase saves (/vault), none with --vault-gb 0
+    pub vault: Option<vault::VaultRoute>,
     /// SO_SNDBUF for /lan connections (NFSU2_LAN_SNDBUF, a measurement knob; 0: the kernel's own, which Linux grows
     /// to megabytes, ahead of the switch's own queue rules)
     lan_sndbuf: usize,
@@ -237,6 +240,7 @@ impl App {
         lan: Arc<LanSwitch>,
         online: Option<Arc<OnlineHost>>,
         roam: Option<Arc<nfsu2_roam::RoamHub>>,
+        vault: Option<Arc<nfsu2_vault::Vault>>,
         pool_threads: usize,
         lan_sndbuf: usize,
     ) -> App {
@@ -293,6 +297,7 @@ impl App {
             lan,
             online,
             roam,
+            vault: vault.map(vault::VaultRoute::new),
             lan_sndbuf,
             o,
         }
@@ -366,6 +371,18 @@ impl App {
             }
         }
         true
+    }
+
+    /// A request from one of this server's own pages, or from no page at all (tools send no Origin): its Origin, when
+    /// it has one, is the host it asked for (or the one a trusted proxy says it asked for) and one of this server's
+    /// names.  A page of another site must not reach the LAN, or a player's saves, through a player's browser.
+    fn own_page(&self, q: &Request) -> bool {
+        let Some(o) = q.headers.get("origin").filter(|o| !o.is_empty()) else { return true };
+        let Some(origin) = url::parse_absolute(o).map(|x| x.host.to_lowercase()) else { return false };
+        let host = q.headers.get("host").unwrap_or("").to_lowercase();
+        let fwd = forwarded_host(q, &self.o.trust);
+        let ours = (!host.is_empty() && host == origin) || fwd.as_deref().is_some_and(|f| !f.is_empty() && f == origin);
+        ours && self.host_check.check(Some(&origin))
     }
 
     /// the client's address, and the keys its budgets count by
@@ -470,6 +487,10 @@ impl App {
         }
         if q.method == "PUT" && self.o.dev && !self.o.artifacts.is_empty() && p.starts_with("/artifacts/") {
             return self.put_artifact(q, s, &p[11..]).await;
+        }
+        // keyphrase saves: their own methods and bodies (vault.rs)
+        if p == "/vault" {
+            return self.vault(q, s, &u).await;
         }
         if q.method != "GET" && q.method != "HEAD" {
             return self

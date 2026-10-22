@@ -56,7 +56,8 @@ or `NFSU2_SERVER_BIN` for another build; on Windows it runs in WSL):
 
 (data-blocks' "past the 128 compressors" fails on a machine whose loopback buffers hold a whole answer.)  Real games:
 online-pair (two games log in, race, the result recorded) and roam-pair (a friend's car shown at 0.10 m from where it
-is) pass against it.
+is) pass against it.  Keyphrase saves between two browsers, a real game's save among them:
+`node web/tools/vault-pair.mjs --base <a running --dev server> --backup <zip> --play`.
 
 `web/tools/server-compare.mjs` runs the same load against builds of the server (`--servers a=<bin>,b=<bin>`: a
 change against main's, say), one after the other, and compares them.  Its `crowd`
@@ -147,6 +148,7 @@ delivering to the receiver, 11 % recvfrom).
 | nfsu2-lan | the switch |
 | nfsu2-roam | the free-roam hub |
 | nfsu2-online | the game's Online mode |
+| nfsu2-vault | keyphrase saves (`/vault`): each player's saves as the page sealed them, one file per keyphrase, the copy of an earlier day, the caps, the sweep of the unused |
 | nfsu2-server (src/) | the routes, the rules, the wiring, the start-up |
 | nfsu2-roamload | up to 4000 simulated free-roam players (as web/tools/roam-crowd.mjs, lighter) |
 

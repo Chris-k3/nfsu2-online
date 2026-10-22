@@ -2,12 +2,13 @@
 // be renamed: profile.ts renameProfile), a backup of the whole save
 // overlay as a zip (profiles, registry.txt, settings.ini, screenshots) and
 // restoring one, or adding the PC game's profiles beside the ones here
-// (readBackup tells them apart), and the F12 screenshots (shots.ts).  And the section at the bottom of the page, the game data on
+// (readBackup tells them apart), and the F12 screenshots (shots.ts); a keyphrase's saves come in as a
+// backup does (readVault, restoreVault: vault-ui.ts).  And the section at the bottom of the page, the game data on
 // this PC: how much of it, all of it downloaded ahead (predownload.ts), or
 // deleted.  The game data is never part of a backup and never written back:
 // it stays on the server.
 
-import { cacheBytes, clearCache, clearSaveDir, filesOf, listFiles, listProfiles, PROFILES_DIR, readBytes, writeFile, type Profile } from './savefs';
+import { cacheBytes, clearCache, clearSaveDir, filesOf, isScreenshot, listFiles, listProfiles, PROFILES_DIR, readBytes, writeFile, type Profile } from './savefs';
 import { AUTOSAVE_SEEN, coverOf, isProfileFile, modCars, NAME_MAX, profileName, renameProfile, sealed, type RenameFiles } from './profile';
 import { listZip, unzip, zip, ZipError, type ZipEntry } from './zip';
 import { downloadBlob, stamp } from './logs';
@@ -25,6 +26,8 @@ export interface SavesDeps {
   onRestored(): void;
   /** the download of the game data (all but the movies) ahead of play */
   download: Predownload;
+  /** the saves here changed (a rename, a restore): a keyphrase sends them */
+  onChanged?(): void;
 }
 
 // Limits for a restore, judged by each entry's declared size before anything is
@@ -34,8 +37,7 @@ export interface SavesDeps {
 // their own budget, so however many a backup holds they never crowd out the
 // profiles, registry.txt or settings.ini (phase-1 app review, finding 5).
 const MAX_ENTRY = 64 << 20, MAX_SHOTS = 512 << 20, MAX_OTHER = 256 << 20;
-/** an F12 screenshot: an image file at the top of the save folder (nfsu2000.tga ...) */
-export const isScreenshot = (path: string) => !path.includes('/') && /\.(tga|bmp|png|jpe?g)$/i.test(path);
+export { isScreenshot };
 
 /**
  * What a backup's settings.ini would change that a player should know before restoring it: the network
@@ -180,6 +182,53 @@ function profilesIn(files: FileIn[], skipped: string[]): Restore {
 export async function restoreSaves(saveDir: string, r: Restore) {
   await clearSaveDir(saveDir);
   for (const e of r.entries) await writeFile(saveDir, e.path, e.data);
+}
+
+/**
+ * A keyphrase's saves (vault.ts: a zip of the save folder but the screenshots) as a backup of this page's, whatever is
+ * at their top: restoreVault puts them in place of everything here.  The same checks as a backup's.
+ */
+export async function readVault(buf: Uint8Array): Promise<Restore> {
+  const refused: string[] = [];
+  let other = 0;
+  const all = await unzip(buf, (name, size) => {
+    const p = safeEntryPath(name);
+    return !!p && !isScreenshot(p) && size <= MAX_ENTRY && ((other += size) <= MAX_OTHER || ((other -= size), false));
+  }, refused);
+  return backupIn(all.map(e => ({ path: safeEntryPath(e.name)!, data: e.data, mtime: e.mtime })), refused);
+}
+
+/** readVault's saves in place of the ones here: everything goes but the screenshots (and a test's input script). */
+export async function restoreVault(saveDir: string, r: Restore) {
+  await clearSaveDir(saveDir, name => isScreenshot(name) || name === 'autotest-script.txt');
+  for (const e of r.entries) await writeFile(saveDir, e.path, e.data);
+}
+
+/** a list of names: "a, b and c" */
+const listOf = (names: string[]) => names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
+
+/** What a restore's question says of its profiles' state: changed by a save editor, mod cars, left out, skipped. */
+function restoreNotes(r: Restore): string[] {
+  const items: string[] = [];
+  const refused = r.refused.map(x => `${x.name}: ${x.why}`).join('; ');
+  if (r.edited.length) items.push(`${listOf(r.edited)} ${r.edited.length > 1 ? 'were' : 'was'} changed outside the game, by a save editor (the checksums no longer matched): ` +
+    'a value the game would not make itself may crash it or break the career.');
+  if (r.modded.length) items.push(`${listOf(r.modded)} ${r.modded.length > 1 ? 'have' : 'has'} cars a mod added, which this game does not have: the game may crash or show them wrong when it loads them.`);
+  if (refused) items.push(`Left out, as the game would not load ${r.refused.length > 1 ? 'them' : 'it'}: ${refused}.`);
+  if (r.skipped.length) items.push(`${r.skipped.length} ${r.kind === 'profiles' ? 'other files are left out' : 'entries are skipped (unsafe names, or over the size limits)'}: ${r.skipped.slice(0, 3).join(', ')}${r.skipped.length > 3 ? ' …' : ''}`);
+  return items;
+}
+
+/** What a backup's restore brings (or a keyphrase's, vault-ui.ts): its profiles, the game's options, settings.ini, restoreNotes. */
+export function backupItems(r: Restore): string[] {
+  const ini = r.entries.find(e => e.path === 'settings.ini');
+  const warn = ini ? settingsWarnings(new TextDecoder().decode(ini.data)) : [];
+  return [
+    r.profiles.length ? `Profiles: ${r.profiles.join(', ')}` : 'No profiles',
+    r.entries.some(e => e.path === 'registry.txt') ? 'The game\'s options (registry.txt)' : 'No registry.txt: the next launch starts with fresh game options',
+    ini ? (warn.length ? `settings.ini. ${warn.join(' ')}` : 'settings.ini') : 'No settings.ini: the defaults apply',
+    ...restoreNotes(r),
+  ];
 }
 
 /**
@@ -380,6 +429,7 @@ export class SavesPanel {
     if ('refused' in r) { ok.disabled = this.deps.busy(); say(r.refused); return; }
     this.renaming = null; this.focusName = to;
     this.msg(`Renamed ${from} to ${to}.`);
+    this.deps.onChanged?.();
     await this.refresh();
   }
 
@@ -419,7 +469,7 @@ export class SavesPanel {
         : `${file.name} has no save files.`);
       return;
     }
-    const list = (names: string[]) => names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
+    const list = listOf;
     const body = document.createElement('div');
     const p = document.createElement('p');
     const items: string[] = [];
@@ -433,20 +483,11 @@ export class SavesPanel {
       }).join(', ')}`);
       if (replaced.length) items.push(replaced.length > 1 ? `Replaces the profiles ${list(replaced)} in this browser, their careers and cover shoots too`
         : `Replaces the profile ${replaced[0]} in this browser, its career and cover shoots too`);
+      items.push(...restoreNotes(r));
     } else {
       p.textContent = `Restoring replaces every profile, the game's options and settings.ini in this browser with the ${r.entries.length} files in ${file.name}.`;
-      const ini = r.entries.find(e => e.path === 'settings.ini');
-      const warn = ini ? settingsWarnings(new TextDecoder().decode(ini.data)) : [];
-      items.push(
-        r.profiles.length ? `Profiles: ${r.profiles.join(', ')}` : 'No profiles',
-        r.entries.some(e => e.path === 'registry.txt') ? 'The game\'s options (registry.txt)' : 'No registry.txt: the next launch starts with fresh game options',
-        ini ? (warn.length ? `settings.ini. ${warn.join(' ')}` : 'settings.ini') : 'No settings.ini: the defaults apply');
+      items.push(...backupItems(r));
     }
-    if (r.edited.length) items.push(`${list(r.edited)} ${r.edited.length > 1 ? 'were' : 'was'} changed outside the game, by a save editor (the checksums no longer matched): ` +
-      'a value the game would not make itself may crash it or break the career.');
-    if (r.modded.length) items.push(`${list(r.modded)} ${r.modded.length > 1 ? 'have' : 'has'} cars a mod added, which this game does not have: the game may crash or show them wrong when it loads them.`);
-    if (refused) items.push(`Left out, as the game would not load ${r.refused.length > 1 ? 'them' : 'it'}: ${refused}.`);
-    if (r.skipped.length) items.push(`${r.skipped.length} ${r.kind === 'profiles' ? 'other files are left out' : 'entries are skipped (unsafe names, or over the size limits)'}: ${r.skipped.slice(0, 3).join(', ')}${r.skipped.length > 3 ? ' …' : ''}`);
     const ul = document.createElement('ul');
     for (const t of items) { const li = document.createElement('li'); li.textContent = t; ul.append(li); }
     body.append(p, ul);
@@ -463,6 +504,7 @@ export class SavesPanel {
         this.deps.onRestored();
       }
     } catch (err) { this.msg(`${adding ? 'Adding' : 'Restoring'} stopped halfway: ${err}. ${adding ? 'Add the profiles' : 'Restore the backup'} again before playing.`); }
+    this.deps.onChanged?.();
     await this.refresh();
   }
 

@@ -12,6 +12,8 @@ import { BLOCK, CACHE_DIR } from '../host/datacache';
 import { coverOf } from './profile';
 
 export const PROFILES_DIR = 'NFS Underground 2';   // what the game creates under the save root
+/** an F12 screenshot: an image file at the top of the save folder (nfsu2000.tga ...) */
+export const isScreenshot = (path: string) => !path.includes('/') && /\.(tga|bmp|png|jpe?g)$/i.test(path);
 
 async function root(): Promise<FileSystemDirectoryHandle> { return navigator.storage.getDirectory(); }
 
@@ -99,11 +101,11 @@ export function filesOf(saveDir: string) {
   };
 }
 
-/** Remove everything inside the save dir (the dir itself stays). */
-export async function clearSaveDir(saveDir: string): Promise<void> {
+/** Remove everything inside the save dir (the dir itself stays), but what is at its top under a name `keep` takes. */
+export async function clearSaveDir(saveDir: string, keep: (name: string) => boolean = () => false): Promise<void> {
   const d = await saveRoot(saveDir);
   const names: string[] = [];
-  for await (const [name] of (d as any).entries() as AsyncIterable<[string, FileSystemHandle]>) names.push(name);
+  for await (const [name] of (d as any).entries() as AsyncIterable<[string, FileSystemHandle]>) if (!keep(name)) names.push(name);
   for (const n of names) await d.removeEntry(n, { recursive: true });
 }
 

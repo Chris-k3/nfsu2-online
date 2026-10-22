@@ -118,6 +118,33 @@ The rest of this guide is reference.
   and the install time), a `SAVE` folder, mod plugins and their settings, or anything else you keep there.
 - **What it never shows:** anything about the VPS or the other players (`web/test/deploy.test.mjs` checks what is
   and is not exposed).
+- **What it keeps for players:** their keyphrase saves, locked ([Keyphrase saves](#keyphrase-saves)), and the Online
+  mode's race results and friends lists ([Multiplayer over the internet](#multiplayer-over-the-internet)).
+
+## Keyphrase saves
+
+A player can keep their saves on the server under a keyphrase (`nfsu2-xyz-` and 8 words), and load them in any
+browser by typing it (the page's Cloud saves: PLAYING.md, Saves). The page locks them before they leave the browser (AES-GCM, with a key made
+from the keyphrase); the server keeps those bytes under the SHA-256 of a token also made from the keyphrase. It never
+sees a keyphrase, a key or a save, and its files name no player.
+
+- **Where:** `vault/` in the state folder (the state volume): one file per keyphrase, `vault/<3 hex>/<64 hex>`,
+  with the current version and the copy of an earlier day. A player's saves without screenshots are 6 to 14 KB:
+  100,000 players take about 1.5 to 3 GB on the disk, both copies counted.
+- **How much room:** `NFSU2_VAULT_GB` in `.env` (`--vault-gb`; 10 when it is not set). New keyphrases stop at 90 % of
+  it, and any save that would grow a file stops at all of it; what is kept stays readable. Give it what the disk can
+  spare, leaving room for the rest (150 GB free: `NFSU2_VAULT_GB=140`). It counts 4 KB blocks, as ext4 takes them;
+  each keyphrase also takes one inode (`df -i`). `0` turns keyphrase saves off, and the page then does not offer
+  them.
+- **How long:** a keyphrase nobody used (no save, no load) for two years is deleted at the daily sweep. The console
+  says so then, counts only: `[vault] 81234 keyphrases, 1.20 GB of 140.00 GB (counted in 0.4 s); 3 removed after two
+  years unused`. A flag in a file's head keeps one without end, for an operator to set (no tool sets it yet).
+- **What one client may do** (an IPv4 address, an IPv6 /56; twice that for its /48): 20 new keyphrases, then 20 a
+  day; 60 saves, then one every 2 s; 60 loads, then one a second; and 30 loads of keyphrases there are not, then 30
+  an hour, so nobody learns anything by guessing. A version is at most 256 KB. More gets 429 (or 413, or 507 when the
+  room is full).
+- **Backups:** copy `vault/` while the server runs: each file is replaced whole, by a rename. Without the folder the
+  players' copies on the server are gone; their browsers keep their own.
 
 ## Sizing
 
@@ -186,7 +213,7 @@ VPS.
   |---|---|---|---|
   | `/game` | your game folder | `/srv/nfsu2/game` | read-only |
   | `/module` | `nfsu2.wasm` and `nfsu2.json` | `/srv/nfsu2/module` | read-only |
-  | `/state` | the server's keys and the Online mode's records | the volume `nfsu2-web_state` | |
+  | `/state` | the server's keys, the Online mode's records, the keyphrase saves | the volume `nfsu2-web_state` | |
 
 - **From GitHub's registry:** `.github/workflows/image-rs.yml` builds `ghcr.io/th0mk/nfsu2-web-rs` for amd64 and
   arm64 on every push: `latest` from `main`, `sha-<commit>` from every push, and `<version>` and `<major>.<minor>`
@@ -333,9 +360,11 @@ voices (Russian 94 MB), and the dubbed movies (206 MB in all) stream in place of
   At the memory limit the kernel stops the server and Docker starts it again.
 - **Keep the state volume.** It holds the ETag key (a new key makes every player's browser download the game data
   again), the switch's addresses (`lan-addresses.json`: a player who reconnects gets the same one back) and the
-  Online mode's records (`online/`). `docker compose down` keeps it; `down -v` deletes it.
+  Online mode's records (`online/`) and the players' keyphrase saves (`vault/`). `docker compose down` keeps it;
+  `down -v` deletes it.
 - **In every mode the server:**
-  - answers only `GET` and `HEAD`, and only for its own names (any other `Host` gets 421);
+  - answers only `GET` and `HEAD` (and `PUT` and `DELETE` at `/vault`, the keyphrase saves, from its own pages), and
+    only for its own names (any other `Host` gets 421);
   - sends HSTS when the page arrived over https for its name (not for `localhost` or an IP address);
   - keeps proxies and CDNs from storing anything (`Cache-Control: private`, `CDN-Cache-Control: no-store`), but
     the game data's runs (`/data-blocks/`) and the module (`/game.wasm`), which a CDN may keep for good when their

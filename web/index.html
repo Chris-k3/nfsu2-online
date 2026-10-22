@@ -111,6 +111,7 @@
         <li>The game pauses when its tab is in the background, except in LAN and Online play.</li>
         <li>Autosave for every profile, and a note each time the game saves.</li>
         <li>Saves stay in this browser, with zip backups. Profiles from the PC game come in too.</li>
+        <li>Cloud saves: your saves in any browser, with a keyphrase only you have.</li>
       </ul>
     </section>
   </div>
@@ -133,6 +134,37 @@
       </div>
       <p class="hint" id="shots-info" hidden>None yet.</p>
       <ul class="shots" id="shots" aria-label="Screenshots in this browser"></ul>
+      <div class="vault" id="vault" hidden>
+        <div class="panel-head sub">
+          <h3>Cloud saves</h3>
+          <button type="button" class="btn" id="vault-make">Make keyphrase</button>
+          <p class="hint" id="vault-when" role="status" hidden></p>
+        </div>
+        <form class="vault-row" id="vault-form">
+          <div class="keybox masked" id="vault-box">
+            <div class="keyfield">
+              <input type="text" id="vault-input" placeholder="Enter your keyphrase" spellcheck="false" autocomplete="off" autocapitalize="none" aria-label="Keyphrase">
+              <span class="keymask" id="vault-mask" aria-hidden="true"></span>
+            </div>
+            <button type="button" class="icon-btn" id="vault-file" aria-label="Download keyphrase" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></button>
+            <button type="button" class="icon-btn eye" id="vault-eye" aria-label="Show keyphrase" aria-pressed="false"><svg class="on" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg><svg class="off" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18M10.6 5.1Q11.3 5 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6C3.8 8.4 2 12 2 12s3.5 7 10 7c1.8 0 3.3-.5 4.6-1.2M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg></button>
+          </div>
+          <button type="submit" class="btn" id="vault-load">Load</button>
+        </form>
+        <p class="hint" id="vault-about">Make a keyphrase, or enter yours to load your saves.</p>
+        <p class="hint warn" id="vault-status" role="status"></p>
+        <div class="row" id="vault-conflict" hidden>
+          <button type="button" class="btn" id="vault-mine">Keep this browser's</button>
+          <button type="button" class="btn" id="vault-theirs">Use the cloud's</button>
+        </div>
+        <div class="row" id="vault-on" hidden>
+          <button type="button" class="text-btn" id="vault-sync">Sync now</button>
+          <button type="button" class="text-btn" id="vault-earlier" hidden>Go back</button>
+          <button type="button" class="text-btn" id="vault-stop">Stop syncing</button>
+          <button type="button" class="text-btn" id="vault-delete">Delete from cloud</button>
+        </div>
+        <p class="msg" id="vault-msg" role="status"></p>
+      </div>
       <p class="msg warn" id="storage-note" hidden></p>
     </section>
 

@@ -225,6 +225,18 @@ async fn the_binary_starts_counts_its_players_and_stops() {
     // (the online folder is made with its first file: none here, no race and no friend)
     assert_eq!(rust.modes.0, 0o700, "the state folder is private");
     assert!(rust.modes.1 == 0 || rust.modes.1 == 0o700, "the online folder is private");
+    // keyphrase saves: their folder (private too), counted at the start
+    assert!(
+        rust.startup.contains(&"  saves     : keyphrase saves (/vault) in <state>/vault, up to 10.00 GB (new keyphrases until 9.00 GB); one unused for two years goes".to_string()),
+        "{:?}",
+        rust.startup
+    );
+    assert!(rust.console.iter().any(|l| l.starts_with("[vault] 0 keyphrases, 0.0 MB of 10.00 GB (counted in ")), "{:?}", rust.console);
+    assert_eq!(
+        std::fs::metadata(state.join("vault")).map(|m| m.permissions().mode() & 0o777).ok(),
+        Some(0o700),
+        "the keyphrases' folder is private"
+    );
 }
 
 /// a header of an answer's head (its name in any case)

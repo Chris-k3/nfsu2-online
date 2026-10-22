@@ -178,6 +178,13 @@ impl Rate {
         }
         true
     }
+    /// whether `take` would go through now, taking nothing (for a cost known only after the work: `take` it then)
+    pub fn check(&self, key: &str, site: &str) -> bool {
+        let now = mono_ms();
+        let m = self.m.lock();
+        let left = |k: &str| m.get(k).is_none_or(|b| b.cap.min(b.v + (now - b.t) / 1000.0 * b.rate) >= 1.0);
+        left(key) && (site.is_empty() || left(&format!("site {site}")))
+    }
     pub fn prune(&self) {
         let now = mono_ms();
         self.m.lock().retain(|_, b| b.v + (now - b.t) / 1000.0 * b.rate < b.cap);
@@ -229,5 +236,18 @@ mod tests {
         assert!(r.take("b", "s"));
         assert!(r.take("b", "s"));
         assert!(!r.take("c", "s"));
+    }
+
+    #[test]
+    fn rate_check_takes_nothing() {
+        let r = Rate::new(1.0, 0.0);
+        assert!(r.check("a", "s") && r.check("a", "s"));
+        assert!(r.take("a", "s"));
+        assert!(!r.check("a", "s"));
+        assert!(r.check("b", "s"));
+        assert!(r.take("b", "s"));
+        // the site's two are spent
+        assert!(!r.check("c", "s") && !r.take("c", "s"));
+        assert!(r.check("c", ""));
     }
 }

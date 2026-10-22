@@ -30,6 +30,7 @@ import { putKey, SettingsPanel } from './settings-ui';
 import { serverAnswers, watchPlayers, type PlayerCounts } from './players';
 import { SavesPanel } from './saves-ui';
 import { saveScreenshot } from './shots';
+import { forgetLink, VaultPanel } from './vault-ui';
 import { FpsOverlay, FPS_MODES, type FpsMode } from './overlay';
 import { GameSession } from './game';
 import { AwayCheck, AWAY_LIMITS, type AwayLimits } from './away';
@@ -88,6 +89,7 @@ let fps: FpsOverlay;
 let settings: SettingsPanel;
 let players: { now(): void; last(): PlayerCounts | null } | null = null;
 let saves: SavesPanel;
+let vault: VaultPanel;
 let download: Predownload;
 /** the server does not answer: the page and the module came from this browser's copies (sw.ts), and a game
  *  runs from the game data on this PC */
@@ -298,7 +300,10 @@ async function startGame() {
   await Promise.race([refreshMeasured, new Promise(r => setTimeout(r, 2000))]);
   canvas.focus();
 
-  await saves.settled();              // a rename or restore the Saves section is writing ends first
+  // the keyphrase's newer saves from another browser (4 s at most), then what the Saves section is writing (a rename,
+  // a restore) ends first
+  if (await vault.beforePlay()) await loadSettings();
+  await saves.settled();
   // the save overlay: registry seed (bundle.m app_seed_registry), test inputs
   const host: Record<string, string> = {
     HOME: '/save', NFSU2_DATA: '/data', NFSU2_SAVEDIR: '/save', NFSU2_REGFILE: '/save/registry.txt',
@@ -489,6 +494,7 @@ function onExit(s: GameSession, code: number) {
     });
   }
   void saves.refresh();               // new or changed profiles
+  vault.gameEnded();                  // and to the keyphrase with them
   showNewer();                        // the note on the log, now that there is one
   void checkNewer();
 }
@@ -500,6 +506,7 @@ function onSaved(path: string) {
   saved = { name: p[1], at: Date.now(), count: (saved?.count ?? 0) + 1 };
   log.add(`[app] the game saved profile ${p[1]} (${saved.count} this game)`);
   if (session) toast(`Progress saved (${p[1]}).`, 2500);
+  vault.saved();
   if ($<HTMLDialogElement>('#menu').open) $('#menu-save').textContent = `Last saved at ${when(saved.at)} (${saved.name}).`;
 }
 /** the newest profile in this browser (listProfiles sorts by time), or null */
@@ -848,8 +855,8 @@ export async function boot() {
   // made here once: a closure made per game (in startGame) would keep that game's scope reachable
   fps.extra = () => session?.stats() ?? {};
   settings = new SettingsPanel($('#settings'), {
-    // another language counts other files as the game data (its language pack)
-    saveDir: SAVE, environment: ENVIRONMENT, onSaved: t => { const was = language(); settingsText = t; if (language() !== was) void saves.refresh(); },
+    // another language counts other files as the game data (its language pack); a keyphrase sends the file
+    saveDir: SAVE, environment: ENVIRONMENT, onSaved: t => { const was = language(); settingsText = t; if (language() !== was) void saves.refresh(); vault?.changed(); },
     // the tab that owns the saves is the one whose Play reads the file: another tab only looks
     readOnly: () => !instance.owner, say: pageToast,
   }, $('#online'));
@@ -860,7 +867,12 @@ export async function boot() {
   download = new Predownload(s => saves.showData(s), logLine, () => language());
   saves = new SavesPanel($('#saves'), $('#game-data'), {
     saveDir: SAVE, busy: () => !!session || starting || !instance.owner, confirm: confirmBox,
-    onRestored: () => { void loadSettings(); void settings.refresh(); }, download,
+    onRestored: () => { void loadSettings(); void settings.refresh(); }, download, onChanged: () => vault.changed(),
+  });
+  // keyphrase saves (on a server that keeps them): synced by the tab that owns the saves, once its settings are loaded
+  vault = new VaultPanel($('#vault'), {
+    saveDir: SAVE, owner: () => instance.owner, playing: () => !!session, busy: () => !!session || starting || !instance.owner,
+    confirm: confirmBox, onRestored: () => { void loadSettings(); void settings.refresh(); void saves.refresh(); }, log: logLine,
   });
   $<HTMLButtonElement>('#play').onclick = () => void play();
   $<HTMLButtonElement>('#retry').onclick = () => void loadModule();
@@ -890,7 +902,7 @@ export async function boot() {
   }, { capture: true });
   window.addEventListener('beforeunload', e => { if (session) { e.preventDefault(); e.returnValue = ''; } });
   document.addEventListener('fullscreenchange', () => { if (!isFullscreen() && session) toast('Full screen left. F9 has it in the menu.', 3000); });
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') void checkNewer(); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { void checkNewer(); vault.shown(); } });
   setInterval(() => { if (document.visibilityState === 'visible') void checkNewer(); }, NEWER_EVERY_MS);
 
   setCheck(checkBrowser());
@@ -903,11 +915,12 @@ export async function boot() {
 
   showOverrides(given, dev);
   if (given.length) log.add(dev ? `[app] test settings from the page address: ${given.join(', ')}` : `[app] the page address's test settings (${given.join(', ')}) are ignored: not a development server`);
-  if (q.has('fresh') && SAVE !== 'save') { await removeSaveDir(SAVE); log.add(`[app] fresh save folder ${SAVE}`); }
+  if (q.has('fresh') && SAVE !== 'save') { await removeSaveDir(SAVE); forgetLink(SAVE); log.add(`[app] fresh save folder ${SAVE}`); }
   // the settings and saves show at once (read only until this tab owns the saves), and again once it does
   void settings.refresh();
   void saves.refresh();
-  void instance.whenOwner.then(async () => { await loadSettings(); evaluate(); void settings.refresh(); void saves.refresh(); });
+  void vault.start();
+  void instance.whenOwner.then(async () => { await loadSettings(); evaluate(); void settings.refresh(); void saves.refresh(); vault.ownerNow(); });
   void checkGpu().then(setCheck);
   // Firefox's answer to its storage prompt comes later: the check again then
   void checkStorage().then(({ answer, ...c }) => { setCheck(c); void answer?.then(setCheck); });

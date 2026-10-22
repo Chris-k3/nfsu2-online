@@ -40,6 +40,8 @@ services:
       NFSU2_HTTP_PORT: ${NFSU2_HTTP_PORT:-8080}
       NFSU2_REAL_IP_HEADER: ${NFSU2_REAL_IP_HEADER:-x-forwarded-for}
       NFSU2_THREADS: ${NFSU2_THREADS:-}
+      # the room for keyphrase saves, in GB (docs/web/VPS.md, "Keyphrase saves"; 10 when not set, 0: none)
+      NFSU2_VAULT_GB: ${NFSU2_VAULT_GB:-}
     volumes:
       - ${NFSU2_DATA:-./game}:/game:ro
       - ${NFSU2_MODULE:-./module}:/module:ro

@@ -19,6 +19,7 @@ nfsu2-ws = { path = "crates/ws" }
 nfsu2-lan = { path = "crates/lan" }
 nfsu2-roam = { path = "crates/roam" }
 nfsu2-online = { path = "crates/online" }
+nfsu2-vault = { path = "crates/vault" }
 
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
@@ -78,6 +79,7 @@ nfsu2-ws.workspace = true
 nfsu2-lan.workspace = true
 nfsu2-roam.workspace = true
 nfsu2-online.workspace = true
+nfsu2-vault.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 bytes.workspace = true

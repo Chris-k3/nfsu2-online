@@ -619,6 +619,7 @@ dependencies = [
  "nfsu2-online",
  "nfsu2-roam",
  "nfsu2-util",
+ "nfsu2-vault",
  "nfsu2-ws",
  "parking_lot",
  "rustls",
@@ -647,6 +648,16 @@ dependencies = [
  "parking_lot",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "nfsu2-vault"
+version = "0.1.0"
+dependencies = [
+ "nfsu2-util",
+ "parking_lot",
+ "sha2",
+ "tempfile",
 ]
 
 [[package]]

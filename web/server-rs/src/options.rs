@@ -6,7 +6,8 @@
 //!        [--tls-cert <pem> --tls-key <pem> [--port 8443] [--bind <address>] | --behind-proxy --host <name>[,<name>...]]
 //!        [--host <name>[,<name>...]] [--state <dir>]
 //!        [--trusted-proxies cloudflare,<ip>,<cidr>,...] [--real-ip-header x-forwarded-for|cf-connecting-ip]
-//!        [--max-peers 128] [--online on|off] [--roam-hub on|off] [--access-log] [--dev [--artifacts <dir>] [--lan-impair <spec>] [--online-trace <file>]]
+//!        [--max-peers 128] [--online on|off] [--roam-hub on|off] [--vault-gb 10] [--access-log]
+//!        [--dev [--artifacts <dir>] [--lan-impair <spec>] [--online-trace <file>]]
 //!
 //! Options with a value can also come from the environment as NFSU2_<OPTION> (NFSU2_DATA, NFSU2_PORT,
 //! NFSU2_TLS_CERT, ...); switches only from the command line.
@@ -15,7 +16,7 @@ use nfsu2_headers::ProxyTrust;
 
 use crate::paths;
 
-pub const VALUE_OPTS: [&str; 18] = [
+pub const VALUE_OPTS: [&str; 19] = [
     "--data",
     "--dist",
     "--wasm",
@@ -34,6 +35,7 @@ pub const VALUE_OPTS: [&str; 18] = [
     "--online",
     "--online-trace",
     "--roam-hub",
+    "--vault-gb",
 ];
 pub const FLAG_OPTS: [&str; 3] = ["--behind-proxy", "--dev", "--access-log"];
 
@@ -71,6 +73,9 @@ pub struct Options {
     pub online: bool,
     /// free roam's hub (nfsu2-roam): each player's peers are the players nearest to it; on unless --roam-hub off
     pub roam_hub: bool,
+    /// keyphrase saves (nfsu2-vault, /vault): the gigabytes they may take in all, 0 for none (--vault-gb, 10 unless
+    /// given)
+    pub vault_gb: f64,
     /// a test aid: the lobby protocol's messages, decoded and with every secret redacted, into a file (nfsu2-online's
     /// LobbyTrace)
     pub online_trace: String,
@@ -283,6 +288,12 @@ pub fn parse(argv: &[String], env: &dyn Fn(&str) -> Option<String>, repo: &str, 
     let online = string(arg("--online", "on")).to_lowercase();
     let roam_hub = string(arg("--roam-hub", "on")).to_lowercase();
     let online_trace = resolve_if("--online-trace")?;
+    // (an empty NFSU2_VAULT_GB, as compose passes one that is not set, is the default)
+    let vault_gb = match arg("--vault-gb", "") {
+        Some(v) if nfsu2_util::js::trim(&v).is_empty() => 10.0,
+        Some(v) => js_to_number(&v),
+        None => f64::NAN,
+    };
 
     if !truthy(&data_arg) || !fs.exists(&paths::join(&data, "SPEED2.EXE")) {
         let got = if truthy(&data_arg) { data.as_str() } else { "nothing" };
@@ -321,6 +332,9 @@ pub fn parse(argv: &[String], env: &dyn Fn(&str) -> Option<String>, repo: &str, 
     }
     if !online_trace.is_empty() && !dev {
         return Err("--online-trace is a test aid: it needs --dev".into());
+    }
+    if !(0.0..=100_000.0).contains(&vault_gb) {
+        return Err("--vault-gb: the gigabytes keyphrase saves may take, 0 (none) to 100000".into());
     }
     if !(max_peers.fract() == 0.0 && (1.0..=4000.0).contains(&max_peers)) {
         return Err("--max-peers: 1 to 4000".into());
@@ -399,6 +413,7 @@ pub fn parse(argv: &[String], env: &dyn Fn(&str) -> Option<String>, repo: &str, 
         lan_impair: lan_impair.unwrap_or_default(),
         online: online == "on",
         roam_hub: roam_hub == "on",
+        vault_gb,
         online_trace,
         tls,
         bind,
@@ -500,7 +515,7 @@ mod tests {
             format!(
                 "unknown option --no-such-option\noptions: {}",
                 "--data --dist --wasm --port --http-port --bind --state --tls-cert --tls-key --trusted-proxies --real-ip-header --max-peers \
-             --artifacts --lan-impair --host --online --online-trace --roam-hub --behind-proxy --dev --access-log"
+             --artifacts --lan-impair --host --online --online-trace --roam-hub --vault-gb --behind-proxy --dev --access-log"
             )
         );
         assert_eq!(s.err(&["--http-port"], &[]), "--http-port needs a value");
@@ -526,6 +541,9 @@ mod tests {
         assert_eq!(s.err(&["--online-trace", "t.log"], &[]), "--online-trace is a test aid: it needs --dev");
         for v in ["0", "4001", "1.5", "x", "Infinity"] {
             assert_eq!(s.err(&["--max-peers", v], &[]), "--max-peers: 1 to 4000", "{v}");
+        }
+        for v in ["-1", "100001", "x", "Infinity"] {
+            assert_eq!(s.err(&["--vault-gb", v], &[]), "--vault-gb: the gigabytes keyphrase saves may take, 0 (none) to 100000", "{v}");
         }
         assert_eq!(s.err(&["--port", "0", "--tls-cert", "c", "--tls-key", "k"], &[]), "--tls-cert needs --port: the HTTPS port");
         assert_eq!(
@@ -585,6 +603,12 @@ mod tests {
         assert_eq!(o.tls, Tls::None);
         assert_eq!(o.bind, "::");
         assert!(!o.bind_set && !o.hsts_ok && o.online && o.roam_hub);
+        assert_eq!(o.vault_gb, 10.0);
+        // an empty NFSU2_VAULT_GB (compose passes one when .env has none) is the default; 0 is none
+        assert_eq!(s.parse(&[], &[("NFSU2_VAULT_GB", "")]).unwrap().vault_gb, 10.0);
+        assert_eq!(s.parse(&[], &[("NFSU2_VAULT_GB", "140")]).unwrap().vault_gb, 140.0);
+        assert_eq!(s.parse(&["--vault-gb", "0.5"], &[]).unwrap().vault_gb, 0.5);
+        assert_eq!(s.parse(&["--vault-gb", "0"], &[("NFSU2_VAULT_GB", "140")]).unwrap().vault_gb, 0.0);
         assert_eq!(o.real_ip, "x-forwarded-for");
         let o = s
             .parse(&["--host", " Game.Example.COM., *.Zone.Test ,", "--max-peers", "0x10", "--online", "OFF", "--wasm", "x/m.wasm"], &[])

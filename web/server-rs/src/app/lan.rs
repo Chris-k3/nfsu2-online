@@ -9,7 +9,6 @@ use std::time::Duration;
 
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf};
 
-use nfsu2_headers::forwarded_host;
 use nfsu2_http::{Hold, Request, Upgraded};
 use nfsu2_lan::AttachOpts;
 use nfsu2_util::{js, log, vip_str};
@@ -91,23 +90,10 @@ impl App {
         if q.method != "GET" || !upgrade || q.headers.get("sec-websocket-version") != Some("13") || !ws_key(key) {
             return self.refuse(up, 400).await;
         }
-        // only this server's own pages (a page of another site must not join the LAN through a player's browser):
-        // the page's origin is the host it asked for, and one of this server's names; clients without an Origin
-        // header (tools) may
-        let origin = match q.headers.get("origin").filter(|o| !o.is_empty()) {
-            Some(o) => match url::parse_absolute(o) {
-                Some(x) => Some(x.host.to_lowercase()),
-                None => return self.refuse(up, 403).await,
-            },
-            None => None,
-        };
-        if let Some(origin) = &origin {
-            let host = q.headers.get("host").unwrap_or("").to_lowercase();
-            let fwd = forwarded_host(&q, &self.o.trust);
-            let ours = (!host.is_empty() && host == *origin) || fwd.as_deref().is_some_and(|f| !f.is_empty() && f == origin);
-            if !ours || !self.host_check.check(Some(origin)) {
-                return self.refuse(up, 403).await;
-            }
+        // only this server's own pages (a page of another site must not join the LAN through a player's browser);
+        // clients without an Origin header (tools) may
+        if !self.own_page(&q) {
+            return self.refuse(up, 403).await;
         }
         // the console names players by their virtual address and nickname, never by their real address (a VPS's
         // journal keeps it); --access-log is the one opt-in that records addresses
