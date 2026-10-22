@@ -6,13 +6,15 @@
 //   pedals    Gas and Brake press the up and down arrows; Nitro and the handbrake are the controller's LB and RB
 //             (Alt, the nitrous key, would turn the other keys into Alt+key).  With tilt, Brake and the handbrake go
 //             under the left thumb.
+//   gears     with a manual gearbox, gear down and up above the left thumb: the controller's X and A, as on a pad
+//             (Ctrl and Shift on the keyboard would be modifiers too)
 //   small     pause, camera, look back, reset; in free roam also the map, messages, horn and start an event
 // The controller part is a virtual one the input module merges with a real one (gamepad.ts withTouch).
 // They show while the game says the player drives ("drive" in its status block, runtime/web/status_web.c: 1 in a
-// race, 2 in free roam), once a finger has touched the game (at once on a touch screen), and hide when a keyboard
+// race, 2 in free roam, + 4 with a manual gearbox), once a finger has touched the game (at once on a touch screen), and hide when a keyboard
 // or a controller is used, until the next touch.  The game reads its input once a frame, so a key a tap presses
 // stays down HOLD_MS at least.
-import { PAD_LB, PAD_RB } from '../input/proto';
+import { PAD_A, PAD_LB, PAD_RB, PAD_X } from '../input/proto';
 import type { GameSession } from './game';
 import { touchFirst } from './device';
 
@@ -47,6 +49,8 @@ const ICONS = {
   buttons: '<path d="M10 7l-5 5 5 5M14 7l5 5-5 5"/>',
   stick: '<circle cx="12" cy="12" r="8"/><circle class="fill" cx="12" cy="12" r="3"/>',
   tilt: '<rect x="4" y="8" width="16" height="9" rx="2" transform="rotate(-18 12 12)"/>',
+  down: '<path d="M6 9l6 6 6-6"/>',
+  up: '<path d="M6 15l6-6 6 6"/>',
 };
 
 /** the roll of the phone in the screen's plane, radians, 0 = upright, + = turned clockwise (a wheel turned right);
@@ -128,6 +132,8 @@ export class TouchControls {
     add('gas', 'Gas', 'Gas', { key: 'ArrowUp', group: 'pedal' }, 'big');
     add('nitro', 'Nitrous', 'Nitro', { bit: 1 << PAD_LB }, 'round');
     add('hb', 'Handbrake', '<span>Hand<br>brake</span>', { bit: 1 << PAD_RB }, 'round');
+    add('down', 'Gear down', path(ICONS.down), { bit: 1 << PAD_X }, 'gear');
+    add('up', 'Gear up', path(ICONS.up), { bit: 1 << PAD_A }, 'gear');
     stage.append(root);
 
     root.addEventListener('pointerdown', this.onDown);
@@ -177,8 +183,9 @@ export class TouchControls {
   }
 
   private update() {
-    const show = !!this.session && this.seen && !this.away && this.drive > 0;
-    this.root.toggleAttribute('data-roam', this.drive === 2);
+    const show = !!this.session && this.seen && !this.away && (this.drive & 3) > 0;
+    this.root.toggleAttribute('data-roam', (this.drive & 3) === 2);
+    this.root.toggleAttribute('data-gears', (this.drive & 4) !== 0);
     if (show === this.shown) return;
     if (show) {
       this.shown = true; this.root.hidden = false;

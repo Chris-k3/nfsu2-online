@@ -356,6 +356,17 @@ html:has(> body > .stage:not([hidden])) { overflow: hidden; }
 .tc[data-ctl="brake"] { right: calc(var(--r) + 92px); width: 84px; height: 104px; }
 .tc[data-ctl="nitro"] { right: calc(var(--r) + 12px); bottom: calc(var(--b) + 160px); width: 60px; height: 60px; }
 .tc[data-ctl="hb"] { right: calc(var(--r) + 106px); bottom: calc(var(--b) + 116px); width: 56px; height: 56px; font-size: 12px; line-height: 14px; }
+/* a manual gearbox: gear down and up above the left thumb's controls (the arrows, the stick's corner, or tilt's
+ * Brake and handbrake), and free roam's Start above them */
+.touch { --gb: 88px; }
+.touch[data-steering="stick"] { --gb: 132px; }
+.touch[data-steering="tilt"] { --gb: 112px; }
+.tc.gear { bottom: calc(var(--b) + var(--gb)); width: 80px; height: 56px; border-radius: 16px; }
+.tc.gear svg { width: 32px; height: 32px; stroke-width: 2.5; }
+.tc[data-ctl="down"] { left: var(--l); }
+.tc[data-ctl="up"] { left: calc(var(--l) + 88px); }
+.touch[data-gears] .tc[data-ctl="start"] { bottom: calc(var(--b) + var(--gb) + 72px); }
+.touch:not([data-gears]) .gear { display: none; }
 /* tilt: Brake and the handbrake under the left thumb, Nitro beside Gas */
 .touch[data-steering="tilt"] .tc[data-ctl="brake"] { right: auto; left: var(--l); }
 .touch[data-steering="tilt"] .tc[data-ctl="hb"] { right: auto; left: calc(var(--l) + 96px); bottom: calc(var(--b) + 24px); }
@@ -399,6 +410,10 @@ html:has(> body > .stage:not([hidden])) { overflow: hidden; }
   html[data-touch] .tc[data-ctl="nitro"] { right: calc(var(--r) + 12px); bottom: calc(var(--b) + 212px); width: 64px; height: 64px; }
   html[data-touch] .tc[data-ctl="hb"] { right: calc(var(--r) + 110px); bottom: calc(var(--b) + 152px); width: 60px; height: 60px; }
   html[data-touch] .tc[data-ctl="start"] { bottom: calc(var(--b) + 132px); }
+  html[data-touch] .touch { --gb: 132px; }
+  html[data-touch] .touch[data-steering="tilt"] { --gb: 148px; }
+  html[data-touch] .tc.gear { width: 88px; height: 64px; }
+  html[data-touch] .tc[data-ctl="up"] { left: calc(var(--l) + 96px); }
   html[data-touch] .touch[data-steering="tilt"] .tc[data-ctl="hb"] { right: auto; left: calc(var(--l) + 100px); bottom: calc(var(--b) + 24px); }
   html[data-touch] .touch[data-steering="tilt"] .tc[data-ctl="nitro"] { right: calc(var(--r) + 100px); bottom: calc(var(--b) + 24px); }
 }

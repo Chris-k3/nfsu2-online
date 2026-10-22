@@ -55,14 +55,15 @@ in a 4:5 picture at the top with the ☰ button and the touch controls below it.
 runs. Chrome's menu, **Add to Home screen** (or **Install app**), puts the game on the home screen as an app that opens
 full screen; on a PC the same makes it an app with its own window.
 
-**Touch controls** show on the game while you drive (races and free roam) and step aside for menus, the pause menu
-and cutscenes:
+**Touch controls** show on the game while you drive (races and free roam, in a race from the start line so you can
+rev in the countdown) and step aside for menus, the pause menu and free roam's cutscenes:
 
 - **Right thumb:** Gas, Brake (and reverse), Nitro and the handbrake. A finger slides from Gas to Brake.
 - **Steering**, switched with the button in the top right corner and kept in this browser: **buttons** (◀ ▶, as the
   arrow keys; the default), a **thumb stick** that appears where the left thumb lands, or **tilt**, the phone held like
   a wheel. With tilt, Brake and the handbrake move under the left thumb, and the button beside the switch sets
   straight ahead.
+- **Gears:** with a manual gearbox (the race's Transmission choice), gear down and gear up above the steering.
 - **Small buttons** along the top: pause, camera, look back, reset; in free roam also the map, messages, horn, and
   Start (an event, or an outrun).
 - A keyboard or a controller sends them away until you touch the game again. Android phones buzz on crashes.

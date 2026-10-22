@@ -10,6 +10,7 @@
 #include <pthread.h>
 #include <string.h>
 #include <strings.h>
+#include <stdio.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -69,20 +70,50 @@ static void *status_main(void *unused){
 
 /* "drive": what the page's touch controls (web/src/app/touch.ts) need of the
  * game, set at every Present (autotest.c): 1 while the player drives in a
- * race, 2 in free roam, 0 elsewhere.  Driving is GameFlow 6 with a race HUD
- * (HUD_*.fng) the top package; the pause menu (UI_pause.fng), the results,
- * the world's loading screen and the Engage dialog over the HUD are not, nor
- * is a cutscene (NIS, as runtime/discord.c tells one). */
+ * race, 2 in free roam, 0 elsewhere, plus 4 with a manual gearbox.  Driving
+ * is GameFlow 6 with a race HUD (HUD_*.fng) the top package; the pause menu
+ * (UI_pause.fng), the results, the world's loading screen and the Engage
+ * dialog over the HUD are not, nor is a cutscene in free roam (NIS, as
+ * runtime/discord.c tells one).  A race's start is one too, the camera's
+ * flight round the grid and the countdown until a moment after the start, so
+ * a race drives during a cutscene: the player revs on the line and goes at
+ * once (a player's report: the controls came seconds after the others left).
+ * The gearbox is manual in a drag race (the game asks nothing there and sets
+ * the car's gearbox to manual), else as the race's Transmission choice set
+ * it: the player's setting 1 (0x4a7b30), kept at player 0 (0x8900ac) +0x20
+ * and handed to the car's gearbox (0x407280: 0 and 2 shift by themselves, 1
+ * and 3 keep the gear).  The gearbox itself is no good to read: in a drag
+ * race the car's controls (+0x30) become the game's lane steering once it
+ * rolls. */
+#define G_PLAYER0    0x008900acu
+#define PL_GEARBOX   0x20u
+#define G_RACE_DRAG  0x0089e7d8u      /* race parameters (discord.c G_RACE) + R_DRAG */
 const char *autotest_top_fng(void);
 int career_fe_active(const char *name);
 int roam_exploring(void);
+static int manual_gearbox(int race){
+    if (race && MR8(G_RACE_DRAG)) return 1;
+    uint32_t p = mem_is_committed(G_PLAYER0 + 3u) ? MR32(G_PLAYER0) : 0u;
+    if (!p || !mem_is_committed(p + PL_GEARBOX)) return 0;
+    uint8_t g = MR8(p + PL_GEARBOX);
+    return g == 1u || g == 3u;
+}
 static int drive_state(void){
-    if (!mem_is_committed(0x8654a7u) || MR32(0x8654a4u) != 6u) return 0;
+    unsigned flow = mem_is_committed(0x8654a7u) ? MR32(0x8654a4u) : 0u;
     const char *top = autotest_top_fng();
-    if (!top || strncasecmp(top, "HUD_", 4) || !strcasecmp(top, "HUD_World_Loading.fng")) return 0;
-    if (mem_is_committed(0x827ecbu) && (MR32(0x827e98u) | MR32(0x827eb0u) | MR32(0x827ec8u))) return 0;
-    if (career_fe_active("UI_EngageMessageDialog.fng")) return 0;
-    return roam_exploring() ? 2 : 1;
+    int hud = top && !strncasecmp(top, "HUD_", 4) && strcasecmp(top, "HUD_World_Loading.fng");
+    int nis = mem_is_committed(0x827ecbu) && (MR32(0x827e98u) | MR32(0x827eb0u) | MR32(0x827ec8u));
+    int engage = career_fe_active("UI_EngageMessageDialog.fng");
+    int roam = roam_exploring();
+    int v = flow == 6u && hud && !engage && !(roam && nis) ? (roam ? 2 : 1) : 0;
+    if (v && manual_gearbox(v == 1)) v |= 4;
+    /* a line at each change, for a player's log */
+    static unsigned l_flow = ~0u; static int l_hud = -1, l_nis = -1, l_engage = -1, l_v = -1;
+    if (flow != l_flow || hud != l_hud || nis != l_nis || engage != l_engage || v != l_v){
+        l_flow = flow; l_hud = hud; l_nis = nis; l_engage = engage; l_v = v;
+        fprintf(stderr, "[drive] f=%ld flow=%u top=%s nis=%d engage=%d -> %d\n", metal_frames(), flow, top ? top : "-", nis, engage, v);
+    }
+    return v;
 }
 void status_web_frame(void){
     static int slot = -2, last = -1;
