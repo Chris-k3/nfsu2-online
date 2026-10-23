@@ -184,8 +184,8 @@ void dispatch_indirect(CPU *c, uint32_t addr);
 #define HOOK_MAINLOOP   0x00581475u
 /* The trip's waits are in its clock's ticks, 60 a second (clk): real time while the game runs; they were game
  * frames, which at 120 fps passed twice as fast (a player's results gone in 4 s, the room's waits halved) */
-#define STEP_FRAMES     (60 * 120)    /* ticks a phase may take before the trip gives up: out and into the LAN */
-#define ROOM_FRAMES     (60 * 90)     /* the host's wait for the others in its room */
+#define STEP_FRAMES     (60 * 120)    /* ticks a phase may take before the trip gives up: out and into the LAN; the race's loading */
+#define ROOM_FRAMES     (60 * 60)     /* the host's wait for the others in its room, a minute at most */
 #define BACK_FRAMES     (60 * 240)    /* back to the career */
 #define MP_PRIZE_N      4
 static const int k_prize[MP_PRIZE_N] = { 400, 300, 200, 100 };   /* 1st to 4th; 5th and 6th nothing */
@@ -194,7 +194,7 @@ enum { G_RACE_GOAL = 1, G_CAREER_GOAL = 2 };
 static struct {
     int      phase, goal;
     MpRace   r;
-    long     next, since, step_at, frame0, results_at, left_at;
+    long     next, since, step_at, look_at, load_at, frame0, results_at, left_at;   /* step_at: in the game's room */
     char     top[64];
     int      place, prize, paid, raced, owns;
     int      quit_race, fee;                       /* the player quit the race (its pause menu); the fee the bank paid */
@@ -334,6 +334,12 @@ int mprace_quit(void){ return M.quit_race; }
 int mprace_fee(void){ return M.fee; }
 const char *mprace_why(void){ return M.why[0] ? M.why : "unknown"; }
 void mprace_host_gone(void){ if (!M.r.host && M.goal == G_RACE_GOAL && (M.phase == MPR_OUT || M.phase == MPR_LAN)) M.host_gone = 1; }
+void mprace_player_gone(void){
+    if (!M.r.host || M.goal != G_RACE_GOAL || M.started || (M.phase != MPR_OUT && M.phase != MPR_LAN)) return;
+    if (M.r.players > 1) M.r.players--;
+    fprintf(stderr, "[mprace] f=%ld a player of the lobby is not coming: %d players\n", autotest_frame(), M.r.players);
+    if (M.r.players < 2) fail("the others left the race");
+}
 int mprace_owns_input(void){ return __atomic_load_n(&M.owns, __ATOMIC_RELAXED); }   /* (the input thread asks) */
 /* the prize into the bank, or the quit's fee out of it (what it holds at most), once; where: for the log */
 static void pay(const char *where){
@@ -505,8 +511,8 @@ static void step_race(CPU *c, long f){
              * (the "reconnect?" dialog, below) */
             int seen = 0; uint32_t head = ss + SS_LIST;
             for (uint32_t n = rd(head), k = 0; n && n != head && k < 128; n = rd(n), k++) if (rd(n + 0x18u) == M.r.host_ip) seen = 1;
-            if (!M.step_at) M.step_at = f;
-            if (!seen && f - M.step_at < 60 * 12) return;
+            if (!M.look_at) M.look_at = f;
+            if (!seen && f - M.look_at < 60 * 12) return;
             char ip[20]; snprintf(ip, sizeof ip, "%u.%u.%u.%u", M.r.host_ip >> 24, (M.r.host_ip >> 16) & 255u, (M.r.host_ip >> 8) & 255u, M.r.host_ip & 255u);
             MR8(G_LAN_HOST) = 0; gs(G_LAN_ADDR, ip, 40); MR16(G_LAN_PORT) = LAN_PORT;
             uint32_t a[3] = { S_SERVERSEL, S_LANNAME, 0 };
@@ -605,7 +611,10 @@ static void step_race(CPU *c, long f){
 /* ---- the race and its results ----------------------------------------------------------------- */
 static int step_racing(long f){
     if (rd(G_FLOW) == 6u && (rd(G_GAMEMODE) & 0x200u) && M.phase == MPR_LAN){ to_phase(MPR_RACE); M.raced = 1; mlog("the race is on%s", ""); }
-    if (M.phase == MPR_LAN && M.lan && rd(G_FLOW) != 3u) M.step = "Loading the race";      /* (the room's start: the race's world loads) */
+    if (M.phase == MPR_LAN && M.lan && rd(G_FLOW) != 3u){                                    /* (the room's start: the race's world loads) */
+        M.step = "Loading the race";
+        if (!M.load_at) M.load_at = f;
+    }
     if (M.phase != MPR_RACE) return 0;
     if (on("UI_PostRaceResults.fng")){
         /* our place; while the results are up, again until there is one (our
@@ -733,9 +742,15 @@ void mprace_frame(CPU *c){
     if (step_racing(f)) return;
     if (keys_run(f) || f < M.next) return;
     if (M.goal == G_RACE_GOAL){
-        /* (in the game's room the host's wait for the others counts from there) */
-        long lim = M.phase == MPR_LAN && M.step_at ? M.step_at - M.since + ROOM_FRAMES + 60 * 40 : STEP_FRAMES;
-        if (f - M.since > lim){ fail(M.phase == MPR_OUT ? "the game did not leave free roam" : "the LAN race did not come together"); return; }
+        /* in the game's room the wait counts from there (each game's own: the host's for the others, then the
+         * game's 10 s countdown), and the race's loading from its start: a joiner's wait counted from the server
+         * list ran out while a late start loaded, and it sat out the race under the cover */
+        long lim = M.phase != MPR_LAN ? STEP_FRAMES : M.load_at ? M.load_at - M.since + STEP_FRAMES
+                 : M.step_at ? M.step_at - M.since + ROOM_FRAMES + 60 * 40 : STEP_FRAMES;
+        if (f - M.since > lim){
+            fail(M.phase == MPR_OUT ? "the game did not leave free roam" : M.load_at ? "the race did not load" : "the LAN race did not come together");
+            return;
+        }
         step_race(c, f);
     } else {
         if (f - M.since > BACK_FRAMES){

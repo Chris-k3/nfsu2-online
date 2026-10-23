@@ -44,6 +44,9 @@ const char *mprace_why(void);
 /* a joiner's host closed its game (free roam heard it quit): the trip ends
  * once in the LAN menus, as the host's LAN server is gone with it */
 void mprace_host_gone(void);
+/* the host: a player of the lobby is not coming after all (its trip did not start, it quit): the room does not wait
+ * for it; with nobody else left the trip ends */
+void mprace_player_gone(void);
 /* the player is in career free roam again while the trip is not over (it made its way back by hand, or the trip
  * lost its way): the trip is over, as done once raced (the prize, if the crib did not pay it, into the bank now),
  * else as failed */

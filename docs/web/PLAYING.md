@@ -308,7 +308,9 @@ Good to know:
     a race of two either player's does. A race that ends under you costs nothing. It goes in or out at the crib on the
     way back, and the crib's autosave saves it with your profile (with the game's Save option at Prompt or Off it waits
     for your next save, as any change in the crib does).
-  - A race that cannot come together (the host's game gone, nobody else in the game in time) ends the trip: every game
+  - A player who leaves the lobby in the countdown, quits the game, or whose game cannot set off is not waited for; the
+    host's game waits a minute at most for the others in the LAN race's room, then starts with those who are ready.
+    A race that cannot come together (the host's game gone, nobody else in the game in time) ends the trip: every game
     goes back to free roam by itself and says why. Players on an older version or the Windows plugin see no lobbies.
 - **Rooms:** set the same "Room" to see only some of the players' cars. A room is a filter between players, not
   privacy: every browser on the server still sees your name ("Your name", or the profile name), whether you are in

@@ -3126,6 +3126,14 @@ static void mp_to(int st, int64_t host){
     if (st == MP_IDLE) memset(&g_mp.l, 0, sizeof g_mp.l);
 }
 static int mp_in(const MpLobby *l, uint32_t id){ for (int i = 0; i < l->n; i++) if (l->ids[i] == id) return 1; return 0; }
+/* hosting: player i out of our lobby (its id, since when it looked gone, its name on the trip) */
+static void mp_drop(int i){
+    for (int k = i; k + 1 < g_mp.l.n; k++){
+        g_mp.l.ids[k] = g_mp.l.ids[k + 1]; g_mp.away[k] = g_mp.away[k + 1];
+        memcpy(g_mp.names[k], g_mp.names[k + 1], sizeof g_mp.names[k]);
+    }
+    g_mp.l.n--;
+}
 static const rc_peer *mp_peer(uint32_t id){
     for (int i = 0; i < RC_TABLE; i++) if (g_s.peer[i].state == RC_PS_EST && g_s.peer[i].id == id) return &g_s.peer[i];
     return 0;
@@ -3255,13 +3263,16 @@ static void mp_recv(int64_t host, uint32_t from, const rc_lobby *m){
             if (m->op == RC_LOBBY_START && in && g_mp.st != MP_COUNT){
                 g_mp.start_at = host + (int64_t)m->t_ms * 1000; mp_to(MP_COUNT, host);
             }
-        } else if (g_mp.st == MP_IDLE && m->op == RC_LOBBY_ADVERT && m->state == RC_LS_OPEN && mp_in(l, self)){
+        } else if (g_mp.st == MP_IDLE && mp_in(l, self)){
             /* our JOIN taken after we gave up asking (a connection seconds behind: on the live server hundreds
-             * were): in, while still at its start; else out again, or the host would keep a player who is not.
-             * Only the lobby we asked to join, lately: any other that lists us is a host's mistake, or a player
-             * pulling others into its race, and then off on its trip (the third security audit) */
+             * were): in, while still at its start and the lobby open; else out again, or the host would keep a
+             * player who is not, and wait for it in the LAN race's room (one starting already: its countdown
+             * and adverts list us).  Only the lobby we asked to join, lately: any other that lists us is a
+             * host's mistake, or a player pulling others into its race, and then off on its trip (the third
+             * security audit) */
             int asked = from == g_mp.asked_host && m->lobby == g_mp.asked_id && host - g_mp.asked_at <= MP_LATE_US;
-            if (asked && mp_dist(l->x, l->y) <= MP_STAY_M){ g_mp.asked_host = 0; g_mp.l = *l; g_mp.joined++; mp_to(MP_IN, host); }
+            int open = m->op == RC_LOBBY_ADVERT && m->state == RC_LS_OPEN;
+            if (open && asked && mp_dist(l->x, l->y) <= MP_STAY_M){ g_mp.asked_host = 0; g_mp.l = *l; g_mp.joined++; mp_to(MP_IN, host); }
             else { roam_plat_lock(); mp_send_of(l, RC_LOBBY_LEAVE, RC_LL_LEFT, from); roam_plat_unlock(); }   /* about its lobby: ours is none */
         }
         return; }
@@ -3274,12 +3285,13 @@ static void mp_recv(int64_t host, uint32_t from, const rc_lobby *m){
         mp_send_all(RC_LOBBY_ADVERT, 0); g_mp.tx_at = host;
         return;
     case RC_LOBBY_LEAVE:
-        if (g_mp.st == MP_HOST && m->lobby == g_mp.l.id && mp_in(&g_mp.l, from)){
-            int k = 0;
-            for (int i = 0; i < g_mp.l.n; i++) if (g_mp.l.ids[i] != from){ g_mp.away[k] = g_mp.away[i]; g_mp.l.ids[k++] = g_mp.l.ids[i]; }
-            g_mp.l.n = (uint8_t)k;
+        /* hosting, also counting down and on the trip: a player that left is not waited for in the LAN race's room */
+        if ((g_mp.st == MP_HOST || g_mp.st == MP_COUNT || g_mp.st == MP_TRIP) && g_mp.l.host == self && m->lobby == g_mp.l.id &&
+            from != self && mp_in(&g_mp.l, from)){
+            for (int i = 1; i < g_mp.l.n; i++) if (g_mp.l.ids[i] == from){ mp_drop(i); break; }
             rlog("[roam] f=%ld race lobby %08x: %s left, %d of %d\n", rh_frame(), g_mp.l.id, mp_name(from), g_mp.l.n, g_mp.l.max);
-            mp_send_all(RC_LOBBY_ADVERT, 0); g_mp.tx_at = host;
+            if (g_mp.st == MP_TRIP) mprace_player_gone();
+            else { mp_send_all(RC_LOBBY_ADVERT, 0); g_mp.tx_at = host; }
         } else if ((g_mp.st == MP_ASKED || g_mp.st == MP_IN || g_mp.st == MP_COUNT) && from == g_mp.l.host && m->lobby == g_mp.l.id){
             mp_note(host, m->arg == RC_LL_FULL ? "The race is full" : "You are no longer in the race");
             mp_to(MP_IDLE, host);
@@ -3358,6 +3370,24 @@ static int mp_engage_spot(int64_t host, uint32_t r){
     if (l) return mp_join(host, l);
     return mp_open(host, r);
 }
+/* hosting: players gone from free roam, or away from the start, for MP_AWAY_US (a player who just joined, whose car
+ * we may not see yet, or a hitch in its snapshots, is not) are out */
+static void mp_away(int64_t host){
+    for (int i = 1; i < g_mp.l.n; i++){
+        const PeerView *v = du_pv(g_mp.l.ids[i]);
+        float far = v && v->have_pose ? rc_sqrtf((v->pose.p[0] - g_mp.l.x) * (v->pose.p[0] - g_mp.l.x) +
+                                                 (v->pose.p[1] - g_mp.l.y) * (v->pose.p[1] - g_mp.l.y)) : 0.f;
+        int gone = !v || !v->visible || far > MP_STAY_M + 10.f;
+        if (!gone){ g_mp.away[i] = 0; continue; }
+        if (!g_mp.away[i]) g_mp.away[i] = host;
+        if (host - g_mp.away[i] < MP_AWAY_US) continue;
+        rlog("[roam] f=%ld race lobby %08x: %s is gone from it (%s)\n", rh_frame(), g_mp.l.id, mp_name(g_mp.l.ids[i]),
+             !v ? "not linked" : !v->visible ? "not in free roam" : "away from the start");
+        mp_send_one(RC_LOBBY_LEAVE, RC_LL_LEFT, g_mp.l.ids[i]);
+        mp_drop(i--);
+        g_mp.tx_at = 0;
+    }
+}
 static void mp_ui_frame(CPU *c, int64_t host, int in_roam, int press, const MpSpot *sp);
 /* per frame */
 static void mp_frame(CPU *c, int64_t host, int in_roam, int world_runs, const uint32_t *from, const rc_lobby *in, int nin){
@@ -3367,6 +3397,14 @@ static void mp_frame(CPU *c, int64_t host, int in_roam, int world_runs, const ui
     int press = eng && !g_mp.engage;
     g_mp.engage = eng;
     uint32_t quit = __atomic_exchange_n(&g_quit_id, 0, __ATOMIC_RELAXED);
+    /* hosting, counting down or on the trip: a player of ours who quit is out at once (not waited for in the room) */
+    if (quit && quit != g_s.conf.self_id && g_mp.l.host == g_s.conf.self_id && (g_mp.st == MP_HOST || g_mp.st == MP_COUNT || g_mp.st == MP_TRIP))
+        for (int i = 1; i < g_mp.l.n; i++) if (g_mp.l.ids[i] == quit){
+            rlog("[roam] f=%ld race lobby %08x: %s quit, %d of %d\n", rh_frame(), g_mp.l.id, mp_name(quit), g_mp.l.n - 1, g_mp.l.max);
+            mp_drop(i);
+            if (g_mp.st == MP_TRIP) mprace_player_gone(); else g_mp.tx_at = 0;
+            break;
+        }
     if (g_mp.st == MP_TRIP){
         int ph = mprace_phase();
         if (quit && quit == g_mp.l.host && quit != g_s.conf.self_id) mprace_host_gone();   /* on the way to the race: its server is gone */
@@ -3415,23 +3453,7 @@ static void mp_frame(CPU *c, int64_t host, int in_roam, int world_runs, const ui
                 break;
             }
         } else g_mp.alone_at = 0;
-        /* players gone from free roam, or away from the start, for MP_AWAY_US (a player who just joined, whose
-         * car we may not see yet, or a hitch in its snapshots, is not) */
-        for (int i = 1; i < g_mp.l.n; i++){
-            const PeerView *v = du_pv(g_mp.l.ids[i]);
-            float far = v && v->have_pose ? rc_sqrtf((v->pose.p[0] - g_mp.l.x) * (v->pose.p[0] - g_mp.l.x) +
-                                                     (v->pose.p[1] - g_mp.l.y) * (v->pose.p[1] - g_mp.l.y)) : 0.f;
-            int gone = !v || !v->visible || far > MP_STAY_M + 10.f;
-            if (!gone){ g_mp.away[i] = 0; continue; }
-            if (!g_mp.away[i]) g_mp.away[i] = host;
-            if (host - g_mp.away[i] < MP_AWAY_US) continue;
-            rlog("[roam] f=%ld race lobby %08x: %s is gone from it (%s)\n", rh_frame(), g_mp.l.id, mp_name(g_mp.l.ids[i]),
-                 !v ? "not linked" : !v->visible ? "not in free roam" : "away from the start");
-            mp_send_one(RC_LOBBY_LEAVE, RC_LL_LEFT, g_mp.l.ids[i]);
-            for (int k = i; k + 1 < g_mp.l.n; k++){ g_mp.l.ids[k] = g_mp.l.ids[k + 1]; g_mp.away[k] = g_mp.away[k + 1]; }
-            g_mp.l.n--; i--;
-            g_mp.tx_at = 0;
-        }
+        mp_away(host);
         if (press && g_mp.l.n >= 2){
             g_mp.l.state = RC_LS_STARTING; g_mp.start_at = host + MP_COUNT_US;
             mp_to(MP_COUNT, host);
@@ -3449,7 +3471,16 @@ static void mp_frame(CPU *c, int64_t host, int in_roam, int world_runs, const ui
         if (mp_dist(g_mp.l.x, g_mp.l.y) > MP_STAY_M){ mp_close(host, RC_LL_LEFT, "You drove away: you left the race"); break; }
         break;
     case MP_COUNT:
-        if (g_mp.l.host == g_s.conf.self_id && host - g_mp.tx_at >= MP_ADVERT_US){ mp_send_all(RC_LOBBY_ADVERT, 0); g_mp.tx_at = host; }
+        if (g_mp.l.host == g_s.conf.self_id){
+            /* the others' leaving and going counts until the trip: those left are the ones the LAN race waits for */
+            mp_away(host);
+            if (g_mp.l.n < 2){
+                g_mp.l.state = RC_LS_OPEN; mp_to(MP_HOST, host); mp_note(host, "Everyone else left: the race waits for players again");
+                mp_send_all(RC_LOBBY_ADVERT, 0); g_mp.tx_at = host;
+                break;
+            }
+            if (host - g_mp.tx_at >= MP_ADVERT_US){ mp_send_all(RC_LOBBY_ADVERT, 0); g_mp.tx_at = host; }
+        }
         if (host >= g_mp.start_at) mp_trip(host);
         break;
     }
