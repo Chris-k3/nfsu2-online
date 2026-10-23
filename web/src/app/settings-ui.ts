@@ -19,7 +19,8 @@ type Control =
   | { t: 'num'; min?: number; max?: number; step?: number; unit?: string }
   | { t: 'text'; placeholder?: string };
 
-interface Item { key: string; label: string; help: string; c: Control; more?: boolean }
+/** link: the words of help that link to a page (a mod's, say), opened in a new tab */
+interface Item { key: string; label: string; help: string; link?: { text: string; href: string }; c: Control; more?: boolean }
 /** status: the group shows a line of the page's own under its title (Online: who plays on this server now);
  *  own: the group is a section of the page of its own (#online, under Saves), named by that section's heading */
 interface Group { title: string; items: Item[]; status?: boolean; own?: boolean }
@@ -54,11 +55,11 @@ const GROUPS: Group[] = [
     { key: 'fullscreen', label: 'Full screen on Play', help: 'Off plays in this browser window; the menu (F9) has full screen while you play. Hold Esc to leave it. On by default on phones.', c: { t: 'switch' } },
     { key: 'render', label: 'Resolution scale', help: 'Scales the game\'s screen-size resolution (its default), per side: 50% renders a quarter of the pixels. Lower is faster and softer. Phones start at 75%.', c: { t: 'seg', opts: [['scale:0.5', '50%'], ['scale:0.75', '75%'], ['backing', '100%'], ['scale:1.5', '150%'], ['scale:2', '200%']] } },
     { key: 'fps', label: 'Frame rate', help: 'Auto follows the display (120 on a 120 Hz screen, 240 on a 240 Hz one). Online and LAN races run at up to 120, as on a PC; cutscenes stay at 30.', c: { t: 'seg', opts: [['auto', 'Auto'], ['60', '60'], ['120', '120'], ['240', '240']] } },
+    { key: 'ui_textures', label: 'Menus and HUD', help: 'Original: the game\'s own. Upscaled: LunicAura106\'s Upscaled HUD mod, the menus, race HUD, fonts and logos redrawn at four times their size, sharp at high resolutions. About 5 MB to download, and on most phones four times the memory.', link: { text: 'Upscaled HUD', href: 'https://nfsmods.xyz/mod/4319' }, c: { t: 'seg', opts: [['original', 'Original'], ['uhud', 'Upscaled']] }, more: true },
     { key: 'hud', label: 'Race HUD', help: 'Wide anchors it to the screen edges; 4:3 is the original centred layout.', c: { t: 'seg', opts: [['wide', 'Wide'], ['43', '4:3']] }, more: true },
     { key: 'movie_framing', label: 'Movie framing', help: 'Fit keeps the 4:3 movies whole; fill crops them; stretch widens them.', c: { t: 'seg', opts: [['fit', 'Fit'], ['fill', 'Fill'], ['stretch', 'Stretch']] }, more: true },
     { key: 'cutscene_borders', label: 'Cutscene bars', help: 'Letterbox bars across the whole width, or none.', c: { t: 'seg', opts: [['full', 'Full'], ['off', 'Off']] }, more: true },
     { key: 'other_headlights', label: 'Other cars\' headlights', help: 'Light on the road from other cars, as your own headlights give. Players: friends in free roam and the other players in Online and LAN races. All: AI racers and traffic too. Off: only yours, as in the original game.', c: { t: 'seg', opts: [['players', 'Players'], ['all', 'All cars'], ['off', 'Off']] }, more: true },
-    { key: 'ui_textures', label: 'Menus and HUD', help: 'Upscaled: LunicAura106\'s Upscaled HUD mod, the menus, race HUD, fonts and logos redrawn at four times their size, sharp at high resolutions (about 5 MB to download). Phones start on Original.', c: { t: 'seg', opts: [['uhud', 'Upscaled'], ['original', 'Original']] }, more: true },
     { key: 'fps_counter', label: 'Frame-rate counter', help: 'In a corner of the game. F8 cycles it while you play.', c: { t: 'seg', opts: [['off', 'Off'], ['on', 'On'], ['detailed', 'Detailed']] }, more: true },
     { key: 'resolution', label: 'Fixed render size', help: 'Renders every resolution at this size, for example 2560x1440. Empty uses the one chosen in the game.', c: { t: 'text', placeholder: 'WxH' }, more: true },
     { key: 'max_pixels', label: 'Pixel limit', help: 'Most pixels the screen-size resolution renders at 100% and below (0 = no limit). 150% and 200% scale up from it.', c: { t: 'num', min: 0, step: 100000 }, more: true },
@@ -299,7 +300,13 @@ export class SettingsPanel {
     const label = document.createElement(c.t === 'seg' ? 'span' : 'label'); label.className = 'set-label'; label.id = `${id}-label`;
     label.textContent = it.label;
     if (label instanceof HTMLLabelElement) label.htmlFor = id;
-    const help = document.createElement('p'); help.className = 'set-help'; help.id = `${id}-help`; help.textContent = it.help;
+    const help = document.createElement('p'); help.className = 'set-help'; help.id = `${id}-help`;
+    const at = it.link ? it.help.indexOf(it.link.text) : -1;
+    if (at < 0) help.textContent = it.help;
+    else {
+      const a = document.createElement('a'); a.href = it.link!.href; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = it.link!.text;
+      help.append(it.help.slice(0, at), a, it.help.slice(at + it.link!.text.length));
+    }
     const ctl = document.createElement('div'); ctl.className = 'set-control';
     let described: HTMLElement;                      // what aria-describedby goes on
     if (c.t === 'switch') {

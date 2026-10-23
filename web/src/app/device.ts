@@ -16,11 +16,10 @@ export function touchFirst(): boolean { return matchMedia('(pointer: coarse)').m
 
 /** settings.ini keys whose default is another on this device: what applies when neither the file nor the page
  *  address sets them.  Phones: 75% resolution scale (a phone's screen has more pixels than its GPU fills at 60 fps),
- *  or 100% once the render check found room to spare on this one (rendercheck.ts), full screen (no browser
- *  bars over the game), and the game's own menu and HUD textures (most phones have no BC textures: the page
- *  decodes the Upscaled HUD's into four times the memory, ~150 MB for the menus). */
+ *  or 100% once the render check found room to spare on this one (rendercheck.ts), and full screen (no browser
+ *  bars over the game). */
 export function deviceDefaults(): Record<string, string> {
-  return isPhone() ? { render: rememberedRender() === 'backing' ? 'backing' : 'scale:0.75', fullscreen: 'on', ui_textures: 'original' } : {};
+  return isPhone() ? { render: rememberedRender() === 'backing' ? 'backing' : 'scale:0.75', fullscreen: 'on' } : {};
 }
 
 /** the render check's verdict on this phone: in this browser only, like the other device defaults (settings.ini,

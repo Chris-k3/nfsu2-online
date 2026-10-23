@@ -256,13 +256,13 @@ export const TEMPLATE = `# NFSU2 settings, read at every launch.
 # original game.  [NFSU2_HEADLIGHTS]
 #other_headlights = players
 
-# The menus' and the HUD's textures: uhud = LunicAura106's Upscaled HUD
-# (nfsmods.xyz/mod/4319): the menus, the race HUD, the fonts and the car and
-# brand logos redrawn at four times their size, where this server has the
-# mod's texture pack (a language pack's own fonts stay); original = the
-# game's.  Phones start on original (their GPUs decode the larger textures
-# into four times the memory).  [NFSU2_UI_TEXTURES]
-#ui_textures = uhud
+# The menus' and the HUD's textures: original = the game's; uhud =
+# LunicAura106's Upscaled HUD (nfsmods.xyz/mod/4319): the menus, the race
+# HUD, the fonts and the car and brand logos redrawn at four times their
+# size, where this server has the mod's texture pack (a language pack's own
+# fonts stay; most phones' GPUs decode the larger textures into four times
+# the memory).  [NFSU2_UI_TEXTURES]
+#ui_textures = original
 
 # ---- Frame rate ----------------------------------------------------------
 
@@ -401,9 +401,6 @@ export const APP_DEFAULTS: Readonly<Record<string, string>> = {
   // at 60 fps) a [status] line with the guest heap, address space and frame times (runtime/autotest.c), but not
   // the sound's own status every 5 s that NFSU2_STATUS_EVERY also turns on (runtime/web/audio_web.c)
   NFSU2_FNG_LOG: '1', NFSU2_STATUS_EVERY: '3600', NFSU2_AUDIO_STATUS: '0',
-  // the player's page shows the Upscaled HUD where the server has it (phones: device.ts); the runtime's own default,
-  // which the test pages keep, is the game's textures (runtime/web/texrep_web.c)
-  NFSU2_UI_TEXTURES: 'uhud',
 };
 
 // The mounts are fixed in the browser (web/src/host/io-worker.ts), so

@@ -365,7 +365,7 @@ dubs speak empty) show the movies' subtitles; the North American game shows none
 
 ## Texture packs
 
-Settings, Display, Menus and HUD, Upscaled (the default, but on phones) shows LunicAura106's "Upscaled HUD" (UHUD,
+Settings, Display, More, Menus and HUD, Upscaled (Original is the default) shows LunicAura106's "Upscaled HUD" (UHUD,
 [nfsmods.xyz/mod/4319](https://nfsmods.xyz/mod/4319)): the menus, the race HUD, the fonts and the car and brand logos
 redrawn at four times their size. It comes from a texture pack, `TEXPACKS/uhud.pak` in the game folder, which the
 port reads in place of the game's textures on the GPU only (`runtime/web/texrep_web.c`): the game keeps reading its

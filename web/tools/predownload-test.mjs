@@ -15,8 +15,9 @@
 //   delete    "Delete the game data on this PC" while it preloads stops it and leaves nothing
 //   language  with French chosen in Settings: the French language pack's files but its movies, the folder's
 //             but the file the pack has in its place, and no other language's
-//             (every step fetches the texture pack Menus and HUD picks by default, TEXPACKS/uhud.pak, and no other)
-//   texpack   with Menus and HUD on Original: the game data counted is the same files without the pack, all here
+//             (no step before fetches a texture pack: Menus and HUD is on Original by default)
+//   texpack   with Menus and HUD on Upscaled: the game data counted gains TEXPACKS/uhud.pak, the rest to preload
+//             is the pack, and it is all that is fetched
 // The game module is out/web/nfsu2.wasm, as for the server (--wasm to use another).
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
@@ -63,13 +64,13 @@ make('LANGPACKS/french/SOUND/TINY.BIN', 300);
 make('LANGPACKS/french/speech/UG2_Speech_FR.big', 3 * M + 5, true);
 make('LANGPACKS/french/MOVIES/BIG.VP6', 5 * M);
 make('LANGPACKS/german/speech/UG2_Speech_GR.big', 2 * M);
-// texture packs (runtime/web/texrep_web.c): only the one picked is fetched (uhud by default, but on phones)
+// texture packs (runtime/web/texrep_web.c): only the one picked is fetched (none by default)
 make('TEXPACKS/uhud.pak', 2 * M + 3, true);
 make('TEXPACKS/other.pak', M);
 fs.writeFileSync(path.join(DATA, 'NOTES.TXT'), 'not the game: never served');
 // what the download fetches for a game in this language: all but the movies, of the language packs only its own,
 // and not the folder's files its pack has in their place; of the texture packs only the one picked (texpack)
-function aheadOf(lang, texpack = 'uhud') {
+function aheadOf(lang, texpack = '') {
   const own = [...files.keys()].filter(f => f.startsWith(`LANGPACKS/${lang}/`));
   const covered = new Set(own.map(f => f.split('/').slice(2).join('/')));
   return [...files.keys()].filter(f => !f.startsWith('LANGPACKS/') && !covered.has(f)).concat(own)
@@ -188,7 +189,7 @@ try {
     const info = await text('#cache-info'), msg = await text('#data-msg');
     // each run went compressed exactly when its bytes compress (made with packs, and more than a few of them: the
     // last byte of TRACKS/RUNPLUSONE.BIN does not), and the whole took fewer bytes
-    const packed = p => /^(GLOBAL|TRACKS)\//.test(p) || p === 'TEXPACKS/uhud.pak' || /^CARS\/CAR(\d\d)\//.test(p) && +/CAR(\d\d)/.exec(p)[1] % 2 === 0;
+    const packed = p => /^(GLOBAL|TRACKS)\//.test(p) || /^CARS\/CAR(\d\d)\//.test(p) && +/CAR(\d\d)/.exec(p)[1] % 2 === 0;
     const runBytes = w => Math.min(fs.statSync(path.join(DATA, w.path)).size, (w.b + w.n) * M) - w.b * M;
     const wrongEnc = wire.filter(w => (w.enc === 'zstd') !== (packed(w.path) && runBytes(w) > 16)).map(w => `${w.path}#${w.b}:${w.enc}`);
     const bytesOnWire = await onWire();
@@ -335,14 +336,21 @@ try {
 
   // ---------------------------------------------------------- texpack --
   {
-    // everything French and the pack are here (the language step): without the pack, all that is counted is here
-    const orig = aheadOf('french', ''), want = `The game data (${(sizeOf(orig) / 1e6).toFixed(1)} MB) is kept`;
-    await page.$eval('input[name="set-ui_textures"][value="original"]', el => { el.checked = true; el.dispatchEvent(new Event('change')); });
-    const info = await page.waitForFunction(w => { const t = document.querySelector('#cache-info').textContent; return t.startsWith(w) && t; }, want,
-      { timeout: 15000 }).then(h => h.jsonValue()).catch(() => text('#cache-info'));
-    report('texpack', info.startsWith(want) && await page.locator('#fetch-all').isHidden() && !orig.some(f => f.startsWith('TEXPACKS/')) &&
-      aheadOf('french').includes('TEXPACKS/uhud.pak') && !aheadOf('french').includes('TEXPACKS/other.pak'),
-      { info: info.slice(0, 80), want });
+    // everything French is here (the language step): with the pack the count gains it, the rest is the pack, and it
+    // is all that comes
+    const up = aheadOf('french', 'uhud'), total = sizeOf(up), want = `Preload the rest (${(sizeOf(['TEXPACKS/uhud.pak']) / 1e6).toFixed(1)} MB)`;
+    wire.length = 0;
+    await page.$eval('input[name="set-ui_textures"][value="uhud"]', el => { el.checked = true; el.dispatchEvent(new Event('change')); });
+    const btn = await page.waitForFunction(w => document.querySelector('#fetch-all').textContent === w && w, want, { timeout: 15000 })
+      .then(h => h.jsonValue()).catch(() => text('#fetch-all'));
+    await page.click('#fetch-all');
+    const s = await until(s => s.state === 'done' || s.state === 'error');
+    await page.waitForTimeout(300);
+    const c = await cacheMatches(up), fetched = [...new Set(wire.map(w => w.path))];
+    report('texpack', btn === want && s.state === 'done' && s.have === total && s.total === total && c.ok &&
+      up.includes('TEXPACKS/uhud.pak') && !up.includes('TEXPACKS/other.pak') && !aheadOf('french').some(f => f.startsWith('TEXPACKS/')) &&
+      fetched.join() === 'TEXPACKS/uhud.pak',
+      { btn, want, state: s.state, have: s.have, total, fetched, mismatched: c.bad, extra: c.extra });
   }
 } catch (e) {
   report('run', false, String(e?.stack ?? e));

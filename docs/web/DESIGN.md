@@ -14,8 +14,7 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
 ## 1. Goals and constraints
 
 - **Goal:** NFS Underground 2 natively playable in the browser: whole career, save games, 120 fps, the original look by
-  default (but the menus and HUD: the Upscaled HUD texture pack, where the server has it, off on phones). Bonuses: LAN
-  and free-roam multiplayer between PCs, the upscaled-texture pack.
+  default. Bonuses: LAN and free-roam multiplayer between PCs, the upscaled-texture pack.
 - **Browser:** the latest **Chrome only** (the user's call). Chrome 155 on the dev Mac (M4 Pro, macOS 27, 3024×1964
   ProMotion) has WebGPU on Metal 3 with `texture-compression-bc`, `texture-component-swizzle`,
   `texture-compression-unaligned`, `clip-distances`, `dual-source-blending`, `timestamp-query`, `subgroups`; JSPI;
