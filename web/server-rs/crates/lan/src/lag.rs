@@ -11,7 +11,9 @@
 //! So the switch times each path: a WebSocket ping every `probe_ms` (the browser answers it by itself) goes out
 //! behind everything queued before it, and its pong comes back once all of that was read.  The lowest round trip of
 //! the last 30-60 s (at most `BASE_MAX_MS`: a path queued from the start must not count as its own base) is the path
-//! without queues; what a round trip has above it waited in them.  While a player's waits are long, it gets only a
+//! without queues; what a round trip has above it waited in them.  A path whose round trips stay above that through
+//! two whole windows of a cut share is that long without queues of ours (a satellite link, a far mobile one): its
+//! lowest round trip is its base from then on, or it never got its share back.  While a player's waits are long, it gets only a
 //! share of the snapshots sent to it (RC_MSG_SNAP, where a car is; every other message of free roam goes, so a
 //! player keeps its links, a car's record, a race): the share halves for a round trip over `LAG_HIGH_MS` (once for
 //! each round trip: only a ping queued after the last cut cuts again), drops to the least at once past
@@ -34,7 +36,8 @@ const LAG_SEVERE_MS: f64 = 1500.0;
 const LAG_LOW_MS: f64 = 150.0;
 /// the base is the lowest round trip of this window and the one before
 const BASE_WINDOW_MS: f64 = 30_000.0;
-/// and at most this (Cloudflare to the far side of the world and back, with room)
+/// and at most this (Cloudflare to the far side of the world and back, with room), until a cut share shows the path is
+/// longer (`Probe::floor`)
 const BASE_MAX_MS: f64 = 400.0;
 /// pings waiting for their pong at most (past it the oldest is forgotten: the keepalive cuts such a player anyway)
 const MAX_OUT: usize = 64;
@@ -48,12 +51,17 @@ pub(crate) struct Probe {
     tick_at: f64,
     /// the last round trip (ms; NaN before the first)
     rtt: f64,
-    /// the lowest round trip of this window and of the one before, and when this one began
+    /// the lowest round trip of this window and of the one before, and when this one and the one before began
     base_now: f64,
     base_prev: f64,
     window_at: f64,
+    prev_at: f64,
+    /// the most the base counts as (BASE_MAX_MS, or the path's own lowest round trip through two windows of a cut share)
+    floor: f64,
     /// when the share was last cut: only a ping queued after it halves it again
     cut_at: f64,
+    /// since when the share is under all (infinity: it is all)
+    thin_at: f64,
 }
 
 impl Probe {
@@ -65,7 +73,10 @@ impl Probe {
             base_now: f64::INFINITY,
             base_prev: f64::INFINITY,
             window_at: now,
+            prev_at: f64::NEG_INFINITY,
+            floor: BASE_MAX_MS,
             cut_at: f64::NEG_INFINITY,
+            thin_at: f64::INFINITY,
         }
     }
 
@@ -97,10 +108,16 @@ impl Probe {
         if now - self.window_at >= BASE_WINDOW_MS {
             self.base_prev = self.base_now;
             self.base_now = f64::INFINITY;
+            self.prev_at = self.window_at;
             self.window_at = now;
         }
         self.base_now = self.base_now.min(rtt);
-        let waited = rtt - self.base_now.min(self.base_prev).min(BASE_MAX_MS);
+        let base = self.base_now.min(self.base_prev);
+        // both windows of the base under a cut share: what is left above BASE_MAX_MS is the path, not a queue of ours
+        if self.thin_at <= self.prev_at {
+            self.floor = self.floor.max(base);
+        }
+        let waited = rtt - base.min(self.floor);
         let s = share.load(Relaxed);
         let next = if waited > LAG_SEVERE_MS {
             SHARE_MIN
@@ -113,6 +130,11 @@ impl Probe {
         };
         if next < s {
             self.cut_at = now;
+        }
+        if next == SHARE_FULL {
+            self.thin_at = f64::INFINITY;
+        } else if self.thin_at == f64::INFINITY {
+            self.thin_at = now;
         }
         share.store(next, Relaxed);
         Some(sent >= self.tick_at)
@@ -220,6 +242,44 @@ mod tests {
             answer(&mut r, &share, t, t + 500.0);
         }
         assert_eq!(share.load(Relaxed), SHARE_FULL);
+    }
+
+    // a path longer than BASE_MAX_MS without queues (a satellite link): cut while it looks late, its share back once
+    // two windows of a cut share show its round trips are that long anyway; a queue on top of it cuts again
+    #[test]
+    fn a_long_path_gets_its_share_back() {
+        // the review of 2026-10-23: 650 ms with one spike to 850 stayed at half for good, 900 ms at the least
+        for (rtt, spike) in [(650.0, 850.0), (900.0, 900.0)] {
+            let share = AtomicU32::new(SHARE_FULL);
+            let mut p = Probe::new(0.0);
+            let mut cut = false;
+            for k in 0..200 {
+                let t = k as f64 * 1000.0;
+                let s = answer(&mut p, &share, t, t + if k == 20 { spike } else { rtt }).1;
+                cut |= s < SHARE_FULL;
+                if k >= 120 {
+                    assert_eq!(s, SHARE_FULL, "{rtt} ms: all again at {k} s");
+                }
+            }
+            assert!(cut, "{rtt} ms: cut first, as a path that may be queued");
+            // queued on top of it: cut again
+            assert_eq!(answer(&mut p, &share, 200_000.0, 200_000.0 + rtt + 600.0).1, SHARE_FULL / 2);
+            assert_eq!(answer(&mut p, &share, 201_000.0, 201_000.0 + rtt + 2000.0).1, SHARE_MIN);
+        }
+        // a path queued from the start that drains under the cut share: its base is the drained one, never raised
+        let share = AtomicU32::new(SHARE_FULL);
+        let mut q = Probe::new(0.0);
+        for k in 0..10 {
+            let t = k as f64 * 1000.0;
+            answer(&mut q, &share, t, t + 3000.0 - k as f64 * 250.0);
+        }
+        for k in 10..130 {
+            let t = k as f64 * 1000.0;
+            answer(&mut q, &share, t, t + 120.0);
+        }
+        assert_eq!(share.load(Relaxed), SHARE_FULL);
+        assert_eq!(q.floor, BASE_MAX_MS);
+        assert_eq!(answer(&mut q, &share, 130_000.0, 130_000.0 + 700.0).1, SHARE_FULL / 2);
     }
 
     // a pong: ours or not, and whether it says the client is there (a ping queued since the keepalive's tick)
