@@ -149,7 +149,7 @@ impl LanSwitch {
             self.stats.resumed.inc();
             return Some((vip, old, true));
         }
-        if (!first && m.line.waiting()) || m.full(self.o.max_peers) {
+        if (!first && m.line.before_newcomers()) || m.full(self.o.max_peers) {
             return None;
         }
         match m.allocate() {

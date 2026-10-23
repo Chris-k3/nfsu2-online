@@ -57,8 +57,12 @@ where
                     peer = sw.admit(&conn, &ctx, first_hello(&sw, &b));
                 } else if let Some(p) = peer.as_ref().filter(|_| conn.open()) {
                     sw.on_message(p, true, b);
-                } else if peer.is_none() && conn.open() {
-                    sw.waiting_text(&conn, &b);
+                } else if peer.is_none() && conn.open() && !sw.waiting_text(&conn, &b) {
+                    // let in just now: the player's message
+                    peer = conn.peer.lock().clone();
+                    if let Some(p) = &peer {
+                        sw.on_message(p, true, b);
+                    }
                 }
             }
             Ok(Message::Binary(b)) => {

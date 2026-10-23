@@ -945,7 +945,7 @@ impl LanSwitch {
     /// a newcomer would wait in line (or get "LAN full") now: others wait, or every place is taken
     pub fn full(&self) -> bool {
         let m = self.members.lock();
-        m.line.waiting() || m.full(self.o.max_peers)
+        m.line.before_newcomers() || m.full(self.o.max_peers)
     }
 
     /// pages waiting in line for a place now

@@ -419,8 +419,6 @@ struct Encoded {
     end: bool,
 }
 
-/// the items into `buf`: the datagrams first, as bundles (compact ones for a page that takes them: the address it
-/// holds), then the rest in order; nothing after a close frame
 /// A page that takes compact bundles: the address it holds, the last bodies it was sent when it takes deltas, and the
 /// writer's buffer for the bundle being made.
 pub(crate) struct Compact<'a> {
@@ -429,16 +427,14 @@ pub(crate) struct Compact<'a> {
     body: &'a mut Vec<u8>,
 }
 
+/// the items into `buf` in order, the datagrams as bundles (compact ones for a page that takes them) where the first
+/// of them stands: what was queued before it goes first (a newcomer's welcome before its first datagrams: a page in
+/// line said hello before its welcome, so its datagrams are bundles from the start, and a page that takes deltas keeps
+/// the last bodies of every bundle it is sent; the datagrams were all written ahead of the batch's other items once);
+/// nothing after a close frame
 fn encode(stats: &Stats, items: &[Out], buf: &mut Vec<u8>, close_sent: &mut bool, compact: Option<Compact<'_>>) -> Encoded {
     let mut e = Encoded::default();
-    if !*close_sent {
-        let start = buf.len();
-        match compact {
-            Some(c) => bundle_compact(stats, items, buf, c),
-            None => bundle(stats, items, buf),
-        }
-        e.extra = buf.len() - start;
-    }
+    let mut compact = Some(compact);
     for it in items {
         e.counted += it.wire_len();
         if matches!(it, Out::End) {
@@ -449,7 +445,17 @@ fn encode(stats: &Stats, items: &[Out], buf: &mut Vec<u8>, close_sent: &mut bool
             continue;
         }
         match it {
-            Out::Dgram { .. } => {}
+            Out::Dgram { .. } => {
+                // (every datagram of the batch, once)
+                if let Some(c) = compact.take() {
+                    let start = buf.len();
+                    match c {
+                        Some(c) => bundle_compact(stats, items, buf, c),
+                        None => bundle(stats, items, buf),
+                    }
+                    e.extra = buf.len() - start;
+                }
+            }
             Out::Text(b) => frame::encode(frame::TEXT, b, buf),
             Out::Raw(b) => frame::encode(frame::BINARY, b, buf),
             Out::Frame { data, src, dst } => one_frame(buf, data, *src, *dst),
@@ -676,6 +682,24 @@ mod tests {
         encode(&stats, &items, &mut buf, &mut cs, None);
         assert_eq!(stats.bundles_out.get(), 2);
         assert_eq!(u16::from_be_bytes([buf[2], buf[3]]) as usize, 4 + 3 * 8196);
+    }
+
+    // a newcomer's welcome, queued before its first datagrams, goes before their bundle (a page in line takes bundles
+    // from its first moment); what came after the first datagram goes after the bundle; after a close frame nothing
+    #[test]
+    fn the_welcome_goes_before_the_first_bundle() {
+        let stats = Stats::default();
+        let (mut buf, mut cs) = (Vec::new(), false);
+        let items = vec![Out::Text(Bytes::from_static(b"w")), dg(20, 1), Out::Text(Bytes::from_static(b"p")), dg(20, 2)];
+        encode(&stats, &items, &mut buf, &mut cs, None);
+        assert_eq!(&buf[..3], &[0x81, 1, b'w']);
+        assert_eq!(&buf[3..5], &[0x82, 4 + 2 * 24]);
+        assert_eq!(buf[5], KIND_BUNDLE);
+        assert_eq!(&buf[5 + 4 + 2 * 24..], &[0x81, 1, b'p']);
+        buf.clear();
+        let items = vec![Out::Close(Bytes::from_static(&[3, 0xE8])), dg(20, 1)];
+        encode(&stats, &items, &mut buf, &mut false, None);
+        assert_eq!(buf, [0x88, 2, 3, 0xE8], "nothing after the close frame");
     }
 
     #[test]

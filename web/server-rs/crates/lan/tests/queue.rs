@@ -177,3 +177,28 @@ async fn a_full_line_refuses_and_the_pace_gives_a_wait() {
 fn vip_num(w: &Value) -> u32 {
     w["vip"].as_u64().unwrap() as u32
 }
+
+// only the ones there make it full: with a free place and only a dropped waiter in line (away, its place kept for its
+// ticket), /players says not full and a newcomer goes in at once; the dropped one is back first in line
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_ones_away_do_not_make_it_full() {
+    let _s = serial().await;
+    let sw = start(line_opts(1)).await;
+    let mut a = Client::connect(sw.port, "Alice").await;
+    a.welcome().await;
+    let c = waiter(sw.port, "Carol", None).await;
+    let ticket = told(&c, 1).await["ticket"].as_str().unwrap().to_string();
+    c.terminate();
+    a.close_with(1000, "idle");
+    wait_for(2000, || !sw.lan.full()).await;
+    assert_eq!(sw.lan.waiting(), 1, "Carol's place kept");
+    let mut d = waiter(sw.port, "Dave", None).await;
+    d.welcome().await;
+    assert_eq!(d.got().count("queue"), 0, "no line to wait in");
+    let mut c2 = waiter(sw.port, "Carol", Some(&ticket)).await;
+    assert_eq!(told(&c2, 1).await["of"], 1);
+    assert!(sw.lan.full());
+    d.close_with(1000, "idle");
+    c2.welcome().await;
+    sw.close().await;
+}
