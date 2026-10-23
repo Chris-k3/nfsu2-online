@@ -100,8 +100,9 @@ impl LanSwitch {
             return None;
         }
         let mut m = self.members.lock();
-        let held = held_address(&m, hello.as_ref());
-        // a page back with its ticket: its place in line again (it never had an address)
+        let mut held = held_address(&m, hello.as_ref());
+        // a page back with its ticket: its place in line again (it never had an address), or the place the line gave
+        // it as its link went (its welcome lost with it: queue.rs `seated`)
         if held.0 == 0 && ctx.queue {
             if let Some(Value::String(t)) = hello.as_ref().and_then(|h| h.get("ticket")) {
                 let t = t.clone();
@@ -110,6 +111,7 @@ impl LanSwitch {
                     self.let_in();
                     return conn.peer.lock().clone();
                 }
+                held = m.line.seated_for(&m.peers, &m.reserved, &t);
             }
         }
         // a newcomer waits while anyone does

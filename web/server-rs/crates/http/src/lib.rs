@@ -481,8 +481,10 @@ async fn listen_on(host: &str, port: u16) -> io::Result<TcpListener> {
     sock.set_reuse_address(true)?;
     sock.set_nonblocking(true)?;
     sock.bind(&addr.into())?;
-    // Node's backlog
-    sock.listen(511)?;
+    // more than Node's 511: when a Cloudflare Tunnel connection goes, the players on it (a thousand and more) come back
+    // within a second, each a new connection from cloudflared; past the backlog the kernel drops the handshake and the
+    // client tries again a second or more later.  The kernel takes at most its somaxconn (Linux: 4096 since 5.4)
+    sock.listen(4096)?;
     TcpListener::from_std(sock.into())
 }
 

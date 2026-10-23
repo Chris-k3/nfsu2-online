@@ -202,3 +202,29 @@ async fn the_ones_away_do_not_make_it_full() {
     c2.welcome().await;
     sw.close().await;
 }
+
+// a page let in as its link went (its welcome, and so its token, lost with it): back with its ticket it takes the
+// place it was given, not the back of the line, and nobody else can take it
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_ticket_takes_the_place_its_page_was_given_as_its_link_went() {
+    let _s = serial().await;
+    let sw = start(line_opts(1)).await;
+    let mut a = Client::connect(sw.port, "Alice").await;
+    a.welcome().await;
+    let mut c = waiter(sw.port, "Carol", None).await;
+    let ticket = told(&c, 1).await["ticket"].as_str().unwrap().to_string();
+    let d = waiter(sw.port, "Dave", None).await;
+    told(&d, 2).await;
+    a.close_with(1000, "idle");
+    let vip = c.welcome().await["vip"].as_u64().unwrap();
+    c.terminate();
+    wait_for(2000, || sw.reserved().len() == 1).await;
+    // someone else's ticket, or none, gets no such place
+    let x = waiter(sw.port, "Xena", Some("not-carols-ticket-000000000")).await;
+    told(&x, 2).await;
+    let mut c2 = waiter(sw.port, "Carol", Some(&ticket)).await;
+    assert_eq!(c2.welcome().await["vip"].as_u64(), Some(vip), "her place");
+    assert_eq!(c2.got().count("queue"), 0);
+    assert_eq!(sw.lan.waiting(), 2, "Dave and Xena still wait");
+    sw.close().await;
+}

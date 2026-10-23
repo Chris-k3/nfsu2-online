@@ -17,7 +17,7 @@
 //! {"t":"lan"} (kept the same way), {"t":"ping"} (answered); its frames go nowhere.  One that sends nothing for
 //! `SILENT_MS` is gone (the page pings every 2 s), and so is its place.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -62,9 +62,31 @@ pub(crate) struct Line {
     longest: f64,
     /// when the waiting pages were last told their places (mono ms)
     told_at: f64,
+    /// the pages the line let in lately, by their tickets: the address it gave each and the hash of its token, until
+    /// when (now_ms).  A page whose link went as it was let in never had its welcome (nor its token): back with its
+    /// ticket it takes that place, held or kept for it, as its token would (`seated_for`)
+    seated: HashMap<[u8; 32], (u32, [u8; 32], i64)>,
 }
 
 impl Line {
+    /// the place a ticket's page was given lately (as `held_address` gives a token's): its address, and the
+    /// connection of the same page that the switch still holds there; (0, None) for none
+    pub(crate) fn seated_for(
+        &self,
+        peers: &IndexMap<u32, Arc<crate::Peer>>,
+        reserved: &IndexMap<u32, crate::members::Reservation>,
+        ticket: &str,
+    ) -> (u32, Option<Arc<crate::Peer>>) {
+        let now = now_ms();
+        let Some(&(vip, token, _)) = self.seated.iter().find(|(h, s)| s.2 > now && token_fits(ticket, h)).map(|(_, s)| s) else {
+            return (0, None);
+        };
+        match peers.get(&vip) {
+            Some(p) if p.token_hash == token => (vip, Some(p.clone())),
+            None if reserved.get(&vip).is_some_and(|r| r.hash == token && r.until > now) => (vip, None),
+            _ => (0, None),
+        }
+    }
     /// anyone waits (or is away and keeps a place)
     pub(crate) fn waiting(&self) -> bool {
         !self.waiters.is_empty()
@@ -210,7 +232,7 @@ impl LanSwitch {
             let held = held_address(&m, wait.hello.as_ref());
             let Some((vip, old, resumed)) = self.place(&mut m, held, true) else { return };
             let hello = wait.hello.take();
-            let came = m.line.waiters.shift_remove(&id).map_or(f64::NAN, |w| w.came);
+            let (came, ticket) = m.line.waiters.shift_remove(&id).map_or((f64::NAN, None), |w| (w.came, Some(w.ticket)));
             let now = mono_ms();
             m.line.moved.push_back(now);
             if m.line.since.is_some() {
@@ -221,6 +243,9 @@ impl LanSwitch {
             }
             self.stats.line_in.inc();
             let (peer, count) = self.seat(&mut m, &conn, &ctx, hello, vip, old);
+            if let Some(t) = ticket {
+                m.line.seated.insert(t, (peer.vip, peer.token_hash, now_ms() + self.o.reserve_ms));
+            }
             *wait = Wait::default();
             drop(wait);
             drop(m);
@@ -236,10 +261,13 @@ impl LanSwitch {
         let now = mono_ms();
         let silent: Vec<Arc<Conn>> = {
             let mut m = self.members.lock();
+            let wall = now_ms();
+            if !m.line.seated.is_empty() {
+                m.line.seated.retain(|_, s| s.2 > wall);
+            }
             if !m.line.waiting() {
                 return;
             }
-            let wall = now_ms();
             let before = m.line.waiters.len();
             m.line.waiters.retain(|_, w| w.conn.is_some() || w.until > wall);
             for _ in m.line.waiters.len()..before {
