@@ -782,7 +782,7 @@ int rc_interp_eval(rc_interp *ip, int64_t now_us, int64_t frame_dt_us, int64_t d
 #define T_MISMATCH_NOTE 30000000    /* a protocol or room mismatch is noted at most this often */
 #define T_HUB_HELLO    1000000      /* to the hub: a HELLO this often */
 #define T_HUB_SNAP      500000      /* and a SNAP (where we are) this often */
-#define T_HUB_GRACE    2500000      /* a peer the hub has not listed for this long goes (its list comes every second) */
+#define T_HUB_GRACE    2500000      /* a peer the hub has not listed for this long goes (its list comes every second, twice since 2026-10-23) */
 #define T_HUB_SILENT  10000000      /* no list for this long (or from the start): discovery and gossip again */
 #define RL_DGRAMS      100          /* per second and source */
 #define RL_BYTES     65536
@@ -927,6 +927,7 @@ int rc_established(const rc_session *s){ int n = 0; for (int i = 0; i < RC_TABLE
 static int in_group(const rc_session *s, const rc_peer *p){
     return s->hub_was != 2 || p->configured || p->hub_listed_us == s->hub_heard_us;
 }
+int rc_peer_listed(const rc_session *s, int i){ return i >= 0 && i < RC_TABLE && in_group(s, &s->peer[i]); }
 static int group_count(const rc_session *s){
     int n = 0;
     for (int i = 0; i < RC_TABLE; i++) if (s->peer[i].state == RC_PS_EST && in_group(s, &s->peer[i])) n++;

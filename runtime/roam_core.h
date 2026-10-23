@@ -395,7 +395,7 @@ typedef struct {
     int      snap_states;
     /* a free-roam hub (the browser's server, web/server-rs/crates/roam), or 0:
      * it gets a HELLO every second and a SNAP twice a second, and answers
-     * every second with a PEERS list of the players near us.  While it
+     * every half second with a PEERS list of the players near us.  While it
      * answers, that list is who our peers are: nobody else is taken, a peer
      * it no longer lists goes ("out of range"), and there is no discovery
      * and no gossip.  Silent for 10 s (or from the start): discovery and
@@ -509,6 +509,9 @@ void rc_bump_epoch(rc_session *s);       /* teleport: receivers snap */
 void rc_bump_clock(rc_session *s);       /* stamps re-anchored: receivers re-sync, blended */
 void rc_shutdown(rc_session *s, uint8_t reason);   /* BYE x3 to every peer, then the session is silent */
 int  rc_established(const rc_session *s);
+/* peer i is on the hub's last list (or there is no hub): a peer left out goes within T_HUB_GRACE, and the game gives
+ * its car's slot to one the hub lists */
+int  rc_peer_listed(const rc_session *s, int i);
 /* a DUEL message to the established peer with id `to`, if its HELLO said it
  * takes them; 1 when sent */
 int  rc_send_duel(rc_session *s, uint32_t to, uint8_t op, uint8_t arg, uint32_t duel);

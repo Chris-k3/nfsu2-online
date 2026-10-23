@@ -587,14 +587,20 @@ static void t_hub(void){
     /* the hub links others: the old peer goes (out of range), the new one comes */
     memset(g_hub_link, 0, sizeof g_hub_link); hub_links(0, 2); hub_links(1, 3);
     int lv = g_leave[0];
-    drive(4, g_now + 5000000);
+    drive(4, g_now + 1500000);
+    int k1 = peer_of(0, id[1]);
+    CHECK(k1 >= 0 && g_n[0].peer[k1].state == RC_PS_EST && !rc_peer_listed(&g_n[0], k1),
+          "hub: a peer left out of its list stays a while, not listed (the game gives its car's slot away)");
+    drive(4, g_now + 3500000);
     CHECK(peer_of(0, id[2]) >= 0 && g_n[0].peer[peer_of(0, id[2])].state == RC_PS_EST && peer_of(0, id[1]) < 0 && est(0) == 1,
           "hub: a new list, new peers (%d)", est(0));
+    CHECK(rc_peer_listed(&g_n[0], peer_of(0, id[2])), "hub: the new peer is listed");
     CHECK(g_leave[0] == lv + 1 && strstr(g_leave_text[0], "out of range"), "hub: the unlisted peer left \"out of range\" ('%s')", g_leave_text[0]);
     /* the hub goes silent: discovery again after 10 s, nobody dropped for it */
     g_hub_on = 0; g_bcast_calls = 0;
     drive(4, g_now + 13000000);
     CHECK(g_bcast_calls > 0 && g_n[0].hub_was == 0 && est(0) == 1, "hub silent: discovery again, peers kept (%d broadcasts, state %d, %d peers)", g_bcast_calls, g_n[0].hub_was, est(0));
+    CHECK(rc_peer_listed(&g_n[0], peer_of(0, id[2])), "hub silent: every peer counts as listed");
     /* it answers again; a BYE tells it we stop */
     g_hub_on = 1; g_hub_next = 0;
     drive(4, g_now + 2000000);

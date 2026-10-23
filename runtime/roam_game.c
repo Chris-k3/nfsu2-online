@@ -329,6 +329,7 @@ static int64_t g_last_host;
 /* local car */
 static float g_lp[3]; static int g_lp_ok;
 static float g_lv[3];                         /* its velocity (m/s of world time) */
+static float g_lf[2];                         /* where it points: its forward row in x and y, of length 1 (or 0) */
 static int64_t g_cfg_next;
 static int g_horn;                            /* the player's horn sounds this frame */
 static uint8_t g_thumps; static int g_landed;  /* the player's car's landings so far; it landed last frame */
@@ -2286,8 +2287,10 @@ static void map_update(CPU *c, uint32_t w, int64_t host){
 
 /* ---- per-frame --------------------------------------------------------------------------------- */
 typedef struct { int idx; uint32_t id; char name[RC_NAME_MAX + 1]; int visible, paused; float dist; uint32_t cfg_gen;
-                 float rank;           /* the slots' order (assign): the nearer of dist and the distance LOOK_S
-                                          ahead, both cars at their speeds (as the hub links, nfsu2-roam) */
+                 float rank;           /* the slots' order (assign): the nearest of the distances SOON_S and LOOK_S
+                                          on, both cars at their speeds, and from our view point VIEW_M ahead (as
+                                          the hub links, nfsu2-roam) */
+                 int listed;           /* the hub's last list has it (or there is no hub): rc_peer_listed */
                  int duels;            /* takes outrun challenges (its HELLO) */
                  int has_cfg;          /* a complete car record is held */
                  int cfg_len;          /* > 0: the record is copied here (a slot needs it) */
@@ -4284,14 +4287,23 @@ static int loads_waiting(void){
  * frame: 32 friends arriving at once made 29 cars in one frame (112 ms) */
 #define HEAVY_PER_FRAME 2
 static int g_heavy;
-/* "nearest" for the slots: the nearer of now and LOOK_S ahead, both cars at
- * their speeds (PeerView.rank), so the car loader serves a car we head for
- * before one we leave behind: a car takes it a second or two to show */
-#define LOOK_S          3.f
-/* choose which friends get the slots: visible ones, nearest first; a slot
- * keeps its friend while the friend stays visible, unless a much nearer
- * friend has none (step 5: with the server's hub there can be more
- * friends near us than slots).  A friend whose car
+/* "nearest" for the slots, as the server's hub weighs its links (nfsu2-roam
+ * RoamOptions soon_ms, look_ms, view_m): the nearest of the distances SOON_S
+ * and LOOK_S on, both cars at their speeds, and from our view point, VIEW_M
+ * ahead of where our car points (SOON_S on), to the friend's car SOON_S on
+ * (PeerView.rank).  So the car loader serves a car we head for, or one in
+ * front of us, before one we leave behind: a car takes it a second or two
+ * to show */
+#define SOON_S          1.f
+#define LOOK_S          4.f
+#define VIEW_M          150.f
+/* choose which friends get the slots: visible ones the hub lists, nearest
+ * first; a slot keeps its friend while the friend stays visible, unless a
+ * friend the hub lists has none and the slot's friend is out of sight (step
+ * 4), left out of the hub's last list (step 5: roam_core keeps such a peer
+ * T_HUB_GRACE, 2.5 s, and the car waiting for its slot appeared that much
+ * later, near), or much farther (step 6: with the server's hub there can be
+ * more friends near us than slots).  A friend whose car
  * cannot be made now (no car memory, a record not understood) is skipped
  * for this frame and the next one is served: a farther friend whose look a
  * parked car already wears, or one with a car that fits, is not kept
@@ -4315,7 +4327,7 @@ static void assign(CPU *c, int64_t host){
         /* the nearest visible friend without a slot */
         int best = -1;
         for (int i = 0; i < g_npv; i++){
-            if (tried[i] || !g_pv[i].visible || !g_pv[i].has_cfg || !g_pv[i].cfg_len || !g_pv[i].have_pose) continue;
+            if (tried[i] || !g_pv[i].visible || !g_pv[i].listed || !g_pv[i].has_cfg || !g_pv[i].cfg_len || !g_pv[i].have_pose) continue;
             int has = 0;
             for (int k = 0; k < nslots; k++)
                 if (g_sl[k].st != SL_FREE && g_sl[k].st != SL_PARKED && g_sl[k].peer == g_pv[i].idx && g_sl[k].peer_id == g_pv[i].id) has = 1;
@@ -4347,7 +4359,17 @@ static void assign(CPU *c, int64_t host){
             int far = -1;
             for (int j = 0; j < nslots; j++)
                 if (g_sl[j].st == SL_ACTIVE && g_sl[j].unseen_since && !du_keeps(j) && (far < 0 || g_sl[j].unseen_since < g_sl[far].unseen_since)) far = j;
-            /* 5. else the farthest shown one, for a friend much nearer (well
+            /* 5. a friend the hub left out of its last list (going within
+             *    T_HUB_GRACE): the farthest of them */
+            if (far < 0){
+                float fd = -1.f;
+                for (int j = 0; j < nslots; j++){
+                    if (g_sl[j].st != SL_ACTIVE || du_keeps(j)) continue;
+                    for (int i = 0; i < g_npv; i++)
+                        if (g_pv[i].idx == g_sl[j].peer && g_pv[i].id == g_sl[j].peer_id && !g_pv[i].listed && g_pv[i].rank > fd){ fd = g_pv[i].rank; far = j; }
+                }
+            }
+            /* 6. else the farthest shown one, for a friend much nearer (well
              *    within 60 % of its distance and 50 m nearer: no swapping
              *    back and forth at the edge) -- with more players than
              *    slots, the cars shown are the nearest ones */
@@ -4361,7 +4383,10 @@ static void assign(CPU *c, int64_t host){
                 if (fj >= 0 && v->rank < fd * 0.6f && fd - v->rank > 50.f) far = fj;
             }
             if (far < 0) return;
-            release(c, far, g_sl[far].unseen_since ? "slot needed for a nearer friend" : "a much nearer friend takes the slot");
+            int left_out = 0;
+            for (int i = 0; i < g_npv; i++) if (g_pv[i].idx == g_sl[far].peer && g_pv[i].id == g_sl[far].peer_id) left_out = !g_pv[i].listed;
+            release(c, far, g_sl[far].unseen_since ? "slot needed for a nearer friend" :
+                            left_out ? "the server's hub links us no more" : "a much nearer friend takes the slot");
             continue;
         }
         Slot *s = &g_sl[k];
@@ -4529,6 +4554,9 @@ void roam_game_frame(CPU *c){
         }
         memcpy(g_lp, ls.p, sizeof g_lp); g_lp_ok = 1;
         for (int i = 0; i < 3; i++) g_lv[i] = ls.v[i] / (float)g_vscale;
+        float f[3], l[3], u[3]; rc_q2m(ls.q, f, l, u);
+        float fl = rc_sqrtf(f[0] * f[0] + f[1] * f[1]);
+        g_lf[0] = fl > 1e-3f ? f[0] / fl : 0.f; g_lf[1] = fl > 1e-3f ? f[1] / fl : 0.f;
     }
     roam_plat_lock();
     uint8_t st = local_status(in_roam);
@@ -4573,7 +4601,7 @@ void roam_game_frame(CPU *c){
             v->visible = !p->lost && p->mo.n > 0 &&
                          (p->status == RC_ST_PAUSED ||
                           (p->status == RC_ST_ROAM && host - p->last_snap_rx < 2000000));
-            v->paused = p->status == RC_ST_PAUSED; v->duels = p->duels;
+            v->paused = p->status == RC_ST_PAUSED; v->duels = p->duels; v->listed = rc_peer_listed(&g_s, i);
             v->cfg_gen = p->cfg_gen; v->cfg_len = 0; v->has_cfg = p->cfg_len > 0; v->err = 0;
             int slotted = -1;
             for (int k = 0; k < NSLOT; k++) if (g_sl[k].st != SL_FREE && g_sl[k].st != SL_PARKED && g_sl[k].peer == i && g_sl[k].peer_id == p->id) slotted = k;
@@ -4610,8 +4638,12 @@ void roam_game_frame(CPU *c){
             }
             float dx = v->pose.p[0] - g_lp[0], dy = v->pose.p[1] - g_lp[1];
             v->dist = v->have_pose ? rc_sqrtf(dx*dx + dy*dy) : 1e9f;
-            float ax = dx + (v->pose.v[0] - g_lv[0]) * LOOK_S, ay = dy + (v->pose.v[1] - g_lv[1]) * LOOK_S, ad = rc_sqrtf(ax*ax + ay*ay);
-            v->rank = v->have_pose && ad < v->dist ? ad : v->dist;
+            float ux = v->pose.v[0] - g_lv[0], uy = v->pose.v[1] - g_lv[1];
+            float sx = dx + ux * SOON_S, sy = dy + uy * SOON_S, ax = dx + ux * LOOK_S, ay = dy + uy * LOOK_S;
+            float wx = sx - g_lf[0] * VIEW_M, wy = sy - g_lf[1] * VIEW_M;
+            float sd = rc_sqrtf(sx*sx + sy*sy), ad = rc_sqrtf(ax*ax + ay*ay), wd = rc_sqrtf(wx*wx + wy*wy);
+            float rk = sd < ad ? sd : ad;
+            v->rank = !v->have_pose ? v->dist : wd < rk ? wd : rk;
             v->err = rc_sqrtf(p->mo.err_p[0] * p->mo.err_p[0] + p->mo.err_p[1] * p->mo.err_p[1] + p->mo.err_p[2] * p->mo.err_p[2]);
         }
     }
