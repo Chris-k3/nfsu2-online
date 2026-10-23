@@ -205,23 +205,28 @@ compose file's limit), 40 GB of disk and a 1 Gbit/s port with a few TB of traffi
 
 ### A share of the VPS
 
-The compose files put every container of theirs (the server, Caddy, or cloudflared and its namespace) into the
-systemd slice `nfsu2.slice` (`cgroup_parent`, `NFSU2_SLICE` to name another), and `web/deploy/nfsu2.slice` gives that
-slice at most 80 % of a 16-vCPU VPS (`CPUQuota=1280%`, 12.8 cores; 80 times the vCPUs for another size), so the
-rest of the VPS keeps at least 3.2 cores whatever the players do. The server and cloudflared share the 12.8 as their
-load goes. At the limit they are slowed down, never the rest: the server's workers count the time they wait as busy
-(wall time), so the free-roam hub's busy cap gives players fewer friends, as it does on a busy server.
+The compose files put every container of theirs (the server, Caddy, or cloudflared and its namespace) into the systemd
+slice `nfsu2.slice` (`cgroup_parent`, `NFSU2_SLICE` to name another), and `web/deploy/nfsu2.slice` gives that slice at
+most 14 of a 16-vCPU VPS (`CPUQuota=1400%`; for another size, its vCPUs less what the rest needs, times 100), so the
+rest of the VPS keeps at least 2 cores whatever the players do. The server and cloudflared share the 14 as their load
+goes. At the limit they are slowed down, never the rest: the server's workers count the time they wait as busy (wall
+time), so the free-roam hub's busy cap gives players fewer friends, as it does on a busy server.
 
     cp web/deploy/nfsu2.slice /etc/systemd/system/ && systemctl daemon-reload
     docker compose up -d --force-recreate
     systemctl status nfsu2.slice                               # the containers in it
-    systemctl show nfsu2.slice -p CPUQuotaPerSecUSec           # 12.8s
+    systemctl show nfsu2.slice -p CPUQuotaPerSecUSec           # 14s
+
+A new quota for a slice that runs already needs no recreate: after the `cp` and `daemon-reload`,
+`systemctl set-property --runtime nfsu2.slice CPUQuota=1400%` sets it at once (`cat
+/sys/fs/cgroup/nfsu2.slice/cpu.max`: `1400000 100000`), and the file keeps it after a reboot.
 
 It needs Docker's systemd cgroup driver (`docker info`: `Cgroup Driver: systemd`, the default with cgroup v2).
 Without the file the containers still start, in a slice systemd makes for them with no limit; with the cgroupfs
 driver (Docker Desktop) `nfsu2.slice` is a plain cgroup, also with no limit.
 
-How far 12.8 cores go: 1209 players took the server 0.7 of a core and cloudflared 1.7 (2026-10-21). 4000 simulated
+How far the cores go: 1209 players took the server 0.7 of a core and cloudflared 1.7 (2026-10-21); 4,294 took the
+server 3.4 and cloudflared 8.9, 11.8 in all, when the slice was 12.8 (2026-10-23). 4000 simulated
 players in free roam took the server 8.2 cores on 12 workers at 32 friends each (`NFSU2_THREADS=12`), 6.5 on 8
 workers at the busy cap's 8 (`web/server-rs/README.md`); cloudflared pays for each message again, so 4000 players
 are about where the slice's limit is reached, and past it free roam gives fewer friends instead of taking more of the
@@ -601,12 +606,10 @@ What follows from this setup:
   players got the other cars seconds late while the server was idle. A copy's sites are in its log:
   `docker logs nfsu2-web-cloudflared-1 2>&1 | grep 'Registered tunnel connection'`. Restart only the copy with the
   bad site (`docker restart nfsu2-web-cloudflared-1`); `docker compose restart cloudflared` drops every player.
-- **A fifth copy over HTTP/2**, off unless started (`cloudflared-h2`, profile `h2`): the four take QUIC, which
-  sends each small message as its own UDP packet (8.9 cores at 4,300 players on nfsu2.xyz, 2026-10-23); this one
-  takes TCP, so its CPU per player can be compared with theirs at the same moment. Start it with
-  `docker compose --profile h2 up -d --no-deps cloudflared-h2`, take it away with
-  `docker compose --profile h2 rm -sf cloudflared-h2`. Over TCP a lost packet holds up every player on that
-  connection until it is sent again, not only the one it was for. Whether it takes less CPU is **UNVERIFIED**.
+- **QUIC, not HTTP/2.** A fifth copy over HTTP/2 (`--protocol http2`, TCP) next to the four, on nfsu2.xyz
+  (2026-10-23, ~4,300 players), took 2.58 cores per 1000 of its players against the QUIC copies' 2.20-2.38: no
+  cheaper (its players had all come within the hour, still loading, which costs more). Over TCP a lost packet also
+  holds up every player on that connection, not only the one it was for.
 - **Small receive buffers** in the namespace (`sysctls` on `net`: 128 KiB at most, not Linux's 32 MiB): what a
   player's connection does not take waits at the server, which then sends that player fewer of free roam's
   updates, instead of piling up unread at cloudflared. A change to it recreates `net`, and with it cloudflared and
