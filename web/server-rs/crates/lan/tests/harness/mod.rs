@@ -1,6 +1,6 @@
 //! The switch's test harness: `start` and `start_full` (a switch behind a listener on 127.0.0.1:0 that answers the
-//! upgrade to /lan and attaches with ?resume, ?g= and ?s=), the fake browser `Client` (tokio-tungstenite), `raw_ws`
-//! and `raw_peer` (plain sockets that read only when told to), `frame_of`, `bundle_of`, `throttle`.  The listener also
+//! upgrade to /lan and attaches with ?resume, ?queue, ?g= and ?s=), the fake browser `Client` (tokio-tungstenite),
+//! `raw_ws` and `raw_peer` (plain sockets that read only when told to), `frame_of`, `bundle_of`, `throttle`.  The listener also
 //! answers GET /state with what the page tests read of the switch (they run in node: tests/page.mjs).
 #![allow(dead_code)]
 
@@ -41,9 +41,9 @@ pub fn ip_str(v: u32) -> String {
     nfsu2_util::vip_str(v)
 }
 
-/// every address the switch hands out: host bytes 2-251 in each /24 of 10.77.0.0/20
+/// every address the switch hands out: host bytes 2-251 in each of 10.77.0-19.x (10.77.0.0/19)
 pub fn all_vips() -> Vec<u32> {
-    (0..16u32).flat_map(|b| (0..250u32).map(move |i| (10 << 24) | (77 << 16) | (b << 8) | (i + 2))).collect()
+    (0..20u32).flat_map(|b| (0..250u32).map(move |i| (10 << 24) | (77 << 16) | (b << 8) | (i + 2))).collect()
 }
 
 /// the tests' options: WebSocket messages of up to 1 MiB taken (max_payload), so that the switch's own limits decide
@@ -126,12 +126,13 @@ async fn serve(lan: Arc<LanSwitch>, mut s: TcpStream) {
     if s.write_all(&nfsu2_ws::handshake_response(&key, None)).await.is_err() {
         return;
     }
-    let mut resume = false;
+    let (mut resume, mut queue) = (false, false);
     let (mut group, mut site) = (None, None);
     for kv in query.split('&').filter(|kv| !kv.is_empty()) {
         let (k, v) = kv.split_once('=').unwrap_or((kv, ""));
         match k {
             "resume" => resume = true,
+            "queue" => queue = true,
             "g" if group.is_none() => group = Some(v.to_string()),
             "s" if site.is_none() => site = Some(v.to_string()),
             _ => {}
@@ -139,7 +140,7 @@ async fn serve(lan: Arc<LanSwitch>, mut s: TcpStream) {
     }
     let pre = Bytes::copy_from_slice(&buf[end..]);
     let (r, w) = s.into_split();
-    lan.attach(r, w, pre, AttachOpts { resume, group, site, ..AttachOpts::default() });
+    lan.attach(r, w, pre, AttachOpts { resume, queue, group, site, ..AttachOpts::default() });
 }
 
 /// what the page tests read of the switch (sw.lan.peers, info(), reserved)

@@ -30,6 +30,10 @@ where
     let killed = conn.kill.cancelled();
     tokio::pin!(killed);
     loop {
+        // (a page that waited in line has its peer once the line let it in: queue.rs)
+        if peer.is_none() && wait.is_none() {
+            peer = conn.peer.lock().clone();
+        }
         let m = {
             let next = ws.next();
             tokio::pin!(next);
@@ -53,6 +57,8 @@ where
                     peer = sw.admit(&conn, &ctx, first_hello(&sw, &b));
                 } else if let Some(p) = peer.as_ref().filter(|_| conn.open()) {
                     sw.on_message(p, true, b);
+                } else if peer.is_none() && conn.open() {
+                    sw.waiting_text(&conn, &b);
                 }
             }
             Ok(Message::Binary(b)) => {

@@ -7,7 +7,6 @@ use sha2::{Digest, Sha256};
 use unicode_general_category::{GeneralCategory, get_general_category};
 use unicode_normalization::UnicodeNormalization;
 
-use crate::BASE;
 
 /// a display name: printable, no bidi or zero-width tricks (control and format characters removed), at most 32
 /// characters, none that reads as a slur (nfsu2-names, the rules of web/src/app/names.mjs): "player" then
@@ -61,7 +60,7 @@ fn nfc_as_node(s: &str) -> String {
     out
 }
 
-/// an address the switch hands out ("10.77.x.y" in 10.77.0.0/21, host byte 2-251), else 0
+/// an address the switch hands out ("10.77.x.y" in 10.77.0-19.x of 10.77.0.0/19, host byte 2-251), else 0
 pub fn vip_num(s: &str) -> u32 {
     // /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/, each part at most 255
     let mut v: u32 = 0;
@@ -81,7 +80,7 @@ pub fn vip_num(s: &str) -> u32 {
     if parts != 4 {
         return 0;
     }
-    if v & 0xFFFF_F000 == BASE && (2..=251).contains(&(v & 255)) { v } else { 0 }
+    if crate::slot(v).is_some() { v } else { 0 }
 }
 
 /// JS `String(x ?? '')` of a parsed JSON value
@@ -273,11 +272,14 @@ mod tests {
         assert_eq!(vip_num("10.77.0.2"), 0x0A4D_0002);
         assert_eq!(vip_num("10.77.7.251"), 0x0A4D_07FB);
         assert_eq!(vip_num("10.77.15.251"), 0x0A4D_0FFB);
+        assert_eq!(vip_num("10.77.19.251"), 0x0A4D_13FB);
         for s in [
             "10.77.0.1",
             "10.77.0.252",
             "10.77.0.255",
-            "10.77.16.2",
+            "10.77.20.2",
+            "10.77.31.2",
+            "10.77.32.2",
             "192.168.1.20",
             "10.77.0.02.1",
             "10.77.0",

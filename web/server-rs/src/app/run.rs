@@ -180,6 +180,15 @@ pub async fn run(o: Options, cores: usize) {
                      bundles); {} more than a second behind on their connection, {} getting fewer car updates ({} left out since the last count)",
                     b.players, b.online, b.lan, b.roam, b.older, b.other, b.bundles, b.behind, b.thinning, b.thinned - thinned
                 ));
+                // the line (nfsu2-lan queue.rs): pages waiting for a place, and how long the longest of those let in
+                // waited
+                if b.waiting > 0 || b.waited > 0 {
+                    log::line(&format!(
+                        "[players] {} waiting in line for a place; the longest wait of those let in since the line began {} min",
+                        b.waiting,
+                        b.waited.div_ceil(60)
+                    ));
+                }
                 thinned = b.thinned;
             }
         });

@@ -122,7 +122,7 @@ impl Default for RoamOptions {
             keep: 0.5,
             hold_ms: 5_000.0,
             max_per_vip: 2,
-            max_players: 4096,
+            max_players: 5120,
             exact_room: 256,
             min_degree: 8,
             busy_high: 0.85,

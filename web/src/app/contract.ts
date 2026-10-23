@@ -6,6 +6,7 @@
 import type { GameProcess } from '../host/process';
 import type { PadPage, TouchPad } from '../input/gamepad';
 import type { TextEntry } from '../input/index';
+import type { NetQueue } from '../net';
 
 /** Given to every subsystem. */
 export interface CommonOptions {
@@ -55,6 +56,8 @@ export interface NetOptions extends CommonOptions {
   lobby?: (json: string) => void;
   /** the server's LAN took this page back after the link was lost (a server restart, as for a deploy) */
   back?: () => void;
+  /** the server is full: this page's place in line for one (null: not in line) */
+  queue?: (q: NetQueue | null) => void;
 }
 
 /** What an attach call returns.  Everything but detach is optional. */
@@ -106,10 +109,13 @@ export interface NetSubsystem extends Subsystem {
   vip(): string | null;
   /** the other browsers on the server's LAN */
   peers(): string[];
-  /** whether the game holds a place on the server's LAN, or is getting one (free roam, the LAN and Online screens) */
+  /** whether the game holds a place on the server's LAN, or is getting one or waits in line for one (free roam, the
+   *  LAN and Online screens) */
   holding?(): boolean;
   /** the player is away: the place goes back, and stays free until away(false) */
   away?(on: boolean): void;
+  /** the player stops waiting in line for a place (a full server): off the server's LAN for the rest of this game */
+  offline?(): void;
 }
 
 export type AttachRenderer = (proc: GameProcess, canvas: HTMLCanvasElement, opts: RendererOptions) => RendererSubsystem | Promise<RendererSubsystem>;

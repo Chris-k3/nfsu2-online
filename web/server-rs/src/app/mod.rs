@@ -83,7 +83,7 @@ pub mod limits {
     pub const WS_MAX_PAYLOAD: usize = 64 << 10;
     pub const ARTIFACT_BYTES: usize = 64 << 20;
     /// each player holds at most 6 HTTP connections and a WebSocket, so with many players (a VPS with --max-peers
-    /// 4000) the port takes 8 per player
+    /// 5000) the port takes 8 per player
     pub fn max_connections(max_peers: usize) -> usize {
         1024.max(max_peers * 8)
     }
@@ -599,9 +599,10 @@ impl App {
     /// /players: how many play on this server now (the start page's Multiplayer settings): three counts, whether it
     /// is full and whether free roam is busy, nothing else, no names, addresses or times; online: in the game's Online
     /// mode (logged in, or racing an online race), null with --online off; roam: driving in free roam, or paused
-    /// there, as of the hub's last tick (nfsu2-roam), null with --roam-hub off; full: a game that connects now gets
-    /// "LAN full"; roamBusy: the hub gives fewer than askCap links a player, so the page does not ask the free-roam
-    /// question now (false with --roam-hub off).  ?room=<hash> (roam_core's rc_room_hash of a Room setting, decimal,
+    /// there, as of the hub's last tick (nfsu2-roam), null with --roam-hub off; full: a game that connects now waits in
+    /// line (a page of before: gets "LAN full"); queue: the pages waiting in line (nfsu2-lan queue.rs); roamBusy: the
+    /// hub gives fewer than askCap links a player, so the page does not ask the free-roam question now (false with
+    /// --roam-hub off).  ?room=<hash> (roam_core's rc_room_hash of a Room setting, decimal,
     /// not 0) adds room: how many of roam are in that room (with --roam-hub on)
     async fn send_players(&self, q: &Request, s: &mut Response, u: &url::Url) -> Res {
         let info = match &self.online {
@@ -628,6 +629,7 @@ impl App {
         m.insert("online".into(), online);
         m.insert("roam".into(), roam);
         m.insert("full".into(), serde_json::Value::Bool(self.lan.full()));
+        m.insert("queue".into(), serde_json::Value::from(self.lan.waiting()));
         m.insert("roamBusy".into(), serde_json::Value::Bool(self.roam.as_ref().is_some_and(|r| r.crowded())));
         let room = u.param("room").and_then(|r| r.parse::<u32>().ok()).filter(|&r| r != 0);
         if let (Some(room), Some(r)) = (room, &self.roam) {

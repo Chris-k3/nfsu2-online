@@ -30,11 +30,12 @@ import { controlsSheet, type ControlsSheet } from './controls';
 import { TouchControls } from './touch';
 import { TextField } from './textentry';
 import type { PadPage } from '../input/gamepad';
+import type { NetQueue } from '../net';
 import { checkSetting, HOST_FIXED, pageOnly, resolveEnv, settingsUpgrade, TEMPLATE, type Resolved } from './settings';
 import { exists, filesOf, listProfiles, PROFILES_DIR, readText, removeSaveDir, writeFile } from './savefs';
 import { turnOnAutosave } from './profile';
 import { putKey, SettingsPanel } from './settings-ui';
-import { serverAnswers, watchPlayers, type PlayerCounts } from './players';
+import { queueText, serverAnswers, watchPlayers, type PlayerCounts } from './players';
 import { SavesPanel } from './saves-ui';
 import { saveScreenshot } from './shots';
 import { forgetLink, VaultPanel } from './vault-ui';
@@ -98,7 +99,7 @@ let fatal: string | null = null;         // why the running game had to be stopp
 let fps: FpsOverlay;
 let lobbyPanel: LobbyPanel;
 let settings: SettingsPanel;
-let players: { now(): void; last(): PlayerCounts | null } | null = null;
+let players: { now(): void; last(): PlayerCounts | null; fresh(ms: number): Promise<PlayerCounts | null> } | null = null;
 let saves: SavesPanel;
 let vault: VaultPanel;
 let download: Predownload;
@@ -223,19 +224,26 @@ let untrack: (() => void) | null = null;
  * (the address's test settings), offline or with network = off.  The name shows only when there is one (Your
  * name, else the newest career profile's): a new player has none yet, the game asks for it before free roam.
  * While the server's free roam is busy (its newest /players says roamBusy: fewer links a player) it is not asked
- * and nothing is written, so a later Play asks once free roam has room again.
+ * and nothing is written, so a later Play asks once free roam has room again.  While the server is full it is asked,
+ * and says that with it on the game waits in line for a place (and plays alone until then).  True: it was asked.
  * ASK_ROAM false: never asked, and free roam stays off until the player turns it on under Online.
  */
 const ASK_ROAM = true;
-async function askRoam() {
+async function askRoam(): Promise<boolean> {
   const r = resolved();
-  if (!ASK_ROAM || r.source.NFSU2_ROAM || TEST_PARAMS.some(k => q.has(k)) || offline || /^(off|0|none)$/i.test(r.env.NFSU2_NET?.trim() ?? '')) return;
-  if (players?.last()?.roamBusy === true) { log.add('[app] free roam with others: not asked, the server\'s free roam is busy (asked at a later Play)'); return; }
+  if (!ASK_ROAM || r.source.NFSU2_ROAM || TEST_PARAMS.some(k => q.has(k)) || offline || /^(off|0|none)$/i.test(r.env.NFSU2_NET?.trim() ?? '')) return false;
+  if (players?.last()?.roamBusy === true) { log.add('[app] free roam with others: not asked, the server\'s free roam is busy (asked at a later Play)'); return false; }
   const name = (r.source.NFSU2_ROAM_NAME === 'settings.ini' ? r.env.NFSU2_ROAM_NAME : '') || (await newestProfile())?.name || '';
   const p = (text: string) => Object.assign(document.createElement('p'), { textContent: text });
   const body = document.createElement('div');
   body.append(p('Other players on this server can drive in your career\'s free roam with you. You see their cars with their names over them, they see yours, and you can challenge each other to outruns. Races, traffic and money stay your own.'),
     p('With this on, everyone on this server sees your picked name and whether you\'re driving or in the menus. Players near you also see your car and where it is.'));
+  const c = players?.last();
+  if (c?.full === true) {
+    const n = Number.isInteger(c.queue) && c.queue! > 0 ? c.queue! : 0;
+    body.append(p(`The server is full right now${n ? `: ${n} ${n === 1 ? 'player is' : 'players are'} waiting in line for a place` : ''}. ` +
+      'With this on, you wait in line too and drive alone until it is your turn; then the others join you by themselves.'));
+  }
   let field: HTMLInputElement | null = null;
   if (name) {
     const row = document.createElement('p'); row.className = 'dlg-field';
@@ -258,7 +266,32 @@ async function askRoam() {
   await writeFile(SAVE, 'settings.ini', text);
   settingsText = text;
   void settings.refresh();
-  log.add(`[app] free roam with others: ${on ? 'on' : 'off'} (asked at the first Play)${on && typed !== name ? `, name ${typed || '(the profile\'s)'}` : ''}`);
+  log.add(`[app] free roam with others: ${on ? 'on' : 'off'} (asked at the first Play${c?.full === true ? ', the server full' : ''})${on && typed !== name ? `, name ${typed || '(the profile\'s)'}` : ''}`);
+  return true;
+}
+
+/**
+ * A full server (the newest /players, asked again at Play): a game that takes a place at once (free roam on) waits in
+ * line for it.  The player picks: wait in line (the game starts, alone until it is their turn; the default, also for
+ * Esc), or play offline (this game only, without free roam or Online; settings.ini stays as it is).  True: offline.
+ * Not asked when the game would not take a place at once (free roam off: the LAN and Online screens wait in line
+ * themselves, the line over the game says where), offline mode, network = off or a test page, nor right after the
+ * free-roam question (askRoam), which says the server is full itself.
+ */
+async function askFull(c: PlayerCounts | null): Promise<boolean> {
+  const r = resolved();
+  if (!c?.full || offline || TEST_PARAMS.some(k => q.has(k)) || r.env.NFSU2_ROAM !== '1' || /^(off|0|none)$/i.test(r.env.NFSU2_NET?.trim() ?? '')) return false;
+  const n = Number.isInteger(c.queue) && c.queue! > 0 ? c.queue! : 0;
+  const p = (text: string) => Object.assign(document.createElement('p'), { textContent: text });
+  const body = document.createElement('div');
+  body.append(p(n ? `Every place on this server is taken, and ${n} ${n === 1 ? 'player is' : 'players are'} waiting in line for one.` : 'Every place on this server is taken.'),
+    p('Wait in line: the game starts now and you play alone. You join free roam and Online by yourself when it is your turn; the top of the screen shows your place in line.'),
+    p('Play offline: this game runs without free roam or Online, and waits for nothing. Your settings stay as they are.'));
+  const answer = choiceBox('The server is full', body, 'Wait in line', 'Play offline');
+  $<HTMLButtonElement>('#confirm-ok').focus();
+  const alone = await answer === 'cancel';
+  log.add(`[app] the server is full${n ? ` (${n} in line)` : ''}: ${alone ? 'this game plays offline' : 'the game waits in line for a place'} (asked at Play)`);
+  return alone;
 }
 
 async function play() {
@@ -275,9 +308,10 @@ async function startGame() {
   // user activation, which full screen needs (after the free-roam question, its
   // button's click is the activation).  Beside it the server's version once more
   // (a deploy since the page last asked): no game starts on a version it replaced.
-  const [, rev] = await Promise.all([
+  const [, rev, counts] = await Promise.all([
     Promise.race([loadSettings().catch(e => log.add(`[app] settings.ini not read again: ${e}`)), new Promise(r => setTimeout(r, 1000))]),
     offline || testPage() ? null : serverRev(1000),
+    offline || testPage() ? null : players?.fresh(1000) ?? null,
   ]);
   if (rev && rev !== loaded!.info.rev && rev !== tried) {
     newer = rev; updated = false;
@@ -287,7 +321,8 @@ async function startGame() {
     showNewer();
     return;
   }
-  await askRoam();
+  // (the free-roam question says when the server is full: answered, it is not asked again what to do about that)
+  const alone = !await askRoam() && await askFull(counts);
   const pre = resolved();
   // inside the click: things that need a user gesture.  The context runs at the
   // mixer's own rate (44.1 kHz), so the worklet does not resample.
@@ -376,7 +411,8 @@ async function startGame() {
   await download.pause();
   // the server's virtual LAN: the game's own LAN races and Online mode (network = on, the default) and free
   // roam all need it; only network = off stays off it (the game then shows its own network error)
-  const net = !/^(off|0|none)$/i.test(r.env.NFSU2_NET?.trim() ?? '');
+  // (and a full server's player who chose to play offline: askFull)
+  const net = !/^(off|0|none)$/i.test(r.env.NFSU2_NET?.trim() ?? '') && !alone;
   const netName = net ? (r.env.NFSU2_ROAM_NAME?.trim() || 'Player') : null;
   hudWide = !/^(43|4:3)$/i.test(r.env.NFSU2_HUD?.trim() ?? '');
   fatal = null;
@@ -388,7 +424,7 @@ async function startGame() {
     // longer than the game), and a closure from this function would keep its
     // scope, and with it this game, reachable
     session = await GameSession.start({
-      module: loaded!.module, info: loaded!.info, saveDir: SAVE, env: r.env, canvas, stage, audio, displayHz, netName, notice, lobby, netBack, onSaved,
+      module: loaded!.module, info: loaded!.info, saveDir: SAVE, env: r.env, canvas, stage, audio, displayHz, netName, notice, lobby, netBack, netQueue, onSaved,
       artifacts: q.get('artifacts') ?? undefined, dumpScale: q.get('dumpscale') ? +q.get('dumpscale')! : undefined,
       toggleFullscreen, padPage: PAD_PAGE, log: logLine, onFatal: stopFatal,
     });
@@ -637,6 +673,16 @@ function placeNotices() {
   s.setProperty('--u', `${u}px`);
 }
 
+/** a full server: the game's place in line for one, over the game until it is in (null: not in line); the page menu
+ *  offers to stop waiting meanwhile */
+let inLine = false;
+function netQueue(q: NetQueue | null) {
+  inLine = q !== null;
+  $<HTMLButtonElement>('#menu [data-act="offline"]').hidden = !inLine;
+  const t = $('#queue');
+  t.hidden = q === null;
+  t.textContent = q ? queueText(q) : '';
+}
 /** the away check's message over the game (away.ts), null: none */
 function awayLine(text: string | null) {
   const t = $('#away');
@@ -707,6 +753,12 @@ async function menuAction(act: string) {
       break;
     case 'fps': fps.cycle(); m.querySelector<HTMLButtonElement>('[data-act="fps"]')!.textContent = `Frame-rate counter: ${fps.mode}`; break;
     case 'help': m.close(); openHelp(); break;
+    case 'offline':
+      m.close();
+      if (!inLine || !session?.net?.offline) break;
+      session.net.offline();
+      toast('Playing offline: you left the line. Free roam and Online stay off until the next game.', 5000);
+      break;
     case 'log': downloadLog(); break;
     case 'quit': {
       m.close();
@@ -752,6 +804,10 @@ function quitLabel(): string {
 
 // ------------------------------------------------------------- helpers --
 function confirmBox(title: string, body: Node | string, ok: string, danger = false, about = '', cancel = 'Cancel'): Promise<boolean> {
+  return choiceBox(title, body, ok, cancel, danger, about).then(v => v === 'ok');
+}
+/** the same, with which way it closed: 'ok', 'cancel' (the cancel button), '' (Esc) */
+function choiceBox(title: string, body: Node | string, ok: string, cancel: string, danger = false, about = ''): Promise<string> {
   const d = $<HTMLDialogElement>('#confirm');
   d.dataset.about = about;            // 'quit': closed when the game ends (endStage)
   $('#confirm-title').textContent = title;
@@ -760,7 +816,7 @@ function confirmBox(title: string, body: Node | string, ok: string, danger = fal
   $('#confirm-cancel').textContent = cancel;
   d.returnValue = '';
   d.showModal();
-  return new Promise(res => d.addEventListener('close', () => res(d.returnValue === 'ok'), { once: true }));
+  return new Promise(res => d.addEventListener('close', () => res(d.returnValue), { once: true }));
 }
 function downloadLog() { downloadBlob(log.text(), `nfsu2-${stamp()}.log`, 'text/plain'); }
 

@@ -126,6 +126,8 @@ pub(crate) struct Conn {
     /// its datagrams go as compact bundles (its hello said "compact":1, compact.rs), to the address it holds
     pub(crate) compact: AtomicBool,
     pub(crate) vip: AtomicU32,
+    /// while it waits in line for a place (queue.rs): its place, and what it sent meanwhile
+    pub(crate) wait: Mutex<crate::queue::Wait>,
 }
 
 impl Conn {
@@ -147,6 +149,7 @@ impl Conn {
             streaming: AtomicBool::new(false),
             compact: AtomicBool::new(false),
             vip: AtomicU32::new(0),
+            wait: Mutex::new(Default::default()),
         }
     }
 

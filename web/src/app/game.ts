@@ -13,6 +13,7 @@ import { StatusReader } from './status';
 import { DATA_BASE, MANIFEST_URL } from '../host/datacache';
 import type { GameInfo } from './loader';
 import type { PadPage } from '../input/gamepad';
+import type { NetQueue } from '../net';
 
 export interface SessionOptions {
   module: WebAssembly.Module;
@@ -31,6 +32,8 @@ export interface SessionOptions {
   lobby?(json: string): void;
   /** the server's LAN took the game back after the link was lost (a server restart, as for a deploy) */
   netBack?(): void;
+  /** the server is full: the game's place in line for one (null: not in line) */
+  netQueue?(q: NetQueue | null): void;
   /** the game finished writing a file of the save overlay (path relative to /save) */
   onSaved?(path: string): void;
   /** tests: where frame dumps go, and their scale */
@@ -102,7 +105,7 @@ export class GameSession {
       ...common, stage: o.stage, toggleFullscreen: o.toggleFullscreen, padPage: o.padPage, viewRect: () => s.viewRect(),
     })).then(i => { s.input = i; });
     if (o.netName !== null)
-      void attach('network', () => attachNet(s.proc, { ...common, name: o.netName!, notice: o.notice, lobby: o.lobby, back: o.netBack })).then(n => { s.net = n; });
+      void attach('network', () => attachNet(s.proc, { ...common, name: o.netName!, notice: o.notice, lobby: o.lobby, back: o.netBack, queue: o.netQueue })).then(n => { s.net = n; });
     return s;
   }
 

@@ -229,9 +229,13 @@ Free roam is shared with **everyone** on the server who turns it on. Use a Room 
 
 Good to know:
 
-- **How many:** up to 4000 players on a server set up as VPS.md describes (2000 with the older Node server), 128 on
-  one started by hand (its owner can change that). Only free roam and the LAN and Online screens take a place; single-player takes none. When it is full,
-  the game says so and lets you in by itself when a place frees up. The server pairs each player with the 32 players
+- **How many:** up to 5000 players on a server set up as VPS.md describes (2000 with the older Node server), 128 on
+  one started by hand (its owner can change that). Only free roam and the LAN and Online screens take a place;
+  single-player takes none. When it is full, you wait in line for a place, first come first served: the top of the
+  screen shows your place and, once a few went in, about how long it takes. You play alone meanwhile and join the
+  others by yourself when it is your turn. The page menu's "Stop waiting: play offline" leaves the line for the rest
+  of that game, and when the server is full as you press Play the start page asks whether to wait in line or play
+  offline (or, the first time, says so in its free-roam question). The server pairs each player with the 32 players
   nearest to them, and your game shows all 32 of their cars at once. Their names show over the cars within 100 m, and
   each gets an arrow on the minimap when it is near and a marker on the world map (M), as the game's own opponents
   do; the world map shows where they were when you opened it. A player in a race, a shop or the menus is not in your

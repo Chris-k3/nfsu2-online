@@ -13,8 +13,9 @@
 //!                      its 10.77.0.1 (nfsu2-online; --online off: none, the game then cannot connect) and free
 //!                      roam's hub on 10.77.0.253 (nfsu2-roam: each player's peers are the players nearest to it;
 //!                      --roam-hub off: none, players find each other by broadcast)
-//!   /players           how many play on this server now: { players, online, roam, full, roamBusy }, three counts,
-//!                      whether a newcomer gets "LAN full" and whether free roam is busy, nothing else (never cached);
+//!   /players           how many play on this server now: { players, online, roam, full, queue, roamBusy }, three
+//!                      counts, whether a newcomer waits in line, how many do and whether free roam is busy, nothing
+//!                      else (never cached);
 //!                      ?room=<hash> adds room, how many of roam are in that free-roam room
 //!   test aids, only with --dev: the test pages (/test/) and source maps from web/dist-dev (web/build.mjs writes them
 //!   there, never into web/dist), the repo's test scripts (/tests/), PUT /artifacts/<name>.png (with --artifacts)

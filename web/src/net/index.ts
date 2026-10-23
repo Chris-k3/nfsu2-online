@@ -68,13 +68,19 @@ export interface NetOptions {
   onLobby?: (json: string) => void;
   /** the switch welcomed this page again after the link was lost (a server restart, as for a deploy) */
   onBack?: () => void;
+  /** the server is full and this page waits in line for a place: where it is, as the switch last said; null: not
+   *  (any more) */
+  onQueue?: (q: NetQueue | null) => void;
   /** milliseconds between pings to the switch (default 2000) */
   pingMs?: number;
   /** milliseconds no mailbox wants the switch before the page lets it go (default 10000) */
   idleMs?: number;
 }
 export interface NetPeer { vip: string; name: string; self: boolean }
-export type NetState = 'waiting' | 'connecting' | 'online' | 'offline' | 'idle' | 'away' | 'closed';
+/** a place in line: pos 1 is the next in, of everyone in line, eta about how many seconds until its turn (when the
+ *  switch can tell: a few have gone in) */
+export interface NetQueue { pos: number; of: number; eta?: number }
+export type NetState = 'waiting' | 'connecting' | 'online' | 'offline' | 'queued' | 'idle' | 'away' | 'closed';
 export interface NetStats {
   state: NetState; vip: string | null; connections: number; reconnects: number;
   framesOut: number; bytesOut: number; framesIn: number; bytesIn: number;
@@ -105,6 +111,8 @@ export interface NetLink {
   stats(): NetStats;
   /** the player is away: the place on the switch goes back, and stays free until setAway(false) */
   setAway(on: boolean): void;
+  /** the player stops waiting in line for a place: no switch for the rest of this game */
+  goOffline(): void;
   close(): void;
 }
 
@@ -248,8 +256,14 @@ class Link implements NetLink {
   /** the link went without the page letting it go (onclose): the next welcome is onBack */
   private lost = false;
   private lastDownLog = -Infinity;
-  /** the switch refused us as full (close 1013 "LAN full"): told once, and again when a place frees up */
+  /** the switch refused us as full (close 1013 "LAN full"), or put us in line: told once, and again when a place frees
+   *  up */
   private full = false;
+  /** our place in line (the switch's ticket for it: the same place again after a dropped link), and since when */
+  private ticket = '';
+  private queuedAt = 0;
+  /** the player chose to stop waiting and play offline (goOffline): nothing takes the switch again this game */
+  private stayOff = false;
   /** the switch's peer list (the online host on it too), as its last whole list and the changes since made it */
   private peerMap = new Map<number, { name: string; server: boolean }>();
   private peerVips = new Set<number>();
@@ -289,7 +303,8 @@ class Link implements NetLink {
     if (name === 'lan') this.log('LAN play attached (the game opened its LAN screens)');
     this.publishPeers(ep);
     if (this.state === 'online') this.publishOnline(ep);
-    else Atomics.store(ep.i32, P.W_PAGE_STATE, this.state === 'connecting' ? P.NET_PAGE_CONNECTING : this.state === 'offline' ? P.NET_PAGE_OFFLINE
+    else Atomics.store(ep.i32, P.W_PAGE_STATE, this.state === 'connecting' ? P.NET_PAGE_CONNECTING
+      : this.state === 'offline' || this.state === 'queued' ? P.NET_PAGE_OFFLINE
       : this.state === 'idle' || this.state === 'away' ? P.NET_PAGE_IDLE : P.NET_PAGE_NONE);
     this.checkWant();
     void this.txLoop(ep);
@@ -359,11 +374,21 @@ class Link implements NetLink {
     if (ws) { ws.onopen = null; ws.onmessage = null; ws.onerror = null; ws.onclose = null; ws.close(1000, 'idle'); }
     this.pings.clear();
     this.state = to; this.token = ''; this.full = false; this.backoff = 250; this.failed = 0;
+    // (a page in line leaves it: its close is 1000 "idle")
+    if (this.ticket || this.queuedAt) { this.ticket = ''; this.queuedAt = 0; this.o.onQueue?.(null); }
     this.setPage(P.NET_PAGE_IDLE);
     for (const ep of this.eps()) { Atomics.add(ep.i32, P.W_RX_BELL, 1); Atomics.notify(ep.i32, P.W_RX_BELL); }
   }
+  /** the player stops waiting for a place (the page menu, a full server): the line and the switch go for the rest of
+   *  this game, as for an away player who never comes back */
+  goOffline() {
+    if (this.closed || this.stayOff) return;
+    this.stayOff = true;
+    if (this.state !== 'away') this.release('away');
+    this.log('the player stopped waiting for a place: no switch for the rest of this game');
+  }
   setAway(on: boolean) {
-    if (this.closed || on === (this.state === 'away')) return;
+    if (this.closed || this.stayOff || on === (this.state === 'away')) return;
     if (on) {
       this.release('away');
       this.log('the player is away: the place on the server goes back until they are here again');
@@ -377,8 +402,11 @@ class Link implements NetLink {
     if (this.closed) return;
     const def = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/lan`;
     const u = new URL(this.o.url ?? def, location.href);
-    // the same address again: the switch waits for the hello with the token (it keeps the address for it a minute)
-    const resume = !!(this.vipNum && this.token);
+    // the same address again: the switch waits for the hello with the token (it keeps the address for it a minute), or
+    // the same place in line with the ticket; queue: this page waits in line when the server is full (nfsu2-lan
+    // queue.rs), where a page of before was refused (a switch of before ignores it)
+    const resume = !!(this.vipNum && this.token) || !!this.ticket;
+    u.searchParams.set('queue', '');
     if (resume) u.searchParams.set('resume', '');
     this.state = 'connecting'; this.setPage(P.NET_PAGE_CONNECTING);
     const ws = new WebSocket(u.href);
@@ -390,7 +418,7 @@ class Link implements NetLink {
       // switch of before ignores it and sends bundles as they were)
       this.lanSent = this.lanOpen();
       ws.send(JSON.stringify({ t: 'hello', name: this.o.name ?? 'player', deltas: 1, lan: this.lanSent ? 1 : 0, bundle: 1, compact: 1,
-        ...(resume ? { vip: P.ipStr(this.vipNum), token: this.token } : {}) }));
+        ...(this.vipNum && this.token ? { vip: P.ipStr(this.vipNum), token: this.token } : {}), ...(this.ticket ? { ticket: this.ticket } : {}) }));
       this.pingTimer = setInterval(() => this.ping(), this.o.pingMs ?? 2000);
     };
     ws.onmessage = (e) => {
@@ -413,8 +441,9 @@ class Link implements NetLink {
       }
       // one line when the link goes, then one every 30 s while it stays away
       const t = now();
-      if (was === 'online' || t - this.lastDownLog > 30000) {
+      if (was === 'online' || was === 'queued' || t - this.lastDownLog > 30000) {
         this.log(was === 'online' ? `lost the switch (${e.code}${e.reason ? ' ' + e.reason : ''}); reconnecting`
+          : was === 'queued' ? `lost the switch while in line (${e.code}); reconnecting to the same place in line (kept a minute)`
           : `still no switch (${this.failed} attempts); reconnecting every ${this.backoff / 1000} s`);
         this.lastDownLog = t;
       }
@@ -434,9 +463,25 @@ class Link implements NetLink {
       this.state = 'online'; this.backoff = 250; this.failed = 0; this.st.connections++;
       for (const ep of this.eps()) { this.publishPeers(ep); this.publishOnline(ep); }
       this.log(`on the virtual LAN as ${this.vip}${this.st.connections > 1 ? (again ? ' (the same address again)' : ' (a new address)') : ''}`);
+      if (this.queuedAt) {
+        this.log(`in from the line after ${Math.max(1, Math.round((now() - this.queuedAt) / 60_000))} min`);
+        this.ticket = ''; this.queuedAt = 0; this.o.onQueue?.(null);
+      }
       if (this.full) { this.full = false; this.o.onNotice?.('A place on the server freed up: you can play with others now'); }
       if (this.lost) { this.lost = false; this.o.onBack?.(); }
       this.resolveOnline(this.vip);
+    } else if (m.t === 'queue' && Number.isInteger(m.pos) && Number.isInteger(m.of)) {
+      // the server is full: in line for a place (its welcome comes when it is our turn)
+      if (typeof m.ticket === 'string') this.ticket = m.ticket;
+      if (this.state !== 'queued') {
+        this.state = 'queued'; this.setPage(P.NET_PAGE_OFFLINE); this.backoff = 250; this.failed = 0;
+        if (!this.queuedAt) {
+          this.queuedAt = now(); this.full = true;
+          this.log(`the server is full: in line for a place, ${m.pos} of ${m.of}`);
+          this.o.onNotice?.('The server is full: you are in line for a place, and join the others by yourself when it is your turn');
+        } else this.log(`back in line, ${m.pos} of ${m.of}`);
+      }
+      this.o.onQueue?.({ pos: m.pos, of: m.of, ...(typeof m.eta === 'number' ? { eta: m.eta } : {}) });
     } else if (m.t === 'peers' && Array.isArray(m.peers)) {
       const old = this.peerMap;
       this.peerMap = new Map();
@@ -658,6 +703,7 @@ class Link implements NetLink {
     // send what C queued last (free roam's BYEs, LAN play's FIN/RST) before the socket goes
     for (const ep of this.eps()) this.drainTx(ep);
     this.closed = true; this.state = 'closed';
+    if (this.queuedAt) { this.queuedAt = 0; this.o.onQueue?.(null); }
     if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null; }
     if (this.retryTimer) { clearTimeout(this.retryTimer); this.retryTimer = null; }
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }

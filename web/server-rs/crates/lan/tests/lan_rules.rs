@@ -1,5 +1,5 @@
 //! The switch's own tests, the second half (tests/lan.rs has the first): the audit's F2 (what one client can make the
-//! switch send, and whom it can get cut), the store, the 4000 addresses, LAN play's broadcasts, a page that lets go,
+//! switch send, and whom it can get cut), the store, the 5000 addresses, LAN play's broadcasts, a page that lets go,
 //! the breakdown, bundles, a player behind on its path (lag.rs).
 
 mod harness;
@@ -419,14 +419,14 @@ async fn with_a_store_a_restart_keeps_each_players_address_for_its_token() {
     sw2.close().await;
 }
 
-// addresses: 4000 on 10.77.0.0/20, handed out round its sixteen /24s; never .0, .1 or .252 and up; full past them
+// addresses: 5000 on 10.77.0.0/19, handed out round twenty of its /24s; never .0, .1 or .252 and up; full past them
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn addresses_4000_round_the_sixteen_24s_full_past_them() {
+async fn addresses_5000_round_the_twenty_24s_full_past_them() {
     let _s = serial().await;
-    let lan = LanSwitch::new(LanOptions { max_peers: 4000, ..LanOptions::default() }, "", None, None, None, None);
+    let lan = LanSwitch::new(LanOptions { max_peers: 5000, ..LanOptions::default() }, "", None, None, None, None);
     let mut got = Vec::new();
     let now = nfsu2_util::now_ms();
-    for i in 0..4000 {
+    for i in 0..5000 {
         let v = lan.allocate();
         assert!(v != 0, "address {i}");
         got.push(v);
@@ -434,10 +434,11 @@ async fn addresses_4000_round_the_sixteen_24s_full_past_them() {
     }
     let first: Vec<String> = got[..18].iter().map(|v| ip_str(*v)).collect();
     let mut want: Vec<String> = (0..16).map(|b| format!("10.77.{b}.2")).collect();
-    want.extend(["10.77.0.3".to_string(), "10.77.1.3".to_string()]);
+    want.extend(["10.77.16.2".to_string(), "10.77.17.2".to_string()]);
     assert_eq!(first, want);
-    assert_eq!(ip_str(got[3999]), "10.77.15.251");
-    assert_eq!(got.iter().collect::<HashSet<_>>().len(), 4000, "all distinct");
+    assert_eq!(ip_str(got[20]), "10.77.0.3");
+    assert_eq!(ip_str(got[4999]), "10.77.19.251");
+    assert_eq!(got.iter().collect::<HashSet<_>>().len(), 5000, "all distinct");
     let mut sorted = got.clone();
     sorted.sort();
     let mut all = all_vips();
@@ -1015,4 +1016,52 @@ async fn a_frame_without_ports_reaches_a_compact_page_whole() {
     s.close().await;
     small.close().await;
     sw.close().await;
+}
+
+// the peer list follows LAN play: a page with it shut gets the server's own hosts only and no changes, the whole
+// list when it opens LAN play and the changes after that, none again once it shuts it
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_peer_list_goes_only_to_pages_with_lan_play_open() {
+    let _s = serial().await;
+    let sw = start(opts()).await;
+    let with = |on: u8| Opts { deltas: true, lan: Some(on), ..Opts::default() };
+    let mut shut = Client::with(sw.port, "Shut", "", with(0)).await;
+    shut.welcome().await;
+    let mut open = Client::with(sw.port, "Open", "", with(1)).await;
+    open.welcome().await;
+    open.until_true(|g| g.names() == "Open,Shut").await;
+    shut.until_true(|g| g.count("peers") == 1).await;
+    assert_eq!(shut.got().names(), "", "the hosts only (none on this switch)");
+    let mut late = Client::with(sw.port, "Late", "", with(1)).await;
+    late.welcome().await;
+    open.until_true(|g| g.names() == "Late,Open,Shut").await;
+    sleep(400).await;
+    {
+        let g = shut.got();
+        assert_eq!((g.count("delta"), g.names()), (0, String::new()), "no changes while LAN play is shut");
+    }
+    // LAN play opens: the whole list, then the changes
+    shut.text(r#"{"t":"lan","on":1}"#);
+    shut.until_true(|g| g.names() == "Late,Open,Shut").await;
+    let mut more = Client::with(sw.port, "More", "", with(0)).await;
+    more.welcome().await;
+    shut.until_true(|g| g.names() == "Late,More,Open,Shut").await;
+    // shut again: no more changes
+    shut.text(r#"{"t":"lan","on":0}"#);
+    sleep(100).await;
+    let deltas = shut.got().count("delta");
+    let mut last = Client::with(sw.port, "Last", "", with(1)).await;
+    last.welcome().await;
+    open.until_true(|g| g.names() == "Last,Late,More,Open,Shut").await;
+    sleep(400).await;
+    assert_eq!(shut.got().count("delta"), deltas);
+    // a page of before (no word on LAN play) gets everything, as it did
+    let mut old = Client::with(sw.port, "Old", "", deltas_only()).await;
+    old.welcome().await;
+    old.until_true(|g| g.names() == "Last,Late,More,Old,Open,Shut").await;
+    sw.close().await;
+}
+
+fn deltas_only() -> Opts {
+    Opts { deltas: true, ..Opts::default() }
 }

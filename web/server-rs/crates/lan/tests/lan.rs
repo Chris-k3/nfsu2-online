@@ -7,7 +7,7 @@
 //! audit's F1), the latency of a frame through the switch on this machine, what a peer learns about the others,
 //! the peer list, the limits (players, frame size and rate, control messages, a broadcast charged per receiver,
 //! limits shared by one client address, a flood never getting a slower receiver cut: the audit's F2), WebSocket
-//! keepalive and idle close, the 4000 addresses of 10.77.0.0/20, LAN play's broadcasts only to the browsers with it
+//! keepalive and idle close, the 5000 addresses of 10.77.0.0/19, LAN play's broadcasts only to the browsers with it
 //! open, a page that lets go freeing its address at once, bundles.
 
 mod harness;
@@ -36,12 +36,12 @@ async fn addresses_peer_lists_unicast_broadcast_ping_disconnect_reconnect() {
     let wb = b.welcome().await;
     let mut c = Client::connect(sw.port, "Carol").await;
     let wc = c.welcome().await;
-    // addresses: round the sixteen /24s of 10.77.0.0/20 in order of arrival; mask /20
+    // addresses: round the twenty /24s of 10.77.0.0/19 in order of arrival; mask /19
     assert_eq!(wa["vipStr"], "10.77.0.2");
     assert_eq!(wb["vipStr"], "10.77.1.2");
     assert_eq!(wc["vipStr"], "10.77.2.2");
     assert_eq!(ip_str(vip_of(&wa)), "10.77.0.2");
-    assert_eq!(wa["mask"], "255.255.240.0");
+    assert_eq!(wa["mask"], "255.255.224.0");
     // everyone's peer list ends with all three names
     for x in [&a, &b, &c] {
         x.until_true(|g| g.names() == "Alice,Bob,Carol").await;
@@ -213,8 +213,8 @@ async fn what_a_peer_learns_about_the_others() {
         let s = m.to_string();
         for ip4 in dotted_quads(&s) {
             assert!(
-                ip4.strip_prefix("10.77.").and_then(|r| r.split('.').next()).and_then(|b| b.parse::<u8>().ok()).is_some_and(|b| b <= 15)
-                    || ip4 == "255.255.240.0",
+                ip4.strip_prefix("10.77.").and_then(|r| r.split('.').next()).and_then(|b| b.parse::<u8>().ok()).is_some_and(|b| b <= 19)
+                    || ip4 == "255.255.224.0",
                 "only virtual addresses ({ip4})"
             );
         }
@@ -810,7 +810,7 @@ async fn a_resume_replaces_the_same_clients_older_connection_only_with_the_token
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn reservations_never_handed_to_another_client_a_silent_resume_times_out() {
     let _s = serial().await;
-    let sw = start(LanOptions { max_peers: 4000, resume_wait_ms: 300, ..opts() }).await;
+    let sw = start(LanOptions { max_peers: 5000, resume_wait_ms: 300, ..opts() }).await;
     let now = nfsu2_util::now_ms();
     for (i, v) in all_vips().into_iter().enumerate() {
         let mut h = [0u8; 32];
@@ -819,7 +819,7 @@ async fn reservations_never_handed_to_another_client_a_silent_resume_times_out()
     }
     let c = Client::with(sw.port, "C", "?g=newcomer", Opts::default()).await;
     assert_eq!(c.closed().await, (1013, "LAN full".into()), "a newcomer waits for an address to free; nobody's reservation is given away");
-    assert_eq!(sw.info().await["reserved"], 4000, "every reservation kept");
+    assert_eq!(sw.info().await["reserved"], 5000, "every reservation kept");
     sw.lan.clear_reserved();
     let t0 = Instant::now();
     let (ws, _) = tokio_tungstenite::connect_async(format!("ws://127.0.0.1:{}/lan?resume", sw.port)).await.unwrap();
@@ -841,7 +841,7 @@ async fn reservations_never_handed_to_another_client_a_silent_resume_times_out()
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn churning_connections_never_takes_a_dropped_players_address() {
     let _s = serial().await;
-    let sw = start(LanOptions { max_peers: 4000, group_reserve: 8, site_reserve: 16, ..opts() }).await;
+    let sw = start(LanOptions { max_peers: 5000, group_reserve: 8, site_reserve: 16, ..opts() }).await;
     let mut alice = Client::with(sw.port, "Alice", "?g=alice", Opts::default()).await;
     alice.welcome().await;
     let mut bob = Client::with(sw.port, "Bob", "?g=bob", Opts::default()).await;
@@ -859,10 +859,11 @@ async fn churning_connections_never_takes_a_dropped_players_address() {
     bob.terminate();
     alice.until_true(|g| !g.last_peers().unwrap_or_default().iter().any(|p| p["vip"] == bvip)).await;
     assert!(sw.lan.full(), "full with one player on: every other address kept for its player");
-    // Mallory opens and closes connections as fast as it can, from many addresses of its own
+    // Mallory opens and closes connections as fast as it can, from many addresses of its own (4000 at most: a refusal
+    // takes microseconds, and a Mac's 16,384 ports for connections ran out within the 600 ms, each kept 30 s)
     let (mut got, mut full) = (0, 0);
     let t0 = Instant::now();
-    while t0.elapsed().as_millis() < 600 {
+    while t0.elapsed().as_millis() < 600 && full < 4000 {
         let ends: Vec<_> = (0..20)
             .map(|i| {
                 let port = sw.port;
@@ -911,7 +912,7 @@ async fn churning_connections_never_takes_a_dropped_players_address() {
     assert!(!sw.lan.full(), "not full once the kept addresses run out");
     sw.close().await;
     // a client that drops many connections keeps groupReserve reservations (its own oldest go), a site siteReserve
-    let sw2 = start(LanOptions { max_peers: 4000, group_reserve: 3, site_reserve: 5, ..opts() }).await;
+    let sw2 = start(LanOptions { max_peers: 5000, group_reserve: 3, site_reserve: 5, ..opts() }).await;
     async fn leave(port: u16, q: &str, n: usize) -> Vec<u32> {
         let mut cs = Vec::new();
         for _ in 0..n {

@@ -130,6 +130,8 @@ impl App {
         let (k1, k2) = (key_.clone(), key_.clone());
         let opts = AttachOpts {
             resume: u.has_param("resume"),
+            // a page that can wait in line when every place is taken (nfsu2-lan queue.rs)
+            queue: u.has_param("queue"),
             group: Some(self.group_id(&key_)),
             site: (!site.is_empty()).then(|| self.group_id(&format!("site {site}"))),
             on_join: Some(Box::new(move |vip, resumed, n| {

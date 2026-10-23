@@ -25,16 +25,16 @@ fn no_node() -> bool {
     false
 }
 
-// on a switch with room for one: the second game hears "the server is full" once while it keeps trying, and "a
-// place freed up" when the first leaves and it gets on
-// the page: a notice when the switch is full, and one when a place frees up
+// on a switch with room for one: the second game waits in line (told where, and "the server is full" once), keeps
+// its place when its link drops, and hears "a place freed up" when the first leaves and it gets on
+// the page: in line when the switch is full, in when a place frees up
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn the_page_a_notice_when_the_switch_is_full_and_one_when_a_place_frees_up() {
+async fn the_page_waits_in_line_when_the_switch_is_full_and_gets_in_when_a_place_frees_up() {
     let _s = serial().await;
     if no_node() {
         return;
     }
-    let sw = start(LanOptions { max_peers: 1, ..opts() }).await;
+    let sw = start(LanOptions { max_peers: 1, line_tell_ms: 100, ..opts() }).await;
     page("full", &[sw.port]).await;
     sw.close().await;
 }

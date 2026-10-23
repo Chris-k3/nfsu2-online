@@ -142,30 +142,50 @@ function roamDatagram(type, n) {
 }
 
 const cases = {
-  // the page: a notice when the switch is full, and one when a place frees up (a switch with room for one)
+  // the page: in line when the switch is full (where it is, and a notice once), its place kept across a dropped link,
+  // in when a place frees up, with a notice (a switch with room for one)
   async full([port]) {
     const { attachNet } = await pageNet(port);
-    const game = (name, notices) => {
+    const game = (name, notices, line) => {
       const memory = new WebAssembly.Memory({ initial: 10, maximum: 10, shared: true }), mb = mailbox(memory, 0);
       want(mb, 1);
-      return attachNet(fakeGame(memory, { 4: mb }), { url: `ws://127.0.0.1:${port}/lan`, name, onNotice: t => notices.push(t), pingMs: 60_000 });
+      return attachNet(fakeGame(memory, { 4: mb }), { url: `ws://127.0.0.1:${port}/lan`, name, onNotice: t => notices.push(t),
+        onQueue: q => line.push(q), pingMs: 60_000 });
     };
-    const na = [], nb = [];
-    const a = game('A', na);
+    const na = [], nb = [], qa = [], qb = [];
+    const a = game('A', na, qa);
     try {
       await a.online;
-      const b = game('B', nb);
+      const b = game('B', nb, qb);
       try {
-        await until(() => nb.length === 1);
-        assert.equal(nb[0], 'The server is full: playing with others waits for a free place');
-        await until(async () => (await state(port)).info.refused >= 3);
-        assert.equal(nb.length, 1, 'said once while it keeps trying');
-        assert.equal(b.state === 'online', false);
+        await until(() => qb.length === 1);
+        assert.deepEqual(qb[0], { pos: 1, of: 1 });
+        assert.equal(b.state, 'queued');
+        assert.deepEqual(nb, ['The server is full: you are in line for a place, and join the others by yourself when it is your turn']);
+        assert.equal((await state(port)).info.waiting, 1);
+        // its link drops: back to the same place, with no second notice
+        b['ws'].close(4000, 'dropped');
+        await until(async () => (await state(port)).info.rejoined === 1);
+        await until(() => qb.length === 2 && b.state === 'queued');
+        assert.deepEqual(qb[1], { pos: 1, of: 1 });
+        assert.equal(nb.length, 1);
+        assert.equal((await state(port)).info.waiting, 1);
         a.close();
-        assert.match(await b.online, /^10\.77\.([0-9]|1[0-5])\.\d+$/);
+        assert.match(await b.online, /^10\.77\.([0-9]|1[0-9])\.\d+$/);
         await until(() => nb.length === 2);
         assert.equal(nb[1], 'A place on the server freed up: you can play with others now');
-        assert.deepEqual(na, [], 'the first game heard nothing');
+        assert.equal(qb.at(-1), null, 'out of line');
+        assert.deepEqual([na, qa], [[], []], 'the first game heard nothing');
+        // a third waits in line, then stops waiting (the page menu's Play offline): out of line for good
+        const nc = [], qc = [], c = game('C', nc, qc);
+        try {
+          await until(() => qc.length === 1 && c.state === 'queued');
+          c.goOffline();
+          await until(async () => (await state(port)).info.lineLeft === 1);
+          assert.deepEqual([c.state, qc.at(-1), (await state(port)).info.waiting], ['away', null, 0]);
+          c.setAway(false); await sleep(600);
+          assert.deepEqual([c.state, (await state(port)).info.queued], ['away', 2], 'nothing takes the switch again');
+        } finally { c.close(); }
       } finally { b.close(); }
     } finally { a.close(); }
   },
@@ -209,13 +229,13 @@ const cases = {
       assert.notEqual(v2, v1, 'a new address (the old one went back)');
       want(lanMb, 0); await sleep(100); want(lanMb, 1); await sleep(500);
       assert.equal((await peers()).length, 1); assert.equal((await state(port)).info.released, 1, 'a short break keeps the place');
-      // peer bits: one bit per host of the /20 up to the module's 2048 (a peer in another /24 has its own bit; the
+      // peer bits: one bit per host of the /19 up to the module's 2048 (a peer in another /24 has its own bit; the
       // third lands in 10.77.4.x, past a /22); the seventh lands in 10.77.8.x, past the /21 and the bitmap: no bit
       // (the module asks that host itself, runtime/web/net_lan.c), and nothing written past the bitmap (its header's
       // padding)
       const others = Array.from({ length: 7 }, (_, i) => new Client(port, `O${i + 1}`));
       for (const o of others) await o.welcome();
-      const hs = others.map(o => (o.vip & 0xfff) >>> 0), low = hs.filter(h => h < P.NET_PEER_BITS);
+      const hs = others.map(o => (o.vip & 0x1fff) >>> 0), low = hs.filter(h => h < P.NET_PEER_BITS);
       assert.ok(low.some(h => h >= 1024), `a host past the /22 (${hs.map(h => h.toString(16))})`);
       assert.ok(low.length < hs.length, `a host past the /21 (${hs.map(h => h.toString(16))})`);
       for (const h of low) await until(() => (Atomics.load(lanMb.w, P.W_PEER_BITS + (h >>> 5)) >>> (h & 31)) & 1);

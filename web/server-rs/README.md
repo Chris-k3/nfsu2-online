@@ -128,7 +128,7 @@ delivering to the receiver, 11 % recvfrom).
   several workers.  Not hyper: the audits' rules need answers of the server's own to requests a library refuses by
   itself, the pipelining cut, a keep-alive time per connection, and the connection budget before any TLS.
 - **The switch** (nfsu2-lan): each connection's reader routes the frames it reads itself, on whatever worker it runs.
-  Who is on the switch changes under one lock; frames find their receivers without it (a table of the 4000
+  Who is on the switch changes under one lock; frames find their receivers without it (a table of the 5000
   addresses, a copy-on-write list of everyone).  Each receiver's writer takes everything queued into one write, and
   makes bundles of a page's datagrams on the bundle clock.  Counters every frame touches are sharded.
 - **Compact bundles** (nfsu2-lan `compact.rs`, kind 33): to a page whose hello says "compact":1 the datagrams go
@@ -186,12 +186,17 @@ players.
 
 ## Where it differs from the Node server
 
-- 4000 players (`--max-peers` 1 to 4000; the image's `NFSU2_MAX_PEERS=4000`), Node's 2000: the switch's network is
-  10.77.0.0/20 (the welcome's mask 255.255.240.0; addresses round its sixteen /24s), the free-roam hub takes 4096
-  players, Online mode 2000 lobby sessions, 600 games and 8000 streams.  The game module's peer bits (mailbox v4)
-  cover a /21: for a player on 10.77.8-15.x the game asks that host itself (`runtime/web/net_lan.c`): a LAN race's
+- 5000 players (`--max-peers` 1 to 5000; the image's `NFSU2_MAX_PEERS=5000`), Node's 2000: the switch's network is
+  10.77.0.0/19 (the welcome's mask 255.255.224.0; addresses round twenty of its /24s, 10.77.0-19.x), the free-roam hub
+  takes 5120 players, Online mode 2500 lobby sessions, 750 games and 10000 streams.  The game module's peer bits
+  (mailbox v4) cover a /21: for a player on 10.77.8-19.x the game asks that host itself (`runtime/web/net_lan.c`): a LAN race's
   connect to one who has just left sends its SYN and ends after the same 3 s with WSAETIMEDOUT instead of
   WSAEHOSTUNREACH.  Nothing else differs: the page and the module need no change (`crates/lan/tests/page.mjs`).
+- A full switch keeps a line (nfsu2-lan `queue.rs`) for the pages that say they can wait (/lan?queue): Node closed
+  every newcomer with "LAN full", and the page asked again every 5 s, so whoever asked first after a place freed up
+  got it.  A page of before still gets "LAN full".
+- The peer list goes only to the pages with LAN play open (the others get the server's own hosts): Node sent every
+  join and leave to every page.
 - Compressed bytes (gzip and br) differ from Node's zlib; the decoded content is the same.
 - Bundles are made on the bundle clock (above), not per turn of an event loop; between different kinds of message
   only the order differs.

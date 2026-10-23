@@ -171,8 +171,8 @@ sees a keyphrase, a key or a save, and its files name no player.
 
 ## Sizing
 
-For up to 4000 players at once (the image's limit; the Node server's was 2000, [From the Node
-server](#from-the-node-server)): 8 vCPU for 2000 and 16 for 4000 (4000 in free roam took the Rust server 6-8 cores of a Ryzen 9 5900X,
+For up to 5000 players at once (the image's limit; the Node server's was 2000, [From the Node
+server](#from-the-node-server)): 8 vCPU for 2000 and 16 for 4000 to 5000 (4000 in free roam took the Rust server 6-8 cores of a Ryzen 9 5900X,
 and a Cloudflare Tunnel's cloudflared pays for each message again, `web/server-rs/README.md`), 8 GB of memory (the
 compose file's limit), 40 GB of disk and a 1 Gbit/s port with a few TB of traffic a month.
 
@@ -290,11 +290,11 @@ NFSU2_IMAGE=ghcr.io/th0mk/nfsu2-web-rs:sha-<commit>
   commit, then `docker compose up -d`. The state volume serves either.
 - `UV_THREADPOOL_SIZE` means nothing to the Rust server; `NFSU2_THREADS` sets its worker threads (by default half
   the cores, 2 to 8). Its console has the Node server's lines.
-- **4000 players** where the Node server took 2000 (`--max-peers` 1 to 4000, the image's `NFSU2_MAX_PEERS=4000`): the
-  virtual network is 10.77.0.0/20, and the game module's peer bits cover a /21, so for a player on 10.77.8-15.x the
+- **5000 players** where the Node server took 2000 (`--max-peers` 1 to 5000, the image's `NFSU2_MAX_PEERS=5000`): the
+  virtual network is 10.77.0.0/19 (addresses in 10.77.0-19.x), and the game module's peer bits cover a /21, so for a player on 10.77.8-19.x the
   game asks that host itself (a LAN race's connect to one who has just gone ends after the same 3 s as "timed out"
   instead of "unreachable"; nothing else differs, and pages and modules of before need no change). Online mode takes
-  2000 lobby sessions and 600 games (Node: 1000 and 300), the free-roam hub 4096 players. 4000 players need 65536
+  2500 lobby sessions and 750 games (Node: 1000 and 300), the free-roam hub 5120 players. 5000 players need 65536
   open files (`ulimits: { nofile: 65536 }` in `compose.yml`), and past about 3000 in free roam more workers than 8
   (`NFSU2_THREADS=12` in `.env`; `compose.yml` passes it on) keep them at 32 friends each instead of the busy cap's 8.
 
@@ -400,8 +400,8 @@ counts its 101 MB). Without `TEXPACKS` Upscaled plays with the game's own textur
     restarts);
   - closes, without an answer, a connection that asks for another name (the bare address, a scanner's made-up
     name), on 80 and on 443; a TLS handshake without your name fails, so the certificate is not shown;
-  - opens at most 31900 connections to the server (one per request in progress; with 4000 players the Rust server
-    takes 32000, 8 per player; the Node image, at most 2000 players, takes 16000);
+  - opens at most 39900 connections to the server (one per request in progress; with 5000 players the Rust server
+    takes 40000, 8 per player; the Node image, at most 2000 players, takes 16000);
   - has its admin API off: nothing reconfigures it while it runs, and a changed `.env` takes `docker compose up -d`.
 - **NFSU2_HOST is one name.** For a second name, or a wildcard, edit the Caddyfile in `compose.yml` and the
   server's `NFSU2_HOST` (a comma list; `*.example.com` for one label under it). A wildcard certificate needs Let's
@@ -674,11 +674,16 @@ paths to the VPS, so pick a VPS location between you.
 - **Keepalive:** the switch pings every connection every 25 s. Proxies and Cloudflare then never cut a quiet player,
   and the switch finds players whose connection died.
 - **Limits:**
-  - 4000 players on the switch with the Rust image (`NFSU2_MAX_PEERS=4000`; the server's own default is 128, and
-    4000 is the most its virtual network, 10.77.0.0/20, has addresses for), 2000 with the Node image (its network
-    is 10.77.0.0/21). A game the switch refuses as full shows "The
-    server is full" in the game and tries again every 5 s; it says so again when it gets a place, and the start
-    page says the server is full;
+  - 5000 players on the switch with the Rust image (`NFSU2_MAX_PEERS=5000`; the server's own default is 128, and
+    5000 is the most its virtual network, 10.77.0.0/19, has addresses for: 250 in each of 10.77.0-19.x), 2000 with
+    the Node image (its network is 10.77.0.0/21);
+  - when every place is taken a game waits in line for one, first come first served (nfsu2-lan `queue.rs`): the
+    line's first takes the next place that frees up, and while anyone waits a newcomer waits too. The game shows
+    its place in line and, once a few went in, about how long it takes at the pace of the last ten minutes; the
+    start page shows how many wait, and at Play offers to wait or play offline. A waiting page whose connection
+    drops keeps its place for a minute (a ticket only it has), as a dropped player keeps its address; one that
+    lets go (no network feature in use, away, "Stop waiting") leaves the line. At most 5000 wait. A page from
+    before the line gets "LAN full" instead, tries again every 5 s and gets in only once nobody waits;
   - a player holds a place only while a network feature needs it: free roam while it is on, LAN play and Online
     from the game's LAN or Online screens until it leaves them. 10 s after the last one ends the page closes its
     connection and the switch frees the address at once; going back into those screens connects again (a new
@@ -703,8 +708,8 @@ paths to the VPS, so pick a VPS location between you.
   - a player who drops (a lost connection, not the page letting go) gets the same address back when it reconnects:
     the switch keeps the address a minute for that player alone (a token only that browser has), also across a restart of the server, and never gives it to
     anyone else. At most 8 such addresses are kept per client address (16 per /48; past that its own oldest goes;
-    the ones kept across a restart do not count). When every address is held or kept, a newcomer gets "LAN full"
-    until one frees.
+    the ones kept across a restart do not count). A kept address holds its place, so when every place is held or
+    kept a newcomer waits in line until one frees.
 - **LAN races** (the game's own LAN mode, from the LAN-play track) use the same switch. Over the internet they are
   **UNVERIFIED**.
 - **The game's Online mode** is served by the server itself, at the switch's reserved address 10.77.0.1 (on by
@@ -722,10 +727,11 @@ paths to the VPS, so pick a VPS location between you.
   - **The console** names online players by persona and virtual address (10.77.x.x) only, and shows at most 30
     Online lines a minute caused by one client address (then one line saying how many were left out).
   - **Who plays now:** `/players` answers anyone who reaches the server with three numbers for the start page,
-    whether it is full and whether free roam is busy:
-    `{"players":3,"online":1,"roam":2,"full":false,"roamBusy":false}`, the games on the switch, how many of them
-    are in Online mode (logged in, or in an online race; `null` with `--online off`), how many drive in free roam
-    or are paused there (`null` with `--roam-hub off`), whether a game that connects now gets "LAN full", and
+    whether it is full, how many wait and whether free roam is busy:
+    `{"players":3,"online":1,"roam":2,"full":false,"queue":0,"roamBusy":false}`, the games on the switch, how many
+    of them are in Online mode (logged in, or in an online race; `null` with `--online off`), how many drive in free
+    roam or are paused there (`null` with `--roam-hub off`), whether a game that connects now waits in line, how
+    many wait in it, and
     whether the free-roam hub gives fewer than 24 links a player (its thread is busy; the start page doesn't ask
     its free-roam question then). Nothing else: no names, addresses or times, never cached. The game's own lobby
     shows its players to anyone who logs in anyway.

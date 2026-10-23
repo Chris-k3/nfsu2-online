@@ -408,9 +408,16 @@ pub(crate) mod tests {
     use crate::{AttachCtx, LanOptions};
 
     /// a peer on the switch without a socket: its connection's queue only fills
-    pub(crate) fn peer(sw: &Arc<LanSwitch>, group: &str) -> (Arc<Conn>, AttachCtx, Arc<Peer>) {
+    pub(crate) fn peer(sw: &Arc<LanSwitch>, group: &str) -> (Arc<Conn>, Arc<AttachCtx>, Arc<Peer>) {
         let conn = Arc::new(Conn::new(sw.conn_ids.fetch_add(1, Relaxed)));
-        let ctx = AttachCtx { resume: false, group: sw.join_group(false, Some(group)), site: None, on_join: None, on_leave: None };
+        let ctx = Arc::new(AttachCtx {
+            resume: false,
+            queue: false,
+            group: sw.join_group(false, Some(group)),
+            site: None,
+            on_join: None,
+            on_leave: None,
+        });
         let p = sw.admit(&conn, &ctx, None).expect("admitted");
         (conn, ctx, p)
     }
@@ -484,8 +491,8 @@ pub(crate) mod tests {
     /// under a millisecond).
     #[tokio::test]
     async fn a_broadcast_refused_walks_no_peer() {
-        let sw = LanSwitch::new(LanOptions { max_peers: 4000, ..LanOptions::default() }, "", None, None, None, None);
-        let peers: Vec<_> = (0..4000).map(|i| peer(&sw, &format!("g{i}"))).collect();
+        let sw = LanSwitch::new(LanOptions { max_peers: 5000, ..LanOptions::default() }, "", None, None, None, None);
+        let peers: Vec<_> = (0..5000).map(|i| peer(&sw, &format!("g{i}"))).collect();
         let p = &peers[0].2;
         for b in [&mut *p.buckets.lock(), &mut *p.group.buckets.lock()] {
             b.frames.v = 0.0;
@@ -497,7 +504,7 @@ pub(crate) mod tests {
             assert!(!sw.route(p, &f, std::iter::repeat_n(BROADCAST, 255)));
         }
         let ms = t.elapsed().as_secs_f64() * 1000.0;
-        assert!(ms < 500.0, "2000 refused messages of 255 broadcasts at 4000 players took {ms:.0} ms");
+        assert!(ms < 500.0, "2000 refused messages of 255 broadcasts at 5000 players took {ms:.0} ms");
         assert!(peers.iter().all(|(c, ..)| c.out.q.lock().len() <= 1), "nothing sent (a welcome at most)");
         sw.stop();
     }

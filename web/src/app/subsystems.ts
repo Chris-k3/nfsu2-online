@@ -40,14 +40,15 @@ export const attachInput: AttachInput = (proc, element, o) =>
   inputAttach(proc, element, { log: o.log, viewRect: o.viewRect, toggleFullscreen: o.toggleFullscreen, padPage: o.padPage });
 
 export const attachNet: AttachNet = (proc, o) => {
-  const link = netAttach(proc, { name: o.name, log: o.log, onNotice: o.notice, onLobby: o.lobby, onBack: o.back });
+  const link = netAttach(proc, { name: o.name, log: o.log, onNotice: o.notice, onLobby: o.lobby, onBack: o.back, onQueue: o.queue });
   const friends = () => link.peers.filter(p => !p.self);
   return {
     detach: () => link.close(),
     vip: () => link.vip,
     peers: () => friends().map(p => `${p.name} (${p.vip})`),
-    holding: () => link.state === 'connecting' || link.state === 'online' || link.state === 'offline',
+    holding: () => link.state === 'connecting' || link.state === 'online' || link.state === 'offline' || link.state === 'queued',
     away: (on: boolean) => link.setAway(on),
+    offline: () => link.goOffline(),
     stats: () => {
       const s = link.stats();
       return { 'lan online': s.state === 'online' ? 1 : 0, 'lan friends': friends().length, 'lan rtt ms': s.switchRttMs };

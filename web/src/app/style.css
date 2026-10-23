@@ -468,6 +468,10 @@ html:has(> body > .stage:not([hidden])) { overflow: hidden; }
 }
 /* the away check (away.ts): in the middle, until the player is back */
 .toast.away { top: 50%; transform: translate(-50%, -50%); width: max-content; max-width: min(560px, calc(100vw - 32px)); text-align: center; }
+/* a full server: the place in line for one (players.ts queueText), at the top while the game waits; a note on the
+ * game goes under it */
+.toast.queue { width: max-content; text-align: center; }
+.stage:has(> .queue:not([hidden])) .toast:not(.away):not(.queue) { margin-top: 44px; }
 /* free roam: friends joining, leaving, going into a race; a quiet log on the left between the game's SMS
  * icon and its radar (shell.ts placeNotices: the place, and --u, one HUD unit), sized with the HUD: small
  * dim italic text, the friend's name in lime; newest at the bottom, each fading out after 5 s (when
