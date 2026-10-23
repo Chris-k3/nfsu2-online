@@ -133,7 +133,8 @@ The rest of this guide is reference.
 - **What it never shows:** anything about the VPS or the other players (`web/test/deploy.test.mjs` checks what is
   and is not exposed).
 - **What it keeps for players:** their keyphrase saves, locked ([Keyphrase saves](#keyphrase-saves)), and the Online
-  mode's race results and friends lists ([Multiplayer over the internet](#multiplayer-over-the-internet)).
+  mode's race results and EA Messenger lists, with the messages that wait for a friend
+  ([Multiplayer over the internet](#multiplayer-over-the-internet)).
 
 ## Keyphrase saves
 
@@ -693,8 +694,10 @@ paths to the VPS, so pick a VPS location between you.
   racing: a name in use is given with four digits in place of its end (on a busy server many players come as
   `NAME`), and the game plays under that.
   - **Kept in the state volume:** `online/stats.json` (race results and best times per persona) and
-    `online/buddies.json` (EA Messenger friends lists, persona names only), each with the month a persona was last
-    seen, written atomically. No passwords, CD keys, addresses or chat. The server never reads an account's
+    `online/buddies.json` (EA Messenger: each persona's friends and blocked by name, its friend requests waiting for
+    an answer, and the messages from friends waiting for it while it is away, text included, 7 days at most), each
+    with the month a persona was last seen, written atomically (0600). No passwords, CD keys, addresses, and no chat
+    but those waiting messages. The server never reads an account's
     password; a game's password it checks against an HMAC kept in memory with that game, under a key of the game's
     own.
   - **The console** names online players by persona and virtual address (10.77.x.x) only, and shows at most 30
@@ -714,8 +717,10 @@ paths to the VPS, so pick a VPS location between you.
     second (a burst of 4; a car description over that is not passed on); chat 1 a second with a burst of 5 (then
     10 s muted), 255 characters; a silent session goes after 120 s; a race whose players' browsers left the switch
     ends after 2 minutes. EA Messenger: 10 messages a second per connection (a flood closes it), the lists and the
-    search 1 a second, a presence at most once a second; 50 friends each, 5000 friends lists (the least recently
-    seen go), 20 new ones an hour per client address. Results: 100,000 personas (the least recently seen go), a
+    search 1 a second, a presence at most once a second; 50 friends and 50 blocked each, 20 friend requests waiting
+    from one persona (30 days), 20 messages waiting for one (the oldest goes) and 20,000 in all (7 days), 5000
+    persona lists (the least recently seen go), 20 new ones an hour per client address. Results: 100,000 personas
+    (the least recently seen go), a
     race counts once two of its players in different browsers sent the same result.
   - **What one client costs the others:** what the online host sends because of a client's message (its answer,
     and what the others hear of it: room chat, a game's players) comes out of that client's switch budget; over

@@ -1,5 +1,5 @@
-//! EA Messenger (the game's "buddy server", port 13505 of the online host): friends lists, who is online
-//! and what they do, messages, and game invites, between the personas logged in to this server's lobby.
+//! EA Messenger (the game's "buddy server", port 13505 of the online host): friends lists, friend requests, who is
+//! online and what they do, messages, and game invites, between the personas logged in to this server's lobby.
 //!
 //! The game's buddy client (SPEED2.EXE BuddyApi, 0x74BC50-0x74F5F0) speaks the lobby's framing with upper-case
 //! commands.  It logs in with AUTH and the LKEY its lobby login was given (lobby.rs `select_persona`): that key, from
@@ -9,38 +9,45 @@
 //! - AUTH PROD VERS PRES USER LKEY -> AUTH TITL="EA MESSENGER" (unknown key: code "pass"; a second AUTH on a
 //!   connection that is logged in: code "logn")
 //! - EPGT LRSC ID -> EPGT ID ENAB=N ADDR=
-//! - RGET LIST=B|I ID -> RGET ID SIZE=n, then n x ROST ID USER (the friends, or the blocked), then PGET for each
-//!   friend online
-//! - RADD/RDEL LIST USER ID -> RADD/RDEL ID; a friend added is told (RNOT USER) and the adder gets the friend's
-//!   presence (LIST I: blocking)
-//! - RADM USER PRES ID -> RADM ID; to the persona: RNOT USER (the asker) CHNG=A ATTR=0x80000, a friend request (the
-//!   game's "pending" bits: which is which UNVERIFIED)
-//! - RRSP USER ANSW ID -> the answer: both are friends (RNOT USER CHNG=A ATTR=0, PGET) unless ANSW says no (its
-//!   coding is UNVERIFIED); a request back from the asked persona (RADM, "Send Friend Request" in its menu) counts
-//!   as yes
-//! - PADD/PDEL USER -> ack, and that player's presence (the Messenger's "All" list: players searched for or met; in
-//!   memory only)
+//! - RGET LIST=B|I PRES PEND ID (the game's login asks for both, ID 1 and ID 2: a ROST's ID says which list its
+//!   entry goes on) -> RGET ID SIZE=n, then n x ROST ID USER LIST (the friends, or the blocked; with PEND=Y also the
+//!   friend requests that wait, ATTR=R one to this persona, ATTR=S one it sent), then PGET for each entry of
+//!   B; `MAIL_WAIT_MS` later RECV for each message that came while the persona was away
+//! - RADM USER PRES ID ("Send Friend Request", the only way the game makes a friend) -> RADM ID and the asked
+//!   persona's presence (PGET); the request waits for its answer (`ASK_DAYS`), the asked persona told now if online
+//!   (RNOT USER (the asker) CHNG=A ATTR=R, the asker's presence), else at its next login (ROST); a request back from
+//!   the asked persona makes friends
+//! - RRSP USER ANSW ID (the answer, 0x74DD00: Y accept, N decline, B block) -> RRSP ID; accepted: both are friends,
+//!   each told (RNOT USER CHNG=A ATTR=0, PGET), the asker at its next login if away; declined or blocked: the request
+//!   goes (to the asker: RNOT USER CHNG=D)
+//! - RDEM USER (a friend taken off, the game's RDEL after it; or a request taken back) and RDEL LIST=B USER -> ack;
+//!   the two are friends no more, on neither list, the other told (RNOT USER CHNG=D)
+//! - RADD/RDEL LIST=I USER ID -> ack: blocking, kept with the persona's lists; RADD LIST=B (the game sends none) puts
+//!   a friend on this persona's list only, the friend told (RNOT USER) and its presence to the adder
+//! - PADD/PDEL USER -> ack, and that player's presence (the Messenger's "All" list: players searched for or met; the
+//!   game's own, in memory only)
 //! - PSET SHOW STAT PROD -> ack; when it changed, PGET USER SHOW STAT PROD TITL EXTR ATTR to every online player who
 //!   has this persona as a friend (at most once a second, the latest)
-//! - SEND USER BODY SUBJ TYPE -> SEND; RECV USER (the sender) BODY SUBJ TYPE TIME to the persona
+//! - SEND USER BODY SUBJ TYPE -> SEND; RECV USER (the sender) BODY SUBJ TYPE TIME to the persona; to one that is away
+//!   and has the sender as a friend it waits (`MAIL_DAYS`) for that persona's next login
 //! - GINV/GRSP/GRVK USER ... -> ack; passed on to the persona (USER = the sender)
 //! - USCH USER MAXR ID -> USCH ID SIZE=n, then n x USER ID USER (the Search: personas online or known from their
 //!   races whose names start with the text)
 //! - PING -> PING;  DISC -> closed
 //!
-//! Field names from the game's own code; the exact use the game makes of each (screens, invites) was checked only in
-//! part.
+//! Field names and the roster's bits from the game's own code (0x74C640 ROST, 0x74E2B0 RNOT, 0x74D420 the adds,
+//! 0x74D660 the deletes); how its screens show each was checked only in part.
 //!
-//! Kept: each persona's friends list (names only) in <state>/online/buddies.json, so a friend is still one after a
-//! restart.  A persona belongs to whoever plays under its name (there are no accounts), so whoever takes a name that
-//! is not online sees and can change its friends list (docs/web/PLAYING.md).  The blocked list is the session's own:
-//! kept while the persona is online, where it is the only place a block matters (messages, invites and requests go
-//! to personas online), and never stored (the Online audit's ONL-6: the next holder of the name could read and empty
-//! it).  Messages and invites are passed on and forgotten (to a persona online now).  Limits: 50 friends, 50
-//! blocked; `lists` friends lists, the least recently seen going first, new ones `list_rate` an hour per client;
-//! messages `msg_rate` a second (burst 3 x), the lists and the search `heavy_rate` a second (burst 4), over that:
-//! closed (the Online audit's ONL-1, ONL-3); chat messages 2 a second (burst 5) and 500 characters; a blocked
-//! persona's messages and invites never arrive.
+//! Kept in <state>/online/buddies.json, so they hold over a restart: each persona's friends and blocked (names), the
+//! friend requests it sent that wait for an answer, and the messages from friends that wait for it.  A persona
+//! belongs to whoever plays under its name (there are no accounts), so whoever takes a name that is not online sees
+//! and can change its lists and gets its waiting messages (docs/web/PLAYING.md; the blocked list was the session's
+//! own until 2026-10-23, the Online audit's ONL-6, and is kept since for the players who block).  Invites are passed
+//! on and forgotten (to a persona online now).  Limits: 50 friends, 50 blocked, `MAX_ASKED` requests waiting from one
+//! persona, `MAX_MAIL` messages waiting for one (the oldest goes) and `ALL_MAIL` in all; `lists` lists, the least
+//! recently seen going first, new ones `list_rate` an hour per client; messages `msg_rate` a second (burst 3 x), the
+//! lists and the search `heavy_rate` a second (burst 4), over that: closed (the Online audit's ONL-1, ONL-3); chat
+//! messages 2 a second (burst 5) and 500 characters; a blocked persona's messages, invites and requests never arrive.
 //!
 //! A buddy connection's state stays readable until the event that closed it is over, so the code still handling that
 //! event goes on with it (a handler whose own answer closed the connection goes on with no persona, and fails where
@@ -63,6 +70,24 @@ use crate::timers::{Action, TimerId};
 use crate::vhost::{ConnId, Svc};
 
 const MAX_LIST: usize = 50;
+/// friend requests one persona has waiting, and the days one waits for its answer
+const MAX_ASKED: usize = 20;
+const ASK_DAYS: f64 = 30.0;
+/// messages waiting for one persona, for all of them together, and the days one waits
+const MAX_MAIL: usize = 20;
+const ALL_MAIL: usize = 20_000;
+const MAIL_DAYS: f64 = 7.0;
+const DAY_MS: f64 = 86_400_000.0;
+/// how long after the friends list the waiting messages go: the game files a message under the player's entry of its
+/// Messenger, which a friend from the list gets only once every message the game had to read is handled (its RGET's
+/// callback at the end of the update, 0x74E8E0: a RECV in the same batch as the ROST is dropped)
+const MAIL_WAIT_MS: f64 = 3000.0;
+/// the roster's request bits as ROST and RNOT write them: ATTR is a set of letters, each a bit of the game's entry
+/// ('@' bit 0, 'A' bit 1 ... 'Z' bit 26, '0'-'3' bits 27-30: 0x742100, its table at 0x7D26B8), of which the game keeps
+/// R (0x40000: a request from that player waits for this one's answer) and S (0x80000: one this player sent);
+/// "0" has neither
+const ASKED_ME: &str = "R";
+const I_ASKED: &str = "S";
 const TITL: &str = "Need for Speed Underground 2 [PC]";
 
 /// EA Messenger's limits (see the module's text): `lists` friends lists kept, `list_rate` new ones an hour per
@@ -83,12 +108,36 @@ impl Default for BuddyLimits {
     }
 }
 
-/// a persona's friends list: its name, the friends (lower case -> the name as given; `B` in buddies.json), the month
-/// it was last seen
+/// a message that waits for its persona: who sent it, its text, and when (ms since 1970)
+pub struct Mail {
+    pub from: String,
+    pub body: String,
+    pub subj: String,
+    pub kind: String,
+    pub t: f64,
+}
+
+/// a persona's lists: its name, the friends (lower case -> the name as given; `B` in buddies.json), the blocked (`I`),
+/// the friend requests it sent that wait for an answer (lower case -> the name as given and when; `R`), the messages
+/// that wait for it, the oldest first (`M`), and the month it was last seen
 pub struct FriendsList {
     pub name: String,
     pub b: IndexMap<String, String>,
+    pub i: IndexMap<String, String>,
+    pub r: IndexMap<String, (String, f64)>,
+    pub m: Vec<Mail>,
     pub seen: String,
+}
+
+impl FriendsList {
+    fn new(name: &str, seen: String) -> FriendsList {
+        FriendsList { name: name.to_string(), b: IndexMap::new(), i: IndexMap::new(), r: IndexMap::new(), m: Vec::new(), seen }
+    }
+
+    /// nothing in it to keep
+    fn is_empty(&self) -> bool {
+        self.b.is_empty() && self.i.is_empty() && self.r.is_empty() && self.m.is_empty()
+    }
 }
 
 /// one EA Messenger connection
@@ -105,10 +154,9 @@ pub struct Buddy {
     msgs_t: f64,
     msgs_v: f64,
     met: HashSet<String>,
-    /// the blocked (lower case -> the name as given), the session's own
-    blocked: IndexMap<String, String>,
     told: Option<f64>,
     presence_timer: Option<TimerId>,
+    mail_timer: Option<TimerId>,
     rate: LBucket,
     heavy: LBucket,
     tries: u32,
@@ -128,8 +176,13 @@ pub struct Buddies {
     /// met it: who hears of its presence (so a presence goes to the ones that hear, not through every online persona)
     fans: HashMap<String, HashSet<String>>,
     met_by: HashMap<String, HashSet<u64>>,
-    /// "from>to" (lower case) -> when: friend requests waiting for an answer
-    requests: HashMap<String, f64>,
+    /// lower-case persona -> the personas (lower case) whose friend requests wait for its answer (each kept in the
+    /// asker's list, `r`)
+    asked: HashMap<String, HashSet<String>>,
+    /// the messages waiting, on all lists
+    mail: usize,
+    /// when requests and messages that waited too long were last let go
+    pruned: f64,
     /// client group -> bucket: new friends lists
     made: HashMap<Arc<str>, LBucket>,
     timer: Option<TimerId>,
@@ -137,6 +190,37 @@ pub struct Buddies {
     pub conns: HashMap<u64, Buddy>,
     graveyard: Vec<u64>,
     next: u64,
+}
+
+/// a time the file keeps (ms since 1970, whole)
+fn when(v: &Value) -> Option<f64> {
+    v.as_f64().filter(|t| (0.0..=1e15).contains(t)).map(f64::floor)
+}
+
+/// names of a list in buddies.json (`B`, `I`) onto a list's map: the later spelling of a name in the earlier one's
+/// place, MAX_LIST at most
+fn read_names(v: Option<&Value>, into: &mut IndexMap<String, String>) {
+    if let Some(Value::Array(a)) = v {
+        for n in a.iter().take(MAX_LIST) {
+            if let Some(n) = n.as_str().filter(|n| valid_name(n)) {
+                into.insert(lower(n), n.to_string());
+            }
+        }
+    }
+}
+
+/// `,"<key>":[names]`
+fn write_names<'a>(s: &mut String, key: &str, names: impl Iterator<Item = &'a String>) {
+    s.push_str(",\"");
+    s.push_str(key);
+    s.push_str("\":[");
+    for (i, n) in names.enumerate() {
+        if i > 0 {
+            s.push(',');
+        }
+        json::write_str(s, n);
+    }
+    s.push(']');
 }
 
 impl Buddies {
@@ -149,7 +233,9 @@ impl Buddies {
             online: OrderedMap::new(),
             fans: HashMap::new(),
             met_by: HashMap::new(),
-            requests: HashMap::new(),
+            asked: HashMap::new(),
+            mail: 0,
+            pruned: f64::NEG_INFINITY,
             made: HashMap::new(),
             timer: None,
             dirty: false,
@@ -171,6 +257,9 @@ impl Buddies {
         let Some(file) = self.file() else { return };
         let Ok(bytes) = std::fs::read(&file) else { return };
         let Ok(j) = crate::jsonparse::parse(&String::from_utf8_lossy(&bytes)) else { return };
+        // (a file of version 2 or older keeps only the friends: one of before the Online audit also has the blocked
+        // lists of then, I, which are not read)
+        let v3 = j.get("v").and_then(Value::as_f64).is_some_and(|v| v >= 3.0);
         let mut rows: Vec<(&serde_json::Map<String, Value>, String, String)> = match j.get("personas") {
             Some(Value::Array(a)) => a
                 .iter()
@@ -189,26 +278,49 @@ impl Buddies {
         };
         rows.sort_by(|a, b| a.2.cmp(&b.2));
         let from = rows.len().saturating_sub(self.l.lists as usize);
-        // (a file of before the audit also has the blocked lists, I: they are not read)
         for (r, name, seen) in rows.drain(from..) {
-            let mut l = FriendsList { name: name.clone(), b: IndexMap::new(), seen };
-            if let Some(Value::Array(b)) = r.get("B") {
-                for n in b.iter().take(MAX_LIST) {
-                    if let Some(n) = n.as_str().filter(|n| valid_name(n)) {
-                        l.b.insert(lower(n), n.to_string());
+            let mut l = FriendsList::new(&name, seen);
+            read_names(r.get("B"), &mut l.b);
+            if v3 {
+                read_names(r.get("I"), &mut l.i);
+                if let Some(Value::Array(a)) = r.get("R") {
+                    for e in a.iter().take(MAX_ASKED) {
+                        if let Some([n, t]) = e.as_array().map(Vec::as_slice)
+                            && let Some(n) = n.as_str().filter(|n| valid_name(n))
+                            && let Some(t) = when(t)
+                        {
+                            l.r.insert(lower(n), (n.to_string(), t));
+                        }
+                    }
+                }
+                if let Some(Value::Array(a)) = r.get("M") {
+                    // (the newest MAX_MAIL)
+                    for e in a.iter().skip(a.len().saturating_sub(MAX_MAIL)) {
+                        let Some(o) = e.as_object() else { continue };
+                        let (Some(from), Some(t)) =
+                            (o.get("from").and_then(Value::as_str).filter(|n| valid_name(n)), o.get("t").and_then(when))
+                        else {
+                            continue;
+                        };
+                        let text = |k: &str, n: usize| o.get(k).and_then(Value::as_str).map_or(String::new(), |s| clean_text(s, n));
+                        let kind = o.get("type").and_then(Value::as_str).map_or("C", |s| jsx::slice16(s, 4)).to_string();
+                        l.m.push(Mail { from: from.to_string(), body: text("body", 500), subj: text("subj", 64), kind, t });
                     }
                 }
             }
-            if !l.b.is_empty() {
+            if !l.is_empty() {
                 self.lists.insert(lower(&name), l);
             }
         }
         // (a name twice in the file: the later list, in the earlier one's place)
-        let owners: Vec<(String, Vec<String>)> = self.lists.iter().map(|(o, l)| (o.clone(), l.b.keys().cloned().collect())).collect();
-        for (owner, friends) in owners {
-            for k in friends {
-                self.fans.entry(k).or_default().insert(owner.clone());
+        for (owner, l) in self.lists.iter() {
+            for k in l.b.keys() {
+                self.fans.entry(k.clone()).or_default().insert(owner.clone());
             }
+            for k in l.r.keys() {
+                self.asked.entry(k.clone()).or_default().insert(owner.clone());
+            }
+            self.mail += l.m.len();
         }
     }
 
@@ -229,12 +341,54 @@ impl Buddies {
         true
     }
 
+    /// owner (lower case) blocks k
+    pub fn blocks(&self, owner: &str, k: &str) -> bool {
+        self.lists.get(owner).is_some_and(|l| l.i.contains_key(k))
+    }
+
+    /// from's friend request to `to` (both lower case) while it waits: the asker's name
+    fn request(&self, from: &str, to: &str, now: f64) -> Option<&str> {
+        let l = self.lists.get(from)?;
+        let (_, t) = l.r.get(to)?;
+        (now - t < ASK_DAYS * DAY_MS).then_some(l.name.as_str())
+    }
+
+    /// from's request to `to` (lower case `to`, its name as given), on from's list (which is there)
+    fn ask(&mut self, from: &str, to: String, name: String, t: f64) {
+        if let Some(l) = self.lists.get_mut(from) {
+            l.r.insert(to.clone(), (name, t));
+            self.asked.entry(to).or_default().insert(from.to_string());
+        }
+    }
+
+    /// from's request to `to` goes (false: there was none)
+    fn unask(&mut self, from: &str, to: &str) -> bool {
+        if !self.lists.get_mut(from).is_some_and(|l| l.r.shift_remove(to).is_some()) {
+            return false;
+        }
+        self.unindex(to, from);
+        true
+    }
+
+    fn unindex(&mut self, to: &str, from: &str) {
+        if let Some(s) = self.asked.get_mut(to) {
+            s.remove(from);
+            if s.is_empty() {
+                self.asked.remove(to);
+            }
+        }
+    }
+
     /// a list goes (the store is full)
     fn drop_list(&mut self, owner: &str) {
         if let Some(l) = self.lists.remove(owner) {
             for k in l.b.keys() {
                 self.unfan(k, owner);
             }
+            for k in l.r.keys() {
+                self.unindex(k, owner);
+            }
+            self.mail -= l.m.len();
         }
     }
 
@@ -247,11 +401,37 @@ impl Buddies {
         }
     }
 
-    /// buddies.json's text: version 2, the lists that have friends, names only (byte for byte the Node server's)
+    /// the requests and messages that waited too long go (false: none did)
+    fn prune(&mut self, now: f64) -> bool {
+        let mut gone: Vec<(String, String)> = Vec::new();
+        let mut mail = 0;
+        self.lists.for_each_mut(|owner, l| {
+            l.r.retain(|k, (_, t)| {
+                let keep = now - *t < ASK_DAYS * DAY_MS;
+                if !keep {
+                    gone.push((k.clone(), owner.clone()));
+                }
+                keep
+            });
+            let n = l.m.len();
+            l.m.retain(|m| now - m.t < MAIL_DAYS * DAY_MS);
+            mail += n - l.m.len();
+        });
+        for (to, from) in &gone {
+            self.unindex(to, from);
+        }
+        self.mail -= mail;
+        !gone.is_empty() || mail > 0
+    }
+
+    /// buddies.json's text: version 3, the lists that have anything in them (`B` always, `I`, `R` and `M` when not
+    /// empty)
     pub fn serialize(&self) -> String {
-        let mut s = String::from("{\"v\":2,\"note\":\"NFSU2 online friends lists (persona names only)\",\"personas\":[");
+        let mut s = String::from(
+            "{\"v\":3,\"note\":\"NFSU2 online Messenger lists (persona names; friend requests and messages waiting for their persona)\",\"personas\":[",
+        );
         let mut first = true;
-        for l in self.lists.values().filter(|l| !l.b.is_empty()) {
+        for l in self.lists.values().filter(|l| !l.is_empty()) {
             if !first {
                 s.push(',');
             }
@@ -260,14 +440,41 @@ impl Buddies {
             json::write_str(&mut s, &l.name);
             s.push_str(",\"seen\":");
             json::write_str(&mut s, &l.seen);
-            s.push_str(",\"B\":[");
-            for (i, n) in l.b.values().enumerate() {
-                if i > 0 {
-                    s.push(',');
-                }
-                json::write_str(&mut s, n);
+            write_names(&mut s, "B", l.b.values());
+            if !l.i.is_empty() {
+                write_names(&mut s, "I", l.i.values());
             }
-            s.push_str("]}");
+            if !l.r.is_empty() {
+                s.push_str(",\"R\":[");
+                for (i, (n, t)) in l.r.values().enumerate() {
+                    if i > 0 {
+                        s.push(',');
+                    }
+                    s.push('[');
+                    json::write_str(&mut s, n);
+                    s.push_str(&format!(",{}]", *t as i64));
+                }
+                s.push(']');
+            }
+            if !l.m.is_empty() {
+                s.push_str(",\"M\":[");
+                for (i, m) in l.m.iter().enumerate() {
+                    if i > 0 {
+                        s.push(',');
+                    }
+                    s.push_str("{\"from\":");
+                    json::write_str(&mut s, &m.from);
+                    s.push_str(&format!(",\"t\":{},\"body\":", m.t as i64));
+                    json::write_str(&mut s, &m.body);
+                    s.push_str(",\"subj\":");
+                    json::write_str(&mut s, &m.subj);
+                    s.push_str(",\"type\":");
+                    json::write_str(&mut s, &m.kind);
+                    s.push('}');
+                }
+                s.push(']');
+            }
+            s.push('}');
         }
         s.push_str("]}");
         s
@@ -338,6 +545,14 @@ impl Core {
         (self.clocks.now)()
     }
 
+    /// the presence of persona `name` (lower case `k`): its connection's, or offline
+    fn presence_of(&self, k: &str, name: &str) -> Fields {
+        match self.buddies.online.get(k).and_then(|o| self.buddies.conns.get(o)) {
+            Some(o) => presence(o),
+            None => offline(name),
+        }
+    }
+
     pub fn buddy_connect(&mut self, c: ConnId) {
         let Some((vip, _, group, _)) = self.conn_ids(c) else { return };
         let now = self.bnow();
@@ -359,9 +574,9 @@ impl Core {
                 msgs_t: now,
                 msgs_v: 5.0,
                 met: HashSet::new(),
-                blocked: IndexMap::new(),
                 told: None,
                 presence_timer: None,
+                mail_timer: None,
                 rate: LBucket::new(l.msg_rate, 3.0 * l.msg_rate, now),
                 heavy: LBucket::new(l.heavy_rate, 4.0, now),
                 tries: 0,
@@ -416,10 +631,11 @@ impl Core {
         }
     }
 
-    /// the connection's persona goes offline: its held-back presence dropped, off `online`, its friends told
+    /// the connection's persona goes offline: its held-back presence and waiting messages' timer dropped, off
+    /// `online`, its friends told
     pub fn buddy_gone(&mut self, b: u64) {
         let Some(x) = self.buddies.conns.get_mut(&b) else { return };
-        if let Some(t) = x.presence_timer.take() {
+        for t in [x.presence_timer.take(), x.mail_timer.take()].into_iter().flatten() {
             self.timers.clear(t);
         }
         if x.persona.is_none() {
@@ -456,6 +672,11 @@ impl Core {
 
     pub fn buddy_save(&mut self) {
         let Some(dir) = self.buddies.dir.clone() else { return };
+        // (what waited too long is not written)
+        let now = self.bnow();
+        if self.buddies.prune(now) {
+            self.buddies.dirty = true;
+        }
         if !self.buddies.dirty {
             return;
         }
@@ -496,7 +717,7 @@ impl Core {
             self.buddies.drop_list(&old);
             self.buddies.dirty = true;
         }
-        self.buddies.lists.insert(k, FriendsList { name: name.to_string(), b: IndexMap::new(), seen: jsx::month_of(now) });
+        self.buddies.lists.insert(k, FriendsList::new(name, jsx::month_of(now)));
         true
     }
 
@@ -577,6 +798,18 @@ impl Core {
         }
     }
 
+    /// the messages that waited for the connection's persona go to it
+    pub fn buddy_mail_timer(&mut self, b: u64) {
+        let Some(x) = self.buddies.conns.get_mut(&b) else { return };
+        x.mail_timer = None;
+        let (conn, me) = (x.conn, x.persona.as_ref().map(|_| x.key.clone()));
+        if let Some(me) = me
+            && self.conn_open(conn)
+        {
+            let _ = self.deliver_mail(b, &me);
+        }
+    }
+
     /// b and the persona who become friends (each on the other's list), both told (RNOT ATTR=0: no request pending
     /// any more) with each other's presence
     fn befriend(&mut self, b: u64, who: &str, how: &str) -> Result<(), String> {
@@ -584,8 +817,9 @@ impl Core {
         let Some(bp) = x.persona.clone() else { return Err(null_persona()) };
         let group = x.group.clone();
         let (k, me) = (lower(who), lower(&bp));
-        self.buddies.requests.remove(&format!("{k}>{me}"));
-        self.buddies.requests.remove(&format!("{me}>{k}"));
+        if self.buddies.unask(&k, &me) | self.buddies.unask(&me, &k) {
+            self.touch_lists();
+        }
         let full_without = |l: Option<&FriendsList>, n: &str| l.is_some_and(|l| l.b.len() >= MAX_LIST && !l.b.contains_key(n));
         if full_without(self.buddies.list(&bp), &k) || full_without(self.buddies.list(who), &me) {
             return Ok(());
@@ -603,16 +837,81 @@ impl Core {
         (self.log)(&format!("[online] \"{bp}\" and \"{who}\" are friends ({how})"), Some(&group));
         let o = self.buddies.online.get(&k).copied();
         self.bsend(b, "RNOT", &fields![("USER", who), ("CHNG", "A"), ("ATTR", 0)], "")?;
-        let p = match o.and_then(|o| self.buddies.conns.get(&o)) {
-            Some(ox) => presence(ox),
-            None => offline(who),
-        };
+        let p = self.presence_of(&k, who);
         self.bsend(b, "PGET", &p, "")?;
         if let Some(o) = o {
             let bp2 = self.buddies.conns.get(&b).and_then(|x| x.persona.clone());
             self.bsend(o, "RNOT", &fields![("USER", bp2), ("CHNG", "A"), ("ATTR", 0)], "")?;
             let p = presence(&self.buddies.conns[&b]);
             self.bsend(o, "PGET", &p, "")?;
+        }
+        Ok(())
+    }
+
+    /// persona `me_name` and `who` are friends no more (on neither list), and me's request to who is taken back: who
+    /// told (RNOT CHNG=D) when that changed anything
+    fn unfriend(&mut self, me_name: &str, who: &str) -> Result<(), String> {
+        let (me, k) = (lower(me_name), lower(who));
+        let changed = self.buddies.remove_friend(&me, &k) | self.buddies.remove_friend(&k, &me) | self.buddies.unask(&me, &k);
+        if !changed {
+            return Ok(());
+        }
+        self.touch_lists();
+        match self.buddies.online.get(&k).copied() {
+            Some(o) => self.bsend(o, "RNOT", &fields![("USER", me_name), ("CHNG", "D")], ""),
+            None => Ok(()),
+        }
+    }
+
+    /// `who` (lower case k) on me's blocked list, its request to me gone; false: no room
+    fn block(&mut self, me_name: &str, group: &Arc<str>, who: String) -> bool {
+        let (me, k) = (lower(me_name), lower(&who));
+        if self.buddies.list(me_name).is_some_and(|l| l.i.len() >= MAX_LIST && !l.i.contains_key(&k)) || !self.make_list(me_name, group) {
+            return false;
+        }
+        self.buddies.lists.get_mut(&me).expect("made").i.insert(k.clone(), who);
+        self.buddies.unask(&k, &me);
+        self.touch_lists();
+        true
+    }
+
+    /// a message to persona k (lower case) that is away waits for it when k has the sender as a friend and does not
+    /// block it, while there is room (the oldest of k's goes for it)
+    fn keep_mail(&mut self, k: &str, from: &str, f: &FieldMap, t: f64) {
+        let me = lower(from);
+        if self.buddies.mail >= ALL_MAIL || self.buddies.blocks(k, &me) {
+            return;
+        }
+        let Some(l) = self.buddies.lists.get_mut(k).filter(|l| l.b.contains_key(&me)) else { return };
+        l.m.push(Mail {
+            from: from.to_string(),
+            body: clean_text(f.str("BODY"), 500),
+            subj: clean_text(f.str("SUBJ"), 64),
+            kind: jsx::slice16(f.get("TYPE").unwrap_or("C"), 4).to_string(),
+            t: t.floor(),
+        });
+        self.buddies.mail += 1;
+        if l.m.len() > MAX_MAIL {
+            l.m.remove(0);
+            self.buddies.mail -= 1;
+        }
+        self.touch_lists();
+    }
+
+    /// the messages that waited for persona `me` (lower case), to connection b, and gone from the store (a sender
+    /// blocked since is left out)
+    fn deliver_mail(&mut self, b: u64, me: &str) -> Result<(), String> {
+        let Some(l) = self.buddies.lists.get_mut(me).filter(|l| !l.m.is_empty()) else { return Ok(()) };
+        let mail = std::mem::take(&mut l.m);
+        self.buddies.mail -= mail.len();
+        self.touch_lists();
+        let now = self.bnow();
+        for m in mail {
+            if now - m.t >= MAIL_DAYS * DAY_MS || self.buddies.blocks(me, &lower(&m.from)) {
+                continue;
+            }
+            let rec = fields![("USER", m.from), ("BODY", m.body), ("SUBJ", m.subj), ("TYPE", m.kind), ("TIME", (m.t / 1000.0).floor())];
+            self.bsend(b, "RECV", &rec, "")?;
         }
         Ok(())
     }
@@ -679,6 +978,14 @@ impl Core {
             }
             self.buddies.online.insert(k, b);
             self.seen_list(&persona);
+            // (requests and messages that waited too long go, at most once an hour)
+            let now = self.bnow();
+            if now - self.buddies.pruned >= 3_600_000.0 {
+                self.buddies.pruned = now;
+                if self.buddies.prune(now) {
+                    self.touch_lists();
+                }
+            }
             return self.bsend(b, "AUTH", &fields![("TITL", "EA MESSENGER")], "");
         }
         if kind == "PING" {
@@ -704,51 +1011,76 @@ impl Core {
                     return self.bsend(b, "RGET", &with_id, "full");
                 }
                 let which = list_field(f);
-                let names: Vec<String> = if which == "I" {
-                    self.buddies.conns[&b].blocked.values().cloned().collect()
+                // the entries: name, ATTR (a request's letter, none for a friend or a blocked one)
+                let mut rows: Vec<(String, &'static str)> = Vec::new();
+                let bs = &self.buddies;
+                let l = bs.lists.get(&me);
+                if which == "I" {
+                    rows.extend(l.into_iter().flat_map(|l| l.i.values()).map(|n| (n.clone(), "")));
                 } else {
-                    self.buddies.list(&bp).map_or(vec![], |l| l.b.values().cloned().collect())
-                };
-                self.bsend(b, "RGET", &wid(fields![("SIZE", names.len())]), "")?;
-                for n in &names {
-                    self.bsend(b, "ROST", &wid(fields![("USER", n), ("LIST", which)]), "")?;
+                    rows.extend(l.into_iter().flat_map(|l| l.b.values()).map(|n| (n.clone(), "")));
+                    if f.str("PEND").eq_ignore_ascii_case("Y") {
+                        let friend_or_asked = |k: &str| l.is_some_and(|l| l.b.contains_key(k) || l.r.contains_key(k));
+                        for (k, (n, t)) in l.into_iter().flat_map(|l| l.r.iter()) {
+                            if now - t < ASK_DAYS * DAY_MS && !l.is_some_and(|l| l.b.contains_key(k)) {
+                                rows.push((n.clone(), I_ASKED));
+                            }
+                        }
+                        let mut askers: Vec<&String> = bs.asked.get(&me).into_iter().flatten().collect();
+                        askers.sort();
+                        for k in askers {
+                            if let Some(n) = bs.request(k, &me, now)
+                                && !bs.blocks(&me, k)
+                                && !friend_or_asked(k)
+                            {
+                                rows.push((n.to_string(), ASKED_ME));
+                            }
+                        }
+                    }
+                }
+                self.bsend(b, "RGET", &wid(fields![("SIZE", rows.len())]), "")?;
+                for (n, a) in &rows {
+                    let mut r = wid(fields![("USER", n), ("LIST", which)]);
+                    if !a.is_empty() {
+                        r.extend(fields![("ATTR", *a)]);
+                    }
+                    self.bsend(b, "ROST", &r, "")?;
                 }
                 if which == "B" {
-                    for n in &names {
-                        let p = match self.buddies.online.get(&lower(n)).and_then(|o| self.buddies.conns.get(o)) {
-                            Some(o) => presence(o),
-                            None => offline(n),
-                        };
+                    for (n, _) in &rows {
+                        let p = self.presence_of(&lower(n), n);
                         self.bsend(b, "PGET", &p, "")?;
+                    }
+                    // the messages that waited, a moment later (`MAIL_WAIT_MS`)
+                    let waiting = self.buddies.lists.get(&me).is_some_and(|l| !l.m.is_empty());
+                    if waiting && self.buddies.conns[&b].mail_timer.is_none() {
+                        let t = self.set_timeout(MAIL_WAIT_MS, Action::BuddyMail(b));
+                        self.buddies.conns.get_mut(&b).expect("held").mail_timer = Some(t);
                     }
                 }
                 Ok(())
             }
-            "RADD" | "RDEL" => {
-                let which = list_field(f);
+            "RADD" | "RDEL" | "RDEM" => {
+                let which = if kind == "RDEM" { "B" } else { list_field(f) };
                 let who = strip_at(f.str("USER")).to_string();
                 if !valid_name(&who) || lower(&who) == me {
                     return self.bsend(b, kind, &with_id, "user");
                 }
                 let k = lower(&who);
-                // the session's own (see the module's text)
                 if which == "I" {
-                    let x = self.buddies.conns.get_mut(&b).expect("held");
                     if kind == "RADD" {
-                        if x.blocked.len() >= MAX_LIST && !x.blocked.contains_key(&k) {
+                        if !self.block(&bp, &group, who) {
                             return self.bsend(b, kind, &with_id, "full");
                         }
-                        x.blocked.insert(k, who);
-                    } else {
-                        x.blocked.shift_remove(&k);
-                    }
-                    return self.bsend(b, kind, &with_id, "");
-                }
-                if kind == "RDEL" {
-                    if self.buddies.remove_friend(&me, &k) {
+                    } else if self.buddies.lists.get_mut(&me).is_some_and(|l| l.i.shift_remove(&k).is_some()) {
                         self.touch_lists();
                     }
                     return self.bsend(b, kind, &with_id, "");
+                }
+                if kind != "RADD" {
+                    // a friend taken off, or the request taken back: on neither side any more
+                    self.bsend(b, kind, &with_id, "")?;
+                    return self.unfriend(&bp, &who);
                 }
                 let cur = self.buddies.list(&bp);
                 if cur.is_some_and(|l| l.b.len() >= MAX_LIST && !l.b.contains_key(&k)) {
@@ -761,75 +1093,84 @@ impl Core {
                 self.touch_lists();
                 self.bsend(b, kind, &with_id, "")?;
                 let o = self.buddies.online.get(&k).copied();
-                let p = match o.and_then(|o| self.buddies.conns.get(&o)) {
-                    Some(ox) => presence(ox),
-                    None => offline(&who),
-                };
+                let p = self.presence_of(&k, &who);
                 self.bsend(b, "PGET", &p, "")?;
-                if let Some(o) = o.filter(|o| self.buddies.conns.get(o).is_some_and(|x| !x.blocked.contains_key(&me))) {
+                if let Some(o) = o.filter(|_| !self.buddies.blocks(&k, &me)) {
                     let bp2 = self.buddies.conns.get(&b).and_then(|x| x.persona.clone());
                     self.bsend(o, "RNOT", &fields![("USER", bp2), ("LIST", "B")], "")?;
                 }
                 Ok(())
             }
             "RADM" => {
-                // a friend request (Send Friend Request): to the persona, which answers with RRSP
+                // a friend request (Send Friend Request): it waits for the persona's answer, RRSP
                 let who = strip_at(f.str("USER")).to_string();
                 let k = lower(&who);
                 if !valid_name(&who) || k == me {
                     return self.bsend(b, kind, &with_id, "user");
                 }
-                if self.buddies.list(&bp).is_some_and(|l| l.b.len() >= MAX_LIST && !l.b.contains_key(&k)) {
+                let now = self.bnow();
+                let (friends, full, asked_full) = match self.buddies.list(&bp) {
+                    Some(l) => (l.b.contains_key(&k), l.b.len() >= MAX_LIST, l.r.len() >= MAX_ASKED && !l.r.contains_key(&k)),
+                    None => (false, false, false),
+                };
+                if friends {
+                    return self.bsend(b, kind, &with_id, "");
+                }
+                if full {
+                    return self.bsend(b, kind, &with_id, "full");
+                }
+                // two requests that cross (the asked one asks back) make friends
+                if self.buddies.request(&k, &me, now).is_some() {
+                    self.bsend(b, kind, &with_id, "")?;
+                    return self.befriend(b, &who, "asked back");
+                }
+                if asked_full || !self.make_list(&bp, &group) {
                     return self.bsend(b, kind, &with_id, "full");
                 }
                 self.bsend(b, kind, &with_id, "")?;
-                let Some(o) = self.buddies.online.get(&k).copied() else { return Ok(()) };
-                // offline, or blocked by that persona
-                if self.buddies.conns.get(&o).is_none_or(|x| x.blocked.contains_key(&me)) {
+                // the asked persona's presence for the asker's new entry (PRES=Y; else the game shows it offline)
+                let p = self.presence_of(&k, &who);
+                self.bsend(b, "PGET", &p, "")?;
+                // (a persona that blocks the asker never hears of it)
+                if self.buddies.blocks(&k, &me) {
                     return Ok(());
                 }
-                // two requests that cross (the asked one asks back: "Send Friend Request" in the asker's menu) make
-                // friends
-                if self.buddies.requests.contains_key(&format!("{k}>{me}")) {
-                    return self.befriend(b, &who, "asked back");
-                }
-                if self.buddies.requests.len() > 10_000 {
-                    self.buddies.requests.clear();
-                }
-                let now = self.bnow();
-                self.buddies.requests.insert(format!("{me}>{k}"), now);
-                let bp2 = self.buddies.conns.get(&b).and_then(|x| x.persona.clone());
-                (self.log)(&format!("[online] \"{}\" asked \"{who}\" to be friends", bp2.as_deref().unwrap_or("null")), Some(&group));
-                // a roster update for the asked one: the asker, with a "request" bit in ATTR (the game keeps two
-                // such bits, 0x40000 and 0x80000, and clears them when the request is answered: RNOT, 0x74E2B0;
-                // with 0x80000 the asker appears on the list, the menu offers no accept: the asked one answers with
-                // a request back), then the asker's presence for that entry
-                self.bsend(o, "RNOT", &fields![("USER", bp2), ("CHNG", "A"), ("ATTR", 0x80000)], "")?;
+                self.buddies.ask(&me, k.clone(), who.clone(), now.floor());
+                self.touch_lists();
+                (self.log)(&format!("[online] \"{bp}\" asked \"{who}\" to be friends"), Some(&group));
+                let Some(o) = self.buddies.online.get(&k).copied() else { return Ok(()) };
+                // to the asked one: the asker, as a request that waits for its answer (R: the player's menu then
+                // offers to answer it, Accept, Decline or Block, 0x4D5190/0x4A1B50), then the asker's presence for
+                // that entry
+                self.bsend(o, "RNOT", &fields![("USER", bp.as_str()), ("CHNG", "A"), ("ATTR", ASKED_ME)], "")?;
                 let p = presence(&self.buddies.conns[&b]);
                 self.bsend(o, "PGET", &p, "")
             }
             "RRSP" => {
-                // the answer to a friend request; ANSW's coding is UNVERIFIED: anything but a "no" accepts
+                // the answer to a friend request: Y accept, N decline, B block
                 let who = strip_at(f.str("USER")).to_string();
                 let k = lower(&who);
-                let key = format!("{k}>{me}");
-                let asked = self.buddies.requests.get(&key).copied();
-                self.bsend(b, kind, &with_id, "")?;
                 let now = self.bnow();
-                let Some(asked) = asked.filter(|a| now - a <= 3_600_000.0) else { return Ok(()) };
-                let _ = asked;
-                self.buddies.requests.remove(&key);
-                let answer = f.str("ANSW");
-                let a = answer.to_lowercase();
-                if a.starts_with('n') || a.starts_with('d') || a.starts_with('0') || a.starts_with("false") {
-                    let bp2 = self.buddies.conns.get(&b).and_then(|x| x.persona.clone());
-                    (self.log)(
-                        &format!("[online] \"{}\" declined \"{who}\"'s friend request", bp2.as_deref().unwrap_or("null")),
-                        Some(&group),
-                    );
-                    return Ok(());
+                let asker = self.buddies.request(&k, &me, now).map(str::to_string);
+                self.bsend(b, kind, &with_id, "")?;
+                // (one that waited too long goes too)
+                if self.buddies.unask(&k, &me) {
+                    self.touch_lists();
                 }
-                self.befriend(b, &who, &format!("ANSW={}", clean_text(answer, 8)))
+                let Some(asker) = asker else { return Ok(()) };
+                let answer = f.str("ANSW");
+                let a = answer.chars().next().map(|c| c.to_ascii_uppercase());
+                if a == Some('Y') {
+                    return self.befriend(b, &asker, &format!("ANSW={}", clean_text(answer, 8)));
+                }
+                if a == Some('B') {
+                    self.block(&bp, &group, asker.clone());
+                }
+                (self.log)(&format!("[online] \"{bp}\" declined \"{asker}\"'s friend request"), Some(&group));
+                match self.buddies.online.get(&k).copied() {
+                    Some(o) => self.bsend(o, "RNOT", &fields![("USER", bp.as_str()), ("CHNG", "D")], ""),
+                    None => Ok(()),
+                }
             }
             "PADD" | "PDEL" => {
                 // the Messenger's "All" list: players this one searched for or met (in memory only); their presence
@@ -852,12 +1193,9 @@ impl Core {
                     return Ok(());
                 }
                 if x.met.len() < MAX_LIST && x.met.insert(k.clone()) {
-                    self.buddies.met_by.entry(k).or_default().insert(b);
+                    self.buddies.met_by.entry(k.clone()).or_default().insert(b);
                 }
-                let p = match self.buddies.online.get(&lower(&who)).and_then(|o| self.buddies.conns.get(o)) {
-                    Some(o) => presence(o),
-                    None => offline(&who),
-                };
+                let p = self.presence_of(&k, &who);
                 self.bsend(b, "PGET", &p, "")
             }
             "USCH" => {
@@ -909,7 +1247,8 @@ impl Core {
             }
             "SEND" | "GINV" | "GRSP" | "GRVK" => {
                 let to = strip_at(f.str("USER")).to_string();
-                let o = self.buddies.online.get(&lower(&to)).copied();
+                let k = lower(&to);
+                let o = self.buddies.online.get(&k).copied();
                 let t = self.bnow();
                 let x = self.buddies.conns.get_mut(&b).expect("held");
                 // messages and invites: 2 a second, a burst of 5 (over that: "full", the connection stays)
@@ -920,10 +1259,15 @@ impl Core {
                 }
                 x.msgs_v -= 1.0;
                 self.bsend(b, kind, &with_id, "")?;
-                // offline, or this sender is blocked
-                let Some(o) = o else { return Ok(()) };
-                let Some(ox) = self.buddies.conns.get(&o) else { return Ok(()) };
-                if ox.persona.is_none() || ox.blocked.contains_key(&me) {
+                // away: a message from a friend waits for the persona (an invite is forgotten)
+                let Some(o) = o.filter(|o| self.buddies.conns.get(o).is_some_and(|x| x.persona.is_some())) else {
+                    if kind == "SEND" && valid_name(&to) {
+                        self.keep_mail(&k, &bp, f, t);
+                    }
+                    return Ok(());
+                };
+                // this sender is blocked
+                if self.buddies.blocks(&k, &me) {
                     return Ok(());
                 }
                 let bp2 = self.buddies.conns.get(&b).and_then(|x| x.persona.clone());
@@ -956,13 +1300,15 @@ impl Core {
 mod tests {
     use super::*;
 
-    // buddies.json read leniently and written again, with room for 3 lists: what the Node server's Buddies made of
-    // the same files
+    // buddies.json read leniently and written again, with room for 3 lists
     #[test]
     fn buddies_json_read_and_written_again() {
         let friends: Vec<String> = (0..60).map(|i| format!("\"Friend{i}\"")).collect();
         let many = format!(r#"{{"personas":[{{"name":"Many","seen":"2026-03","B":[{}]}}]}}"#, friends.join(","));
         let fifty = format!(r#"{{"name":"Many","seen":"2026-03","B":[{}]}}"#, friends[..50].join(","));
+        let mail: Vec<String> = (0..25).map(|i| format!(r#"{{"from":"Friend1","t":{i},"body":"m{i}","subj":"","type":"C"}}"#)).collect();
+        let lots = format!(r#"{{"v":3,"personas":[{{"name":"Inbox","seen":"2026-10","B":["Friend1"],"M":[{}]}}]}}"#, mail.join(","));
+        let twenty = format!(r#"{{"name":"Inbox","seen":"2026-10","B":["Friend1"],"M":[{}]}}"#, mail[5..].join(","));
         let cases = [
             ("{not json", ""),
             ("", ""),
@@ -971,25 +1317,36 @@ mod tests {
                 r#"{"name":"Alpha","seen":"2026-10","B":["Bravo","Charlie"]}"#,
             ),
             // a friend twice: the later spelling in the earlier one's place; friends that are no name; the blocked
-            // list (I) not read; an owner twice: the more recently seen list, in the other one's place
+            // list of a file of version 2 (I) not read; an owner twice: the more recently seen list, in the other
+            // one's place
             (
                 r#"{"personas":[{"name":"Alpha","seen":"2026-10","B":["Bravo","bravo","x y",5,null,"Delta"],"I":["Mallory"]},{"name":"alpha","seen":"2026-09","B":["Echo"]}]}"#,
                 r#"{"name":"Alpha","seen":"2026-10","B":["bravo","Delta"]}"#,
             ),
             // owners that are no name not read; of the others the 3 most recently seen (no month: the oldest), of
-            // those the lists with friends
+            // those the lists with anything in them
             (
                 r#"{"personas":[{"name":"NoFriends","seen":"2026-10","B":[]},{"name":"Bad Name","B":["Alpha"]},{"name":"Old","B":["Alpha"]},{"name":"Mid","seen":"2026-05","B":["Alpha"]},{"name":"New","seen":"2026-12","B":"Alpha"},{"name":"Newer","seen":"2027-01","B":["Zed"]}]}"#,
                 r#"{"name":"Newer","seen":"2027-01","B":["Zed"]}"#,
             ),
             // 50 friends at most
             (many.as_str(), fifty.as_str()),
+            // version 3: the blocked, the requests sent (ones that are no name or no time left out), the messages
+            // waiting (text cleaned, ones from no name or without a time left out); a list with only some of them
+            (
+                r#"{"v":3,"personas":[{"name":"Alpha","seen":"2026-10","B":["Bravo"],"I":["Mallory","x y"],"R":[["Charlie",1761200000000],["x y",1],["Delta"],["Echo",-5]],"M":[{"from":"Bravo","t":1761200000123.7,"body":"hi\u0007 there","subj":"","type":"C"},{"from":"x y","t":1,"body":"no"},{"from":"Bravo","body":"no time"}]},{"name":"Lonely","seen":"2026-10","B":[],"R":[["Alpha",5]]}]}"#,
+                r#"{"name":"Alpha","seen":"2026-10","B":["Bravo"],"I":["Mallory"],"R":[["Charlie",1761200000000]],"M":[{"from":"Bravo","t":1761200000123,"body":"hi there","subj":"","type":"C"}]},{"name":"Lonely","seen":"2026-10","B":[],"R":[["Alpha",5]]}"#,
+            ),
+            // the newest 20 messages
+            (lots.as_str(), twenty.as_str()),
         ];
         for (text, kept) in cases {
             let dir = tempfile::tempdir().unwrap();
             std::fs::write(dir.path().join("buddies.json"), text).unwrap();
             let b = Buddies::new(Some(dir.path().to_path_buf()), BuddyLimits { lists: 3.0, ..Default::default() });
-            let want = format!(r#"{{"v":2,"note":"NFSU2 online friends lists (persona names only)","personas":[{kept}]}}"#);
+            let want = format!(
+                r#"{{"v":3,"note":"NFSU2 online Messenger lists (persona names; friend requests and messages waiting for their persona)","personas":[{kept}]}}"#
+            );
             assert_eq!(b.serialize(), want, "{text}");
         }
     }

@@ -124,7 +124,7 @@ fn stop_writes_what_is_kept() {
     assert_eq!(
         b,
         format!(
-            r#"{{"v":2,"note":"NFSU2 online friends lists (persona names only)","personas":[{{"name":"Alpha","seen":"{month}","B":["Bravo"]}}]}}"#
+            r#"{{"v":3,"note":"NFSU2 online Messenger lists (persona names; friend requests and messages waiting for their persona)","personas":[{{"name":"Alpha","seen":"{month}","B":["Bravo"]}}]}}"#
         )
     );
 }

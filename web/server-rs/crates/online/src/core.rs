@@ -170,6 +170,7 @@ impl Core {
             Action::BuddyLogin(b) => self.buddy_login_idle(b),
             Action::BuddyRetry(b, f) => self.buddy_retry(b, f),
             Action::Presence(b) => self.presence_timer(b),
+            Action::BuddyMail(b) => self.buddy_mail_timer(b),
             Action::BuddySave => self.buddy_save_timer(),
         }
     }

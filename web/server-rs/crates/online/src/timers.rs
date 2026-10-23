@@ -28,6 +28,8 @@ pub enum Action {
     BuddyRetry(u64, FieldMap),
     /// a presence held back to at most one a second
     Presence(u64),
+    /// the messages that waited for a persona, a moment after its friends list
+    BuddyMail(u64),
     /// the friends lists' debounced save
     BuddySave,
 }

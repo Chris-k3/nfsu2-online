@@ -366,17 +366,19 @@ Good to know:
   `i`), gaps and repeated letters read as the word they spell; a number (a year, two digits at the end) is a number
   (`Hakan1995` and `Dani99` are names).
 - **Your name is yours while you are online**, and while you race. Someone else can use it when you are not; the
-  rankings and your EA Messenger friends list follow the name, so whoever plays under it while you are away sees your
-  friends list and can change it. If another player is online under it, you play under it with four digits in place
+  rankings and your EA Messenger lists follow the name, so whoever plays under it while you are away sees your
+  friends, the players you block, your friend requests and the messages waiting for you, and can change them. If
+  another player is online under it, you play under it with four digits in place
   of its end (`NAME` becomes `NAME4821`), usually the same digits when you come back. Set **Online, Your name** to
   keep your own.
 - **No name and no profile:** the game's own EA Login screens come instead. **Use Existing EA Account**, any name
   (3 to 15 letters, digits, `-` or `_`) and any password, **Continue**; **No** to "create a profile"; your persona.
   Nothing is checked and nothing is kept: there are no accounts. Type a password you use nowhere else: the game
   sends it to the server only lightly scrambled (the server never reads it).
-- **Kept on the server:** only race results per name (Rankings) and your EA Messenger friends list (names). Never
-  your password: the server does not read it. Players you block stay blocked while you are online; the block is not
-  kept after that.
+- **Kept on the server:** only race results per name (Rankings) and your EA Messenger lists: your friends and the
+  players you block (names), the friend requests you sent until they are answered (30 days at most), and your friends'
+  messages that came while you were away until you are back (7 days at most). Never your password: the server does
+  not read it.
 - **Game passwords:** the game asks for the password of a game created with one, and only the same password joins
   it. The server keeps no copy of it, only a check value for that game while it is open, and never shows or logs it.
 - **Others see** your name, your game, your chat and your results, never your real address.
@@ -399,8 +401,13 @@ Good to know:
 - **A race counts** in Rankings once two of its players' games sent the same result (every game sends its own at
   the results screen), so a race that only one player finished does not count. Each player races from their own
   browser.
-- **EA Messenger:** Search finds players on this server; Send Message works. To become friends, both send a
-  friend request (the other's request shows the asker in your list: open them, Send Friend Request).
+- **EA Messenger** (the Online Main Menu's button): Search finds the players online on this server and those with a
+  race in Rankings. **Send Friend Request** reaches the other player now, or when they next come online: they see you
+  in their list with a green arrow and pick **Answer Friend Request**: Accept, Decline or Block. Your friends stay on
+  your list and are told when you come online; **Remove Friend** takes the two of you off each other's lists. A
+  message to a friend who is away waits for them (7 days), and shows with an envelope when they are back; a message
+  to anyone else reaches them only while they are online. Players you block stay blocked: nothing of theirs reaches
+  you.
 - **Not yet:** the points table after a ranked race stays empty (the race still counts in Rankings).
 - **Who is on:** Online on the start page shows how many play on this server now, and how many of them are in Online
   mode (in its menus or racing). Only the two numbers: no names.

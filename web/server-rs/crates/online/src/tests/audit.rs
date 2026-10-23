@@ -312,9 +312,11 @@ fn onl5_races_and_browsers() {
     assert!(names.contains(&"stays".to_string()), "the race of browsers still here goes on");
 }
 
-// ONL-6: a blocked list is the session's own: the next holder of the name sees none, none is stored
+// ONL-6, as the players chose on 2026-10-23 (it was: the blocked list is the session's own, never stored, so that the
+// next holder of the name can neither read nor empty it): the blocked list follows the name like its friends, kept
+// over a restart, and the block holds while its persona is away (no message waits for it, no request arrives)
 #[test]
-fn onl6_blocked_list_is_the_sessions() {
+fn onl6_blocked_list_follows_the_name() {
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path().join("onl6");
     let mut w = World::new(Opts { state_dir: Some(dir.clone()), ..Default::default() });
@@ -322,7 +324,7 @@ fn onl6_blocked_list_is_the_sessions() {
     let la = w.login_as(ga, "AliceAcct", "Alice", "secret");
     let ka = w.lkey(la);
     let ab = w.buddy(ga, &ka);
-    for (l, u) in [("B", "BobFriend"), ("I", "Mallory")] {
+    for (l, u) in [("B", "BobFriend"), ("B", "Mallory"), ("I", "Mallory")] {
         w.send(ab, "RADD", fields![("LIST", l), ("USER", u), ("ID", 1)]);
     }
     // while Alice is online the block works
@@ -332,20 +334,29 @@ fn onl6_blocked_list_is_the_sessions() {
     let mb = w.buddy(gm, &km);
     w.send(mb, "SEND", fields![("USER", "Alice"), ("BODY", "hi")]);
     assert_eq!(w.c(ab).count("RECV"), 0, "a blocked sender's message does not arrive");
+    // and while she is away, though Mallory is on her friends list too
     w.close(ab);
     w.close(la);
+    w.send(mb, "SEND", fields![("USER", "Alice"), ("BODY", "still there?")]);
+    w.send(mb, "RADM", fields![("USER", "Alice"), ("ID", 3)]);
     w.close(mb);
     w.core.buddy_save();
     let stored = std::fs::read_to_string(dir.join("buddies.json")).unwrap();
-    assert!(!stored.contains("Mallory"), "the blocked list is not stored: {stored}");
-    assert!(stored.contains("BobFriend"), "the friends list is");
-    // Mallory takes the name while Alice is away
+    assert!(stored.contains(r#""I":["Mallory"]"#), "the blocked list is kept: {stored}");
+    assert!(!stored.contains("still there") && !stored.contains(r#""R""#), "nothing of Mallory's waits: {stored}");
+    // over a restart: whoever plays as Alice has the list
+    w.core.stop();
+    let mut w = World::new(Opts { state_dir: Some(dir.clone()), ..Default::default() });
     let g2 = client(&mut w, "10.77.0.52");
-    let l2 = w.login_as(g2, "Mallory99", "Alice", "secret");
+    let l2 = w.login_as(g2, "Other", "Alice", "secret");
     let k2 = w.lkey(l2);
     let b2 = w.buddy(g2, &k2);
-    w.send(b2, "RGET", fields![("LIST", "I"), ("ID", 2)]);
-    assert_eq!(w.c(b2).l("RGET").g("SIZE"), "0", "the next holder of the name sees no blocked list");
+    w.send(b2, "RGET", fields![("LIST", "I"), ("PRES", "Y"), ("PEND", "Y"), ("ID", 2)]);
+    assert_eq!([w.c(b2).l("RGET").g("SIZE"), w.c(b2).l("ROST").g("USER"), w.c(b2).l("ROST").g("ID")], ["1", "Mallory", "2"]);
+    // unblocked: gone from the file
+    w.send(b2, "RDEL", fields![("LIST", "I"), ("USER", "Mallory")]);
+    w.core.buddy_save();
+    assert!(!std::fs::read_to_string(dir.join("buddies.json")).unwrap().contains(r#""I""#));
 }
 
 fn board(w: &mut World, kind: u32) -> Vec<String> {

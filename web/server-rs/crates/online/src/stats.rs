@@ -915,7 +915,7 @@ pub(crate) mod tests {
         assert_eq!(alpha, Some((Some(Counts { races: 2.0, rw: 1.0, ..Default::default() }), true)));
         assert_eq!(
             buddies,
-            r#"{"v":2,"note":"NFSU2 online friends lists (persona names only)","personas":[{"name":"Alpha","seen":"2026-10","B":["Bravo"]}]}"#
+            r#"{"v":3,"note":"NFSU2 online Messenger lists (persona names; friend requests and messages waiting for their persona)","personas":[{"name":"Alpha","seen":"2026-10","B":["Bravo"]}]}"#
         );
         assert_eq!(bad, 0);
     }
