@@ -33,6 +33,13 @@ const char *horn_name(int kind);
 void horn_begin(const float *pos, const float *fwd, const float *vel);
 int  horn_sound(uint32_t who, const char *name, int kind, const float *p, const float *v);
 void horn_end(void);
+/* The player's own horn for a moment (a quarter of a second, or until the
+ * next horn_end): how loud the volume makes it.  Game thread. */
+void horn_preview(void);
+/* How loud every horn is, HORN_VOL_MIN .. 1 (1: as made, the default);
+ * a value out of that range is taken as its nearer end.  Any thread. */
+#define HORN_VOL_MIN 0.1f
+void horn_set_volume(float v);
 /* Adds the sounding voices to an interleaved stereo float mix.  Mixer
  * thread. */
 void horn_mix(float *acc, unsigned frames, unsigned rate);

@@ -41,7 +41,9 @@
  * player's from their car as the camera hears it, full within NEAR_M, then
  * falling with the distance until it is gone at FAR_M (the last 50 m a
  * fade), from the side the car is on, duller the farther it is, its pitch
- * shifted by how fast the car and the player come or go (Doppler).
+ * shifted by how fast the car and the player come or go (Doppler).  All of
+ * them as loud as the Horn Volume slider of the game's Audio options says
+ * (hornmenu.c): 10 % to 100 % of that.
  *
  * Threads: horn_begin/horn_sound/horn_end on the game thread, every frame
  * while horns may sound; the mixer (audio.m: the AudioUnit callback,
@@ -178,10 +180,19 @@ static void voice_set(int v, uint32_t tune, int kind, float gain, float pan, flo
     PUT(g_in[v].tune, tune); PUT(g_in[v].kind, (uint32_t)kind); PUT(g_in[v].gain, fbits(gain)); PUT(g_in[v].pan, fbits(pan));
     PUT(g_in[v].pitch, fbits(pitch)); PUT(g_in[v].stamp, now_ms());
 }
+/* the volume, as the mixer reads it: 1.0's bits until the slider sets it */
+static uint32_t g_vol = 0x3f800000u;
+void horn_set_volume(float v){
+    if (!(v >= HORN_VOL_MIN)) v = HORN_VOL_MIN;
+    if (v > 1.f) v = 1.f;
+    PUT(g_vol, fbits(v));
+}
 
 /* ---- the game thread: which horn has which voice ---------------------------------- */
 static struct { int used, sounded, kind; uint32_t who, tune, free_at; float pan, pitch; } g_vo[HORN_VOICES];
 static struct { int ok; float p[3], l[2], v[3]; } g_lis;
+#define PREVIEW_WHO 0xfffffffeu
+static char g_self[64];                                  /* the name the player's own horn last sounded with (its pitch) */
 void horn_begin(const float *pos, const float *fwd, const float *vel){
     g_lis.ok = pos && fwd;
     if (!g_lis.ok) return;
@@ -209,6 +220,7 @@ int horn_sound(uint32_t who, const char *name, int kind, const float *p, const f
             if (pitch > 2.f) pitch = 2.f;
         }
     }
+    if (!p && who != PREVIEW_WHO && name) snprintf(g_self, sizeof g_self, "%s", name);
     int k = 0, start = 0;
     while (k < HORN_VOICES && !(g_vo[k].used && g_vo[k].who == who)) k++;
     if (k == HORN_VOICES){
@@ -231,6 +243,9 @@ void horn_end(void){
         voice_set(k, g_vo[k].tune, g_vo[k].kind, 0.f, g_vo[k].pan, g_vo[k].pitch > 0.f ? g_vo[k].pitch : 1.f);   /* fades as it was */
     }
 }
+/* the player's own horn, sounded once: the mixer lets it go STALE_MS later
+ * (or the next horn_end, when free roam or a race has the voices) */
+void horn_preview(void){ horn_sound(PREVIEW_WHO, g_self, horn_mine(), 0, 0); }
 
 /* ---- the mixer ----------------------------------------------------------------- */
 static float g_tbl[HORN_KINDS][TBL + 1];
@@ -281,6 +296,7 @@ void horn_mix(float *acc, unsigned frames, unsigned rate){
     float k_smooth = 1.f - expf(-1.f / (0.020f * fs));
     float k_hp = 1.f / (1.f + 2.f * (float)M_PI * 180.f / fs), rise = 1.f / (0.030f * fs);
     uint32_t gap = (uint32_t)(GAP_S * fs), vib_in = (uint32_t)(0.25f * fs);
+    float vol = bitsf(GET(g_vol));                       /* in the voices' gains, smoothed with them */
     for (int v = 0; v < HORN_VOICES; v++){
         float gain = bitsf(GET(g_in[v].gain));
         if (now - GET(g_in[v].stamp) > STALE_MS) gain = 0.f;
@@ -305,7 +321,7 @@ void horn_mix(float *acc, unsigned frames, unsigned rate){
         float svf = K->res > 0.f ? 2.f * sinf((float)M_PI * K->res / fs) : 0.f, wah = 2.f * (float)M_PI * K->wah / fs;
         float pan = bitsf(GET(g_in[v].pan)), tp = bitsf(GET(g_in[v].pitch));
         float th = (pan + 1.f) * (float)M_PI * 0.25f;     /* equal power */
-        float tgl = gain * cosf(th), tgr = gain * sinf(th), te = gain > 0.f ? 1.f : 0.f;
+        float tgl = gain * cosf(th) * vol, tgr = gain * sinf(th) * vol, te = gain > 0.f ? 1.f : 0.f;
         /* far horns lose their top: a one-pole low-pass from ~1.5 kHz (gain 0.05, 160 m) up to none (gain 0.6) */
         float k_lp = 0.15f + 0.85f * (gain * 1.7f > 1.f ? 1.f : gain * 1.7f);
         float env = g_v[v].env, gl = g_v[v].gl, gr = g_v[v].gr, pt = g_v[v].pitch;

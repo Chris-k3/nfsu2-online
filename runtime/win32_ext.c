@@ -1157,6 +1157,15 @@ void win32_reg_del(const char *nm){
     g_regn--;
 }
 void win32_reg_flush(void){ reg_load(); reg_save(); }
+/* A DWORD value of our own (hornmenu.c's HornVolume): read, and set with
+ * the file written at once. */
+int win32_reg_get_dword(const char *nm, uint32_t *out){
+    int i = reg_find(nm);
+    if (i < 0 || g_reg[i].is_str) return 0;
+    *out = g_reg[i].dw;
+    return 1;
+}
+void win32_reg_put_dword(const char *nm, uint32_t v){ reg_put_dword(nm, v); }
 
 /* GetTimeZoneInformation: the host's real zone.  TIME_ZONE_INFORMATION
  * (172 bytes): Bias@0, StandardName[32 WCHAR]@4, StandardDate@68,

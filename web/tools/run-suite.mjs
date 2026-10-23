@@ -55,6 +55,9 @@ const TABLE = [
   ['customize', 'mainmenu_item3.txt', 'screen UI_GenericParts_Browser.fng', '', 400],
   ['movies', 'career_movies.txt', 'tapuntil UI_StartCareer.fng satisfied', 'NOMOVIES=0', 400],
   ['options', 'options_display.txt', '[D3D] Reset', '', 400],
+  // the Horn Volume slider (runtime/hornmenu.c): Options > Audio, and the pause menu's, whose bar is made of copies
+  ['hornvolume', 'options_horn.txt', '[horn] volume 85 %', '', 400],
+  ['hornpause', 'pause_horn.txt', 'parts as SLIDER_BASE_8 SLIDER_KNOB_8 SLIDER_HANDLE_8 SLIDER_BEG_8 SLIDER_END_8', '', 400],
   // ns* commands: without a page input layer, runtime/web/input_web.c translates them into the event ring
   ['keyboard', 'kb_rebind_save.txt', 'waitmem [0x008654a4]==6 satisfied', '', 400],
   ['careerbot', 'career_bot.txt', 'segment done', 'NFSU2_CAREER_BOT_RACES=2', 600],

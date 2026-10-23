@@ -250,6 +250,8 @@ Good to know:
   players on an older version hear the dual tone.
   Each player's horn is also pitched a little differently by their name, so two players with the same horn sound
   apart. It sounds while the game runs, not in the pause menu or on the map. It works in Online and LAN races too.
+  How loud the horns are (yours and the others'): the game's Options, Audio, Horn Volume, also in the pause menu's
+  Options, from 10 % to 100 % (the most, and the default). Moving it sounds your horn at the new volume.
 - **Engines:** the others hear your engine from your car, as you hear it yourself: the game's own recordings of your
   car's engine (each car has its own, and the engine upgrades change it), pulling as you accelerate and letting off as
   you lift, at your revs, with the limiter and a launch's wheelspin as your game plays them; louder the nearer they

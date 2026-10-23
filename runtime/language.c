@@ -85,6 +85,8 @@ static const struct lang *g_lang = &LANGS[0];
 static const uint32_t THAI_FONTS[4] = { 0x4815619du, 0xa87927beu, 0xa73823ffu, 0xbbba71c2u };
 
 const char *language_registry(void){ return g_lang->reg; }
+/* The language played, as NFSU2_LANGUAGE names it ("english" ... "portuguese") */
+const char *language_name(void){ return g_lang->key; }
 
 /* The game's text for a hash in the language it plays in: 0x4ff9d0's binary
  * search over the loaded strings ([0x8383d8]: { hash, text } sorted by hash,
