@@ -111,13 +111,127 @@ export function crc32(b: Uint8Array, n: number): number {
   for (let i = 0; i < n; i++) c = CRC_TABLE[(c ^ b[i]) & 255] ^ (c >>> 8);
   return (c ^ -1) >>> 0;
 }
-/** a compact bundle's frames, each put together again byte for byte as the switch had it, to `take` in order; `own`
- *  the address this page holds; `refs` the last bodies (a free-roam datagram past its type) by source and type, for a
- *  page that takes deltas (kept for its connection).  A broken entry ends it.  Returns how many came as deltas. */
-export function unpackCompact(u: Uint8Array, own: number, take: (f: ArrayBuffer) => void, refs?: Map<number, Uint8Array>): number {
+// A friend's car state by its fields (an entry to a page whose hello said "fpred":1 too; nfsu2-lan fpred.rs, whose
+// twin this is, says how): [0] C_FPRED, [1..2] the source's low 16 bits, [3] the length of what follows; a bitmap
+// (LEB128) of the fields that differ from what they are taken to be, and those differences (zigzag LEB128).  The
+// state is put back from its source's last one (the rounded one, as the game got it), with the position in mm, the
+// velocity in cm/s and the time in steps of 256 us written back as floats and microseconds.  Integers only, as the
+// switch does them: one division and a conversion to f32 for each float, the same in both.
+export const C_FPRED = 0x61;
+const FP_NF = 53, FP_T = 0, FP_SEQ = 1, FP_P = 2, FP_V = 5, FP_Q = 8, FP_W = 12, FP_SPEED = 15, FP_RPM = 16, FP_STEER = 17,
+  FP_WZ = 18, FP_ENG = 22, FP_EACC = 23, FP_EDCL = 24, FP_THR = 25, FP_BRK = 26, FP_GEAR = 27, FP_BITS = 28, FP_NOS = 29,
+  FP_HYD = 30, FP_THUMPS = 31, FP_EBASE = 32, FP_SLIP = 33, FP_XLEN = 45, FP_CLOCK = 46, FP_STATUS = 47, FP_EPOCH = 48,
+  FP_CFG_REV = 49, FP_N = 50, FP_FLAGS = 51, FP_SENDER = 52;
+/** a field's width when its difference wraps (bits), 0 for a signed one that does not */
+const FP_WIDTH = (() => {
+  const w = new Array<number>(FP_NF).fill(0);
+  for (const i of [FP_RPM, FP_ENG, FP_SEQ, FP_CFG_REV, FP_FLAGS]) w[i] = 16;
+  w[FP_T] = 24; w[FP_SENDER] = 32;
+  for (const i of [FP_EACC, FP_EDCL, FP_THR, FP_BRK, FP_GEAR, FP_BITS, FP_NOS, FP_HYD, FP_THUMPS, FP_EBASE, FP_XLEN, FP_CLOCK,
+    FP_STATUS, FP_EPOCH, FP_N]) w[i] = 8;
+  for (let i = FP_SLIP; i < FP_SLIP + 12; i++) w[i] = 8;
+  return w;
+})();
+/** a source's last state (as the page restored it), and the one before's time and sequence number */
+type FpLast = { v: number[]; t2: number; seq2: number; two: boolean };
+/** the last car states by source, for a page that takes them by their fields (kept for its connection) */
+export type FpredState = Map<number, FpLast>;
+const fpMod = (x: number, m: number) => ((x % m) + m) % m;
+/** what an extension of x bytes holds past the wheels' heights and the nitrous (roam_core.c get_statex) */
+function fpLayout(x: number): [boolean, boolean, boolean] | null {
+  const hyd = x >= 11, slip = x >= 23, base = 9 + (hyd ? 2 : 0) + (slip ? 12 : 0), eng = x >= base + 5;
+  return x >= 9 && base + (eng ? 5 : 0) === x ? [hyd, slip, eng] : null;
+}
+/** the value each field is taken to have (fpred.rs `predict`) */
+function fpPredict(l: FpLast | undefined, t: number | null): number[] {
+  if (!l) return new Array<number>(FP_NF).fill(0);
+  const w = l.v.slice();
+  if (l.two) { w[FP_T] = fpMod(2 * l.v[FP_T] - l.t2, 2 ** 24); w[FP_SEQ] = fpMod(2 * l.v[FP_SEQ] - l.seq2, 65536); }
+  if (t !== null) {
+    let dt = fpMod(t - l.v[FP_T], 2 ** 24);
+    if (dt >= 2 ** 23) dt -= 2 ** 24;
+    if (dt >= 0 && dt <= 4096) for (let i = 0; i < 3; i++) w[FP_P + i] = l.v[FP_P + i] + Math.floor((l.v[FP_V + i] * dt * 16 + 3125) / 6250);
+  }
+  return w;
+}
+const fpApply = (i: number, want: number, d: number) => FP_WIDTH[i] ? fpMod(want + d, 2 ** FP_WIDTH[i]) : want + d;
+/** a state's body (the datagram from its sender's id on, without its CRC) from its fields; null: no layout */
+function fpWrite(v: number[]): Uint8Array | null {
+  const statex = (v[FP_FLAGS] & 0x40) !== 0, x = v[FP_XLEN], g = statex && x > 0 ? fpLayout(x) : null;
+  if ((statex && x > 0 && !g) || v[FP_N] !== 1 || x < 0 || x > 255) return null;
+  const b = new Uint8Array(66 + (statex ? 1 + x : 0)), d = new DataView(b.buffer);
+  d.setUint32(0, v[FP_SENDER], true); d.setUint16(4, v[FP_SEQ], true); d.setUint16(6, v[FP_FLAGS], true);
+  b[8] = v[FP_STATUS]; b[9] = v[FP_EPOCH]; d.setUint16(10, v[FP_CFG_REV], true); b[12] = 1; b[13] = v[FP_CLOCK];
+  d.setUint32(14, v[FP_T] * 256, true);
+  for (let i = 0; i < 3; i++) { d.setFloat32(18 + 4 * i, v[FP_P + i] / 1000, true); d.setFloat32(30 + 4 * i, v[FP_V + i] / 100, true); }
+  for (let i = 0; i < 4; i++) d.setInt16(42 + 2 * i, v[FP_Q + i], true);
+  for (let i = 0; i < 3; i++) d.setInt16(50 + 2 * i, v[FP_W + i], true);
+  d.setInt16(56, v[FP_STEER], true); b[58] = v[FP_THR]; b[59] = v[FP_BRK]; d.setUint16(60, v[FP_RPM], true);
+  d.setInt16(62, v[FP_SPEED], true); b[64] = v[FP_GEAR]; b[65] = v[FP_BITS];
+  if (statex) {
+    b[66] = x;
+    if (g) {
+      for (let i = 0; i < 4; i++) d.setInt16(67 + 2 * i, v[FP_WZ + i], true);
+      b[75] = v[FP_NOS];
+      let k = 76;
+      if (g[0]) { b[76] = v[FP_HYD]; b[77] = v[FP_THUMPS]; k = 78; }
+      if (g[1]) { for (let i = 0; i < 12; i++) b[78 + i] = v[FP_SLIP + i]; k = 90; }
+      if (g[2]) { d.setUint16(k, v[FP_ENG], true); b[k + 2] = v[FP_EACC]; b[k + 3] = v[FP_EDCL]; b[k + 4] = v[FP_EBASE]; }
+    }
+  }
+  return b;
+}
+/** an fpred entry's state from source src (e: what follows its 4-byte head) as its body; null when it is broken */
+export function fpredTake(st: FpredState, src: number, e: Uint8Array): Uint8Array | null {
+  let at = 0;
+  const varint = (): number | null => {
+    let u = 0, mul = 1;
+    for (let k = 0; k < 10; k++) {
+      if (at >= e.length) return null;
+      const x = e[at++];
+      u += (x & 0x7f) * mul; mul *= 128;
+      if (!(x & 0x80)) return u;
+    }
+    return null;
+  };
+  const set: number[] = [];
+  for (let g = 0; ; g++) {
+    if (at >= e.length || g > 8) return null;
+    const x = e[at++];
+    for (let j = 0; j < 7; j++) if ((x >> j) & 1) { if (g * 7 + j >= FP_NF) return null; set.push(g * 7 + j); }
+    if (!(x & 0x80)) break;
+  }
+  const d = new Array<number>(FP_NF).fill(0);
+  for (const i of set) { const u = varint(); if (u === null) return null; d[i] = u % 2 === 1 ? -(u + 1) / 2 : u / 2; }
+  if (at !== e.length) return null;
+  const last = st.get(src), t = fpApply(FP_T, fpPredict(last, null)[FP_T], d[FP_T]), want = fpPredict(last, t);
+  const cur = want.map((w, i) => fpApply(i, w, d[i]));
+  const body = fpWrite(cur);
+  if (!body) return null;
+  if (!last && st.size >= COMPACT_REFS_MAX) st.clear();
+  st.set(src, { v: cur, t2: last ? last.v[FP_T] : 0, seq2: last ? last.v[FP_SEQ] : 0, two: !!last });
+  return body;
+}
+
+/** a compact bundle's frames, each put together again byte for byte as the switch had it (a car state by its fields
+ *  rounded as the switch rounded it), to `take` in order; `own` the address this page holds; `refs` the last bodies
+ *  (a free-roam datagram past its type) by source and type, for a page that takes deltas, and `fp` its friends' last
+ *  car states, for one that takes them by their fields (both kept for its connection).  A broken entry ends it.
+ *  Returns how many came as deltas (those by their fields too). */
+export function unpackCompact(u: Uint8Array, own: number, take: (f: ArrayBuffer) => void, refs?: Map<number, Uint8Array>,
+  fp?: FpredState): number {
   const dv = new DataView(u.buffer, u.byteOffset, u.byteLength);
   let deltas = 0;
   for (let at = 4; at + 5 <= u.length;) {
+    if (u[at] === C_FPRED) {
+      const src = dv.getUint16(at + 1), end = at + 4 + u[at + 3];
+      if (end > u.length || !fp) return deltas;
+      const body = fpredTake(fp, src, u.subarray(at + 4, end));
+      if (!body) return deltas;
+      at = end; deltas++;
+      take(roamFrame(3, body, src, own, false));
+      continue;
+    }
     const flags = u[at], src = dv.getUint16(at + 1), end = at + 5 + dv.getUint16(at + 3);
     let p = at + 5;
     if (end > u.length) return deltas;
@@ -146,19 +260,34 @@ export function unpackCompact(u: Uint8Array, own: number, take: (f: ArrayBuffer)
         refs.set(key, body);
       }
     }
+    if (body && !ports && (flags & 7) === 1) { take(roamFrame(kind, body, src, own, (flags & C_BCAST) !== 0)); continue; }
     const len = body ? 1 + body.length + ROAM_CUT : end - d, f = new Uint8Array(F_DATA + len), fv = new DataView(f.buffer);
     f[F_KIND] = flags & 7;
     fv.setUint32(F_SRC, (0x0a4d0000 | src) >>> 0);
     fv.setUint32(F_DST, flags & C_BCAST ? NET_BROADCAST : own >>> 0);
     if (ports) f.set(u.subarray(p, p + 4), F_SPORT);
     else { fv.setUint16(F_SPORT, ROAM_PORT); fv.setUint16(F_DPORT, ROAM_PORT); }
-    if (body) {
-      f.set([0x4e, 0x32, 0x46, 0x52, 1, kind], F_DATA);              // "N2FR", version 1, the type
-      fv.setUint16(F_DATA + 6, len, true);
-      f.set(body, F_DATA + 8);
-      fv.setUint32(F_DATA + len - 4, crc32(f.subarray(F_DATA), len - 4), true);
-    } else f.set(u.subarray(d, end), F_DATA);
+    if (body) roamDatagram(f, len, kind, body);
+    else f.set(u.subarray(d, end), F_DATA);
     take(f.buffer);
   }
   return deltas;
+}
+/** a free-roam datagram ("N2FR", version 1, its type, its length, the body, the CRC) into f at F_DATA, len its bytes */
+function roamDatagram(f: Uint8Array, len: number, kind: number, body: Uint8Array) {
+  const fv = new DataView(f.buffer);
+  f.set([0x4e, 0x32, 0x46, 0x52, 1, kind], F_DATA);
+  fv.setUint16(F_DATA + 6, len, true);
+  f.set(body, F_DATA + 8);
+  fv.setUint32(F_DATA + len - 4, crc32(f.subarray(F_DATA), len - 4), true);
+}
+/** a frame of kind 1 on free roam's ports from 10.77.<src> to this page (or the broadcast address) around a datagram */
+function roamFrame(kind: number, body: Uint8Array, src: number, own: number, bcast: boolean): ArrayBuffer {
+  const len = 1 + body.length + ROAM_CUT, f = new Uint8Array(F_DATA + len), fv = new DataView(f.buffer);
+  f[F_KIND] = 1;
+  fv.setUint32(F_SRC, (0x0a4d0000 | src) >>> 0);
+  fv.setUint32(F_DST, bcast ? NET_BROADCAST : own >>> 0);
+  fv.setUint16(F_SPORT, ROAM_PORT); fv.setUint16(F_DPORT, ROAM_PORT);
+  roamDatagram(f, len, kind, body);
+  return f.buffer;
 }

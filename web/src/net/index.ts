@@ -278,6 +278,8 @@ class Link implements NetLink {
   /** the last body of each source's free-roam datagrams of each type in this connection's compact bundles (the
    *  switch's deltas are made against them: proto.ts unpackCompact) */
   private refs = new Map<number, Uint8Array>();
+  /** friends' last car states, for the compact bundles' entries by their fields (proto.ts fpredTake) */
+  private fp: P.FpredState = new Map();
   /** while a bundle from the switch is taken apart: the endpoints to ring once it is */
   private ringLater: Set<Endpoint> | null = null;
   private pings = new Map<number, number>();
@@ -448,6 +450,7 @@ class Link implements NetLink {
     if (resume) u.searchParams.set('resume', '');
     this.state = 'connecting'; this.setPage(P.NET_PAGE_CONNECTING);
     this.refs = new Map();
+    this.fp = new Map();
     const ws = new WebSocket(u.href);
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
@@ -455,9 +458,10 @@ class Link implements NetLink {
       // deltas: the switch sends what changed on the peer list, not the whole list each time (nfsu2-lan); lan: LAN
       // play is open, so it takes LAN broadcasts; bundle: this page takes bundles; compact: and compact ones (a
       // switch of before ignores it and sends bundles as they were); delta: and in those a free-roam datagram as
-      // what changed since its source's last one (proto.ts unpackCompact; `refs`, kept for this connection)
+      // what changed since its source's last one (proto.ts unpackCompact; `refs`, kept for this connection); fpred: and
+      // a friend's car state by its fields, rounded (proto.ts fpredTake; `fp`)
       this.lanSent = this.lanOpen();
-      ws.send(JSON.stringify({ t: 'hello', name: this.o.name ?? 'player', deltas: 1, lan: this.lanSent ? 1 : 0, bundle: 1, compact: 1, delta: 1,
+      ws.send(JSON.stringify({ t: 'hello', name: this.o.name ?? 'player', deltas: 1, lan: this.lanSent ? 1 : 0, bundle: 1, compact: 1, delta: 1, fpred: 1,
         ...(this.vipNum && this.token ? { vip: P.ipStr(this.vipNum), token: this.token } : {}), ...(this.ticket ? { ticket: this.ticket } : {}) }));
       this.pingTimer = setInterval(() => this.ping(), this.o.pingMs ?? 2000);
     };
@@ -664,7 +668,7 @@ class Link implements NetLink {
       // the same, each frame put together again first (proto.ts unpackCompact)
       const ring = this.ringLater = new Set();
       this.st.compactIn++;
-      this.st.deltaIn += P.unpackCompact(u, this.vipNum, f => this.rxFrame(f), this.refs);
+      this.st.deltaIn += P.unpackCompact(u, this.vipNum, f => this.rxFrame(f), this.refs, this.fp);
       this.ringLater = null;
       for (const ep of ring) ep.ring();
     } else this.rxFrame(b);

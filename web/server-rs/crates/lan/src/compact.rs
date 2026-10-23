@@ -29,6 +29,7 @@ use std::hash::{BuildHasherDefault, Hasher};
 
 use bytes::Bytes;
 
+use crate::fpred::{self, Fpred};
 use crate::{BASE, BROADCAST};
 
 /// a compact bundle (page and switch only: the switch never routes one from a client)
@@ -52,6 +53,7 @@ const ROAM_CUT: usize = 11;
 pub(crate) const ROAM_OK: u8 = 1;
 
 /// runtime/roam_core.h: a free-roam datagram's type (its byte 5), a ping's and its answer's
+const RC_SNAP: u8 = 3;
 const RC_PING: u8 = 6;
 const RC_PONG: u8 = 7;
 /// the longest of them (a pong: its 16-byte frame header, the datagram's 16, three times and the CRC)
@@ -142,7 +144,7 @@ pub(crate) struct Refs {
 
 /// a key's hash: one multiply, folded (a map of at most `REFS_MAX` keys, made of a source and a type)
 #[derive(Default)]
-struct KeyHash(u64);
+pub(crate) struct KeyHash(u64);
 
 impl Hasher for KeyHash {
     fn finish(&self) -> u64 {
@@ -207,8 +209,23 @@ impl Refs {
 
 /// one entry; with `refs` (a page that takes deltas) a free-roam datagram to it goes as what changed when that is
 /// shorter, and is its source's last either way
+#[cfg(test)]
 pub(crate) fn entry(buf: &mut Vec<u8>, data: &[u8], src: u32, dst: u32, own: u32, refs: Option<&mut Refs>) {
+    entry_fp(buf, data, src, dst, own, refs, None)
+}
+
+/// the same; with `fp` too (a page whose hello said "fpred":1) a friend's car state to it goes by its fields
+/// (fpred.rs) when it can, and leaves `refs` alone then
+pub(crate) fn entry_fp(buf: &mut Vec<u8>, data: &[u8], src: u32, dst: u32, own: u32, refs: Option<&mut Refs>, fp: Option<&mut Fpred>) {
     let (flags, n) = plan(data, src, dst, own);
+    if let Some(fp) = fp
+        && flags & (F_ROAM | F_PORTS | F_BCAST | F_WHOLE) == F_ROAM
+        && data[16 + 5] == RC_SNAP
+        && let Some(v) = fpred::fields(&data[16 + 8..data.len() - 4])
+        && fp.encode(buf, src as u16, &v)
+    {
+        return;
+    }
     match refs.filter(|_| flags & (F_ROAM | F_PORTS | F_BCAST | F_WHOLE) == F_ROAM) {
         Some(refs) => {
             let d = &data[16..];
@@ -250,12 +267,41 @@ pub(crate) mod tests {
     }
 
     /// the same for a page that takes deltas: refs its last bodies (by source and type), as `Refs` keeps them
-    pub(crate) fn unpack_with(b: &[u8], own: u32, mut refs: Option<&mut HashMap<u32, Vec<u8>>>) -> Vec<Vec<u8>> {
+    pub(crate) fn unpack_with(b: &[u8], own: u32, refs: Option<&mut HashMap<u32, Vec<u8>>>) -> Vec<Vec<u8>> {
+        unpack_fp(b, own, refs, None)
+    }
+
+    /// a free-roam datagram ("N2FR", version 1, its type and length, the body (from its sender's id on), the CRC)
+    fn dgram(kind: u8, body: &[u8]) -> Vec<u8> {
+        let mut d = b"N2FR".to_vec();
+        d.extend_from_slice(&[1, kind]);
+        d.extend_from_slice(&((body.len() + 1 + ROAM_CUT) as u16).to_le_bytes());
+        d.extend_from_slice(body);
+        let crc = crc32fast::hash(&d);
+        d.extend_from_slice(&crc.to_le_bytes());
+        d
+    }
+
+    /// that in a frame from src to own on free roam's ports
+    fn roam_frame(kind: u8, body: &[u8], src: u32, own: u32) -> Vec<u8> {
+        frame(1, src, own, ROAM_PORT, ROAM_PORT, &dgram(kind, body))
+    }
+
+    /// the same for a page that takes car states by their fields too: `fp` the page's last ones (fpred.rs `decode`)
+    pub(crate) fn unpack_fp(b: &[u8], own: u32, mut refs: Option<&mut HashMap<u32, Vec<u8>>>, mut fp: Option<&mut Fpred>) -> Vec<Vec<u8>> {
         assert_eq!(b[0], KIND_COMPACT);
         let mut out = Vec::new();
         let mut at = 4;
         while at + ENTRY <= b.len() {
             let flags = b[at];
+            if flags == fpred::F_FPRED {
+                let src = u16::from_be_bytes([b[at + 1], b[at + 2]]);
+                let end = at + 4 + b[at + 3] as usize;
+                let body = fp.as_deref_mut().expect("a page that takes them").decode(src, &b[at + 4..end]).expect("it decodes");
+                out.push(roam_frame(3, &body, BASE | src as u32, own));
+                at = end;
+                continue;
+            }
             let src = BASE | u16::from_be_bytes([b[at + 1], b[at + 2]]) as u32;
             let n = u16::from_be_bytes([b[at + 3], b[at + 4]]) as usize;
             let mut p = at + ENTRY;
@@ -501,6 +547,56 @@ pub(crate) mod tests {
         assert_eq!(t(&got[3], 16), 1_000_000, "no wait, no change");
     }
 
+    // to a page that takes car states by their fields: a friend's SNAP goes so and reaches the game rounded, everything
+    // else (a ping with its wait, a HELLO, a SNAP of three states, one to the broadcast address) as before, byte for byte
+    #[test]
+    fn car_states_by_their_fields_among_the_rest() {
+        use crate::fpred::tests::body;
+        let (own, a, b) = (BASE | 0x0305, BASE | 0x0102, BASE | 0x0207);
+        let (mut refs, mut fp) = (Refs::default(), Fpred::default());
+        let (mut page_refs, mut page_fp) = (HashMap::new(), Fpred::default());
+        let mut want: Vec<Vec<u8>> = Vec::new();
+        let mut bundle = vec![KIND_COMPACT, 0, 0, 0];
+        let mut into = [0u8; TIMED_MAX];
+        let mut put = |bundle: &mut Vec<u8>, f: Vec<u8>, src: u32, dst: u32, us: u32, want: &mut Vec<Vec<u8>>, rounded: bool| {
+            let m = mark(&f);
+            let d = waited(&m, us, &mut into).to_vec();
+            entry_fp(bundle, &d, src, dst, own, Some(&mut refs), Some(&mut fp));
+            let mut w = d.clone();
+            w[1] = 0;
+            if rounded {
+                let body = fpred::rounded(&w[16 + 8..w.len() - 4]).unwrap();
+                w = roam_frame(3, &body, src, own);
+            } else if us > 0 {
+                let n = w.len();
+                let crc = crc32fast::hash(&w[16..n - 4]);
+                w[n - 4..].copy_from_slice(&crc.to_le_bytes());
+            }
+            want.push(w);
+        };
+        for k in 0..40i32 {
+            let t = 1_000_000 + 50_000 * k as u32;
+            for (src, x) in [(a, Some(16)), (b, Some(28))] {
+                let s = body(src, k as u16, t, [100.0 + k as f32 * 1.5, 2.0, 3.0], [30.0, 0.5, 0.0], k, x);
+                put(&mut bundle, roam_frame(3, &s, src, own), src, own, 0, &mut want, true);
+            }
+            if k % 5 == 0 {
+                put(&mut bundle, frame(1, a, own, ROAM_PORT, ROAM_PORT, &roam(RC_PING, &(k as u32).to_le_bytes())), a, own, 3000, &mut want, false);
+                put(&mut bundle, frame(1, b, own, ROAM_PORT, ROAM_PORT, &roam(1, b"a hello")), b, own, 0, &mut want, false);
+                let mut three = body(a, k as u16, t, [1.0; 3], [0.0; 3], k, Some(16));
+                three[12] = 3;
+                put(&mut bundle, roam_frame(3, &three, a, own), a, own, 0, &mut want, false);
+                let s = body(b, k as u16, t, [5.0; 3], [0.0; 3], k, Some(16));
+                put(&mut bundle, frame(1, b, BROADCAST, ROAM_PORT, ROAM_PORT, &dgram(3, &s)), b, BROADCAST, 0, &mut want, false);
+            }
+        }
+        let got = unpack_fp(&bundle, own, Some(&mut page_refs), Some(&mut page_fp));
+        assert_eq!(got.len(), want.len());
+        for (i, (g, w)) in got.iter().zip(&want).enumerate() {
+            assert_eq!(g, w, "frame {i}");
+        }
+    }
+
     // past REFS_MAX sources the writer's last bodies all go, and the page's with them: still byte for byte
     #[test]
     fn many_sources_the_last_bodies_go_together() {
@@ -518,6 +614,88 @@ pub(crate) mod tests {
             }
             assert_eq!(unpack_with(&b, own, Some(&mut page)), want, "round {round}");
             assert!(refs.last.len() <= REFS_MAX && page.len() == refs.last.len());
+        }
+    }
+
+    /// what a friend's moving car state costs the writer as a byte delta and by its fields (fpred.rs): 32 friends driving
+    /// circles, 20 states a second each, in turn
+    #[test]
+    #[ignore]
+    fn what_a_car_state_costs() {
+        use crate::fpred::tests::body;
+        let own = BASE | 0x0305;
+        let frames: Vec<(Vec<u8>, u32)> = (0..200i32)
+            .flat_map(|k| {
+                (0..32u32).map(move |s| {
+                    let src = BASE | (s + 2);
+                    let a = k as f64 * 0.05 + s as f64;
+                    let p = [(1000.0 + 40.0 * a.cos()) as f32, (-500.0 + 40.0 * a.sin()) as f32, 24.0 + 0.01 * k as f32];
+                    let v = [(-40.0 * a.sin()) as f32, (40.0 * a.cos()) as f32, 0.1];
+                    let b = body(src, k as u16, 1_000_000 + 50_000 * k as u32 + s, p, v, k, Some(16));
+                    (mark(&roam_frame(3, &b, src, own)).to_vec(), src)
+                })
+            })
+            .collect();
+        for fp_on in [false, true] {
+            let (mut r, mut fp) = (Refs::default(), Fpred::default());
+            let mut b = Vec::with_capacity(64 << 10);
+            let (t, mut bytes) = (std::time::Instant::now(), 0);
+            let n = frames.len() * 50;
+            for i in 0..n {
+                let (f, src) = &frames[i % frames.len()];
+                if i % frames.len() == 0 {
+                    (r, fp) = (Refs::default(), Fpred::default());
+                }
+                if b.len() > 30_000 {
+                    bytes += b.len();
+                    b.clear();
+                }
+                entry_fp(&mut b, f, *src, own, own, Some(&mut r), fp_on.then_some(&mut fp));
+            }
+            bytes += b.len();
+            println!("by fields {fp_on}: {:.0} ns an entry, {:.1} bytes", t.elapsed().as_secs_f64() * 1e9 / n as f64, bytes as f64 / n as f64);
+        }
+    }
+
+    /// what friends' car states cost on real drives: a capture of the frames the switch sent (NFSU2_CAPTURE=<file>:
+    /// [t_us u64 LE][len u16 LE][frame], each as its receiver got it), through the writer as a byte delta and by their
+    /// fields, each receiver with its own last bodies and states
+    #[test]
+    #[ignore]
+    fn what_car_states_cost_on_a_capture() {
+        let Ok(path) = std::env::var("NFSU2_CAPTURE") else { return };
+        let cap = std::fs::read(path).unwrap();
+        let mut frames = Vec::new();
+        let mut o = 0;
+        while o + 10 <= cap.len() {
+            let len = u16::from_le_bytes([cap[o + 8], cap[o + 9]]) as usize;
+            frames.push(&cap[o + 10..o + 10 + len]);
+            o += 10 + len;
+        }
+        for fp_on in [false, true] {
+            let mut ends: HashMap<u32, (Refs, Fpred)> = HashMap::new();
+            let (mut snap, mut snaps, mut rest, mut rests, mut by_fields) = (0, 0, 0, 0, 0);
+            for f in &frames {
+                let (src, dst) = (u32::from_be_bytes([f[4], f[5], f[6], f[7]]), u32::from_be_bytes([f[8], f[9], f[10], f[11]]));
+                if dst & 0xFFFF_0000 != BASE || dst == BASE | 0xFD {
+                    continue;
+                }
+                let m = mark(f);
+                let (r, fp) = ends.entry(dst).or_default();
+                let mut b = Vec::new();
+                entry_fp(&mut b, &m, src, dst, dst, Some(r), fp_on.then_some(fp));
+                if m.len() > 21 && m[1] == ROAM_OK && m[16 + 5] == 3 {
+                    (snap, snaps) = (snap + b.len(), snaps + 1);
+                    by_fields += (b[0] == fpred::F_FPRED) as usize;
+                } else {
+                    (rest, rests) = (rest + b.len(), rests + 1);
+                }
+            }
+            println!(
+                "by fields {fp_on}: {snaps} car states {:.1} bytes each ({by_fields} by their fields), {rests} others {:.1} bytes each",
+                snap as f64 / snaps.max(1) as f64,
+                rest as f64 / rests.max(1) as f64
+            );
         }
     }
 

@@ -141,6 +141,45 @@ function roamDatagram(type, n) {
   return d;
 }
 
+/** a SNAP of one state as roam_core.c rc_encode makes it (its fields from k, so that each differs), with an extension
+ *  of x bytes when x is given */
+function snapDatagram({ sender = 0xABCD0001, seq, t, p, v, k, x }) {
+  const b = 8, d = Buffer.alloc(b + 66 + (x !== undefined ? 1 + x : 0) + 4);
+  d.write('N2FR', 0, 'latin1'); d[4] = 1; d[5] = 3; d.writeUInt16LE(d.length, 6);
+  d.writeUInt32LE(sender, b); d.writeUInt16LE(seq & 0xffff, b + 4); d.writeUInt16LE((x !== undefined ? 0x40 : 0) | 0x20, b + 6);
+  d[b + 8] = 2; d[b + 9] = 7; d.writeUInt16LE(0x0102, b + 10); d[b + 12] = 1; d[b + 13] = 3;
+  d.writeUInt32LE(t >>> 0, b + 14);
+  p.forEach((f, i) => d.writeFloatLE(f, b + 18 + 4 * i)); v.forEach((f, i) => d.writeFloatLE(f, b + 30 + 4 * i));
+  [100 + k, -200, 30000 - k, 5].forEach((q, i) => d.writeInt16LE(q, b + 42 + 2 * i));
+  [3 * k, -k, 7].forEach((w, i) => d.writeInt16LE(w, b + 50 + 2 * i));
+  d.writeInt16LE((k * 101) << 16 >> 16, b + 56); d[b + 58] = 200; d[b + 59] = k % 3; d.writeUInt16LE((3000 + 7 * k) & 0xffff, b + 60);
+  d.writeInt16LE(1500 + k, b + 62); d[b + 64] = 4; d[b + 65] = 0x10;
+  if (x !== undefined) {
+    d[b + 66] = x;
+    if (x > 0) {
+      for (let i = 0; i < 4; i++) d.writeInt16LE(-300 + k + i, b + 67 + 2 * i);
+      let o = b + 76;
+      if (x >= 11) { d[o] = 1; d[o + 1] = 2; o += 2; }
+      if (x >= 23) { for (let i = 0; i < 12; i++) d[o + i] = (i * 9 + k) & 255; o += 12; }
+      if (x === 16 || x === 28) { d.writeUInt16LE(4000 + k, o); d[o + 2] = 10; d[o + 3] = 20; d[o + 4] = 30; }
+    }
+  }
+  d.writeUInt32LE(zlib.crc32(d.subarray(0, d.length - 4)), d.length - 4);
+  return d;
+}
+/** the same as the game gets it through the fields (nfsu2-lan fpred.rs): the time to 256 us, the position to 1 mm, the
+ *  velocity to 1 cm/s (rounded half away from zero, as Rust's round), and the CRC made again */
+function roundedDatagram(d) {
+  const r = Buffer.from(d), b = 8, away = x => Math.sign(x) * Math.round(Math.abs(x)) + 0;
+  r.writeUInt32LE((Math.floor((r.readUInt32LE(b + 14) + 128) / 256) % 2 ** 24) * 256, b + 14);
+  for (let i = 0; i < 3; i++) {
+    r.writeFloatLE(away(r.readFloatLE(b + 18 + 4 * i) * 1000) / 1000, b + 18 + 4 * i);
+    r.writeFloatLE(away(r.readFloatLE(b + 30 + 4 * i) * 100) / 100, b + 30 + 4 * i);
+  }
+  r.writeUInt32LE(zlib.crc32(r.subarray(0, r.length - 4)), r.length - 4);
+  return r;
+}
+
 const cases = {
   // the page: in line when the switch is full (where it is, and a notice once), its place kept across a dropped link,
   // in when a place frees up, with a notice (a switch with room for one)
@@ -391,6 +430,50 @@ const cases = {
       const held = performance.now() - t0;
       assert.ok(held >= 25, `without a car state it waits until 50 ms after the last send (${held.toFixed(0)} ms)`);
       await b.close(); await c.close();
+    } finally { link.close(); }
+  },
+
+  // its hello took friends' car states by their fields (nfsu2-lan fpred.rs, proto.ts fpredTake): each reaches the game
+  // rounded, as the switch rounded it, with a CRC that checks out; one of a layout that does not go so (three states)
+  // and a HELLO reach it as they were
+  async fpred([port]) {
+    const { attachNet } = await pageNet(port);
+    const memory = new WebAssembly.Memory({ initial: 10, maximum: 10, shared: true }), roam = mailbox(memory, 0);
+    want(roam, 1); Atomics.store(roam.w, P.W_MODE, P.NET_MODE_VLAN);
+    const link = attachNet(fakeGame(memory, { 4: roam }), { url: `ws://127.0.0.1:${port}/lan`, name: 'P', pingMs: 60_000 });
+    try {
+      const me = P.ipNum(await link.online);
+      const c = new Client(port, 'C', '', null, { bundle: true });
+      await c.welcome(); await sleep(100);
+      const sent = [];
+      let t = 4_294_000_000;
+      for (let k = 0; k < 120; k++) {
+        t = (t + 50_000 + (k % 7 === 0 ? 16_667 : 0)) >>> 0;
+        const a = k * 0.05, moving = k < 90;
+        const p = moving ? [1695.123 + 40 * Math.cos(a), -884.5 + 40 * Math.sin(a), 24.25 + 0.01 * k] : [1700.5, -880.25, 25.125];
+        const v = moving ? [-40 * Math.sin(a), 40 * Math.cos(a), 0.2] : [0, 0, 0];
+        sent.push(snapDatagram({ seq: k, t, p, v, k: moving ? k : 90, x: k % 10 === 5 ? 28 : k === 40 ? 0 : 16 }));
+        if (k === 60) {
+          const three = snapDatagram({ seq: k, t, p, v, k, x: 16 });
+          three[8 + 12] = 3;
+          three.writeUInt32LE(zlib.crc32(three.subarray(0, three.length - 4)), three.length - 4);
+          sent.push(three, roamDatagram(1, 40));
+        }
+      }
+      const expect = sent.map(d => d[5] === 3 && d[8 + 12] === 1 ? roundedDatagram(d) : d);
+      for (let i = 0; i < sent.length; i += 6) {
+        const part = sent.slice(i, i + 6);
+        c.sendBundle(part.map(d => ({ f: frameOf(me, d, 1, 47210, 47210) })));
+        await until(() => Atomics.load(roam.w, P.W_RX_HEAD) - Atomics.load(roam.w, P.W_RX_TAIL) >= part.length);
+        const got = rxTakeRaw(memory, roam);
+        assert.deepEqual(got.map(g => [g.src === c.vip, g.sport, g.dport, g.data.toString('hex')]),
+          expect.slice(i, i + 6).map(d => [true, 47210, 47210, d.toString('hex')]), `datagrams ${i} on`);
+        for (const g of got) assert.equal(g.data.readUInt32LE(g.data.length - 4), zlib.crc32(g.data.subarray(0, g.data.length - 4)), 'a CRC that checks out');
+      }
+      const info = (await state(port)).info;
+      assert.ok(info.fpredEntries >= 115 && info.fpredEntries <= info.snapEntries, `by their fields: ${info.fpredEntries} of ${info.snapEntries}`);
+      assert.ok(info.snapBytes / info.snapEntries < 40, `${(info.snapBytes / info.snapEntries).toFixed(1)} bytes a car state`);
+      await c.close();
     } finally { link.close(); }
   },
 };

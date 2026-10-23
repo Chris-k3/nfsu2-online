@@ -200,7 +200,7 @@ impl LanSwitch {
         });
         if let Some(h) = &hello {
             peer.ctl.lock().texts.take_at(now, 1.0);
-            greet(&peer, h);
+            greet(&peer, h, self.o.fpred);
         }
         m.peers.insert(vip, peer.clone());
         // (a replaced holder's place on it goes with it)
@@ -499,7 +499,7 @@ impl LanSwitch {
             return;
         }
         let was = peer.name().to_string();
-        greet(peer, msg);
+        greet(peer, msg, self.o.fpred);
         self.lan_changed(&mut m, peer);
         let list = self.list_for(&m, peer);
         self.send(peer, Out::Text(list));
@@ -613,13 +613,19 @@ pub(crate) fn lan_full() -> Bytes {
 
 /// a connection's first hello: its player's name, and whether it takes the changes to the peer list, bundles, and has
 /// LAN play open (a page of before says nothing: it gets every broadcast)
-fn greet(peer: &Peer, m: &Map<String, Value>) {
+fn greet(peer: &Peer, m: &Map<String, Value>, fpred: bool) {
     use nfsu2_util::json::is_num;
     peer.hello.store(true, Relaxed);
     peer.deltas.store(is_num(m.get("deltas"), 1.0), Relaxed);
     peer.bundle.store(is_num(m.get("bundle"), 1.0), Relaxed);
-    use crate::conn::{COMPACT, DELTAS, PLAIN};
-    let compact = if !is_num(m.get("compact"), 1.0) { PLAIN } else if is_num(m.get("delta"), 1.0) { DELTAS } else { COMPACT };
+    use crate::conn::{COMPACT, DELTAS, FPRED, PLAIN};
+    let compact = match (is_num(m.get("compact"), 1.0), is_num(m.get("delta"), 1.0), is_num(m.get("fpred"), 1.0)) {
+        (false, ..) => PLAIN,
+        (true, false, _) => COMPACT,
+        (true, true, false) => DELTAS,
+        (true, true, true) => FPRED,
+    };
+    let compact = if compact == FPRED && !fpred { DELTAS } else { compact };
     peer.conn.compact.store(compact, Relaxed);
     let lan = m.get("lan");
     if is_num(lan, 0.0) || is_num(lan, 1.0) {

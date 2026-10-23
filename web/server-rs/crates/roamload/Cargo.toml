@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 nfsu2-util.workspace = true
+nfsu2-lan.workspace = true
 tokio.workspace = true
 tokio-tungstenite.workspace = true
 futures-util.workspace = true

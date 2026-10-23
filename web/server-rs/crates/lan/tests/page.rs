@@ -83,3 +83,16 @@ async fn the_page_sends_one_bundle_and_takes_bundles_apart_in_order() {
     page("bundles", &[sw.port]).await;
     sw.close().await;
 }
+
+// the page takes friends' car states by their fields (nfsu2-lan fpred.rs, proto.ts fpredTake): the game gets them
+// rounded, byte for byte as the switch rounded them
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_page_takes_friends_car_states_by_their_fields() {
+    let _s = serial().await;
+    if no_node() {
+        return;
+    }
+    let sw = start(opts()).await;
+    page("fpred", &[sw.port]).await;
+    sw.close().await;
+}

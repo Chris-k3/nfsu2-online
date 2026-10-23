@@ -22,13 +22,15 @@
 //!     place back with its ticket
 //!
 //!   nfsu2-roamload --base http://127.0.0.1:8691 [--n 2000] [--seconds 60] [--rate 20] [--spread 2000] [--room 7]
-//!        [--stagger-ms 5] [--first 0] [--threads 4] [--out file.json] [--mode roam|idle] [--compact] [--delta]
+//!        [--stagger-ms 5] [--first 0] [--threads 4] [--out file.json] [--mode roam|idle] [--compact] [--delta] [--fpred]
 //!        [--queue] [--churn 120] [--leave-drop 0.5] [--drop-wait 0.1] [--tag roam]
 //!   --rate        snapshots a second to each friend (the game: 20; Settings allow 60)
 //!   --spread      the players' area, a square this many metres a side (each drives a circle of 40 m in it); every
 //!                 roam generator against one server needs the same (the receivers check the senders' states)
 //!   --first       the first bot's number (two generators against one server: --first 0 and --first 1000)
-//!   --compact     the hello takes compact bundles (kind 33); --delta deltas in them too (as the page does)
+//!   --compact     the hello takes compact bundles (kind 33); --delta deltas in them too; --fpred and friends' car states by
+//!                 their fields (nfsu2-lan fpred.rs), rounded: each is checked against its state rounded so (as the page
+//!                 does).  A bot's clock goes in steps of 256 µs, as the fields carry the time, so its state comes back
 //!   --queue       /lan?queue: a bot waits in line when the server is full (as the page does), else it is refused
 //!   --churn       each bot plays about this many seconds (exponential), then leaves (--leave-drop of them by a dropped
 //!                 link, which keeps the place a minute, the rest as the page lets go, 1000 "idle") and comes back as
@@ -98,6 +100,7 @@ struct Args {
     mode: Mode,
     compact: bool,
     delta: bool,
+    fpred: bool,
     queue: bool,
     churn: f64,
     leave_drop: f64,
@@ -115,7 +118,8 @@ fn args() -> Args {
     let flag = |k: &str| a.iter().any(|x| x == k);
     let base = opt("--base", "http://127.0.0.1:8080");
     let host = base.trim_start_matches("http://").trim_start_matches("ws://").trim_end_matches('/').to_string();
-    let delta = flag("--delta");
+    let fpred = flag("--fpred");
+    let delta = fpred || flag("--delta");
     Args {
         host,
         n: opt("--n", "2000").parse().expect("--n"),
@@ -133,6 +137,7 @@ fn args() -> Args {
         },
         compact: delta || flag("--compact"),
         delta,
+        fpred,
         queue: flag("--queue"),
         churn: opt("--churn", "0").parse().expect("--churn"),
         leave_drop: opt("--leave-drop", "0.5").parse().expect("--leave-drop"),
@@ -233,6 +238,7 @@ struct Shared {
     bytes_in: Counter,
     compact_in: Counter,
     deltas_in: Counter,
+    fpred_in: Counter,
     deliveries: Counter,
     snaps_out: Counter,
     dgrams_in: Counter,
@@ -260,8 +266,10 @@ impl Shared {
             l.push(why());
         }
     }
+    /// the bots' clock (µs, in steps of 256: what the fields of a car state carry, so that a state rounded by them
+    /// is the state of the same time)
     fn us(&self) -> u32 {
-        self.t0.elapsed().as_micros() as u32
+        self.t0.elapsed().as_micros() as u32 & !0xFF
     }
     fn ms(&self) -> f64 {
         self.t0.elapsed().as_secs_f64() * 1000.0
@@ -336,8 +344,8 @@ fn state(n: usize, t_us: u32, spread: f64) -> [u8; STATE] {
     put(&((4000.0 + 1500.0 * (t * 0.7 + ph).sin()) as u16).to_le_bytes()); // rpm
     put(&((1500.0 + 50.0 * (t * 1.3).sin()) as i16).to_le_bytes()); // speed (1/100 m/s)
     put(&[3, 0]); // gear, bits
-    // the extension: its length, the wheels' heights (mm), nitrous, hydraulics, landings
-    put(&[12]);
+    // the extension: its length (what follows it), the wheels' heights (mm), nitrous, hydraulics, landings
+    put(&[11]);
     for k in 0..4 {
         put(&((-300.0 + 12.0 * (t * 5.0 + k as f64).sin()) as i16).to_le_bytes());
     }
@@ -395,6 +403,8 @@ struct Bot {
     ping_id: u64,
     /// the last body of each source's free-roam datagrams of each type in compact bundles (the page's `refs`)
     refs: HashMap<u32, Vec<u8>>,
+    /// friends' last car states, for those by their fields (the page's `fp`)
+    fp: nfsu2_lan::fpred::Fpred,
     /// snapshots taken, and every how many one is checked byte for byte (--check-every)
     snaps_seen: u64,
     check_every: u64,
@@ -437,7 +447,18 @@ impl Bot {
                 if u16::from_le_bytes([m[14], m[15]]) & HF_STATEX != 0 && m.len() >= 22 + STATE && self.snaps_seen % self.check_every == 0 {
                     sh.checked.inc();
                     let n = u16::from_le_bytes([m[18], m[19]]) as usize;
-                    let want = state(n, t, self.spread);
+                    let mut want = state(n, t, self.spread);
+                    if via == "fpred" {
+                        // rounded as the fields round it (nfsu2-lan fpred.rs): the state in a body of its own
+                        let mut b = vec![0u8; 14];
+                        b[6..8].copy_from_slice(&HF_STATEX.to_le_bytes());
+                        b[12] = 1;
+                        b.extend_from_slice(&want);
+                        match nfsu2_lan::fpred::rounded(&b) {
+                            Some(r) => want.copy_from_slice(&r[14..14 + STATE]),
+                            None => sh.bad(|| format!("a state by its fields the switch could not have made: n {n} t {t}")),
+                        }
+                    }
                     if m[22..22 + STATE] != want {
                         let at = (0..STATE).find(|&k| m[22 + k] != want[k]).unwrap_or(0);
                         sh.bad(|| format!("state via {via} from {src:08x} n {n} t {t} len {}: byte {at} got {:02x?} want {:02x?}", m.len(),
@@ -462,6 +483,29 @@ impl Bot {
         let mut at = 4;
         while at + 5 <= u.len() {
             let flags = u[at];
+            if flags == nfsu2_lan::fpred::F_FPRED {
+                // a friend's car state by its fields: its body as the page puts it back
+                let src = u16::from_be_bytes([u[at + 1], u[at + 2]]);
+                let end = at + 4 + u[at + 3] as usize;
+                if end > u.len() {
+                    sh.bad(|| format!("a state by its fields past the bundle: end {end} of {}", u.len()));
+                    return;
+                }
+                let Some(body) = self.fp.decode(src, &u[at + 4..end]) else {
+                    sh.bad(|| format!("a state by its fields that does not decode: from {src:04x}, {} bytes", end - at));
+                    return;
+                };
+                at = end;
+                sh.fpred_in.inc();
+                let mut m = Vec::with_capacity(body.len() + 12);
+                m.extend_from_slice(b"N2FR");
+                m.extend_from_slice(&[1, MSG_SNAP]);
+                m.extend_from_slice(&((body.len() + 12) as u16).to_le_bytes());
+                m.extend_from_slice(&body);
+                m.extend_from_slice(&[0; 4]);
+                self.take(sh, 0x0A4D_0000 | src as u32, &m, "fpred");
+                continue;
+            }
             let src = 0x0A4D_0000 | u16::from_be_bytes([u[at + 1], u[at + 2]]) as u32;
             let end = at + 5 + u16::from_be_bytes([u[at + 3], u[at + 4]]) as usize;
             if end > u.len() {
@@ -605,6 +649,9 @@ fn hello_text(name: &str, a: &Args, ticket: Option<&str>) -> String {
     }
     if a.delta {
         h["delta"] = 1.into();
+    }
+    if a.fpred {
+        h["fpred"] = 1.into();
     }
     if let Some(t) = ticket {
         h["ticket"] = t.into();
@@ -780,6 +827,7 @@ async fn play(
         pings: Vec::new(),
         ping_id: 0,
         refs: HashMap::new(),
+        fp: Default::default(),
         snaps_seen: 0,
         check_every: a.check_every.max(1),
     };
@@ -1021,6 +1069,7 @@ fn main() {
             bytes_in: Counter::new(),
             compact_in: Counter::new(),
             deltas_in: Counter::new(),
+            fpred_in: Counter::new(),
             deliveries: Counter::new(),
             snaps_out: Counter::new(),
             dgrams_in: Counter::new(),
@@ -1116,11 +1165,11 @@ fn main() {
         };
         let summary = serde_json::json!({
             "tag": a.tag, "n": a.n, "mode": if a.mode == Mode::Roam { "roam" } else { "idle" }, "rate": a.rate, "spread": a.spread,
-            "seconds": a.seconds, "compact": a.compact, "delta": a.delta, "queue": a.queue, "churn": a.churn,
+            "seconds": a.seconds, "compact": a.compact, "delta": a.delta, "fpred": a.fpred, "queue": a.queue, "churn": a.churn,
             "welcomed": sh.welcomed.load(Ordering::Relaxed), "refused": sh.refused.load(Ordering::Relaxed),
             "failed": sh.failed.load(Ordering::Relaxed), "closed": sh.closed.load(Ordering::Relaxed),
             "lives": sh.lives.load(Ordering::Relaxed), "left": sh.left.load(Ordering::Relaxed),
-            "snapshots": { "checked": sh.checked.get(), "bad": sh.bad.get(), "compactBundles": sh.compact_in.get(), "deltas": sh.deltas_in.get(), "badLog": *sh.bad_log.lock() },
+            "snapshots": { "checked": sh.checked.get(), "bad": sh.bad.get(), "compactBundles": sh.compact_in.get(), "deltas": sh.deltas_in.get(), "byFields": sh.fpred_in.get(), "badLog": *sh.bad_log.lock() },
             "steady": {
                 "snapLossPct": if steady_dl > 0 { ((steady_dl as f64 - steady_in as f64) / steady_dl as f64 * 1000.0).round() / 10.0 } else { 0.0 },
                 "bytesInPerPlayerS": if steady_player_s > 0.0 { (steady_bytes as f64 / steady_player_s).round() } else { 0.0 },

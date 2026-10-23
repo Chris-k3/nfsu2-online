@@ -189,6 +189,7 @@
 
 mod compact;
 mod conn;
+pub mod fpred;
 mod impair;
 mod lag;
 mod members;
@@ -338,6 +339,8 @@ pub struct LanOptions {
     pub bundle_budget: u64,
     /// each tick is the tick give or take this share of it, at random (conn.rs `Clock` says why)
     pub bundle_jitter: f64,
+    /// friends' car states by their fields to a page whose hello asks for them (fpred.rs); false: as byte deltas still
+    pub fpred: bool,
     /// SO_SNDBUF for /lan connections (NFSU2_LAN_SNDBUF; 0: the kernel's own, which Linux grows to megabytes)
     pub send_buffer_os: usize,
     /// the largest WebSocket message a client may send (the server's `limits::WS_MAX_PAYLOAD`, the ws library's
@@ -383,6 +386,7 @@ impl Default for LanOptions {
             bundle_max_ms: 50,
             bundle_budget: 125_000,
             bundle_jitter: 0.4,
+            fpred: true,
             send_buffer_os: 0,
             max_payload: 64 << 10,
         }
@@ -482,6 +486,13 @@ pub struct Breakdown {
     pub thinning: usize,
     /// the snapshots left out so far (the switch's `thinned`, since it started)
     pub thinned: u64,
+    /// what compact bundles carried to pages so far: car states' bytes and entries, how many of those went by their
+    /// fields (fpred.rs), the rest's bytes and entries
+    pub snap_bytes: u64,
+    pub snap_entries: u64,
+    pub fpred_entries: u64,
+    pub other_bytes: u64,
+    pub other_entries: u64,
     /// not on the switch: the pages waiting in line for a place (those away keeping theirs too), and of those that went
     /// in since the line last began, the longest wait (s)
     pub waiting: usize,
@@ -535,9 +546,30 @@ pub(crate) struct Stats {
     line_in: Counter,
     line_left: Counter,
     cuts: [Counter; 7],
+    /// what compact bundles carried to pages: friends' car states (SNAP entries, those by their fields of them) and
+    /// the rest, bytes and entries (their 4-byte bundle headers not counted)
+    snap_bytes: Counter,
+    snap_entries: Counter,
+    fpred_entries: Counter,
+    other_bytes: Counter,
+    other_entries: Counter,
 }
 
 impl Stats {
+    /// an entry of a compact bundle that went to a page: `data` the datagram, `e` its entry
+    pub(crate) fn entry_out(&self, data: &[u8], e: &[u8]) {
+        if data.len() > 16 + 5 && data[1] == compact::ROAM_OK && data[16 + 5] == 3 {
+            self.snap_bytes.add(e.len() as u64);
+            self.snap_entries.inc();
+            if e.first() == Some(&fpred::F_FPRED) {
+                self.fpred_entries.inc();
+            }
+        } else {
+            self.other_bytes.add(e.len() as u64);
+            self.other_entries.inc();
+        }
+    }
+
     fn cut(&self, why: Cut) {
         self.cuts[why as usize].inc();
     }
@@ -1001,6 +1033,9 @@ impl LanSwitch {
             }
         }
         n.thinned = self.stats.thinned.get();
+        let s = &self.stats;
+        (n.snap_bytes, n.snap_entries, n.fpred_entries) = (s.snap_bytes.get(), s.snap_entries.get(), s.fpred_entries.get());
+        (n.other_bytes, n.other_entries) = (s.other_bytes.get(), s.other_entries.get());
         (n.waiting, n.waited) = self.line_view();
         n
     }
@@ -1038,6 +1073,11 @@ impl LanSwitch {
             ("thinned", &s.thinned),
             ("bundlesIn", &s.bundles_in),
             ("bundlesOut", &s.bundles_out),
+            ("snapBytes", &s.snap_bytes),
+            ("snapEntries", &s.snap_entries),
+            ("fpredEntries", &s.fpred_entries),
+            ("otherBytes", &s.other_bytes),
+            ("otherEntries", &s.other_entries),
             ("resumed", &s.resumed),
             ("released", &s.released),
             ("queued", &s.queued),

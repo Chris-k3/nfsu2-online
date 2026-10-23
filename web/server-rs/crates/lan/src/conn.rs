@@ -17,10 +17,12 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{AttachCtx, BUNDLE_OUT, CLOSE_TIMEOUT, KIND_BUNDLE, LanSwitch, Peer, Stats, compact};
 
-/// how a page takes its datagrams (`Conn::compact`): as bundles of before, compact bundles, compact bundles with deltas
+/// how a page takes its datagrams (`Conn::compact`): as bundles of before, compact bundles, compact bundles with deltas,
+/// and with friends' car states by their fields (fpred.rs)
 pub(crate) const PLAIN: u8 = 0;
 pub(crate) const COMPACT: u8 = 1;
 pub(crate) const DELTAS: u8 = 2;
+pub(crate) const FPRED: u8 = 3;
 
 /// ws's readyState
 const OPEN: u8 = 1;
@@ -130,7 +132,8 @@ pub(crate) struct Conn {
     pub(crate) peer: Mutex<Option<Arc<Peer>>>,
     /// stream segments wait at the switch for this connection (a hint for its writer: pump after each write)
     pub(crate) streaming: AtomicBool,
-    /// how its datagrams go (its hello said "compact":1, and "delta":1: compact.rs): `PLAIN`, `COMPACT` or `DELTAS`;
+    /// how its datagrams go (its hello said "compact":1, "delta":1 and "fpred":1: compact.rs): `PLAIN`, `COMPACT`,
+    /// `DELTAS` or `FPRED`;
     /// compact ones leave out the address it holds.  One word, so that its writer never sees compact without the
     /// deltas its page takes (the page keeps the last bodies of every compact bundle it was sent)
     pub(crate) compact: AtomicU8,
@@ -342,6 +345,7 @@ async fn write_loop<W: AsyncWrite + Unpin>(sw: Arc<LanSwitch>, conn: Arc<Conn>, 
     // a compact bundle as it is made, and the last bodies its page was sent (compact.rs `Refs`)
     let mut body: Vec<u8> = Vec::new();
     let mut refs = compact::Refs::default();
+    let mut fp = crate::fpred::Fpred::default();
     loop {
         conn.out.wake.notified().await;
         loop {
@@ -360,7 +364,8 @@ async fn write_loop<W: AsyncWrite + Unpin>(sw: Arc<LanSwitch>, conn: Arc<Conn>, 
             let mode = conn.compact.load(Relaxed);
             let c = (mode != PLAIN).then(|| Compact {
                 own: conn.vip.load(Relaxed),
-                refs: (mode == DELTAS).then_some(&mut refs),
+                refs: (mode >= DELTAS).then_some(&mut refs),
+                fp: (mode == FPRED).then_some(&mut fp),
                 body: &mut body,
             });
             let e = encode(&sw.stats, &items, &mut buf, &mut close_sent, c);
@@ -422,11 +427,12 @@ struct Encoded {
     end: bool,
 }
 
-/// A page that takes compact bundles: the address it holds, the last bodies it was sent when it takes deltas, and the
-/// writer's buffer for the bundle being made.
+/// A page that takes compact bundles: the address it holds, the last bodies it was sent when it takes deltas (and the
+/// last car states, when it takes them by their fields), and the writer's buffer for the bundle being made.
 pub(crate) struct Compact<'a> {
     own: u32,
     refs: Option<&'a mut compact::Refs>,
+    fp: Option<&'a mut crate::fpred::Fpred>,
     body: &'a mut Vec<u8>,
 }
 
@@ -540,7 +546,7 @@ fn bundle(stats: &Stats, items: &[Out], buf: &mut Vec<u8>) {
 /// the datagrams as compact bundles (compact.rs) of BUNDLE_OUT at most, a datagram alone in one too (its 16-byte
 /// header costs more than a bundle's 4 and an entry's 5)
 fn bundle_compact(stats: &Stats, items: &[Out], buf: &mut Vec<u8>, c: Compact<'_>) {
-    let Compact { own, mut refs, body } = c;
+    let Compact { own, mut refs, mut fp, body } = c;
     body.clear();
     body.extend_from_slice(&[compact::KIND_COMPACT, 0, 0, 0]);
     let mut n = 0;
@@ -549,7 +555,8 @@ fn bundle_compact(stats: &Stats, items: &[Out], buf: &mut Vec<u8>, c: Compact<'_
         let Out::Dgram { data, src, dst, at: queued } = it else { continue };
         let data = compact::waited(data, if *queued != 0 { now.wrapping_sub(*queued) } else { 0 }, &mut moved);
         let at = body.len();
-        compact::entry(body, data, *src, *dst, own, refs.as_deref_mut());
+        compact::entry_fp(body, data, *src, *dst, own, refs.as_deref_mut(), fp.as_deref_mut());
+        stats.entry_out(data, &body[at..]);
         // a bundle takes datagrams while it stays within BUNDLE_OUT (the one that would not fit begins the next; it
         // was written as the next one, in order, so the page reads the same entries the writer made)
         if n > 0 && body.len() > BUNDLE_OUT {

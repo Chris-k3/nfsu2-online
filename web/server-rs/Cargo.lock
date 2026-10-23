@@ -594,6 +594,7 @@ dependencies = [
  "crc32fast",
  "futures-util",
  "libc",
+ "nfsu2-lan",
  "nfsu2-util",
  "parking_lot",
  "serde_json",

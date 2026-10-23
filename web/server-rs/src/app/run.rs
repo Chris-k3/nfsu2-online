@@ -137,6 +137,7 @@ pub async fn run(o: Options, cores: usize) {
         bundle_max_ms: fixed.unwrap_or_else(|| env_num("NFSU2_BUNDLE_MAX_MS", d.bundle_max_ms)),
         bundle_budget: env_num("NFSU2_BUNDLE_BUDGET", d.bundle_budget),
         bundle_jitter: env_num("NFSU2_BUNDLE_JITTER", (d.bundle_jitter * 100.0) as u64) as f64 / 100.0,
+        fpred: env_num("NFSU2_FPRED", 1) != 0,
         send_buffer_os: lan_sndbuf,
         ..d
     };
@@ -165,6 +166,7 @@ pub async fn run(o: Options, cores: usize) {
         tokio::spawn(async move {
             let mut shown = false;
             let mut thinned = 0;
+            let mut was = nfsu2_lan::Breakdown::default();
             let mut every = interval_at(Instant::now() + BREAKDOWN_EVERY, BREAKDOWN_EVERY);
             loop {
                 every.tick().await;
@@ -190,7 +192,21 @@ pub async fn run(o: Options, cores: usize) {
                         b.waited.div_ceil(60)
                     ));
                 }
+                // what free roam sent the pages in compact bundles since the last count: friends' car states (by their
+                // fields, nfsu2-lan fpred.rs, or as a byte delta) and the rest
+                let (sb, se, sf) = (b.snap_bytes - was.snap_bytes, b.snap_entries - was.snap_entries, b.fpred_entries - was.fpred_entries);
+                let (ob, oe) = (b.other_bytes - was.other_bytes, b.other_entries - was.other_entries);
+                if se + oe > 0 {
+                    log::line(&format!(
+                        "[players] to the pages in compact bundles since the last count: {:.1} MB in {se} car states ({:.1} bytes each, \
+                         {sf} of them by their fields), {:.1} MB in {oe} other datagrams",
+                        sb as f64 / 1e6,
+                        sb as f64 / se.max(1) as f64,
+                        ob as f64 / 1e6
+                    ));
+                }
                 thinned = b.thinned;
+                was = b;
             }
         });
     }
