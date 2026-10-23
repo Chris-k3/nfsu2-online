@@ -31,6 +31,7 @@ movies:career_movies.txt:tapuntil UI_StartCareer.fng satisfied:NOMOVIES=0
 options:options_display.txt:[D3D] Reset:
 hornvolume:options_horn.txt:[horn] volume 85 %:
 hornpause:pause_horn.txt:parts as SLIDER_BASE_8 SLIDER_KNOB_8 SLIDER_HANDLE_8 SLIDER_BEG_8 SLIDER_END_8:
+eucars:qr_eucars.txt:[expect] PASS:
 keyboard:kb_rebind_save.txt:waitmem [0x008654a4]==6 satisfied:
 careerbot:career_bot.txt:segment done:NFSU2_CAREER_BOT_RACES=2 ALARM=600
 lan_host:lan_host_short.txt:auth NAME 'SUITEHOST':NFSU2_NET=loopback NFSU2_NET_LOOPOFFSET=2101

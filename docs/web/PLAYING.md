@@ -140,6 +140,9 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
   On yours a link cannot change your game; the start page says so when an address carries them.
 - **The look:** the game looks as it did originally. Any graphics enhancement will be a separate setting, off
   unless you turn it on.
+- **The European cars:** the Peugeot 106 and the Vauxhall Corsa 1.8, which only the European release sold, are in the
+  car lot and on every car select (Quick Race, Customize, LAN and Online), and AI racers drive them too. The North
+  American game has their files but hid them.
 - **Two tabs:** one browser runs one game at a time. A second tab shows "Open elsewhere" and its Settings are
   read only. It takes over when the first tab closes.
 

@@ -168,6 +168,7 @@ int main(int argc,char**argv){
     { extern void sponsors_install(void); sponsors_install(); }   /* the sponsor screens' Continue (help bar) */
     { extern void lobbyclick_install(void); lobbyclick_install(); }   /* the lobby's list ignores a click on a dialog over it */
     { extern void olfilter_install(void); olfilter_install(); }       /* the Online lobby's Filter, once set, narrows its list */
+    { extern void regional_install(void); regional_install(); }       /* the European game's Corsa and 106 for sale, and AI racers' cars */
     { extern void autotest_init(void); autotest_init(); }       /* NFSU2_INPUT_SCRIPT ... */
     if (getenv("BT")) g_bt_on = 1;
     g_report_fn = all_reports;
