@@ -216,11 +216,11 @@ async fn the_binary_starts_counts_its_players_and_stops() {
     assert!(rust.startup.iter().any(|l| l.starts_with("  online    : the game's Online mode at 10.77.0.1")
         && l.ends_with("race results per persona in <state>/online)")));
     let p: Vec<Value> = rust.players.iter().map(|p| serde_json::from_str(p).unwrap()).collect();
-    assert_eq!(rust.players[0], r#"{"players":0,"online":0,"roam":0,"full":false,"roamBusy":false}"#);
+    assert_eq!(rust.players[0], r#"{"players":0,"online":0,"roam":0,"full":false,"queue":0,"roamBusy":false}"#);
     assert_eq!((p[1]["players"].as_u64(), p[1]["online"].as_u64()), (Some(1), Some(0)), "a /lan client: {}", rust.players[1]);
     assert_eq!((p[2]["players"].as_u64(), p[2]["online"].as_u64()), (Some(1), Some(1)), "an Online login: {}", rust.players[2]);
-    assert_eq!(rust.players[3], r#"{"players":0,"online":0,"roam":0,"full":false,"roamBusy":false}"#);
-    assert_eq!(rust.players[4], r#"{"players":0,"online":0,"roam":0,"full":false,"roamBusy":false,"room":0}"#);
+    assert_eq!(rust.players[3], r#"{"players":0,"online":0,"roam":0,"full":false,"queue":0,"roamBusy":false}"#);
+    assert_eq!(rust.players[4], r#"{"players":0,"online":0,"roam":0,"full":false,"queue":0,"roamBusy":false,"room":0}"#);
     assert_eq!(rust.players[5], rust.players[3], "no room for one that is not a number");
     assert!(rust.console.iter().any(|l| l == "[lan] 10.77.0.2 joined (1 on the switch)"), "{:?}", rust.console);
     assert!(rust.console.iter().any(|l| l == "[lan] 10.77.0.2 \"Ann\" left (0 on the switch)"), "{:?}", rust.console);
@@ -346,8 +346,8 @@ async fn the_binary_with_online_and_the_hub_off_and_one_place() {
     println!("{rust:#?}");
     assert!(rust.startup.contains(&"  online    : off (--online off)".to_string()), "{:?}", rust.startup);
     assert!(rust.startup.contains(&"  switch    : at most 1 players".to_string()));
-    assert_eq!(rust.players[0], r#"{"players":0,"online":null,"roam":null,"full":false,"roamBusy":false}"#);
-    assert_eq!(rust.players[1], r#"{"players":1,"online":null,"roam":null,"full":true,"roamBusy":false}"#);
+    assert_eq!(rust.players[0], r#"{"players":0,"online":null,"roam":null,"full":false,"queue":0,"roamBusy":false}"#);
+    assert_eq!(rust.players[1], r#"{"players":1,"online":null,"roam":null,"full":true,"queue":0,"roamBusy":false}"#);
     assert_eq!(rust.players[2], rust.players[1]);
     assert_eq!(rust.refused.1, Some((1013, "LAN full".to_string())));
     assert_eq!(rust.answers, 0, "no host at 10.77.0.1 or 10.77.0.253");
@@ -412,7 +412,8 @@ async fn players_who_leave_leave_nothing_behind() {
     let tmp = tempfile::tempdir().unwrap();
     let (data, wasm) = game_folder(tmp.path());
     let (port, state) = (free_port(), tmp.path().join("state"));
-    let mut srv = Server::spawn(command(&data, &wasm, port, &state, &[]), port);
+    // (each one that leaves without the page's own close keeps its place a minute: room for the four rounds' 160)
+    let mut srv = Server::spawn(command(&data, &wasm, port, &state, &["--max-peers", "1000"]), port);
     srv.ready().await;
     let pid = srv.child.id();
     let host = format!("localhost:{port}");
@@ -430,13 +431,13 @@ async fn players_who_leave_leave_nothing_behind() {
             b.binary(to_hub(&roam_snap(1000 + i as u32, [i as f32 * 10.0, 0.0, 0.0])));
         }
         let during = srv.players().await;
-        assert_eq!(during, r#"{"players":40,"online":40,"roam":0,"full":false,"roamBusy":false}"#);
+        assert_eq!(during, r#"{"players":40,"online":40,"roam":0,"full":false,"queue":0,"roamBusy":false}"#);
         let used = proc_use(pid);
         for b in &bs {
             b.close().await;
         }
         drop(bs);
-        assert_eq!(srv.players_until(0).await, r#"{"players":0,"online":0,"roam":0,"full":false,"roamBusy":false}"#);
+        assert_eq!(srv.players_until(0).await, r#"{"players":0,"online":0,"roam":0,"full":false,"queue":0,"roamBusy":false}"#);
         // (the sockets close as their tasks end: until the count holds, or the first round's again, 3 s at most)
         let t0 = Instant::now();
         let mut after = proc_use(pid);
@@ -609,7 +610,7 @@ async fn a_page_that_replaces_its_connection_keeps_its_online_session() {
     assert!(rust.same_vip, "the address came back");
     assert_eq!(rust.old_closed, Some((1006, String::new())), "the old connection ended, no close frame (terminate)");
     assert_eq!(rust.answer, Some(("move".to_string(), String::new())), "the lobby answers over the new connection");
-    assert_eq!(rust.players, r#"{"players":1,"online":1,"roam":0,"full":false,"roamBusy":false}"#);
+    assert_eq!(rust.players, r#"{"players":1,"online":1,"roam":0,"full":false,"queue":0,"roamBusy":false}"#);
     assert!(rust.console.contains(&"[lan] 10.77.0.2 is back (1 on the switch)".to_string()), "{:?}", rust.console);
     assert!(!rust.console.iter().any(|l| l.contains("the browser left")), "{:?}", rust.console);
 }

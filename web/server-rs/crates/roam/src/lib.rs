@@ -364,6 +364,7 @@ mod tests {
             pending: Arc::new(AtomicUsize::new(0)),
             crowded: Arc::new(AtomicBool::new(false)),
             in_roam: Arc::new(AtomicUsize::new(0)),
+            in_rooms: Arc::new(Mutex::new(HashMap::new())),
         };
         let ctx = FrameCtx { group: Arc::from("client"), site: None, cause: None, slot: None };
         for _ in 0..100_000 {
@@ -398,7 +399,7 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         let (pending, crowded) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicBool::new(false)));
         let c = crowded.clone();
-        let t = std::thread::spawn(move || run(hub, rx, &pending, &c, &AtomicUsize::new(0)));
+        let t = std::thread::spawn(move || run(hub, rx, &pending, &c, &AtomicUsize::new(0), &Mutex::new(HashMap::new())));
         let until = |want: bool| {
             let t0 = Instant::now();
             while crowded.load(Ordering::Relaxed) != want {
