@@ -2,7 +2,8 @@
 // Three tabs: the keyboard (on a touch screen: touch), the controller and this site.  The controller's tab is a
 // drawing of a pad with what each button the game uses does beside it, the buttons named as Xbox or PlayStation
 // names them (the switch under it; a PlayStation controller connecting picks those names).  While a steering wheel
-// is connected, the tab is the wheel's instead (wheel-setup.ts).
+// is connected, the tab is the wheel's instead (wheel-setup.ts).  The touch tab has the level horizon's switch (touch.ts),
+// the same in both copies.
 //
 // The drawing: a front view in its own units (260 x 180, x 130 the middle, the triggers above y 0) at SCALE in the
 // SVG's 336 px, the labels in rows of px left and right of it and over its middle, each joined to its control by a
@@ -11,6 +12,7 @@
 import { familyOf } from '../input/gamepad';
 import { PADF_PLAYSTATION } from '../input/proto';
 import { wheelSection } from './wheel-setup';
+import { levelHorizon, onLevelHorizon, setLevelHorizon } from './touch';
 
 export type Tab = 'keys' | 'pad' | 'site';
 export type Family = 'xb' | 'ps';
@@ -186,6 +188,16 @@ export function controlsSheet(root: HTMLElement, id: string, opts: { tab?: Tab; 
     sheet.show(tabs[to].dataset.tab as Tab, true);
   };
   for (const r of radios) r.onchange = () => { if (r.checked) sheet.family(r.value as Family); };
+  const level = root.querySelector<HTMLElement>('[data-level]');
+  if (level) {
+    const sw = level.querySelector<HTMLInputElement>('.switch')!, val = level.querySelector('.val')!;
+    sw.id = `${id}-level`; level.querySelector('label')!.htmlFor = sw.id;
+    const help = level.querySelector('.set-help')!; help.id = `${id}-level-help`; sw.setAttribute('aria-describedby', help.id);
+    const show = () => { sw.checked = levelHorizon(); val.textContent = sw.checked ? 'On' : 'Off'; };
+    sw.onchange = () => setLevelHorizon(sw.checked);
+    onLevelHorizon(show);
+    show();
+  }
   if (opts.follow) {
     const seen = (g: Gamepad) => {
       sheet.family(familyOf(g.id).family === PADF_PLAYSTATION ? 'ps' : 'xb');

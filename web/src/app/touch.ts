@@ -9,11 +9,14 @@
 //   gears     with a manual gearbox, gear down and up above the left thumb: the controller's X and A, as on a pad
 //             (Ctrl and Shift on the keyboard would be modifiers too)
 //   small     pause, camera, look back, reset; in free roam also the map, messages, horn and start an event
+//   horizon   while tilt steers, the game's 3D view turns against the phone's tilt from straight ahead, so the road's
+//             horizon stays level with the real one (the HUD stays on the phone; runtime/overrides.c sub_005c7ec0).
+//             Not in a cutscene (a race's start); faded in and out.  A switch in the Controls sheet's touch tab.
 // The controller part is a virtual one the input module merges with a real one (gamepad.ts withTouch).
 // They show while the game says the player drives ("drive" in its status block, runtime/web/status_web.c: 1 in a
-// race, 2 in free roam, + 4 with a manual gearbox), once a finger has touched the game (at once on a touch screen), and hide when a keyboard
-// or a controller is used, until the next touch.  The game reads its input once a frame, so a key a tap presses
-// stays down HOLD_MS at least.
+// race, 2 in free roam, + 4 with a manual gearbox, + 8 in a cutscene), once a finger has touched the game (at once on
+// a touch screen), and hide when a keyboard or a controller is used, until the next touch.  The game reads its input
+// once a frame, so a key a tap presses stays down HOLD_MS at least.
 import { PAD_A, PAD_LB, PAD_RB, PAD_X } from '../input/proto';
 import type { GameSession } from './game';
 import { touchFirst } from './device';
@@ -25,6 +28,20 @@ const STORE = 'nfsu2-touch-steering';
 const HOLD_MS = 150;
 /** the thumb stick: px from its centre to full lock; tilt: degrees of roll to full lock */
 const STICK_PX = 64, TILT_DEG = 30;
+/** the level horizon: the most it turns the view (degrees), how long it takes to come and go (ms) */
+const LEVEL_MAX_DEG = 60, LEVEL_FADE_MS = 400;
+
+const LEVEL_STORE = 'nfsu2-touch-level', LEVEL_EVENT = 'nfsu2-touch-level';
+let levelOn = (() => { try { return localStorage.getItem(LEVEL_STORE) !== 'off'; } catch { return true; } })();
+/** the level horizon's switch (the Controls sheet): on unless turned off in this browser */
+export function levelHorizon(): boolean { return levelOn; }
+export function setLevelHorizon(on: boolean) {
+  levelOn = on;
+  try { localStorage.setItem(LEVEL_STORE, on ? 'on' : 'off'); } catch { /* not kept: a private window */ }
+  dispatchEvent(new Event(LEVEL_EVENT));
+}
+/** fn runs when the switch changes */
+export function onLevelHorizon(fn: () => void) { addEventListener(LEVEL_EVENT, fn); }
 
 interface Ctl {
   id: string; el: HTMLElement;
@@ -96,6 +113,11 @@ export class TouchControls {
   private lastRoll: number | null = null;
   private tiltHeard = false;
   private tiltCheck = 0;
+  // the level horizon: the tilt from straight ahead (radians, unsmoothed), how far it is faded in, what the game has
+  private tilt = 0;
+  private levelK = 0;
+  private levelAt = 0;
+  private sentRoll = 0;
 
   constructor(stage: HTMLElement, private deps: TouchDeps) {
     this.steering = (() => { try { const s = localStorage.getItem(STORE) as Steering; return STEERING.includes(s) ? s : 'buttons'; } catch { return 'buttons'; } })();
@@ -160,12 +182,14 @@ export class TouchControls {
   }
 
   /** for tests and logs: what the controls do now */
-  state() { return { shown: this.shown, drive: this.drive, steering: this.steering, lx: this.lx, buttons: this.padButtons }; }
+  state() { return { shown: this.shown, drive: this.drive, steering: this.steering, lx: this.lx, buttons: this.padButtons, roll: this.sentRoll }; }
 
   /** the game ended: everything let go, nothing of it kept */
   stop() {
     cancelAnimationFrame(this.raf);
     this.hide();
+    this.levelK = this.tilt = 0;
+    if (this.sentRoll) { this.sentRoll = 0; this.session?.input?.viewRoll?.(0); }
     this.session = null;
   }
 
@@ -180,6 +204,20 @@ export class TouchControls {
     }
     if (!this.away && (s.input?.padPressed?.() ?? 0) > this.touchedAt) this.away = true;
     this.update();
+    this.level(now);
+  }
+
+  /** the level horizon: the view turned against the tilt while tilt steers outside a cutscene, faded in and out
+   *  (smoothstep) as that starts and ends, the tilt itself as the sensor gives it (a smoothed one would lag) */
+  private level(now: number) {
+    const on = this.shown && this.steering === 'tilt' && levelOn && (this.drive & 8) === 0;
+    const dt = Math.min(100, now - this.levelAt);
+    this.levelAt = now;
+    this.levelK = Math.max(0, Math.min(1, this.levelK + (on ? dt : -dt) / LEVEL_FADE_MS));
+    const k = this.levelK, roll = k * k * (3 - 2 * k) * this.tilt;
+    if (roll === this.sentRoll) return;
+    this.sentRoll = roll;
+    this.session?.input?.viewRoll?.(roll);
   }
 
   private update() {
@@ -304,6 +342,8 @@ export class TouchControls {
     if (this.center === null) this.center = r;
     let d = r - this.center;
     if (d > Math.PI) d -= 2 * Math.PI; else if (d < -Math.PI) d += 2 * Math.PI;
+    const max = LEVEL_MAX_DEG * Math.PI / 180;
+    this.tilt = Math.max(-max, Math.min(max, d));
     const v = Math.max(-1, Math.min(1, d / (TILT_DEG * Math.PI / 180)));
     this.lx = this.lx * 0.4 + v * 0.6;                  // a little smoothing of the sensor's jitter
     this.sendPad();

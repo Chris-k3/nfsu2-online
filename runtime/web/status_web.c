@@ -70,7 +70,8 @@ static void *status_main(void *unused){
 
 /* "drive": what the page's touch controls (web/src/app/touch.ts) need of the
  * game, set at every Present (autotest.c): 1 while the player drives in a
- * race, 2 in free roam, 0 elsewhere, plus 4 with a manual gearbox.  Driving
+ * race, 2 in free roam, 0 elsewhere, plus 4 with a manual gearbox and 8
+ * during a cutscene (the touch controls' level horizon waits).  Driving
  * is GameFlow 6 with a race HUD (HUD_*.fng) the top package; the pause menu
  * (UI_pause.fng), the results, the world's loading screen and the Engage
  * dialog over the HUD are not, nor is a cutscene in free roam (NIS, as
@@ -107,6 +108,7 @@ static int drive_state(void){
     int roam = roam_exploring();
     int v = flow == 6u && hud && !engage && !(roam && nis) ? (roam ? 2 : 1) : 0;
     if (v && manual_gearbox(v == 1)) v |= 4;
+    if (v && nis) v |= 8;
     /* a line at each change, for a player's log */
     static unsigned l_flow = ~0u; static int l_hud = -1, l_nis = -1, l_engage = -1, l_v = -1;
     if (flow != l_flow || hud != l_hud || nis != l_nis || engage != l_engage || v != l_v){

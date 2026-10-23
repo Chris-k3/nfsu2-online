@@ -38,7 +38,7 @@ import {
   IEV_RELEASE_ALL, IEV_TEXT, IEV_WHEEL, IKF_ALT, IKF_CTRL, IKF_DEAD, IKF_REPEAT, IKF_SHIFT, IKF_SYNTH, IM_ATTACHED,
   IM_EV_DROP, IM_EV_R, IM_EV_W, IM_EVENTS, IM_GAME_INACTIVE, IM_HDR_WORDS, IM_KEYS_HELD, IM_MAGIC, IM_MOUSE_X,
   IM_MOUSE_Y, IM_NAMES_GEN, IM_OFF_EV, IM_OFF_NAMES, IM_OFF_SYN, IM_QUIT_REQ, IM_SYN_R, IM_SYN_W, IM_TEXT,
-  IM_TEXT_KIND, IM_TEXT_LEN, IM_TEXT_MAX, IM_TEXT_SEQ, IM_VERSION, INPUT_EV_N, INPUT_MAGIC, INPUT_NAME_LEN,
+  IM_TEXT_KIND, IM_TEXT_LEN, IM_TEXT_MAX, IM_TEXT_SEQ, IM_VERSION, IM_VIEW_ROLL, INPUT_EV_N, INPUT_MAGIC, INPUT_NAME_LEN,
   INPUT_SYN_N, INPUT_TEXT_BYTES, INPUT_VERSION, IREASON_ELEMENT, IREASON_FULLSCREEN, IREASON_META, IREASON_PAGE,
   IREASON_PAGEHIDE, IREASON_SCRIPT, IREASON_VISIBILITY, IREASON_WINDOW,
 } from './proto';
@@ -95,6 +95,8 @@ export interface InputHandle {
   key(code: string, down: boolean): void;
   /** the touch controls' virtual controller, merged with a real one (null: none) */
   touchPad(t: TouchPad | null): void;
+  /** the touch controls' level horizon: the phone's tilt the game's 3D view turns against, radians, + = clockwise */
+  viewRoll(rad: number): void;
   /** performance.now() of a real controller's last button press (0: none) */
   padPressed(): number;
   /** the game's text entry while it is up, else null */
@@ -129,6 +131,7 @@ export function attachInput(proc: GameProcess, element: HTMLElement, opts: Input
   let active: boolean | null = null;
   let pads: PadPoller | null = null, synth: SynthDriver | null = null;
   let raf = 0, timer = 0, detached = false;
+  const roll = new Float32Array(1), rollBits = new Int32Array(roll.buffer);
   // the mailbox was not ours (another writer, another layout): requests cannot reach the game
   let refused = false;
   // quit requests made before the mailbox registered: sent once it does
@@ -375,6 +378,7 @@ export function attachInput(proc: GameProcess, element: HTMLElement, opts: Input
       if (k && !detached) push(down ? IEV_KEY_DOWN : IEV_KEY_UP, k.dik, k.vk, 0);
     },
     touchPad(t) { pads?.setTouch(t); },
+    viewRoll(rad) { if (h && !detached) { roll[0] = rad; Atomics.store(h, IM_VIEW_ROLL, rollBits[0]); } },
     padPressed() { return pads?.lastPress ?? 0; },
     textEntry() {
       if (!h || !u8) return null;
@@ -398,6 +402,7 @@ export function attachInput(proc: GameProcess, element: HTMLElement, opts: Input
       if (detached) return;
       // whatever the game holds is let go (it may outlive the page's input, e.g. a test page)
       push(IEV_RELEASE_ALL, 0, 0, 0, [], 0, IREASON_PAGE);
+      api.viewRoll(0);
       if (h) Atomics.compareExchange(h, IM_ATTACHED, 1, 0);   // only our own claim (2 = the C ns* driver)
       detached = true; quitPending = 0; cancelAnimationFrame(raf); clearInterval(timer);
       pads?.dispose(); pads = null; synth = null;

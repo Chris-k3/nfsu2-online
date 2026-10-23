@@ -1032,6 +1032,21 @@ void gamepad_rumble(float strong, float weak){
     atomic_store_explicit(&MH(IM_RUMBLE_WEAK), w, memory_order_relaxed);
     atomic_fetch_add_explicit(&MH(IM_RUMBLE_SEQ), 1u, memory_order_release);
 }
+/* the phone's tilt the 3D view turns against (web/src/app/touch.ts: the
+ * level horizon), radians, + = the phone turned clockwise; read once a
+ * frame, so the main view and its road reflection (overrides.c
+ * sub_005c7ec0) turn alike */
+float input_view_roll(void){
+    static long frame = -1; static float roll = 0.f;
+    long f = metal_frames();
+    if (f == frame) return roll;
+    frame = f;
+    uint32_t v = atomic_load_explicit(&MH(IM_VIEW_ROLL), memory_order_relaxed);
+    memcpy(&roll, &v, 4);
+    if (!isfinite(roll)) roll = 0.f;
+    if (roll > 1.5f) roll = 1.5f; else if (roll < -1.5f) roll = -1.5f;
+    return roll;
+}
 /* on: 0 unplugged, 1 a pad, 2 a steering wheel */
 void gamepad_synth_connect(int on){
     pthread_mutex_lock(&g_pad_mx);

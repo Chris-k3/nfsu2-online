@@ -472,14 +472,47 @@ void sub_0060faa0(CPU *c){
  *   eView+0x40 = Camera*  (CameraParams: +0xbc NearZ, +0xc0 FarZ, +0xc4 FOV)
  *   ecx+0x00 view matrix, +0x40 projection, +0x80 their product
  * The game only passes identity matrices to SetTransform; the camera can only
- * be read here.  Behaviour is UNCHANGED: only the address is captured and (in
- * the HD build) the main view's matrices are recorded into the frame.  In the
- * original build enh_view_setup is an empty inline function.  The web build
- * keeps the headlight view's (9) for the other cars' lights (headlights.c). */
+ * be read here.  The address is captured and (in the HD build) the main
+ * view's matrices are recorded into the frame.  In the original build
+ * enh_view_setup is an empty inline function.  The web build keeps the
+ * headlight view's (9) for the other cars' lights (headlights.c), and turns
+ * the view against a phone's tilt (below). */
+#ifdef __wasm__
+/* The touch controls' level horizon (web/src/app/touch.ts): while tilt
+ * steers, the main view (1) and its road reflection (4, laid over it in
+ * screen space) turn against the phone's tilt, about the camera's forward
+ * axis, so the road's horizon stays level with the real one; the HUD stays
+ * on the phone.  The camera's matrix is turned for the length of the call:
+ * the view matrix copied from it (0x4012b0), the product and the culling
+ * planes made of that agree, and whatever reads the camera itself keeps the
+ * game's.  The game's view space has y down (the projection's P11 is
+ * negative), so this turns the picture anticlockwise for a + roll. */
+float input_view_roll(void);
+static void view_roll(uint32_t m, float a){
+    float c = cosf(a), s = sinf(a);
+    for (uint32_t r = m; r < m + 0x40u; r += 0x10u){
+        float x = MRF32(r), y = MRF32(r + 4u);
+        MRF32(r) = x * c + y * s;
+        MRF32(r + 4u) = y * c - x * s;
+    }
+}
+#endif
 void sub_005c7ec0_orig(CPU *c);
 void sub_005c7ec0(CPU *c){
     uint32_t plat = c->ecx, view = MR32(c->esp + 4u);
+#ifdef __wasm__
+    uint32_t cam = 0; uint8_t keep[0x40];
+    if (view && mem_is_committed(view + 0x43u) && (MR32(view + 4u) == 1u || MR32(view + 4u) == 4u)){
+        float a = input_view_roll();
+        cam = a != 0.f ? MR32(view + 0x40u) : 0u;
+        if (cam && mem_is_committed(cam + 0x3fu)){ memcpy(keep, g_mem + cam, sizeof keep); view_roll(cam, a); }
+        else cam = 0;
+    }
     sub_005c7ec0_orig(c);
+    if (cam) memcpy(g_mem + cam, keep, sizeof keep);
+#else
+    sub_005c7ec0_orig(c);
+#endif
     if (view && plat && mem_is_committed(view + 0x43u) && mem_is_committed(plat + 0xbfu)){
         enh_view_setup(MR32(view + 4u), (const float *)(g_mem + plat),
                        MR32(view + 0x40u));

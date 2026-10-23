@@ -152,6 +152,7 @@ kbd {
 .keys > div { display: flex; align-items: center; gap: 16px; padding: 8px 0; }
 .keys dt { order: 1; flex: none; margin-left: auto; display: flex; align-items: center; gap: 4px; color: var(--muted); }
 .tab-panel > .keys + .hint { margin-top: 16px; }
+.tab-panel > .hint + .set { margin-top: 8px; box-shadow: inset 0 1px var(--line); }
 /* the controller (controls.ts): the pad in line art, the buttons the game uses in lime, a dotted line from each
  * label to its control, the button's name in a small key cap; the names as Xbox or PlayStation write them (the
  * sheet's data-fam).  --pad-bg: what is behind it (the hollow of the bumpers) */

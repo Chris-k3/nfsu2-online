@@ -96,6 +96,8 @@ export interface InputSubsystem extends Subsystem {
   key?(code: string, down: boolean): void;
   /** the touch controls' virtual controller, merged with a real one (null: none) */
   touchPad?(t: TouchPad | null): void;
+  /** the touch controls' level horizon: the phone's tilt the game's 3D view turns against, radians, + = clockwise */
+  viewRoll?(rad: number): void;
   /** performance.now() of a real controller's last button press (0: none) */
   padPressed?(): number;
   /** the game's text entry while it is up (a new profile's name, the LAN name), else null */
