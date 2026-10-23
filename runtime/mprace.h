@@ -19,6 +19,11 @@ typedef struct {
 enum { MPR_IDLE = 0, MPR_OUT, MPR_LAN, MPR_RACE, MPR_BACK, MPR_DONE, MPR_FAILED };
 /* what quitting a started race with its pause menu's Quit costs the bank (what it holds at most) */
 #define MPRACE_QUIT_FEE 75
+/* a race's evening out (mprace.c balance_race): a car's engine power at most this much up, and down; the faster
+ * cars' share of the way (their target between the cars' middle and the best) */
+#define MPRACE_BALANCE_UP    0.50f
+#define MPRACE_BALANCE_DOWN  0.25f
+#define MPRACE_BALANCE_SHARE (1.f / 3.f)
 
 /* the career has a car of its own, one the LAN race can take (not a new
  * career's prologue car): a trip without one would race a car made of
@@ -35,6 +40,11 @@ void mprace_ack(void);
  * prize the career's bank got for it */
 int  mprace_place(void);
 int  mprace_prize(void);
+/* our car's engine power in the race as evened out (1: as it was) */
+float mprace_factor(void);
+/* a network race of this type (its N_MODE: circuit 0, sprint 1, drag 2, drift 3, URL 4, Street X 10) evens
+ * out the cars */
+int  mprace_evened(int net_mode);
 /* the player quit the race (its pause menu's Quit); the fee the bank paid for it (less than MPRACE_QUIT_FEE when it
  * held less, 0 before the crib) */
 int  mprace_quit(void);
@@ -81,6 +91,12 @@ typedef struct {
 int  mprace_car_perf(uint32_t car, CarPerf *p);
 /* one log line: who's car and its numbers */
 void mprace_perf_log(const char *who, uint32_t car);
+/* the engine's power times f: all of its torque curve (the turbo's is in it)
+ * and its nitrous (the engine reads both in place); 0 when the car has no
+ * physics info */
+int  mprace_torque_scale(uint32_t car, float f);
+/* (test aid) the car's governor at mph (0: none, as with an ECU part); 0 when the car has no physics info */
+int  mprace_speed_limit(uint32_t car, float mph);
 struct CPU;
 /* test aid: the player's car rated as every player car type, stock and with
  * every performance part, then put back (roam mp perf survey) */

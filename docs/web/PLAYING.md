@@ -309,6 +309,15 @@ Good to know:
     with no traffic and no AI racers. You drive the race. After the results every game goes back by itself,
     behind the same screen, through the main menu and your crib, to where it left free roam, and the panel says your
     place and prize: about a minute for the way out and back.
+  - **The cars are evened out** in circuit, sprint, drag and URL races: at the start every game rates the race's
+    cars as the game itself does (its performance rating: the engine, gears, weight and drag with every part in) and
+    changes each car's engine power so the cars meet: the slower cars come two thirds of the way up, the faster ones
+    a third of the way down, by at most half again as much power or a quarter less (the nitrous with it). No car
+    keeps a stock car's top-speed governor (as with an ECU part), so the extra power counts at speed too. Grip,
+    brakes, gears, weight and your tuning stay as they are, so your car still drives as itself; a car far ahead of
+    the others stays ahead, by less. The lobby says so before you join, and after the race the note says how your
+    engine was changed. Street X and drift races leave the cars as they are: there the rating did not decide who
+    won.
   - **Your career is not touched:** the race does not count in it, is neither won nor lost there and opens nothing.
     Only your bank changes: 1st $400, 2nd $300, 3rd $200, 4th $100, nothing for 5th or 6th. **Quitting the race**
     (its pause menu's Quit) costs $75, as the panel says before you join: the host's quit ends the race for everyone,

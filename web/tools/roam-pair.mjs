@@ -32,6 +32,8 @@
 //                    NFSU2_SAVE_SEED: e.g. a player's "Download a backup" unzipped) instead of a fresh one
 //        [--fresh Neo]  that page starts from a fresh profile all the same (a new career's prologue beside
 //                    --seed's careers: tests/scripts/mprace_nocar_b.txt)
+//        [--seed-for Bob:<save tree>]  that page starts from its own save instead (two careers' cars in one
+//                    race: mprace_lobby_a.txt + mprace_card_b.txt at a race open in its career)
 //
 // Without --base it starts its own server (web/tools/server-cmd.mjs, --dev on the given
 // ports, the game folder from --data or NFSU2_DATA) and stops it at the end.
@@ -81,7 +83,9 @@ const PLAY = opt('page', 'test') === 'play', SIZE = opt('size', opt('page', 'tes
 const FETCH = opts('fetch');                 // files of each page's save folder to copy out, as <out>/<name>.<file>
 const SEED = opt('seed', '');               // a save tree each page starts from
 const FRESH = opts('fresh');                 // pages that start from a fresh profile all the same
-const seeded = name => SEED && !FRESH.includes(name);
+const SEED_FOR = new Map(opts('seed-for').map(s => [s.slice(0, s.indexOf(':')), s.slice(s.indexOf(':') + 1)]));   // a page's own
+const seedOf = name => SEED_FOR.get(name) || (FRESH.includes(name) ? '' : SEED);
+const seeded = name => !!seedOf(name);
 const HIDE = opts('hide').map(x => { const [n, at, dur] = x.split(':'); return { name: n, at: +at * 1000, dur: +(dur ?? 8) * 1000 }; });
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -167,7 +171,7 @@ async function start(i, name, script, own) {
   });
   page.on('pageerror', e => w('PAGEERROR ' + e));
   const u = url(i, name, script, own);
-  if (seeded(name)) w(`[roam-pair] save seed: ${await seedSave(page, BASE, `roam-${name}`, SEED)} files from ${SEED}`);
+  if (seeded(name)) w(`[roam-pair] save seed: ${await seedSave(page, BASE, `roam-${name}`, seedOf(name))} files from ${seedOf(name)}`);
   w(`URL ${u}`);
   await page.goto(u);
   if (APP) {

@@ -3091,6 +3091,11 @@ static const char *race_kind(uint32_t r){
     return MR8(r + 0x34u) == 2u ? "URL race" : t == 0 ? "circuit" : t == 1 ? "sprint" : t == 2 ? "Street X" : t == 4 ? "drag" :
            t == 5 ? "drift" : "race";
 }
+/* the network race's type (mprace N_MODE) for a career race: URL 4, circuit 0, sprint 1, Street X 10, drag 2, drift 3 */
+static int race_net_mode(uint32_t r){
+    uint8_t ty = MR8(r + 0xfu);
+    return MR8(r + 0x34u) == 2u ? 4 : ty == 0 ? 0 : ty == 1 ? 1 : ty == 2 ? 0xa : ty == 4 ? 2 : ty == 5 ? 3 : 0;
+}
 /* the most players a race takes: the game's network race takes 6, drag one a
  * lane (4; 3 on track 4402) */
 static int race_max(uint32_t r){ return MR8(r + 0xfu) == 4u ? (MR16(r + 0x18u) == 4402u ? 3 : 4) : RC_LOBBY_MAX; }
@@ -3371,8 +3376,7 @@ static void mp_trip(int64_t host){
     if (!t.name[0]){ mp_note(host, "The race is off: you are not in it"); mp_to(MP_IDLE, host); return; }
     snprintf(t.password, sizeof t.password, "%08x", g_mp.l.id);
     t.race = MR32(r + 8u);
-    uint8_t ty = MR8(r + 0xfu);
-    t.mode = MR8(r + 0x34u) == 2u ? 4 : ty == 0 ? 0 : ty == 1 ? 1 : ty == 2 ? 0xa : ty == 4 ? 2 : ty == 5 ? 3 : 0;
+    t.mode = race_net_mode(r);
     t.track = MR16(r + 0x18u); t.reverse = MR8(r + 0x1au) & 1u; t.laps = MR8(r + 0x1bu);
     t.players = g_mp.l.n;
     for (int i = 0; i < g_mp.l.n && i < RC_LOBBY_MAX; i++) snprintf(g_mp.names[i], sizeof g_mp.names[i], "%s", mp_name(g_mp.l.ids[i]));
@@ -3445,6 +3449,11 @@ static void mp_frame(CPU *c, int64_t host, int in_roam, int world_runs, const ui
         else if (mprace_quit() && mprace_fee()) snprintf(t, sizeof t, "Multiplayer race: you quit it, $%d fee", mprace_fee());
         else if (mprace_quit()) snprintf(t, sizeof t, "Multiplayer race: you quit it");
         else snprintf(t, sizeof t, "Multiplayer race: not finished");
+        float ef = mprace_factor();
+        if (ph != MPR_FAILED && (ef > 1.005f || ef < 0.995f)){
+            size_t n = strlen(t);
+            snprintf(t + n, sizeof t - n, " (your engine %+.0f%% to even out the cars)", (double)((ef - 1.f) * 100.f));
+        }
         mp_report();
         mprace_ack();
         mp_note(host, t); mp_to(MP_IDLE, host);
@@ -3534,8 +3543,8 @@ static int mp_line(int64_t host, char *tx, int n){
         MpLobby *l = mp_joinable();
         if (l && (!sp || sp->kind == MPS_ONLY)){
             if (!mprace_car_ok()) snprintf(tx, (size_t)n, "%s's %s: %s", mp_name(l->host), race_kind(l->race), MP_NOCAR);
-            else snprintf(tx, (size_t)n, "Press Enter to join %s's %s (%d of %d). Quitting the race costs $%d", mp_name(l->host), race_kind(l->race),
-                          l->n, l->max, MPRACE_QUIT_FEE);
+            else snprintf(tx, (size_t)n, "Press Enter to join %s's %s (%d of %d). Quitting the race costs $%d%s", mp_name(l->host), race_kind(l->race),
+                          l->n, l->max, MPRACE_QUIT_FEE, l->race && mprace_evened(race_net_mode(l->race)) ? ". The cars are evened out" : "");
             return 1;
         }
         if (sp && sp->kind == MPS_ONLY){
@@ -3676,7 +3685,8 @@ static void mp_panel(int64_t host, int in_roam){
         /* a message first, for its few seconds (back from the race at the spot: the place and the prize) */
         if (g_mp.note[0] && host < g_mp.note_until){ js_str(&j, "v", "note"); js_str(&j, "text", g_mp.note); }
         else if (l && (!sp || sp->kind == MPS_ONLY) && !mprace_car_ok()){ js_str(&j, "v", "note"); js_str(&j, "text", MP_NOCAR); }
-        else if (l && (!sp || sp->kind == MPS_ONLY)){ js_str(&j, "v", "join"); js_race(&j, l->race); js_players(&j, l); js_int(&j, "fee", MPRACE_QUIT_FEE); }
+        else if (l && (!sp || sp->kind == MPS_ONLY)){ js_str(&j, "v", "join"); js_race(&j, l->race); js_players(&j, l); js_int(&j, "fee", MPRACE_QUIT_FEE);
+            if (l->race && mprace_evened(race_net_mode(l->race))) js_int(&j, "even", 1); }
         else if (full){ js_str(&j, "v", "full"); js_race(&j, full->race); js_players(&j, full); }
         else if (sp && sp->kind == MPS_ONLY){ js_str(&j, "v", "spot"); js_race(&j, sp->race); js_str(&j, "why", mpw_text[sp->why]); }
     }
@@ -4839,9 +4849,12 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
     }
 #if MPRACES
     if (!strcasecmp(sub, "perf")){
-        /* "mp perf [survey]": the player's car's performance as the game rates it (mprace.c); survey: as every player
-         * car type, stock and with every performance part, then the car as it was (a test aid) */
+        /* "mp perf [survey | scale F | limit MPH]": the player's car's performance as the game rates it (mprace.c);
+         * survey: as every player car type, stock and with every performance part, then the car as it was; scale: its
+         * engine's torque and nitrous times F; limit: its governor at MPH (0 none) (test aids) */
         if (!strcasecmp(a1, "survey")) mprace_perf_survey(c, player_car());
+        else if (!strcasecmp(a1, "scale")){ mprace_torque_scale(player_car(), (float)atof(a2)); mprace_perf_log("mp perf scale", player_car()); }
+        else if (!strcasecmp(a1, "limit")){ mprace_speed_limit(player_car(), (float)atof(a2)); mprace_perf_log("mp perf limit", player_car()); }
         else mprace_perf_log("mp perf", player_car());
         return 1;
     }
