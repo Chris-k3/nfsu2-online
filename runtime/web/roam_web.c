@@ -275,6 +275,11 @@ int roam_plat_lobby(const char *json){
     if (n <= 0 || n > (int)NET_MAX_PAYLOAD) return 1;
     return tx_push(NET_KIND_LOBBY, 0, 0, (const uint8_t *)json, n) ? 1 : -1;
 }
+/* solid cars as the page's menu switched them (net_proto.h solid) */
+int roam_plat_solid(void){
+    uint32_t v = MB ? ld(&MB->solid) : 0;
+    return v == 1 ? 0 : v == 2 ? 1 : -1;
+}
 static uint8_t place(const rc_peer *p){ return p->status == RC_ST_PAUSED ? RC_ST_ROAM : p->status; }
 /* we are in free roam and the friend's car was within NEAR_M of ours (on the
  * ground) when last seen: SNAPs come only from free roam, so its newest state

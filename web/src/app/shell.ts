@@ -88,6 +88,7 @@ let displayHz = 60;
 let refreshMeasured: Promise<void> = Promise.resolve();
 let session: GameSession | null = null;
 let hudWide = true;                      // the running game's HUD is edge-anchored (hud = wide), not 4:3
+let solidCars: boolean | null = null;    // the running game's free roam has solid cars (null: no free roam)
 let away: AwayCheck | null = null;
 let renderCheck: RenderCheck | null = null;
 let lastExit: { code: number; seconds: number } | null = null;
@@ -415,6 +416,7 @@ async function startGame() {
   const net = !/^(off|0|none)$/i.test(r.env.NFSU2_NET?.trim() ?? '') && !alone;
   const netName = net ? (r.env.NFSU2_ROAM_NAME?.trim() || 'Player') : null;
   hudWide = !/^(43|4:3)$/i.test(r.env.NFSU2_HUD?.trim() ?? '');
+  solidCars = net && r.env.NFSU2_ROAM === '1' ? r.env.NFSU2_ROAM_COLLIDE !== '0' : null;
   fatal = null;
   quitAt = null;
   saved = null;
@@ -731,6 +733,9 @@ function openMenu() {
   if (m.open) { m.close(); return; }
   m.querySelector<HTMLButtonElement>('[data-act="fullscreen"]')!.textContent = isFullscreen() ? 'Leave full screen' : 'Full screen';
   m.querySelector<HTMLButtonElement>('[data-act="fps"]')!.textContent = `Frame-rate counter: ${fps.mode}`;
+  const solid = m.querySelector<HTMLButtonElement>('[data-act="solid"]')!;
+  solid.hidden = solidCars === null || !session?.net?.solid;
+  solid.textContent = `Solid cars: ${solidCars ? 'on' : 'off'}`;
   m.querySelector<HTMLButtonElement>('[data-act="quit"]')!.textContent = quitLabel();
   const line = $('#menu-save');
   if (saved) line.textContent = `Last saved at ${when(saved.at)} (${saved.name}).`;
@@ -752,6 +757,18 @@ async function menuAction(act: string) {
       toggleFullscreen();
       break;
     case 'fps': fps.cycle(); m.querySelector<HTMLButtonElement>('[data-act="fps"]')!.textContent = `Frame-rate counter: ${fps.mode}`; break;
+    case 'solid': {
+      if (solidCars === null || !session?.net?.solid) break;
+      solidCars = !solidCars;
+      session.net.solid(solidCars);
+      m.querySelector<HTMLButtonElement>('[data-act="solid"]')!.textContent = `Solid cars: ${solidCars ? 'on' : 'off'}`;
+      // and in settings.ini for the next game, as Settings, Online, Solid cars would
+      const text = putKey(settingsText ?? TEMPLATE, 'roam_collide', solidCars ? 'on' : 'off').text;
+      try { await writeFile(SAVE, 'settings.ini', text); settingsText = text; void settings.refresh(); }
+      catch (e) { log.add(`[app] settings.ini not written: ${e}`); }
+      log.add(`[app] solid cars ${solidCars ? 'on' : 'off'} (the page menu)`);
+      break;
+    }
     case 'help': m.close(); openHelp(); break;
     case 'offline':
       m.close();

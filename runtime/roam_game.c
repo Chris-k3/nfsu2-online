@@ -44,7 +44,8 @@
  *    a contact is at the same spot on both screens.  Ghost cars
  *    (NFSU2_ROAM_COLLIDE=0) have no collision body and are drawn a little in
  *    the past (NFSU2_ROAM_DELAY), smoothed through the jitter buffer; the
- *    player's own car is then passable on every friend's screen too.
+ *    player's own car is then passable on every friend's screen too.  The
+ *    page's menu switches between the two while the game runs (solid_follow).
  *  - names over friends' cars, as the game's own LAN races show them
  *    (roam_game_hud).
  *  - horns: the player's goes out with the snapshots, and which horn it is
@@ -65,6 +66,8 @@
  *  - outruns: two players who stay near each other can challenge each other
  *    to the game's own outrun, raced against each other's car (du_frame),
  *    away from the doors and their open events.
+ *  - keep right: a new player's car driving out of the new career's start
+ *    gets a line at the top asking them to keep right (kr_frame).
  *  - leaving free roam (shop, crib, race, menus) parks the cars; their
  *    rides are unloaded once the world is gone.  A peer that leaves, times
  *    out or goes into a shop or race disappears (soft-parked), and its slot
@@ -2864,6 +2867,39 @@ static void du_frame(CPU *c, int64_t host, int in_roam, int world_runs, const ui
         break;
     }
 }
+/* ---- keep right: new players leaving the airport ------------------------------------------------ */
+/* Every new player's car appears at the new career's start, the airport's
+ * car park, and drives out from there onto roads full of other players.  A
+ * player whose car stood on that spot gets a line at the top as it drives
+ * off, while friends are in free roam (du_hud: an outrun's or a race lobby's
+ * line first): KR_SHOW_US of it, counted while it shows. */
+#define KR_TEXT         "Please keep right to help avoid crashes"
+#define KR_GO_M         15.f          /* the car is this far from the spot: it drives off */
+#define KR_SHOW_US      15000000
+static struct { int armed; int64_t left, at; } g_kr;   /* at: when it showed last (0: not last frame) */
+static void kr_frame(void){
+    if (!g_lp_ok) return;
+    float dx = g_lp[0] - SPAWN_X, dy = g_lp[1] - SPAWN_Y, dz = g_lp[2] - SPAWN_Z, d2 = dx * dx + dy * dy + dz * dz;
+    float v = rc_sqrtf(g_lv[0] * g_lv[0] + g_lv[1] * g_lv[1] + g_lv[2] * g_lv[2]);
+    if (d2 < (float)(SPAWN_M * SPAWN_M) && v < IDLE_MPS) g_kr.armed = 1;
+    else if (g_kr.armed && d2 > KR_GO_M * KR_GO_M){
+        g_kr.armed = 0;
+        int about = 0;
+        for (int i = 0; i < g_npv; i++) if (g_pv[i].visible) about++;
+        if (about){ g_kr.left = KR_SHOW_US; g_kr.at = 0; }
+        rlog("[roam] f=%ld keep right: the car drives off the new career's start, %d friend(s) in free roam%s\n", rh_frame(), about,
+             about ? ": the line shows" : ": no line");
+    }
+}
+/* the line this frame, while some of its time is left; last: when it showed last frame (0: it did not) */
+static int kr_line(int64_t host, int64_t last){
+    if (g_kr.left <= 0) return 0;
+    int64_t dt = last ? host - last : 0;
+    g_kr.left -= dt < 0 ? 0 : dt > 100000 ? 100000 : dt;
+    g_kr.at = host;
+    return 1;
+}
+
 /* the line of text, top centre, after the HUD's update (roam_game_hud) */
 #if MPRACES
 static int mp_line(int64_t host, char *tx, int n);
@@ -2872,6 +2908,8 @@ static int64_t g_mp_hud_at;                   /* free roam's HUD was up, no dial
 static void du_hud(CPU *c, int64_t host){
     uint32_t pl = rd32(G_PLAYER1), hud = pl && ok(pl, PL_HUD + 4u) ? rd32(pl + PL_HUD) : 0;
     uint32_t pkg = hud && ok(hud, 0x14) ? rd32(hud + 0x10u) : 0;
+    int64_t kr_last = g_kr.at;
+    g_kr.at = 0;
     if (!hud || hud != g_tag.hud || !ok(pkg, 0x20) || !g_gmem) return;
     char tx[TAG_DUEL_MAX] = {0};
 #if MPRACES
@@ -2889,6 +2927,7 @@ static void du_hud(CPU *c, int64_t host){
         else if (g_du.st == DU_GOT) snprintf(tx, sizeof tx, "%s challenges you to an outrun: press Enter to take it", g_du.name);
         else if (g_du.st == DU_ACCEPTED) snprintf(tx, sizeof tx, "Outrun with %s", g_du.name);
         if (!tx[0] && g_du.note[0] && host < g_du.note_until && g_du.st != DU_RACE && g_du.st != DU_OVER) snprintf(tx, sizeof tx, "%s", g_du.note);
+        if (!tx[0] && g_du.st == DU_IDLE && !rd32(0x00838974u /* a dialog up */) && kr_line(host, kr_last)) snprintf(tx, sizeof tx, "%s", KR_TEXT);
     }
     if (!tx[0]){ tag_hide(c, TAG_DUEL); return; }
     uint32_t obj = tag_obj(c, TAG_DUEL, pkg);
@@ -4376,9 +4415,27 @@ static void world_changed(CPU *c, uint32_t w){
     g_world_seen = w;
 }
 
+#ifndef ROAM_HOST_WIN
+/* Solid cars switched while the game runs (the page's menu: roam_plat_solid).
+ * Off: friends' cars lose their bodies at once, and the player's car is
+ * passable on their screens (RC_BIT_PASS).  On: friends' cars are ghosts
+ * until they are clear of the player's car, as when they appear, so nobody
+ * is shoved out of a car that was inside theirs.  The cars slew to the other
+ * rule's drawing delay (render_delay) */
+static void solid_follow(void){
+    int v = roam_plat_solid();
+    if (v < 0 || v == O.collide) return;
+    O.collide = v;
+    if (v) ghost_all();
+    rlog("[roam] f=%ld solid cars %s (the page's menu)\n", rh_frame(), v ? "on" : "off");
+}
+#endif
 void roam_game_frame(CPU *c){
     if (!g_inited) init_once(c);
     if (!O.on) return;
+#ifndef ROAM_HOST_WIN
+    solid_follow();
+#endif
     g_step++;
     uint64_t t0 = rh_ns();
     int64_t host = roam_plat_now_us();
@@ -4570,6 +4627,7 @@ void roam_game_frame(CPU *c){
         for (int i = 0; i < g_npv; i++) if (g_pv[i].visible && g_pv[i].has_cfg && g_pv[i].have_pose) want = 1;
         em_update(c, want, host);
         soft_me(c, host, st);
+        if (DUELS) kr_frame();
 #if MPRACES
         spots_read(c, host);
 #endif
@@ -4767,7 +4825,7 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
                     car ? MR32(car + 0x24u) : 0, car ? MR32(car + 0x28u) : 0, car ? MR32(car + 0x554u) : 0, car ? (int16_t)MR16(car + 8u) : -1,
                     car ? (double)MRF32(car + 0x50u) : 0, car ? (double)MRF32(car + 0x54u) : 0, car ? (double)MRF32(car + 0x58u) : 0);
             uint32_t body = car ? rd32(car + 0x3cu) : 0;
-            if (car) rlog("[roam]     %s%s%s%s%s%s%s%s; collision body %s%s; %u hit(s) with my car (at most %.1f m/s)\n", g_sl[k].soft ? "passable:" : g_sl[k].ghost ? "a ghost" : "solid",
+            if (car) rlog("[roam]     %s%s%s%s%s%s%s%s; collision body %s%s; %u hit(s) with my car (at most %.1f m/s)\n", !O.collide ? "solid cars off" : g_sl[k].soft ? "passable:" : g_sl[k].ghost ? "a ghost" : "solid",
                           g_sl[k].soft & SOFT_PAUSED ? " paused" : "", g_sl[k].soft & SOFT_IDLE ? " standing" : "",
                           g_sl[k].soft & SOFT_DOOR ? " near a door" : "", g_sl[k].soft & SOFT_SPAWN ? " at the start" : "",
                           g_sl[k].soft & SOFT_EVENT ? " near my event" : "", g_sl[k].soft & SOFT_SAYS ? " says so" : "",

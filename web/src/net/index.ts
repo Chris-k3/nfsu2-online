@@ -115,6 +115,8 @@ export interface NetLink {
   setAway(on: boolean): void;
   /** the player stops waiting in line for a place: no switch for the rest of this game */
   goOffline(): void;
+  /** free roam's solid cars, switched while the game runs (the page menu; runtime/roam_game.c solid_follow) */
+  setSolid(on: boolean): void;
   close(): void;
 }
 
@@ -269,6 +271,8 @@ class Link implements NetLink {
   private queuedAt = 0;
   /** the player chose to stop waiting and play offline (goOffline): nothing takes the switch again this game */
   private stayOff = false;
+  /** the roam mailbox's solid word (setSolid): 0 not switched, 1 off, 2 on */
+  private solid = 0;
   /** the switch's peer list (the online host on it too), as its last whole list and the changes since made it */
   private peerMap = new Map<number, { name: string; server: boolean }>();
   private peerVips = new Set<number>();
@@ -305,6 +309,7 @@ class Link implements NetLink {
     }
     const ep = new Endpoint(name, ver, buf, r.ptr, r.size);
     if (name === 'roam') this.roam = ep; else this.lan = ep;
+    if (name === 'roam' && this.solid) Atomics.store(ep.i32, P.W_SOLID, this.solid);
     if (name === 'lan') this.log('LAN play attached (the game opened its LAN screens)');
     this.publishPeers(ep);
     if (this.state === 'online') this.publishOnline(ep);
@@ -402,6 +407,11 @@ class Link implements NetLink {
       this.log('the player is here again');
       this.checkWant();
     }
+  }
+  setSolid(on: boolean) {
+    this.solid = on ? 2 : 1;
+    if (this.roam) Atomics.store(this.roam.i32, P.W_SOLID, this.solid);
+    this.log(`solid cars ${on ? 'on' : 'off'} (the page menu)`);
   }
   private connect() {
     if (this.closed) return;

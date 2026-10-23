@@ -57,6 +57,9 @@ void     roam_plat_notice(const char *name, const char *what);
  * (web); 0: this platform has no panel, the game's top line says it.  With
  * the session lock held */
 int      roam_plat_lobby(const char *json);
+/* solid cars as the player switched them while the game runs (the page's
+ * menu, web): 1 on, 0 off, -1 not switched (NFSU2_ROAM_COLLIDE holds) */
+int      roam_plat_solid(void);
 const char *roam_ip_str(uint32_t ip, char *buf);   /* buf >= 16 */
 
 #endif

@@ -87,7 +87,7 @@ rev in the countdown) and step aside for menus, the pause menu and free roam's c
 | Enter | Choose (menus); in free roam, start an event at its marker or take an outrun |
 | F12 | Screenshot (PNG), kept with your saves and shown in Saves on the start page |
 | **F8** | Frame-rate counter: off, on, detailed |
-| **F9** | The page menu: when the game last saved, full screen, counter, controls, log, **Quit game**; on a controller Home, or both sticks pressed in; on a touch screen the ☰ button |
+| **F9** | The page menu: when the game last saved, full screen, counter, solid cars (in free roam), controls, log, **Quit game**; on a controller Home, or both sticks pressed in; on a touch screen the ☰ button |
 | **Hold Esc** | Leave full screen (a short press still goes to the game) |
 
 The start page shows these keys under **Controls**, and F9, Controls shows them while you play.
@@ -252,7 +252,8 @@ Good to know:
   you their car 5 times a second instead of 20 (past 1 km, twice), which saves traffic and doesn't show at that
   distance. When many players arrive at once, their cars load one after another, about two a second.
 - **Solid cars:** you collide with the other players' cars (Online, More online settings,
-  Solid cars; off: you drive through them, and they through yours). A car that appears on top of yours, at a garage or
+  Solid cars; off: you drive through them, and they through yours). The page menu (F9) switches it while you play,
+  at once, and keeps it for your next games. A car that appears on top of yours, at a garage or
   after a jump, lets you through until you are apart. Each player's own game moves their car: a car you hit is pushed
   in its owner's game, and moves on your screen as it does there. A hit is shared between the two cars by their
   models' weight (0.96 t for the Peugeot 106 to 2.9 t for the Hummer): driving into a standing car of your weight,
@@ -265,6 +266,9 @@ Good to know:
   car, and every car through yours, so nobody blocks it; for players who don't have that event it is an ordinary
   spot. A player on an older version doesn't know about your events or your Solid cars setting, and collides with
   you there as before.
+- **Keep right:** a new career starts in the airport's car park, and every new player drives out of it into the
+  others. As your car leaves that spot, the top of the screen says "Please keep right to help avoid crashes" for 15 s
+  (while other players are in free roam).
 - **Names over the cars** follow the game's own player-names option, as in its LAN races. A player who paused shows
   as "paused" there.
 - **Horn:** hold N (or click the controller's left stick) to honk. The others hear it from your car: louder the nearer

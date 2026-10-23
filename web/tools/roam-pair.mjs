@@ -16,7 +16,8 @@
 //                    NFSU2_ROAM=1); the default is test/hostcheck.html (null renderer, net=<name>).  A page of
 //                    1600x900 (--size), and a script line `log SHOT <name>` saves the page as the player sees it
 //                    (the game and the page's own overlays) as <out>/<instance>-<name>.png; `log SHOT clean_<name>`
-//                    without the race lobby's panel (tests/scripts/mprace_shots_a/b.txt)
+//                    without the race lobby's panel (tests/scripts/mprace_shots_a/b.txt); `log MENU <item>` opens
+//                    the page menu (F9), clicks that item (its data-act, e.g. solid) and goes back to the game
 //        [--page play [--size 960x540] [--play-only Bob]]   the renderer's test page (test/play.html, WebGPU)
 //                    instead: frame dumps go to the server's /artifacts/ as <name>-*.png (a server of our own
 //                    gets --artifacts <out>); --play-only: only that instance renders, the others run hostcheck
@@ -168,6 +169,12 @@ async function start(i, name, script, own) {
     if (k) void (k[1].startsWith('clean') ? page.evaluate(() => { for (const id of ['lobby', 'lobby-cover']) document.getElementById(id).hidden = true; }) : Promise.resolve())
       .then(() => page.screenshot({ path: path.join(OUT, `${name}-${k[1]}.png`) }))
       .then(() => w(`[shot] ${k[1]}`), e => w(`[shot] ${k[1]} failed: ${e}`));
+    // the page menu as the player uses it, at a script's `log MENU <item>` (its data-act: solid, fps ...): F9, the
+    // item, back to the game
+    const mk = APP && /LOG MENU (\S+)/.exec(m.text());
+    if (mk) void page.keyboard.press('F9').then(() => page.click(`#menu [data-act="${mk[1]}"]`, { timeout: 5000 }))
+      .then(() => page.click('#menu [data-act="resume"]'))
+      .then(() => w(`[menu] ${mk[1]}`), e => w(`[menu] ${mk[1]} failed: ${e}`));
   });
   page.on('pageerror', e => w('PAGEERROR ' + e));
   const u = url(i, name, script, own);

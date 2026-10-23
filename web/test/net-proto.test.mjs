@@ -51,7 +51,7 @@ test('offsets', () => {
     rx_slots: P.W_RX_SLOTS, tx_off: P.W_TX_OFF, rx_off: P.W_RX_OFF, mode: P.W_MODE, port: P.W_PORT, tx_head: P.W_TX_HEAD,
     tx_bell: P.W_TX_BELL, rx_tail: P.W_RX_TAIL, c_alive: P.W_C_ALIVE, want: P.W_WANT, page_state: P.W_PAGE_STATE, vip: P.W_VIP, netmask: P.W_NETMASK,
     generation: P.W_GENERATION, tx_tail: P.W_TX_TAIL, rx_head: P.W_RX_HEAD, rx_bell: P.W_RX_BELL, rx_full_drop: P.W_RX_FULL_DROP,
-    tx_offline_drop: P.W_TX_OFFLINE_DROP, rx_oversize: P.W_RX_OVERSIZE, switch_peers: P.W_SWITCH_PEERS, tx_wait_n: P.W_TX_WAIT_N,
+    tx_offline_drop: P.W_TX_OFFLINE_DROP, rx_oversize: P.W_RX_OVERSIZE, switch_peers: P.W_SWITCH_PEERS, solid: P.W_SOLID, tx_wait_n: P.W_TX_WAIT_N,
     peer_bits: P.W_PEER_BITS };
   for (const [f, w] of Object.entries(words)) assert.equal(off[f], w * 4, f);
   const dbl = { switch_rtt_ms: P.D_SWITCH_RTT_MS, tx_wait_ms_sum: P.D_TX_WAIT_MS_SUM, tx_wait_ms_max: P.D_TX_WAIT_MS_MAX };

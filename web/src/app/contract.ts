@@ -116,6 +116,8 @@ export interface NetSubsystem extends Subsystem {
   away?(on: boolean): void;
   /** the player stops waiting in line for a place (a full server): off the server's LAN for the rest of this game */
   offline?(): void;
+  /** free roam's solid cars, switched while the game runs (the page menu) */
+  solid?(on: boolean): void;
 }
 
 export type AttachRenderer = (proc: GameProcess, canvas: HTMLCanvasElement, opts: RendererOptions) => RendererSubsystem | Promise<RendererSubsystem>;
