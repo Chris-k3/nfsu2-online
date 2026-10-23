@@ -260,8 +260,8 @@ Good to know:
   you go on at about half your speed and it leaves at about the other half, where you used to stop dead and it flew
   off faster than you came; driving a 240SX into a standing Hummer, you keep about a quarter of your speed and it
   leaves at about a third of it. Such a hit starts the game's slow-motion crash view only when it is hard: from about
-  200 km/h of closing speed between two cars of the same weight. You also drive through a car whose player is paused (or you are), one that has stood
-  still for a minute (or yours has), and any car within 20 m of a shop's, the garage's or the car lot's door, so a
+  155 km/h of closing speed between two cars of the same weight. You also drive through a car whose player is
+  paused (or you are), one that has stood still for a minute (or yours has), and any car within 20 m of a shop's, the garage's or the car lot's door, so a
   crowd can't wall off an entrance. The same goes for the start of an event
   that is open in your career (a race, or one of the stage's other events): within 20 m of it you drive through every
   car, and every car through yours, so nobody blocks it; for players who don't have that event it is an ordinary

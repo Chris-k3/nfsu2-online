@@ -5447,20 +5447,20 @@ static void push_add(Slot *s, const float *v, int64_t t){
  * first) reaches 30.  It weighed the game's whole hit, against an immovable
  * car: twice what the player's car keeps of one of the same weight, so a
  * friend's car started it at half the closing speed a car of the game's own
- * needs.  For the pair the threshold is twice the game's (CRASH_VIEW_X)
+ * needs.  For the pair the threshold is 1.5 x the game's (CRASH_VIEW_X)
  * over the part the player's car keeps (the cap raised to it), and a next
  * pass of the same step (none kept) never starts it.  Measured with two
  * 240SX (1.22 t): the hit is about 1.85 x the velocity change it makes, 67
  * for 32 m/s into a standing car (the rammer turned back at -3.5 m/s), so
  * the view came from about 53 km/h of closing speed, with the game's own
- * over the part kept (60) from about 105, still too often, and now (120)
- * from about 205; that ram started it on both screens at 60, and on
+ * over the part kept (60) from about 105, still too often, and now (90)
+ * from about 155; that ram started it on both screens at 60, and on
  * neither now.  The crashed mark the same hit sets (car +0x38, 0x5F6BE0,
  * read by the physics) and the game's other thresholds of the capped hit
  * (30) keep the game's own values. */
 #define G_CRASH_VIEW    0x007a1864u   /* float 30: the hit (t m/s) that starts the crash view */
 #define G_CRASH_CAP     0x007a1858u   /* float 40: what 0x59FB70 caps the hit at first */
-#define CRASH_VIEW_X    2.f           /* a friend's car: the player's car's part of the hit starts it at this x the game's */
+#define CRASH_VIEW_X    1.5f          /* a friend's car: the player's car's part of the hit starts it at this x the game's */
 void roam_game_contact(CPU *c, void (*orig)(CPU *)){
     uint32_t pair = c->ecx, me = O.on && O.collide && O.hit_share != 100 ? player_car() : 0;
     uint32_t mb = ok(me, 0x40) ? rd32(me + 0x3cu) : 0;
