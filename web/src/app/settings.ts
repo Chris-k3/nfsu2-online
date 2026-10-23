@@ -39,8 +39,11 @@ export interface KeyDef {
 // (enhance.c is compiled in, but whether the WebGPU renderer honours them is
 // the gfx track's, UNVERIFIED), the texture packs (texrep.m is not ported: the
 // tex track's), the Metal HUD, the BSD-socket LAN interface and address (the
-// browser's address comes from the server's switch), Discord and the
-// background controller.  The LAN keys the browser's runtime reads (network:
+// browser's address comes from the server's switch), free roam's peers and port
+// (every browser has an address of its own on that switch, which the page never
+// shows, and the server's free-roam hub picks the players near it; the test
+// tools set NFSU2_ROAM_PORT and NFSU2_ROAM_PEERS in the page address), Discord
+// and the background controller.  The LAN keys the browser's runtime reads (network:
 // on/lan = the server's virtual LAN, off = none; lan_adapter_id, lan_host_name,
 // lan_timing) are 'web' but have no template paragraph: the player's page does
 // not offer the game's LAN races yet (PLAYING.md).
@@ -98,8 +101,8 @@ export const KEYS: readonly KeyDef[] = [
   // free-roam multiplayer (the runtime checks the values too)
   { key: 'roam', env: 'NFSU2_ROAM', kind: 'bool', ic: true, scope: 'web' },
   { key: 'roam_name', env: 'NFSU2_ROAM_NAME', kind: 'name', ic: true, scope: 'web' },
-  { key: 'roam_port', env: 'NFSU2_ROAM_PORT', kind: 'int', vals: '1024..65535', ic: true, scope: 'web' },
-  { key: 'roam_peers', env: 'NFSU2_ROAM_PEERS', kind: 'peers', ic: true, scope: 'web' },
+  { key: 'roam_port', env: 'NFSU2_ROAM_PORT', kind: 'int', vals: '1024..65535', ic: true, scope: 'mac' },
+  { key: 'roam_peers', env: 'NFSU2_ROAM_PEERS', kind: 'peers', ic: true, scope: 'mac' },
   { key: 'roam_discovery', env: 'NFSU2_ROAM_DISCOVERY', kind: 'bool', ic: true, scope: 'web' },
   { key: 'roam_room', env: 'NFSU2_ROAM_ROOM', kind: 'text', ic: true, scope: 'web' },
   { key: 'roam_max_players', env: 'NFSU2_ROAM_MAX_PLAYERS', kind: 'int', vals: '2..33', ic: true, scope: 'web' },
@@ -230,7 +233,9 @@ export const TEMPLATE = `# NFSU2 settings, read at every launch.
 # device pixels 1:1; scale:<f> = device pixels times f (0.25 to 2), e.g.
 # scale:0.5 renders a quarter of the pixels (faster, softer).  [NFSU2_RENDER]
 #render = backing
-# Upper bound for every native render size, in pixels (0 = none).  [NFSMAXPIX]
+# Upper bound for the native render size at scale 1 and below, in pixels
+# (0 = none); a scale above 1 multiplies the bounded size, up to 8192 pixels
+# a side.  [NFSMAXPIX]
 #max_pixels = 9000000
 
 # Race HUD: wide = anchored to the screen edges (to a centred 16:9 area on
@@ -327,15 +332,10 @@ export const TEMPLATE = `# NFSU2 settings, read at every launch.
 # see.  For these options a ';' or '#' after a blank starts a comment.
 # [NFSU2_ROAM]
 #roam = off
-# Other players' addresses, if the automatic search does not find them:
-# a.b.c.d or a.b.c.d:port, separated by commas.  [NFSU2_ROAM_PEERS]
-#roam_peers =
 # Empty: you drive with everyone.  With a name, free roam shows only the
 # players who set the same name (capitals and spaces do not count).  Not
 # private: everyone on the server still sees your name.  [NFSU2_ROAM_ROOM]
 #roam_room =
-# Port, the same for every player (1024 to 65535).  [NFSU2_ROAM_PORT]
-#roam_port = 47210
 # Look for players with a broadcast every 2 s when the server does not pick
 # the players near you (its free-roam hub).  [NFSU2_ROAM_DISCOVERY]
 #roam_discovery = on

@@ -339,11 +339,18 @@ static void modes_refresh(void){
         unsigned hh = hts[i], ww = (unsigned)((double)hh * vw / vh + 0.5) & ~1u;
         g_modes[i][0] = ww; g_modes[i][1] = hh;
     }
-    /* NFSU2_RENDER (widescreen.c): backing pixels, panel pixels or a scale. */
-    double rf = ws_render_factor();
-    double dw = vw * rf, dh = vh * rf;
+    /* NFSU2_RENDER (widescreen.c): backing pixels, panel pixels or a scale.
+     * NFSMAXPIX bounds the size at a scale of 1 and below; a scale above 1 is
+     * chosen to go beyond it and multiplies the bounded size (bounded after
+     * the scale, 150% and 200% both came out at ~104% on a 4K screen), up to
+     * 8192 a side: WebGPU's default texture limit (gpu/index.ts asks for no
+     * more). */
+    double rf = ws_render_factor(), up = rf > 1.0 ? rf : 1.0;
+    double dw = vw * rf / up, dh = vh * rf / up;
     double maxpix = ws_max_pixels();
     if (maxpix > 1.0e5 && dw * dh > maxpix){ double k = sqrt(maxpix / (dw * dh)); dw *= k; dh *= k; }
+    dw *= up; dh *= up;
+    if (dw > 8192.0 || dh > 8192.0){ double k = 8192.0 / (dw > dh ? dw : dh); dw *= k; dh *= k; }
     unsigned w = (unsigned)dw & ~1u, h = (unsigned)dh & ~1u;
     g_modes[ROW_NATIVE][0] = w; g_modes[ROW_NATIVE][1] = h;
     /* The 4K row only if the display can show it (screen row >= 2160).

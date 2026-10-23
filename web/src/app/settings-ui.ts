@@ -34,15 +34,7 @@ const GROUPS: Group[] = [
     { key: 'roam_room', label: 'Room', help: 'Leave empty to drive with everyone. With a name, free roam shows only the players who set the same name. Not private: everyone on this server still sees your name.', c: { t: 'text', placeholder: 'everyone' } },
     { key: 'online', label: 'Online mode', help: 'The game\'s Online menu takes you straight to the Online Main Menu under your name, without the EA Login screens: lobby, chat and races with everyone playing from this server.', c: { t: 'switch' }, more: true },
     { key: 'roam_collide', label: 'Solid cars', help: 'You collide with the other players\' cars. A car that appears on yours lets you through until you are apart. Off: you drive through them, and they through yours.', c: { t: 'switch' }, more: true },
-    { key: 'roam_max_players', label: 'Largest group', help: 'You and the players you exchange cars with at once, 2 to 33: the server picks the nearest.', c: { t: 'num', min: 2, max: 33, step: 1 }, more: true },
     { key: 'roam_max_cars', label: 'Players\' cars shown', help: 'The nearest, 0 to 32.', c: { t: 'num', min: 0, max: 32, step: 1 }, more: true },
-    { key: 'roam_discovery', label: 'Find players automatically', help: 'When the server does not pick the players near you: looks for players on this server with a broadcast every 2 s.', c: { t: 'switch' }, more: true },
-    { key: 'roam_peers', label: 'Players\' addresses', help: 'a.b.c.d or a.b.c.d:port, separated by commas.', c: { t: 'text', placeholder: 'none' }, more: true },
-    { key: 'roam_port', label: 'Port', help: 'The same for every player, 1024 to 65535.', c: { t: 'num', min: 1024, max: 65535, step: 1 }, more: true },
-    { key: 'roam_rate', label: 'Updates per second', help: 'How often your car is sent to the others, 10 to 30.', c: { t: 'num', min: 10, max: 30, step: 1 }, more: true },
-    { key: 'roam_delay', label: 'Display delay', help: 'With Solid cars off, the other players\' cars are shown this far behind, 0 to 1000. Solid cars are shown where they are now.', c: { t: 'num', min: 0, max: 1000, step: 10, unit: 'ms' }, more: true },
-    { key: 'roam_extrap', label: 'Longest extrapolation', help: 'How long another player\'s car keeps moving on its own when updates are late, 0 to 1000.', c: { t: 'num', min: 0, max: 1000, step: 10, unit: 'ms' }, more: true },
-    { key: 'roam_carpool_kb', label: 'Car memory pool', help: 'In KB; never below the game\'s own 11000.', c: { t: 'num', min: 0, max: 128000, step: 1000, unit: 'KB' }, more: true },
   ] },
   { title: 'Game', items: [
     { key: 'language', label: 'Language', help: 'The game\'s menus and subtitles, and the voices in languages with a dub.', c: { t: 'select', opts: [
@@ -57,8 +49,6 @@ const GROUPS: Group[] = [
     { key: 'background', label: 'When the tab is in the background', help: 'Pause freezes the game and its sound, as alt-tab does on Windows. In LAN and Online play it keeps running, without sound.', c: { t: 'seg', opts: [['pause', 'Pause'], ['run', 'Keep running']] }, more: true },
     { key: 'audio_latency', label: 'Output latency', help: 'Lowest reacts fastest; Robust survives a busy PC best.', c: { t: 'seg', opts: [['interactive', 'Lowest'], ['balanced', 'Balanced'], ['playback', 'Robust']] }, more: true },
     { key: 'seed_registry', label: 'Highest graphics for a new save', help: 'The game\'s own graphics options at their highest, at this screen\'s resolution. Off lets the game run its own hardware check.', c: { t: 'switch' }, more: true },
-    { key: 'quit_grace', label: 'Time to quit', help: 'Seconds the game gets to shut down after Quit game before it is stopped.', c: { t: 'num', min: 0, step: 1, unit: 's' }, more: true },
-    { key: 'watchdog', label: 'Stall report', help: 'Seconds without a frame before the log gets a report of every game thread (0 = off).', c: { t: 'num', min: 0, step: 1, unit: 's' }, more: true },
   ] },
   { title: 'Display', items: [
     { key: 'fullscreen', label: 'Full screen on Play', help: 'Off plays in this browser window; the menu (F9) has full screen while you play. Hold Esc to leave it. On by default on phones.', c: { t: 'switch' } },
@@ -70,9 +60,7 @@ const GROUPS: Group[] = [
     { key: 'other_headlights', label: 'Other cars\' headlights', help: 'Light on the road from other cars, as your own headlights give. Players: friends in free roam and the other players in Online and LAN races. All: AI racers and traffic too. Off: only yours, as in the original game.', c: { t: 'seg', opts: [['players', 'Players'], ['all', 'All cars'], ['off', 'Off']] }, more: true },
     { key: 'fps_counter', label: 'Frame-rate counter', help: 'In a corner of the game. F8 cycles it while you play.', c: { t: 'seg', opts: [['off', 'Off'], ['on', 'On'], ['detailed', 'Detailed']] }, more: true },
     { key: 'resolution', label: 'Fixed render size', help: 'Renders every resolution at this size, for example 2560x1440. Empty uses the one chosen in the game.', c: { t: 'text', placeholder: 'WxH' }, more: true },
-    { key: 'max_pixels', label: 'Pixel limit', help: 'Most pixels the screen-size resolution renders (0 = no limit).', c: { t: 'num', min: 0, step: 100000 }, more: true },
-    { key: 'hfr_fixes', label: 'High-frame-rate fixes', help: 'For the parts of the game that count frames: default, all, none, or a list of ticks, timer, particles, trail, audio, rtf.', c: { t: 'text', placeholder: 'default' }, more: true },
-    { key: 'nos_trail_length', label: 'Nitrous trail length', help: 'Length factor of the nitrous and speed-streak trails (1 = normal).', c: { t: 'num', min: 0, step: 0.1 }, more: true },
+    { key: 'max_pixels', label: 'Pixel limit', help: 'Most pixels the screen-size resolution renders at 100% and below (0 = no limit). 150% and 200% scale up from it.', c: { t: 'num', min: 0, step: 100000 }, more: true },
   ] },
   { title: 'Controller', items: [
     { key: 'rumble', label: 'Rumble', help: 'On controllers that have it: crashes, hard landings and the game\'s own force feedback.', c: { t: 'switch' } },
@@ -251,15 +239,18 @@ export class SettingsPanel {
     return `More ${g.title.toLowerCase()} settings${n ? ` (${n} changed)` : ''}`;
   }
 
-  /** The lines with keys outside the table: listed, so nothing in the file acts unseen (the audit's PAGE-2). */
+  /** The lines with keys outside the table, and those of table keys the panel has no row for (roam_rate and the
+   *  other tuning knobs, the Mac app's): listed, so nothing in the file acts unseen (the audit's PAGE-2). */
   private others(): HTMLElement[] {
-    const other = this.fileOnly.other;
+    const unshown = Object.entries(this.fileOnly.file).filter(([k, f]) => !ITEMS.has(k) && f.raw !== '')
+      .map(([key, f]) => ({ phys: f.phys, key, env: key, value: f.raw, refused: f.refused }));
+    const other = [...this.fileOnly.other, ...unshown].sort((a, b) => a.phys - b.phys);
     if (!other.length) return [];
     const box = document.createElement('div'); box.className = 'group'; box.id = 'settings-other';
-    const h = document.createElement('h3'); h.id = 'group-other'; h.textContent = 'Other variables in this file';
+    const h = document.createElement('h3'); h.id = 'group-other'; h.textContent = 'Other settings in this file';
     box.setAttribute('role', 'group'); box.setAttribute('aria-labelledby', h.id);
     const p = document.createElement('p'); p.className = 'set-help';
-    p.textContent = 'Lines that set a runtime variable by its own name. They apply at Play; edit the file as text below to change them.';
+    p.textContent = 'Lines this page has no control for: settings it does not show, and runtime variables set by their own name. They apply at Play; edit the file as text below to change them.';
     const ul = document.createElement('ul');
     for (const o of other) {
       const li = document.createElement('li'); li.className = 'set-help';

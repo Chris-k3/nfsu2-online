@@ -643,7 +643,8 @@ paths to the VPS, so pick a VPS location between you.
   - **Measured with impairment on a local switch:** 100 ± 10 ms one way and 5 % loss.
     98.1 % of frames were interpolated, 1.9 % extrapolated, and none were held.
   - **For 50–150 ms round trips, the default is enough.** If friends' cars stutter (Wi-Fi or mobile jitter), set
-    `roam_delay = 150` in Settings (settings.ini). It only adds display delay.
+    `roam_delay = 150` in settings.ini (the text editor at the bottom of Settings; the page has no row for it). It
+    only adds display delay.
   - **There is no automatic raise from the measured ping.** The runtime reads `roam_delay` once at start; making it
     follow the ping is a runtime change for the net track.
   - **Over the real internet:** **UNVERIFIED**.
