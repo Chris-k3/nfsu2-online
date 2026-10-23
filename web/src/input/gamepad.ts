@@ -87,6 +87,10 @@ function withTouch(s: PadSnapshot, t: TouchPad): PadSnapshot {
     : { connected: true, buttons: t.buttons, axes, family: PADF_GENERIC, name: 'Touch controls', index: -2 };
 }
 
+/** a stick pressed in alone waits this long (ms) for the other, the menu's shortcut, before the game gets it (the horn,
+ *  a car's hydraulics); let go before, the game gets it this long */
+const CHORD_MS = 120, TAP_MS = 80;
+
 /** the left stick as four directions, PAD_D* bits: on past 0.55, off below 0.40 (runtime/dinput_pad.c's hat) */
 function stickDirs(x: number, y: number, prev: number): number {
   const on = (bit: number, v: number) => v > 0.55 || (v > 0.40 && (prev & 1 << bit) !== 0) ? 1 << bit : 0;
@@ -108,9 +112,14 @@ export class PadPoller {
   private rumbleSent = 0;
   private rumbleNow: [number, number] = [0, 0];
   private rumblePad: Gamepad | null = null;
-  // the page's share: buttons kept from the game until let go, the left stick's directions
+  // the page's share: buttons kept from the game until let go, the left stick's directions; a stick pressed in alone,
+  // kept from the game while the other may follow (the menu): its bit and since when, and a tap's until when
   private held = 0;
   private stick = 0;
+  private alone = 0;
+  private aloneAt = 0;
+  private tap = 0;
+  private tapUntil = 0;
   // the touch controls' virtual controller (touch.ts), and the phone's vibration for the game's rumble without a
   // controller: when it last buzzed
   private touch: TouchPad | null = null;
@@ -185,16 +194,26 @@ export class PadPoller {
   /** The page's share of the controller: Home, or the second stick pressed in while the other is, opens or closes its
    *  menu.  While a dialog of the page is open, the buttons and the left stick work it and the game gets the
    *  controller at rest.  A button held then (or the shortcut's) stays away from the game until it is let go, so the
-   *  A that closed the menu does not press A in the game too. */
+   *  A that closed the menu does not press A in the game too.  A stick pressed in alone (the horn, horn.c; a car's
+   *  hydraulics) reaches the game once CHORD_MS passed without the other, or for TAP_MS when let go before, so the
+   *  shortcut does not sound the horn or bounce the car. */
   private forPage(s: PadSnapshot, pressed: number): PadSnapshot {
-    const page = this.page!, sticks = 1 << PAD_LS | 1 << PAD_RS, home = 1 << PAD_HOME;
+    const page = this.page!, sticks = 1 << PAD_LS | 1 << PAD_RS, home = 1 << PAD_HOME, now = performance.now();
     const menu = (pressed & home) !== 0 || ((pressed & sticks) !== 0 && (s.buttons & sticks) === sticks);
     if (menu) { page.menu(); this.held |= s.buttons & (sticks | home); }
+    if (pressed & sticks && (s.buttons & sticks) !== sticks) { this.alone = s.buttons & sticks; this.aloneAt = now; }
+    let wait = 0;
+    if (menu) this.alone = 0;
+    else if (this.alone && !(s.buttons & this.alone)) { this.tap = this.alone; this.tapUntil = now + TAP_MS; this.alone = 0; }
+    else if (this.alone && now - this.aloneAt < CHORD_MS) wait = this.alone;
+    else this.alone = 0;
+    const tap = now < this.tapUntil ? this.tap : 0;
     const dirs = stickDirs(s.axes[PAD_AXIS_LX], s.axes[PAD_AXIS_LY], this.stick), turned = dirs & ~this.stick;
     this.stick = dirs;
     if (!page.dialog()) {
       this.held &= s.buttons;
-      return this.held ? { ...s, buttons: s.buttons & ~this.held } : s;
+      const buttons = (s.buttons & ~this.held & ~wait) | tap;
+      return buttons === s.buttons ? s : { ...s, buttons };
     }
     this.held = s.buttons;
     if (!menu) for (let b = 0; b < 16; b++) if ((pressed | turned) & 1 << b) page.press(b);

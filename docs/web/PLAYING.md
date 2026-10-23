@@ -99,7 +99,8 @@ The start page shows these keys under **Controls**, and F9, Controls shows them 
   car has hydraulics: then the stick clicks are the game's hydraulics (left: pressurize, right: bounce).
 - **The page menu on a controller:** Home, or both sticks pressed in, opens it (where the browser passes Home on; on
   Windows the Game Bar may take it). The D-pad or left stick moves in it, A picks, B closes it; meanwhile the game
-  gets no controller input.
+  gets no controller input. A stick pressed in alone reaches the game a moment later (0.12 s), so the shortcut never
+  honks or works the hydraulics.
 - **Rumble:** a controller that can rumble in Chrome (Xbox, DualSense and others) shakes when you crash, scrape a
   wall or land hard. Settings, Controller, Rumble turns it off. Firefox has no rumble.
 - **Sound** starts with the Play click. If the browser still keeps it off, a note says so, and a click on the game or
