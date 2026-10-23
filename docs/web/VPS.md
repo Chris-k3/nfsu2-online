@@ -333,9 +333,9 @@ players the evening before.
 
 Every player picks the game's language in Settings. The North American game folder has the text of thirteen,
 but English voices and movies only, and short early versions of the Chinese, Japanese and Thai text. The rest comes
-from KyoriAsh's "Multi 13 languages" mod ([nfsmods.xyz/mod/5749](https://nfsmods.xyz/mod/5749)) and, for Brazilian
-Portuguese, TraduMix's and MixMods' translation, as language packs: a `LANGPACKS` folder in the game folder, one
-folder per language, whose files a game in that language reads in place of the game folder's
+from KyoriAsh's "Multi 13 languages" mod ([nfsmods.xyz/mod/5749](https://nfsmods.xyz/mod/5749)), for Brazilian
+Portuguese TraduMix's and MixMods' translation and for Polish PLProjekt's, as language packs: a `LANGPACKS` folder in
+the game folder, one folder per language, whose files a game in that language reads in place of the game folder's
 (`runtime/language.c`). The game folder itself stays as it is.
 
 1. Download the mod's archives (Core and the dubs) and extract them all into one empty folder, not the game folder.
@@ -343,19 +343,23 @@ folder per language, whose files a game in that language reads in place of the g
 2. Download the Portuguese translation ("Tradução PT-BR, V1.1 (TraduMix e MixMods)", from
    [joao13traducoes.com](https://joao13traducoes.com/2018/08/pc-need-for-speed-underground-2-traduzido-e-dublado-varios-autores/))
    and extract it into another empty folder (`unrar x -p'João13'`).
-3. `tools/langpacks.py "<your game folder>" --multi13 "<the mod's folder>" --ptbr "<the translation's folder>"`
-   builds `LANGPACKS` (1.6 GB) and prints what each language got: the dubbed voices and movies of French, German,
-   Italian, Spanish, Japanese and Russian, the full Chinese, Japanese and Thai text with their fonts, Russian and
-   Portuguese in English's place, and the Danish, Dutch and Swedish EA logos. Korean needs nothing. Either source
-   can be left out: the other's packs stay as they are.
-4. Copy it like the rest, from inside the game folder:
+3. Download the Polish translation (PLProjekt's v1.1, from
+   [portal24h.pl](https://www.portal24h.pl/spolszczenia-gier/spolszczenia-gier/mo/Need-For-Speed-Underground-2-(plprojekt)-1456/))
+   and extract it into a third empty folder (`unrar x`). It holds two Windows installers; the tool reads either one's
+   files and never runs it.
+4. `tools/langpacks.py "<your game folder>" --multi13 "<the mod's folder>" --ptbr "<the translation's folder>"
+   --pl "<the Polish folder>"` builds `LANGPACKS` (1.6 GB) and prints what each language got: the dubbed voices and
+   movies of French, German, Italian, Spanish, Japanese and Russian, the full Chinese, Japanese and Thai text with
+   their fonts, Russian, Portuguese and Polish in English's place (Polish with its fonts), and the Danish, Dutch and
+   Swedish EA logos. Korean needs nothing. Any source can be left out: the others' packs stay as they are.
+5. Copy it like the rest, from inside the game folder:
    `rsync -rlt LANGPACKS root@<vps>:/srv/nfsu2/game/`, then the same `chmod`.
 
 A player's browser fetches only their own language's pack: "Preload the game data" adds about 50 MB of dubbed
 voices (Russian 94 MB), and the dubbed movies (206 MB in all) stream in place of the English ones (725 MB). Without
-`LANGPACKS` every language but Russian and Portuguese still plays its text, with English voices and movies; those
-two play in English. All but English, French, German, Italian and Spanish (whose texts leave the lines their dubs
-speak empty) show the movies' subtitles; the North American game shows none.
+`LANGPACKS` every language but Russian, Portuguese and Polish still plays its text, with English voices and movies;
+those three play in English. All but English, French, German, Italian and Spanish (whose texts leave the lines their
+dubs speak empty) show the movies' subtitles; the North American game shows none.
 
 ## How it runs
 

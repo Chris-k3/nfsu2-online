@@ -45,11 +45,11 @@ const GROUPS: Group[] = [
     { key: 'roam_carpool_kb', label: 'Car memory pool', help: 'In KB; never below the game\'s own 11000.', c: { t: 'num', min: 0, max: 128000, step: 1000, unit: 'KB' }, more: true },
   ] },
   { title: 'Game', items: [
-    { key: 'language', label: 'Language', help: 'The game\'s menus and text, and the movies\' subtitles in all but English, French, German, Italian and Spanish. French, German, Italian, Spanish, Japanese and Russian also have their dubbed voices and movies where this server has them, and Russian and Portuguese their text.', c: { t: 'select', opts: [
+    { key: 'language', label: 'Language', help: 'The game\'s menus and text, and the movies\' subtitles in all but English, French, German, Italian and Spanish. French, German, Italian, Spanish, Japanese and Russian also have their dubbed voices and movies where this server has them, and Russian, Portuguese and Polish their text.', c: { t: 'select', opts: [
       ['english', 'English'], ['french', 'French · Français'], ['german', 'German · Deutsch'], ['italian', 'Italian · Italiano'],
       ['spanish', 'Spanish · Español'], ['dutch', 'Dutch · Nederlands'], ['swedish', 'Swedish · Svenska'], ['danish', 'Danish · Dansk'],
       ['korean', 'Korean · 한국어'], ['chinese', 'Chinese · 繁體中文'], ['japanese', 'Japanese · 日本語'], ['russian', 'Russian · Русский'],
-      ['thai', 'Thai · ไทย'], ['portuguese', 'Portuguese (Brazil) · Português (Brasil)']] } },
+      ['thai', 'Thai · ไทย'], ['portuguese', 'Portuguese (Brazil) · Português (Brasil)'], ['polish', 'Polish · Polski']] } },
     { key: 'movies', label: 'Movies', help: 'Intro, story and FMV movies.', c: { t: 'switch' } },
     { key: 'autosave', label: 'Autosave', help: 'Sets each profile\'s Save option in the game to Autosave once, so races, purchases and changes are saved without asking. Prompt or Off chosen afterwards in the game\'s Options, Gameplay stays.', c: { t: 'switch' } },
     { key: 'intro', label: 'Startup movies', help: 'The EA and THX logos, the PSA and the intro. Skippable: Enter, Esc, Space, a left click, or A, B or Start ends each one. Original: as in the game, where only the intro ends early.', c: { t: 'seg', opts: [['skippable', 'Skippable'], ['original', 'Original'], ['off', 'Off']] }, more: true },

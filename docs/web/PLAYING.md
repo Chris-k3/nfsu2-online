@@ -123,10 +123,10 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
 | Controller | rumble; more: controller on or off, menu buttons, dead zones |
 
 - **Language:** English, French, German, Italian, Spanish, Dutch, Swedish, Danish, Korean, Chinese, Japanese, Russian,
-  Thai or Portuguese (Brazil), for the menus and all the game's text, and the movies' subtitles in all but English,
-  French, German, Italian and Spanish. Where the server has the [language packs](VPS.md#languages), French, German, Italian, Spanish, Japanese and Russian also play with their dubbed voices and movies,
-  Chinese, Japanese and Thai with their full text, and Portuguese with its text at all (without the packs it plays
-  in English, with English voices). Your browser fetches only your language's files: the dubbed
+  Thai, Portuguese (Brazil) or Polish, for the menus and all the game's text, and the movies' subtitles in all but
+  English, French, German, Italian and Spanish. Where the server has the [language packs](VPS.md#languages), French, German, Italian, Spanish, Japanese and Russian also play with their dubbed voices and movies,
+  Chinese, Japanese and Thai with their full text, and Portuguese and Polish with their text at all (without the
+  packs they play in English, with English voices). Your browser fetches only your language's files: the dubbed
   voices are about 50 MB (Russian 94 MB), and the dubbed movies are smaller than the English ones they replace.
 - **More settings:** each group's "More … settings" has the less common ones, and says how many of them you
   changed. **Reset** next to a changed setting puts its default back.

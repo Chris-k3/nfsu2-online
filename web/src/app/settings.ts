@@ -46,7 +46,7 @@ export interface KeyDef {
 // not offer the game's LAN races yet (PLAYING.md).
 /** the game's languages (runtime/language.c), the setting's values; english is the default */
 export const LANGUAGES = ['english', 'french', 'german', 'italian', 'spanish', 'dutch', 'swedish', 'danish', 'korean',
-  'chinese', 'japanese', 'russian', 'thai', 'portuguese'] as const;
+  'chinese', 'japanese', 'russian', 'thai', 'portuguese', 'polish'] as const;
 /** the horns (runtime/horn.c), the setting's values; dual is the default */
 export const HORNS = ['dual', 'single', 'truck', 'train', 'klaxon', 'cucaracha', 'clown', 'trombone'] as const;
 
@@ -172,11 +172,12 @@ export const TEMPLATE = `# NFSU2 settings, read at every launch.
 #intro = skippable
 
 # The game's language: english, french, german, italian, spanish, dutch,
-# swedish, danish, korean, chinese, japanese, russian, thai or portuguese
-# (Brazil's).  All but English, French, German, Italian and Spanish show the
-# movies' subtitles.  French, German, Italian, Spanish, Japanese and Russian
-# come with their dubbed voices and movies where the server has the language
-# packs; Russian and Portuguese take their text from them too.  [NFSU2_LANGUAGE]
+# swedish, danish, korean, chinese, japanese, russian, thai, portuguese
+# (Brazil's) or polish.  All but English, French, German, Italian and Spanish
+# show the movies' subtitles.  French, German, Italian, Spanish, Japanese and
+# Russian come with their dubbed voices and movies where the server has the
+# language packs; Russian, Portuguese and Polish take their text from them
+# too.  [NFSU2_LANGUAGE]
 #language = english
 
 # Sound output.  [NOSOUND, inverted]

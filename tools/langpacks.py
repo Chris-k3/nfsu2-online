@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """The language packs: LANGPACKS/<language> in the game folder, from the
-"Multi 13 languages" mod for NFSU2 (KyoriAsh, nfsmods.xyz/mod/5749) and from
-TraduMix's and MixMods' Brazilian Portuguese translation.
+"Multi 13 languages" mod for NFSU2 (KyoriAsh, nfsmods.xyz/mod/5749), from
+TraduMix's and MixMods' Brazilian Portuguese translation and from PLProjekt's
+Polish one.
 
     tools/langpacks.py <game folder> [--multi13 <mod folder>] [--ptbr <translation folder>]
+                       [--pl <installer>]
 
 Each source builds its own languages' packs; the others are left as they are.
 
@@ -39,9 +41,21 @@ text (accented in the game's own fonts) and credits, and the game folder's own
 Brazilian Portuguese memory-card texts ("Carregado." for "Load complete.").
 The rest of the archive is the Extra Options mod, for its ShowSubs: the port
 shows the subtitles itself (runtime/language.c).
+
+<installer> is either installer of the Polish translation (v1.1, 2009,
+NFSU2PLv1.1US.exe or NFSU2PLv1.1UK.exe, from its archive at portal24h.pl), or
+the folder they are in.  It is read, never run: an Astrum InstallWizard
+package, whose files are gzip streams.  Polish takes English's place as Russian
+does: its text spells the Polish letters with accented ones the game's fonts
+have (ę is ¿, ł is î, ś is â ...), and its fonts' textures
+(LanguageTextures.bin, and one in GLOBALA.BUN) draw those as the Polish ones;
+also its memory-card texts and credits.  The rest of the
+installer is a Polish SPEED2.EXE, the game folder's own GLOBALB.BUN, the
+British game's Corsa and 106 (this game folder has them) and a script that
+hides the movies.
 Rerunning it copies only what changed.  Prints what each pack holds.
 """
-import argparse, filecmp, os, shutil, struct, sys
+import argparse, filecmp, gzip, os, shutil, struct, sys
 
 LANGS = ['french', 'german', 'italian', 'spanish', 'dutch', 'swedish', 'danish',
          'korean', 'chinese', 'japanese', 'russian', 'thai']
@@ -77,6 +91,15 @@ PTBR = [
     ('LANGUAGES/English.bin', 'LANGUAGES/English.bin'),
     ('CREDITS/NA_ENGLISH.TXT', 'CREDITS/NA_ENGLISH.TXT'),
     ('CREDITS/NA_ENGLISH.TXT', 'CREDITS/UK_ENGLISH.TXT'),
+]
+# Polish: (file in the installer, the game's file it stands in for)
+PL = [
+    ('LANGUAGES/Polish.bin', 'LANGUAGES/English.bin'),
+    ('LANGUAGES/LanguageTextures.bin', 'LANGUAGES/LanguageTextures.bin'),
+    ('GLOBAL/GLOBALA.BUN', 'GLOBAL/GLOBALA.BUN'),
+    ('MEMCARD/LOCALE_POLISH.loc', 'memcard/LOCALE_ENGLISH.loc'),
+    ('CREDITS/POLISH.TXT', 'CREDITS/NA_ENGLISH.TXT'),
+    ('CREDITS/POLISH.TXT', 'CREDITS/UK_ENGLISH.TXT'),
 ]
 
 
@@ -190,16 +213,57 @@ def ptbr(src, game):
     done(p, 'portuguese')
 
 
+def astrum_files(path):
+    """{path in the game folder, lower-cased: data} of an Astrum InstallWizard 2
+    installer.  It ends with the package's header offset and the magic; the
+    header (big-endian words) gives where the files start, and they end where
+    it begins.  Each file: a 0x40-byte record whose word 0x2c is its name's
+    length, the name ("<InstallDir>\\...", each byte's bit i stored as bit i^6),
+    the offset its data ends at, the data: a gzip stream, or the file as it is
+    (a few bytes)."""
+    with open(path, 'rb') as f: d = f.read()
+    if d[-8:] != struct.pack('<II', 0x0b1c2d3e, 0x12345678): sys.exit(f'{path}: not an Astrum InstallWizard installer')
+    n = struct.unpack('<I', d[-12:-8])[0]
+    head = struct.unpack('<I', d[-16 - n:-12 - n])[0]
+    hdr = struct.unpack('>59I', d[head:head + 236])
+    pos = hdr[48]
+    if pos + hdr[49] != head: sys.exit(f'{path}: an Astrum package of another layout')
+    out = {}
+    while pos < head:
+        size = struct.unpack('<I', d[pos + 0x2c:pos + 0x30])[0]
+        name = bytes(sum((b >> i & 1) << (i ^ 6) for i in range(8)) for b in d[pos + 0x40:pos + 0x40 + size])
+        end = struct.unpack('<I', d[pos + 0x40 + size:pos + 0x44 + size])[0]
+        rel = name.decode('latin1').split('\\', 1)[1].replace('\\', '/')
+        data = d[pos + 0x44 + size:end]
+        out[rel.lower()] = gzip.decompress(data) if data[:3] == b'\x1f\x8b\x08' else data
+        pos = end
+    return out
+
+
+def pl(src, game):
+    exe = src if os.path.isfile(src) else next(
+        (os.path.join(src, n) for n in sorted(os.listdir(src), reverse=True) if n.lower().startswith('nfsu2pl') and n.lower().endswith('.exe')), None)
+    if not exe: sys.exit(f'{src}: no NFSU2PLv1.1US.exe or NFSU2PLv1.1UK.exe, not the translation')
+    files = astrum_files(exe)
+    missing = [s for s, _ in PL if s.lower() not in files]
+    if missing: sys.exit(f'{exe}: not the translation, missing:\n  ' + '\n  '.join(missing))
+    p = Pack(game, 'polish')
+    for s, rel in PL: p.add_data(files[s.lower()], rel)
+    done(p, 'polish')
+
+
 def main():
-    ap = argparse.ArgumentParser(usage='tools/langpacks.py <game folder> [--multi13 <mod folder>] [--ptbr <translation folder>]')
+    ap = argparse.ArgumentParser(usage='tools/langpacks.py <game folder> [--multi13 <mod folder>] [--ptbr <translation folder>] [--pl <installer>]')
     ap.add_argument('game')
     ap.add_argument('--multi13', metavar='MOD', help='the Multi 13 languages mod, every archive extracted')
     ap.add_argument('--ptbr', metavar='FOLDER', help='the Brazilian Portuguese translation, extracted')
+    ap.add_argument('--pl', metavar='INSTALLER', help='the Polish translation\'s installer (or its folder), never run')
     a = ap.parse_args()
-    if not (a.multi13 or a.ptbr): sys.exit(__doc__)
+    if not (a.multi13 or a.ptbr or a.pl): sys.exit(__doc__)
     if not find(a.game, 'SPEED2.EXE'): sys.exit(f'{a.game}: no SPEED2.EXE, not the game folder')
     if a.multi13: multi13(a.multi13, a.game)
     if a.ptbr: ptbr(a.ptbr, a.game)
+    if a.pl: pl(a.pl, a.game)
 
 
 if __name__ == '__main__':
