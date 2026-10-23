@@ -82,7 +82,7 @@ export const KEYS: readonly KeyDef[] = [
   { key: 'fps_counter', env: 'NFSU2_FPS_COUNTER', kind: 'enum', vals: 'off|on|detailed', scope: 'web' },   // the page draws it
   { key: 'metal_hud', env: 'MTL_HUD_ENABLED', kind: 'bool', scope: 'mac' },
   // frame rate
-  { key: 'fps', env: 'NFSU2_FPS', kind: 'enum', vals: 'auto|60|120|240|uncapped|off|native|vanilla|game|max', scope: 'web' },
+  { key: 'fps', env: 'NFSU2_FPS', kind: 'enum', vals: 'auto|30|60|120|240|uncapped|off|native|vanilla|game|max', scope: 'web' },
   { key: 'hfr_fixes', env: 'NFSU2_HFR_FIX', kind: 'fixes', scope: 'web' },
   { key: 'nos_trail_length', env: 'NFSU2_NOS_TRAIL_LEN', kind: 'num', scope: 'web' },
   // game controller
@@ -267,13 +267,15 @@ export const TEMPLATE = `# NFSU2 settings, read at every launch.
 # ---- Frame rate ----------------------------------------------------------
 
 # auto = follow the display's refresh rate (60, 120 or 240; 144/165 Hz give
-# 120); 60, 120 or 240 = fixed; uncapped = no pacing (benchmark only);
+# 120); 30, 60, 120 or 240 = fixed (30: steady frames where 60 does not
+# hold, as on a slow phone); uncapped = no pacing (benchmark only);
 # off = the game's own 1/120 s limiter, the timing before the frame-rate
 # work.  Cutscenes stay at 30 fps in every mode.  [NFSU2_FPS]
 #fps = auto
 # Fixes for subsystems that count frames: default (all above 60 fps, none
-# at 60), all, none, or a list of ticks,timer,particles,trail,audio,rtf,rain
-# (a leading '-' removes one, e.g. default,-audio).  [NFSU2_HFR_FIX]
+# at 60, ticks,particles,rain at 30), all, none, or a list of
+# ticks,timer,particles,trail,audio,rtf,rain (a leading '-' removes one,
+# e.g. default,-audio).  [NFSU2_HFR_FIX]
 #hfr_fixes = default
 # Length factor of the NOS / streak trail.  [NFSU2_NOS_TRAIL_LEN]
 #nos_trail_length = 1.0

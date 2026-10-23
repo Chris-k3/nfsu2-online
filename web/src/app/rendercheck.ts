@@ -20,7 +20,7 @@ export interface RenderCheckTimes { warmupMs: number; decideMs: number }
 export const RENDER_CHECK_TIMES: RenderCheckTimes = { warmupMs: 60_000, decideMs: 180_000 };
 
 const TICK_MS = 250;
-const MIN_RATE = 50;            // below: a cutscene's 30 fps, not the game's own rate
+const MIN_RATE = 50;            // below: a cutscene's 30 fps, not the game's own rate (fps = 30: no verdict)
 const UP_HELD = 0.97, DOWN_HELD = 0.95, GPU_SHARE = 2 / 3;
 const MAX_SAMPLES = 1 << 16;
 

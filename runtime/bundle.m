@@ -195,7 +195,7 @@ static const struct { const char *key, *env; int kind; const char *vals; } g_key
     { "metal_hud",                "MTL_HUD_ENABLED",            K_BOOL     },
     /* frame rate */
     { "fps",                      "NFSU2_FPS",                  K_ENUM,
-      "auto|60|120|240|uncapped|off|native|vanilla|game|max" },
+      "auto|30|60|120|240|uncapped|off|native|vanilla|game|max" },
     { "hfr_fixes",                "NFSU2_HFR_FIX",              K_FIXES    },
     { "nos_trail_length",         "NFSU2_NOS_TRAIL_LEN",        K_NUM      },
     /* game controller */
@@ -355,13 +355,15 @@ static const char *const k_template =
 "# ---- Frame rate --------------------------------------------------------\n"
 "\n"
 "# auto = follow the display's refresh rate (60, 120 or 240; 144/165 Hz give\n"
-"# 120); 60, 120 or 240 = fixed; uncapped = no pacing (benchmark only);\n"
+"# 120); 30, 60, 120 or 240 = fixed (30: steady frames where 60 does not\n"
+"# hold, as on a slow phone); uncapped = no pacing (benchmark only);\n"
 "# off = the game's own 1/120 s limiter, the timing before the frame-rate\n"
 "# work.  Cutscenes stay at 30 fps in every mode.  [NFSU2_FPS]\n"
 "#fps = auto\n"
 "# Fixes for subsystems that count frames: default (all above 60 fps, none\n"
-"# at 60), all, none, or a list of ticks,timer,particles,trail,audio,rtf,rain\n"
-"# (a leading '-' removes one, e.g. default,-audio).  [NFSU2_HFR_FIX]\n"
+"# at 60, ticks,particles,rain at 30), all, none, or a list of\n"
+"# ticks,timer,particles,trail,audio,rtf,rain (a leading '-' removes one,\n"
+"# e.g. default,-audio).  [NFSU2_HFR_FIX]\n"
 "#hfr_fixes = default\n"
 "# Length factor of the NOS / streak trail.  [NFSU2_NOS_TRAIL_LEN]\n"
 "#nos_trail_length = 1.0\n"

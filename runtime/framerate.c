@@ -1,5 +1,6 @@
 /* framerate.c -- frame-rate modes, the host frame pacer, and the fixes that
- * make the game's frame-count-driven subsystems correct above 60 fps.
+ * make the game's frame-count-driven subsystems correct above 60 fps (and
+ * at 30).
  *
  * The game runs one simulation step and one render per main-loop iteration
  * (0x5811C0): dt is variable and the frame rate is the simulation rate.  Car
@@ -9,12 +10,14 @@
  *   (2) fix the handful of subsystems that count frames instead of time.
  *
  * Options (all read once):
- *   NFSU2_FPS = auto | 60 | 120 | 240 | uncapped | off
+ *   NFSU2_FPS = auto | 30 | 60 | 120 | 240 | uncapped | off
  *       auto (default): the window's screen maximumFramesPerSecond mapped to
  *       the best supported content rate (>= 239 Hz -> 240, >= 119 Hz -> 120,
  *       otherwise 60).  The game's own 30 fps requests in NIS cutscenes are
  *       kept (SetFrameRate 0x576CB0); its online/LAN cap 0x5FF67C is not
  *       (sub_005ff490 below).
+ *       30: for a machine that cannot hold 60 (a phone): steady frames at
+ *       half the rate, the game otherwise as at 60 (the fixes below).
  *       uncapped: no pacer, mailbox presenter, display sync off.  Benchmark
  *       only: dt follows the machine, so the physics substep varies.
  *       off: the game's own QPC limiter at 1/120 s (plus SPINSLEEP), no fix,
@@ -23,9 +26,11 @@
  *   NFSU2_HFR_FIX = default | all | none | comma list of
  *       ticks,timer,particles,trail,audio,rtf,rain; a '-' prefix removes one
  *       ("default,-audio").  default = all when the mode's content rate is
- *       above 60, none otherwise (60 stays the vanilla reference).  With
- *       auto the set follows the rate when the window moves to a screen
- *       with another refresh rate.
+ *       above 60, none at 60 (60 stays the vanilla reference), and
+ *       ticks,particles,rain at 30 (rtf and audio do nothing there; timer
+ *       and trail stay the game's own at that rate).  With auto the set
+ *       follows the rate when the window moves to a screen with another
+ *       refresh rate.
  *   NFSU2_LAN_TIMING = pc | exact
  *       pc (default): in a network race (World::IsOnline) ticks and timer
  *       are off, so the clocks run as on an unmodified Windows PC at the
@@ -47,12 +52,14 @@
  *   ticks      exact host ticks: 1/3600 s tick base instead of 1/1800, the
  *              tick count primed from the pacer's slot count (F1)
  *   timer      fractional carry for RealTimer/WorldTimer (1/4000 s units)
- *   particles  "Acid" effects step = min(real dt, 1/60) instead of 1/60 (F2)
+ *   particles  "Acid" effects step = min(real dt, 1/60) instead of 1/60; at
+ *              30 the real dt (F2)
  *   trail      NOS/streak trail sampled every frame, history resampled to
  *              1/60 s spacing (F3)
  *   audio      EAXSound::Update dt carried across its 15 ms gate (F4)
  *   rtf        RealTimeFrames without the forced minimum of 1 (F5)
- *   rain       Rain::Update on every frame, its per-call steps per time (F6)
+ *   rain       Rain::Update on every frame, its per-call steps per time; at
+ *              30 twice a frame (F6)
  */
 #include "cpu.h"
 #include <stdio.h>
@@ -114,7 +121,7 @@ static const char *const g_fx_name[] = { "ticks", "timer", "particles", "trail",
 /* ---- options ----------------------------------------------------------- */
 static int    g_mode = M_AUTO;      /* M_OFF, M_UNCAPPED, M_AUTO or a fixed rate */
 static int    g_fix = 0;            /* fixes in effect (fixes_follow_rate) */
-static int    g_fix_hi = 0, g_fix_lo = 0;   /* NFSU2_HFR_FIX above 60 fps, at 60 and below */
+static int    g_fix_hi = 0, g_fix_lo = 0, g_fix_30 = 0;   /* NFSU2_HFR_FIX above 60 fps, at 60, at 30 */
 static double g_trail_len = 1.0;
 static int    g_log = 0;
 static FILE  *g_trace = 0;
@@ -146,8 +153,8 @@ static void parse_mode(void){
     else if (!strcasecmp(e, "uncapped") || !strcasecmp(e, "max")) g_mode = M_UNCAPPED;
     else {
         int v = atoi(e);
-        if (v == 60 || v == 120 || v == 240) g_mode = v;
-        else { fprintf(stderr, "[hfr] NFSU2_FPS=%s not supported (60|120|240|auto|uncapped|off): auto\n", e);
+        if (v == 30 || v == 60 || v == 120 || v == 240) g_mode = v;
+        else { fprintf(stderr, "[hfr] NFSU2_FPS=%s not supported (30|60|120|240|auto|uncapped|off): auto\n", e);
                g_mode = M_AUTO; }
     }
 }
@@ -163,7 +170,8 @@ static const char *mode_name(void){
     return g_mode == M_OFF ? "off" : g_mode == M_UNCAPPED ? "uncapped" : g_mode == M_AUTO ? "auto" : "fixed";
 }
 /* the fix set for a mode rate above 60 (or uncapped) when def = FX_ALL,
- * for 60 and below when def = 0 */
+ * for 60 when def = 0, for 30 when def = FX_30 */
+#define FX_30 (FX_TICKS | FX_PARTICLES | FX_RAIN)
 static int parse_fix(int def, int warn){
     const char *e = getenv("NFSU2_HFR_FIX");
     if (!e || !*e) return def;
@@ -189,6 +197,7 @@ static void fix_str(int f, char *out, size_t n){
         size_t l = strlen(out); snprintf(out + l, n - l, "%s%s", l ? "," : "", g_fx_name[i]); }
     if (!out[0]) snprintf(out, n, "none");
 }
+static int fix_for_rate(int r){ return r > 60 || r == 0 ? g_fix_hi : r <= 30 ? g_fix_30 : g_fix_lo; }
 
 /* Tick base 1/3600 s: 30, 60, 120 and 240 fps are 120, 60, 30 and 15 whole
  * ticks, so every supported rate gets dt = exactly 1/rate and the car
@@ -208,7 +217,8 @@ static void resolve_once(void){
     parse_mode();
     g_fix_hi = g_mode == M_OFF ? 0 : parse_fix(FX_ALL, 1);
     g_fix_lo = g_mode == M_OFF ? 0 : parse_fix(0, 0);
-    { int r = mode_rate(); g_fix = r > 60 || r == 0 ? g_fix_hi : g_fix_lo; }
+    g_fix_30 = g_mode == M_OFF ? 0 : parse_fix(FX_30, 0);
+    g_fix = fix_for_rate(mode_rate());
     { const char *e = getenv("NFSU2_NOS_TRAIL_LEN"); if (e && *e) g_trail_len = atof(e);
       if (!(g_trail_len > 0.05 && g_trail_len < 20.0)) g_trail_len = 1.0; }
     { const char *e = getenv("NFSU2_HFR_LOG"); g_log = e && *e ? atoi(e) : 0; }
@@ -259,6 +269,13 @@ static int content_rate(void){
         if (req >= 10 && req < m) m = req;
     }
     return m;
+}
+/* fps = 30 outside the game's own 30 fps requests (a cutscene runs at 30 in
+ * every mode and keeps the effects it has there at 60): a frame is two of
+ * 60, so effects stepped once a frame step for both (F2, F6) */
+static int at_30(void){
+    float cap = MRF32(A_CAP);
+    return g_mode == 30 && !(cap > 0.f && cap != MRF32(A_CAP_DEF));
 }
 /* frame-rate counter (fpscounter.m): the mode's name, its own rate (0 =
  * uncapped) and the content rate of the last frame (the game's 30 fps
@@ -637,7 +654,7 @@ void sub_005ff490(CPU *c){
  * sound and trails. */
 static void fixes_follow_rate(void){
     static int first = 1, net_prev = 0;
-    int r = mode_rate(), fx = r > 60 || r == 0 ? g_fix_hi : g_fix_lo;
+    int r = mode_rate(), fx = fix_for_rate(r);
     int net = g_lan_pc && net_race();
     if (net) fx &= ~(FX_TICKS | FX_TIMER);
     if (!first && net != net_prev){
@@ -766,14 +783,17 @@ void sub_0057a0e0(CPU *c){
  * constant 1/60 for the system at 0x835860 (0x5D2C0D) once per rendered
  * frame: smoke, sparks and flames age 2x at 120.  The step becomes the real
  * frame dt, but never more than the 1/60 of the original: at or below 60
- * fps (and in 30 fps NIS) the argument is untouched, bit for bit. */
+ * fps (and in 30 fps NIS) the argument is untouched, bit for bit.  At fps
+ * = 30 they would age at half speed: there the step is the real dt up to
+ * 1/30 (the emitters' countdowns take it as time too). */
 void sub_00492e10_orig(CPU *c);
 void sub_00492e10(CPU *c){
     if (MR32(c->esp) == 0x005d2c1cu && c->ecx == 0x00835860u){
         float k = MRF32(c->esp + 4u);
         if (g_fix & FX_PARTICLES){
-            float dt = MRF32(A_REALDT);
+            float dt = MRF32(A_REALDT), hi = at_30() ? 2.f * k : k;
             if (dt < k) MRF32(c->esp + 4u) = dt > 0.f ? dt : 0.f;
+            else MRF32(c->esp + 4u) = dt < hi ? dt : hi;
         }
         g_f.part += MRF32(c->esp + 4u);
     }
@@ -924,7 +944,12 @@ void sub_00483b40(CPU *c){
  *   [0x7A67C0]/[0x7A67C4], read only here): 1 - (1 - f)^s.
  * A streak's direction comes from the last step, which the scaling keeps.
  * All of it is put back after the call (a drop value only if the call did
- * not write it again). */
+ * not write it again).
+ * At fps = 30 (s = 2) the rain would fall at half speed, and the camera's
+ * share cannot be scaled up past the game's cap: the update runs twice
+ * instead, each call a 60 fps frame with half the world dt (its own copy at
+ * 0x61F134 is the gate's and steps a timer at [0x8A1D50] and the easing of
+ * Rain+0x1F0). */
 void sub_0061f120_orig(CPU *c);
 #define A_RAIN_GATE   0x007a8734u   /* 0.009 s */
 #define A_RAIN_EASE   0x007a67c0u   /* cloud easing a call: towards clear, +4 towards overcast */
@@ -938,6 +963,16 @@ void hfr_rain_update(CPU *c){
     double s = 60.0 * MRF32(A_WORLDDT);
     uint32_t view = rain && mem_is_committed(rain + RAIN_FALL + 0x9fu) ? MR32(rain + 0x1ecu) : 0;
     uint32_t cam = view && mem_is_committed(view + 0x43u) ? MR32(view + 0x40u) : 0;
+    if ((g_fix & FX_RAIN) && s > 1.5 && at_30()){
+        float wdt = MRF32(A_WORLDDT);
+        uint32_t ret = MR32(c->esp);                         /* popped by the call: pushed again for the second */
+        MRF32(A_WORLDDT) = wdt * 0.5f;
+        sub_0061f120_orig(c);
+        c->esp -= 4u; MR32(c->esp) = ret; c->ecx = rain;
+        sub_0061f120_orig(c);
+        MRF32(A_WORLDDT) = wdt;
+        return;
+    }
     if (!(g_fix & FX_RAIN) || !(s > 0.0 && s < 1.0) || !cam || !mem_is_committed(cam + 0x1ebu)){
         sub_0061f120_orig(c); return; }
     float gate = MRF32(A_RAIN_GATE), up = MRF32(A_RAIN_EASE), down = MRF32(A_RAIN_EASE + 4u);

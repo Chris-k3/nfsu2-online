@@ -121,7 +121,7 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
 |---|---|
 | Online | its own section under Saves: how many play on this server now, free roam with others, your name (in free roam and online), room, the game's Online mode (on by default); more: solid cars and the free-roam network |
 | Game | language, movies, autosave; more: startup movies (skippable, original or off), sound, pause or keep running in the background, sound output latency |
-| Display | full screen on Play (off: the game plays in the browser window; on by default on phones), resolution scale (phones start at 75%, 100% once one shows it has the room), frame rate (auto follows the screen: 120 on a 120 Hz display, 240 on a 240 Hz one; 60, 120 or 240; Online and LAN races at most 120); more: menus and HUD (original or upscaled), HUD layout, movie framing, cutscene bars, other cars' headlights (players, all cars, off), frame-rate counter |
+| Display | full screen on Play (off: the game plays in the browser window; on by default on phones), resolution scale (phones start at 75%, 100% once one shows it has the room), frame rate (auto follows the screen: 120 on a 120 Hz display, 240 on a 240 Hz one; 30, 60, 120 or 240, where 30 keeps a phone that cannot hold 60 steady; Online and LAN races at most 120); more: menus and HUD (original or upscaled), HUD layout, movie framing, cutscene bars, other cars' headlights (players, all cars, off), frame-rate counter |
 | Controller | rumble; more: controller on or off, menu buttons, dead zones |
 
 - **Language:** English, French, German, Italian, Spanish, Dutch, Swedish, Danish, Korean, Chinese, Japanese, Russian,
