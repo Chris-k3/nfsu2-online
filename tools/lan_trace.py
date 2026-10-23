@@ -6,7 +6,12 @@
 
 Each instance writes NFSU2_CAR_TRACE (runtime/autotest.c): per frame the
 wall-clock time (CLOCK_REALTIME, the same clock for every instance on this
-Mac), the frame cap, WorldTimer and every race car with a flag for the local
+Mac; in the browser a worker's time origin plus its monotonic clock, so
+instances started on either side of a correction of the system clock -- WSL
+makes them -- are that far apart: a WorldTimer offset of a second or more
+in the last lines, and ~50 m errors for every pair with that instance, while
+the game's own [racenet] "their race clock ... off ours" says tens of ms),
+the frame cap, WorldTimer and every race car with a flag for the local
 player's car.  Frames whose top package is not the race HUD (pre-race
 screen, results) are left out when the trace says so.  For every pair (owner A, viewer B) this tool finds A's car in
 B's car list (the index whose positions stay closest to A's own trace) and

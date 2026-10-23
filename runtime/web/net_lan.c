@@ -414,21 +414,26 @@ static void sent_note(VSock *v, uint32_t ip, uint16_t port){
 }
 
 /* the race's peers: the addresses the game's race link (UDP 3658, a star
- * around the game's creator) exchanged datagrams with lately, and how their
- * datagrams came (racenet.h: waits, and the runs of datagrams that came at
- * once, as a link that held them hands them over) (g_mu held) */
+ * around the game's creator) exchanged datagrams with lately (sent or
+ * received, at), and how their datagrams came (racenet.h: waits, and the
+ * runs of datagrams that came at once, as a link that held them hands them
+ * over; received only, rx_at: our own sends to a peer filled the waits of
+ * its link) (g_mu held) */
 #define RACE_PORT  3658
 #define RACE_PEERS 16
-static struct { uint32_t ip_h; uint64_t at; RaceLink s; int gap_run; } g_race[RACE_PEERS];
-static void race_note(uint32_t ip_h){
+static struct { uint32_t ip_h; uint64_t at, rx_at; RaceLink s; int gap_run; } g_race[RACE_PEERS];
+static void race_note(uint32_t ip_h, int rx){
     int k = -1;
     for (int j = 0; j < RACE_PEERS && k < 0; j++) if (g_race[j].at && g_race[j].ip_h == ip_h) k = j;
     for (int j = 0; j < RACE_PEERS && k < 0; j++) if (!g_race[j].at) k = j;
     if (k < 0){ k = 0; for (int j = 1; j < RACE_PEERS; j++) if (g_race[j].at < g_race[k].at) k = j; }
     if (!g_race[k].at || g_race[k].ip_h != ip_h){ memset(&g_race[k], 0, sizeof g_race[k]); g_race[k].ip_h = ip_h; }
-    uint64_t now = now_us(), gap = g_race[k].at ? now - g_race[k].at : 0;
+    uint64_t now = now_us();
+    g_race[k].at = now;
+    if (!rx) return;
+    uint64_t gap = g_race[k].rx_at ? now - g_race[k].rx_at : 0;
     RaceLink *s = &g_race[k].s;
-    if (g_race[k].at && gap <= RACENET_ONCE_MS * 1000u){ if (g_race[k].gap_run) s->after++; }
+    if (g_race[k].rx_at && gap <= RACENET_ONCE_MS * 1000u){ if (g_race[k].gap_run) s->after++; }
     else {
         s->runs++;
         g_race[k].gap_run = gap >= RACENET_GAP_MS * 1000u;
@@ -436,7 +441,7 @@ static void race_note(uint32_t ip_h){
         if (gap / 1000u > s->gap_max_ms) s->gap_max_ms = (uint32_t)(gap / 1000u);
     }
     s->ip_h = ip_h; s->n++;
-    g_race[k].at = now;
+    g_race[k].rx_at = now;
 }
 
 /* ---- the LAN thread: received frames ------------------------------------------------- */
@@ -493,7 +498,7 @@ static void rx_frame(const net_slot *sl){
             break;
         }
         S.udp_in++;
-        if (!bc && (sport == RACE_PORT || dport == RACE_PORT)) race_note(sl->src_ip);
+        if (!bc && (sport == RACE_PORT || dport == RACE_PORT)) race_note(sl->src_ip, 1);
         if (!udp_deliver(src_n, sport, bc ? 0xFFFFFFFFu : own_n(), dport, p, pn, bc) && !bc){
             S.udp_noport++;
             if (auto_ok(sl->src_ip, NET_LAN_HDR))
@@ -963,7 +968,7 @@ int vlan_sendto(WsSock *s, const uint8_t *buf, int len, uint32_t ip, uint16_t po
         tx(NET_KIND_LAN_UDP, NET_BROADCAST, v->bport, port, NET_LAN_UDP_DATA, (uint8_t)s->ip_ttl, 0, buf, (uint32_t)len);
     } else if (in_subnet_h(ip_h)){
         if (tx(NET_KIND_LAN_UDP, ip_h, v->bport, port, NET_LAN_UDP_DATA, (uint8_t)s->ip_ttl, 0, buf, (uint32_t)len)) sent_note(v, ip, port);
-        if (port == RACE_PORT || v->bport == RACE_PORT) race_note(ip_h);
+        if (port == RACE_PORT || v->bport == RACE_PORT) race_note(ip_h, 0);
     } else {
         S.udp_outside++;
         static uint32_t said[8]; static int ns;
