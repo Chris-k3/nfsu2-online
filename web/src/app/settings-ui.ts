@@ -28,11 +28,11 @@ const GROUPS: Group[] = [
   { title: 'Online', status: true, own: true, items: [
     { key: 'roam', label: 'Free roam with others', help: 'Everyone on this server who turns this on sees your car in career free roam, and you see theirs, with their names over them.', c: { t: 'switch' } },
     { key: 'roam_name', label: 'Your name', help: 'What other players see over your car in free roam, and your name in the Online menu (there only letters, digits, - and _, at most 15). Empty uses your profile name.', c: { t: 'text', placeholder: 'profile name' } },
-    { key: 'horn', label: 'Your horn', help: 'N or the controller\'s left stick click, in free roam and in races with other players. They hear the horn you pick (players on an older version hear the dual tone).', c: { t: 'select', opts: [
+    { key: 'horn', label: 'Your horn', help: 'N or the controller\'s left stick click, in free roam and in races with other players.', c: { t: 'select', opts: [
       ['dual', 'Dual tone'], ['single', 'Single tone'], ['truck', 'Air horn'], ['train', 'Train horn'], ['klaxon', 'Klaxon'],
       ['cucaracha', 'La Cucaracha'], ['clown', 'Clown horn'], ['trombone', 'Sad trombone']], preview: { play: playHorn, stop: stopHorn } } },
     { key: 'roam_room', label: 'Room', help: 'Only players in the same room see each other\'s cars. A filter, not privacy: everyone on this server still sees your name and whether you play.', c: { t: 'text', placeholder: 'none' } },
-    { key: 'online', label: 'Online mode', help: 'The game\'s Online menu takes you straight to the Online Main Menu under your name, without the EA Login screens: lobby, chat and races with everyone playing from this server.', c: { t: 'switch' } },
+    { key: 'online', label: 'Online mode', help: 'The game\'s Online menu takes you straight to the Online Main Menu under your name, without the EA Login screens: lobby, chat and races with everyone playing from this server.', c: { t: 'switch' }, more: true },
     { key: 'roam_collide', label: 'Solid cars', help: 'You collide with the other players\' cars. A car that appears on yours lets you through until you are apart. Off: you drive through them, and they through yours.', c: { t: 'switch' }, more: true },
     { key: 'roam_max_players', label: 'Largest group', help: 'You and the players you exchange cars with at once, 2 to 33: the server picks the nearest.', c: { t: 'num', min: 2, max: 33, step: 1 }, more: true },
     { key: 'roam_max_cars', label: 'Players\' cars shown', help: 'The nearest, 0 to 32.', c: { t: 'num', min: 0, max: 32, step: 1 }, more: true },
@@ -45,7 +45,7 @@ const GROUPS: Group[] = [
     { key: 'roam_carpool_kb', label: 'Car memory pool', help: 'In KB; never below the game\'s own 11000.', c: { t: 'num', min: 0, max: 128000, step: 1000, unit: 'KB' }, more: true },
   ] },
   { title: 'Game', items: [
-    { key: 'language', label: 'Language', help: 'The game\'s menus and text, and the movies\' subtitles in all but English, French, German, Italian and Spanish. French, German, Italian, Spanish, Japanese and Russian also have their dubbed voices and movies where this server has them, and Russian, Portuguese and Polish their text.', c: { t: 'select', opts: [
+    { key: 'language', label: 'Language', help: 'The game\'s menus and subtitles, and the voices in languages with a dub.', c: { t: 'select', opts: [
       ['english', 'English'], ['french', 'French · Français'], ['german', 'German · Deutsch'], ['italian', 'Italian · Italiano'],
       ['spanish', 'Spanish · Español'], ['dutch', 'Dutch · Nederlands'], ['swedish', 'Swedish · Svenska'], ['danish', 'Danish · Dansk'],
       ['korean', 'Korean · 한국어'], ['chinese', 'Chinese · 繁體中文'], ['japanese', 'Japanese · 日本語'], ['russian', 'Russian · Русский'],

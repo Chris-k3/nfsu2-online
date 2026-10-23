@@ -25,6 +25,7 @@ import { LogRing, downloadBlob, stamp } from './logs';
 import { enterFullscreen, exitFullscreen, isFullscreen, keepScreenOn, measureRefresh, settledSize, trackCanvasSize } from './display';
 import { deviceDefaults, markTouch, padSeen, touchFirst } from './device';
 import { markPad, padPress, pageDialog } from './padnav';
+import { controlsSheet, type ControlsSheet } from './controls';
 import { TouchControls } from './touch';
 import type { PadPage } from '../input/gamepad';
 import { checkSetting, HOST_FIXED, pageOnly, resolveEnv, settingsUpgrade, TEMPLATE, type Resolved } from './settings';
@@ -569,10 +570,17 @@ function pageToast(msg: string) {
   pageToastTimer = setTimeout(() => { t.textContent = ''; }, 5000);
 }
 
-/** the controls sheet of the start page, in a dialog (F9, Controls, while the game runs) */
+/** the controls sheet of the start page, in a dialog (F9, Controls, while the game runs), at the page's tab and
+ *  button names */
+let keySheet: ControlsSheet, helpSheet: ControlsSheet | null = null;
 function openHelp() {
   const body = $('#help-body');
-  if (!body.firstChild) body.append(...[...$('#keys').childNodes].map(n => n.cloneNode(true)));
+  if (!helpSheet) {
+    body.append(...[...$('#keys').childNodes].map(n => n.cloneNode(true)));
+    helpSheet = controlsSheet(body, 'help');
+  }
+  helpSheet.show(keySheet.tab);
+  helpSheet.family(keySheet.fam);
   $<HTMLDialogElement>('#help').showModal();
 }
 
@@ -958,6 +966,7 @@ export async function boot() {
   document.addEventListener('fullscreenchange', () => { if (!isFullscreen() && session) toast(`Full screen left. ${cap(menuName())} has it.`, 3000); });
   // the menu's button on the game: on a touch screen from the start, elsewhere from the first touch
   markTouch();
+  keySheet = controlsSheet($('#keys'), 'keys', { follow: true });
   const stageMenu = $<HTMLButtonElement>('#stage-menu');
   stageMenu.onpointerdown = e => e.preventDefault();     // the canvas keeps the focus (and with it the keyboard)
   stageMenu.onclick = () => { if (session) openMenu(); };

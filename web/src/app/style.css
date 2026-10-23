@@ -41,7 +41,7 @@ a { color: var(--lime); text-underline-offset: 4px; }
 code { font: 14px/20px var(--mono); }
 
 /* the game's type: bold italic */
-h1, h2, h3, .status, .btn, .play, kbd, .set-label, .opt, .val, summary, .profiles .name, .problems strong, .hud-fps {
+h1, h2, h3, .status, .btn, .play, kbd, .tab, .set-label, .opt, .val, summary, .profiles .name, .problems strong, .hud-fps {
   font-style: italic; font-weight: 700;
 }
 .hint { color: var(--muted); font-size: 14px; line-height: 20px; }
@@ -140,15 +140,38 @@ kbd {
 .problems p { color: var(--muted); font-size: 14px; line-height: 20px; margin-top: 4px; }
 
 /* ------------------------------------------------------- the key sheet */
-.panel > #keys > h3:first-child, #help-body > h3:first-child { margin-top: 0; }
+/* its tabs (controls.ts): words on a divider, the open one lime and underlined */
+.tabs { display: flex; gap: 24px; margin: -4px 0 16px; box-shadow: inset 0 -1px var(--line); }
+.tab { height: 36px; padding: 0; border: 0; background: none; color: var(--muted); font-size: 16px; line-height: 24px; }
+.tab:hover { color: var(--text); }
+.tab[aria-selected="true"] { color: var(--lime); box-shadow: inset 0 -3px var(--lime); }
 /* a row as in Settings and the game's Controls menu: what it does, its keys on the right */
 .keys > div { display: flex; align-items: center; gap: 16px; padding: 8px 0; }
 .keys dt { order: 1; flex: none; margin-left: auto; display: flex; align-items: center; gap: 4px; color: var(--muted); }
-#keys > .hint, #help-body > .hint { margin-top: 24px; }
+.tab-panel > .keys + .hint { margin-top: 16px; }
+/* the controller (controls.ts): the pad in line art, the buttons the game uses in lime, a dotted line from each
+ * label to its control, the button's name in a small key cap; the names as Xbox or PlayStation write them (the
+ * sheet's data-fam).  --pad-bg: what is behind it (the hollow of the bumpers) */
+.pad { display: block; width: 100%; max-width: 448px; height: auto; margin: 0 auto; overflow: visible; --pad-bg: var(--panel); }
+.dlg .pad { --pad-bg: var(--frame); }
+.pad-ctl > * { fill: none; stroke: var(--edge); stroke-width: 1.25; }
+.pad-ctl > .on { stroke: var(--lime); }
+.pad-ctl > .pad-body { stroke: var(--muted); stroke-width: 1.5; }
+.pad-ctl > .pad-bumper { stroke-width: 10; stroke-linecap: round; }
+.pad-ctl > .pad-bumper-in { stroke: var(--pad-bg); stroke-width: 6.5; stroke-linecap: round; }
+.pad-line { fill: none; stroke: #6a6a6a; stroke-width: 1; stroke-dasharray: 2 2; }
+.pad-dot { fill: var(--lime); }
+.pad-label { font: italic 700 12px var(--font); fill: var(--text); }
+.pad-sub { font: 400 11px var(--font); fill: var(--muted); }
+.pad-chip rect { fill: var(--field); stroke: var(--edge); stroke-width: 1; }
+.pad-chip text { font: italic 700 9px var(--font); fill: var(--text); text-anchor: middle; }
+.pad-chip :is(path, circle), kbd .glyph { fill: none; stroke: var(--text); stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; }
+kbd .glyph { display: inline-block; width: 14px; height: 14px; vertical-align: -2px; stroke-width: 1.4; }
+[data-fam="xb"] .ps, [data-fam="ps"] .xb { display: none; }
+.pad-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-top: 16px; }
 
 /* ------------------------------------------- changes from the original */
-.changes { display: grid; gap: 8px; padding-left: 16px; font-size: 14px; line-height: 20px; }
-.changes li::marker { color: var(--lime); }
+.changes { display: grid; gap: 12px; font-size: 14px; line-height: 20px; }
 
 /* -------------------------------------------------------------- settings */
 .group h3 { margin-top: 32px; }

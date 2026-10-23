@@ -74,66 +74,50 @@
     <section class="panel" id="controls" aria-labelledby="controls-title">
       <h2 id="controls-title">Controls</h2>
       <div id="keys">
-        <p class="hint touch-only">Tap to use the game's menus. While you drive, touch controls show on the game: the button in the top right corner switches the steering between buttons, a thumb stick and tilt. A controller works too.</p>
-        <h3 class="key-only">Driving</h3>
-        <dl class="keys key-only">
-          <div><dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>Throttle, brake and reverse</dd></div>
-          <div><dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>Steer (or W S A D)</dd></div>
-          <div><dt><kbd>Alt</kbd></dt><dd>Nitrous</dd></div>
-          <div><dt><kbd>Space</kbd></dt><dd>Handbrake</dd></div>
-          <div><dt><kbd>Shift</kbd> <kbd>Ctrl</kbd></dt><dd>Shift up, shift down (manual)</dd></div>
-          <div><dt><kbd>C</kbd> <kbd>B</kbd></dt><dd>Change camera, look back</dd></div>
-          <div><dt><kbd>R</kbd></dt><dd>Respawn</dd></div>
-          <div><dt><kbd>H</kbd> <kbd>J</kbd></dt><dd>Hydraulics (hold, then the arrows)</dd></div>
-          <div><dt><kbd>N</kbd></dt><dd>Horn (with other players)</dd></div>
-          <div><dt><kbd>Enter</kbd></dt><dd>Start an event, take an outrun</dd></div>
-          <div><dt><kbd>M</kbd> <kbd>Tab</kbd></dt><dd>Map, messages</dd></div>
-          <div><dt><kbd>Esc</kbd> <kbd>P</kbd></dt><dd>Pause</dd></div>
-        </dl>
-        <p class="hint key-only">In menus: arrow keys and Enter, Esc goes back. Change keys in the game's Options, Controls.</p>
-        <h3>Controller</h3>
-        <dl class="keys">
-          <div><dt><kbd>RT</kbd> <kbd>LT</kbd></dt><dd>Throttle, brake and reverse</dd></div>
-          <div><dt>Left stick</dt><dd>Steer</dd></div>
-          <div><dt><kbd>LB</kbd></dt><dd>Nitrous</dd></div>
-          <div><dt><kbd>RB</kbd></dt><dd>Handbrake</dd></div>
-          <div><dt><kbd>A</kbd> <kbd>X</kbd></dt><dd>Shift up, shift down (manual)</dd></div>
-          <div><dt><kbd>Y</kbd> <kbd>B</kbd></dt><dd>Change camera, look back</dd></div>
-          <div><dt><kbd>View</kbd></dt><dd>Respawn</dd></div>
-          <div><dt>Left stick click</dt><dd>Horn (with other players)</dd></div>
-          <div><dt>D-pad <kbd>↑</kbd></dt><dd>Start an event, take an outrun</dd></div>
-          <div><dt>D-pad <kbd>←</kbd> <kbd>→</kbd></dt><dd>Map, messages</dd></div>
-          <div><dt><kbd>Start</kbd></dt><dd>Pause</dd></div>
-        </dl>
-        <p class="hint">In menus: D-pad and A, B goes back. On a PlayStation controller A, B, X and Y are Cross, Circle, Square and Triangle, and LB, RB, LT and RT are L1, R1, L2 and R2.</p>
-        <h3>This page</h3>
-        <dl class="keys">
-          <div class="key-only"><dt><kbd>F9</kbd></dt><dd>Menu: full screen, controls, log, quit</dd></div>
-          <div class="touch-only"><dt><kbd>☰</kbd></dt><dd>Menu: full screen, controls, log, quit</dd></div>
-          <div><dt><kbd>Home</kbd> or both sticks pressed in</dt><dd>The menu, on a controller</dd></div>
-          <div class="key-only"><dt><kbd>F8</kbd></dt><dd>Frame-rate counter</dd></div>
-          <div class="key-only"><dt><kbd>F12</kbd></dt><dd>Screenshot, shown in Saves</dd></div>
-          <div class="key-only"><dt>Hold <kbd>Esc</kbd></dt><dd>Leave full screen</dd></div>
-        </dl>
+        <div class="tabs" role="tablist" aria-label="Controls">
+          <button type="button" class="tab" role="tab" data-tab="keys"><span class="key-only">Keyboard</span><span class="touch-only">Touch</span></button>
+          <button type="button" class="tab" role="tab" data-tab="pad">Controller</button>
+          <button type="button" class="tab" role="tab" data-tab="site">Site</button>
+        </div>
+        <div class="tab-panel" role="tabpanel" data-tab="keys">
+          <p class="hint touch-only">Tap to use the game's menus. While you drive, touch controls show on the game: the button in the top right corner switches the steering between buttons, a thumb stick and tilt. A controller works too.</p>
+          <dl class="keys key-only">
+            <div><dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>Throttle, brake and reverse</dd></div>
+            <div><dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>Steer (or W S A D)</dd></div>
+            <div><dt><kbd>Alt</kbd></dt><dd>Nitrous</dd></div>
+            <div><dt><kbd>Space</kbd></dt><dd>Handbrake</dd></div>
+            <div><dt><kbd>Shift</kbd> <kbd>Ctrl</kbd></dt><dd>Shift up, shift down (manual)</dd></div>
+            <div><dt><kbd>C</kbd> <kbd>B</kbd></dt><dd>Change camera, look back</dd></div>
+            <div><dt><kbd>R</kbd></dt><dd>Respawn</dd></div>
+            <div><dt><kbd>H</kbd> <kbd>J</kbd></dt><dd>Hydraulics (hold, then the arrows)</dd></div>
+            <div><dt><kbd>N</kbd></dt><dd>Horn (with other players)</dd></div>
+            <div><dt><kbd>Enter</kbd></dt><dd>Start an event, take an outrun</dd></div>
+            <div><dt><kbd>M</kbd> <kbd>Tab</kbd></dt><dd>Map, messages</dd></div>
+            <div><dt><kbd>Esc</kbd> <kbd>P</kbd></dt><dd>Pause</dd></div>
+          </dl>
+          <p class="hint key-only">In menus: arrow keys and Enter, Esc goes back. Change keys in the game's Options, Controls.</p>
+        </div>
+        <!-- the controller's drawing: controls.ts -->
+        <div class="tab-panel" role="tabpanel" data-tab="pad" hidden></div>
+        <div class="tab-panel" role="tabpanel" data-tab="site" hidden>
+          <dl class="keys">
+            <div class="key-only"><dt><kbd>F9</kbd></dt><dd>Menu: full screen, controls, log, quit</dd></div>
+            <div class="touch-only"><dt><kbd>☰</kbd></dt><dd>Menu: full screen, controls, log, quit</dd></div>
+            <div><dt><kbd>Home</kbd> or both sticks pressed in</dt><dd>The menu, on a controller</dd></div>
+            <div class="key-only"><dt><kbd>F8</kbd></dt><dd>Frame-rate counter</dd></div>
+            <div class="key-only"><dt><kbd>F12</kbd></dt><dd>Screenshot, shown in Saves</dd></div>
+            <div class="key-only"><dt>Hold <kbd>Esc</kbd></dt><dd>Leave full screen</dd></div>
+          </dl>
+        </div>
       </div>
     </section>
 
     <section class="panel" id="changes" aria-labelledby="changes-title">
       <h2 id="changes-title">Changes from the original</h2>
-      <ul class="changes">
-        <li>The PC game's own code, recompiled to run in Chrome and Firefox, with WebGPU for the graphics and Web Audio for the sound.</li>
-        <li>Up to 120 fps, widescreen at your screen's resolution.</li>
-        <li>The original look, with the game's graphics settings at their highest.</li>
-        <li>Startup movies skip with one press.</li>
-        <li>Free roam and Online mode with friends on this server, no EA account needed.</li>
-        <li>A horn to honk at the other players, in free roam and in races: eight to pick from, up to a train horn and La Cucaracha.</li>
-        <li>Xbox and PlayStation controllers, with rumble.</li>
-        <li>On phones: tap through the menus, and drive with touch controls: buttons, a thumb stick or tilt.</li>
-        <li>The game pauses when its tab is in the background, except in LAN and Online play.</li>
-        <li>Autosave for every profile, and a note each time the game saves.</li>
-        <li>Saves stay in this browser, with zip backups. Profiles from the PC game come in too.</li>
-        <li>Cloud saves: your saves in any browser, with a keyphrase only you have.</li>
-      </ul>
+      <div class="changes">
+        <p>The PC game's own code, recompiled to run in Chrome and Firefox with WebGPU graphics and Web Audio sound. It runs at up to 120 fps in widescreen at your screen's resolution, with the original look at its highest settings.</p>
+        <p>Drive with friends in free roam and race them in Online mode on this server, with no account, and honk at them with eight horns. Play on a keyboard, an Xbox or PlayStation controller or a phone's touch controls, with your saves in this browser or in the cloud.</p>
+      </div>
     </section>
   </div>
 

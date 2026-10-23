@@ -987,13 +987,23 @@ try {
     const helpKeys = await s.locator('#help-body .keys > div').count();
     const inert = await s.evaluate(() => document.querySelector('#app').inert);
     await shot(s, 'help-dialog.png');
+    // the dialog's copy of the sheet has tabs of its own (controls.ts): the controller's shows its drawing, and no
+    // id of the copy is the page's too
+    await s.click('#help-body [role="tab"][data-tab="pad"]');
+    const helpTabs = await s.evaluate(() => {
+      const ids = [...document.querySelectorAll('[id]')].map(e => e.id);
+      return { padShown: document.querySelector('#help-body .pad')?.checkVisibility() ?? false,
+        pageTab: document.querySelector('#keys [aria-selected="true"]')?.dataset.tab, dupIds: ids.filter((id, i) => ids.indexOf(id) !== i) };
+    });
+    await shot(s, 'help-dialog-pad.png');
     await s.keyboard.press('Escape');
     await s.evaluate(() => window.__nfsu2.session?.terminate());
     await waitPhase(s, ['exited'], 30000);
     const inertAfter = await s.evaluate(() => document.querySelector('#app').inert);
     report('page', Object.values(gone).every(c => c === 404) && !pageAsked.some(u => /^\/(server-info|setup|ca\.crt)$/.test(u)) &&
-      !a11y.unnamed.length && !a11y.undescribed.length && a11y.keys >= 10 && helpKeys === a11y.keys && !a11y.dialogsOpen && inert && !inertAfter,
-      { gone, ...a11y, helpKeys, startPageInertWhilePlaying: inert, inertAfter });
+      !a11y.unnamed.length && !a11y.undescribed.length && a11y.keys >= 10 && helpKeys === a11y.keys && !a11y.dialogsOpen && inert && !inertAfter &&
+      helpTabs.padShown && helpTabs.pageTab === 'keys' && !helpTabs.dupIds.length,
+      { gone, ...a11y, helpKeys, helpTabs, startPageInertWhilePlaying: inert, inertAfter });
     await c2.close();
   }
 
