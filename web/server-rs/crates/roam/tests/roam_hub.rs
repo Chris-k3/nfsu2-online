@@ -470,7 +470,8 @@ fn a_panic_in_a_tick_leaves_a_hub_that_goes_on() {
 // every list of its tick (2000 players' lists were one buffer of 700 KB, kept whole for as long as any of them waited)
 #[test]
 fn a_list_waiting_holds_little() {
-    let mut k = Kit::new(RoamOptions::default());
+    // (the lattice's links by distance alone: player 7 has 32)
+    let mut k = Kit::new(ways()[0].1.clone());
     for i in 0..300u32 {
         let v = 0x0A4D_0100 + i;
         k.from(v, &hello_with(1000 + i, &HelloOpts { core: 2, ..Default::default() }));

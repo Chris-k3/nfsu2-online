@@ -13,7 +13,7 @@ use nfsu2_util::js;
 use nfsu2_util::json::num;
 use serde_json::{Value, json};
 
-use crate::links::{Cand, Found, Grid, Heap, Near, before, distance, order_key, sort_stable};
+use crate::links::{Cand, Found, Grid, Heap, Near, WALK_AHEAD, WALK_SOON, WALK_VIEW, before, distance, order_key, sort_stable};
 use crate::wire::{self, F_DATA, KIND_UDP, Msg};
 use crate::{PeerEntry, ROAM_HUB_VIP, RoamOptions};
 
@@ -173,7 +173,10 @@ fn sanitize(o: RoamOptions) -> RoamOptions {
         cap_down_ms: f(o.cap_down_ms, d.cap_down_ms),
         cap_up_ms: f(o.cap_up_ms, d.cap_up_ms),
         ask_cap: n(o.ask_cap, d.ask_cap),
+        soon_ms: f(o.soon_ms, d.soon_ms),
         look_ms: f(o.look_ms, d.look_ms),
+        away_m: f(o.away_m, d.away_m),
+        view_m: f(o.view_m, d.view_m),
         // (one answer is three datagrams at most)
         map_max: n(o.map_max, d.map_max).min(wire::MAP_PER * 3),
         map_gap_ms: f(o.map_gap_ms, d.map_gap_ms),
@@ -214,9 +217,12 @@ struct Scratch {
     fresh: Vec<Vec<Link>>,
     /// each slot's place in the room being linked (NONE: not in it)
     local: Vec<u32>,
-    // by the place in the room's list: where each one is, and where it will be look_ms on
+    // by the place in the room's list: where each one is, and where the links weigh it (`prepare`): soon_ms on,
+    // look_ms on, and its view point
     pos: Vec<[f64; 3]>,
+    soon: Vec<[f64; 3]>,
     ahead: Vec<[f64; 3]>,
+    view: Vec<[f64; 3]>,
     deg: Vec<usize>,
     mark: Vec<u32>,
     since: Vec<f64>,
@@ -230,6 +236,8 @@ struct Scratch {
     /// the same over the places ahead
     grid_a: Grid,
     near_a: Vec<Near>,
+    /// the walks from the view points over the places soon (`grid`)
+    near_v: Vec<Near>,
     /// each Near's vectors of what it found, kept for the next tick
     found: Vec<Found>,
     /// the race lobbies' pairs (`lobby_pairs`), places in the room, the host first; the room's ids to places; the
@@ -260,10 +268,14 @@ struct Weigh {
     keep: f64,
 }
 
-/// how far apart places i and j of a room count: the nearer of now and look_ms ahead
+/// how far apart places i and j of a room count: the nearest of the two soon_ms on, the two look_ms on, and either
+/// one's view point to the other soon_ms on
 #[inline]
-fn apart(pos: &[[f64; 3]], ahead: &[[f64; 3]], i: usize, j: usize) -> f64 {
-    distance(&pos[i], &pos[j]).min(distance(&ahead[i], &ahead[j]))
+fn apart(soon: &[[f64; 3]], ahead: &[[f64; 3]], view: &[[f64; 3]], i: usize, j: usize) -> f64 {
+    distance(&soon[i], &soon[j])
+        .min(distance(&ahead[i], &ahead[j]))
+        .min(distance(&view[i], &soon[j]))
+        .min(distance(&view[j], &soon[i]))
 }
 
 /// The hub's logic, without its timer (`RoamHub` gives it one).
@@ -675,7 +687,7 @@ impl Hub {
         let mut lobby_links = 0;
         for r in 0..rooms {
             let list = std::mem::take(&mut s.rooms[r]);
-            prepare(&self.slots, &list, self.cap, self.o.look_ms / 1000.0, s);
+            prepare(&self.slots, &list, self.cap, &self.o, now, s);
             lobby_pairs(&self.slots, &list, now, s);
             lobby_links += if list.len() > self.o.exact_room {
                 link_many(&self.slots, &list, &w, s)
@@ -826,16 +838,36 @@ impl Hub {
     }
 }
 
-/// a room's players by their place in its list: positions, degrees (under the cap), and each one's place
-fn prepare(slots: &[Option<Player>], list: &[u32], cap: usize, look: f64, s: &mut Scratch) {
+/// a SNAP comes every half second: a position is moved on by its age up to this (s), a game stalled no farther
+const AGE_MAX_S: f64 = 1.0;
+
+/// A room's players by their place in its list: positions, degrees (under the cap), and each one's place.  Where the
+/// links weigh a player: where it will be soon_ms and look_ms on at its speed, from where its last SNAP had it (moved
+/// on by that SNAP's age), and its view point, view_m ahead of where its car points from its place soon_ms on (the
+/// camera looks that way: what is in front shows from farther away).  Only a car in free roam moves on and has a view
+/// point (a paused game's last SNAP has the speed it had), and a player not in free roam (a shop, a race, the menus,
+/// loading) is away_m up, out of the way of the cars shown.
+fn prepare(slots: &[Option<Player>], list: &[u32], cap: usize, o: &RoamOptions, now: f64, s: &mut Scratch) {
     s.pos.clear();
+    s.soon.clear();
     s.ahead.clear();
+    s.view.clear();
     s.deg.clear();
     for (i, &slot) in list.iter().enumerate() {
         let p = player(slots, slot);
-        let (at, v) = p.map_or(([0.0; 3], [0.0; 3]), |p| (p.p.unwrap_or_default(), p.v));
+        let (at, v, status, heading, age) = p.map_or(([0.0; 3], [0.0; 3], 0, 0, 0.0), |p| {
+            (p.p.unwrap_or_default(), p.v, p.status, p.heading, (now - p.pos_at) / 1000.0)
+        });
+        let (v, view) = if status == 2 { (v, o.view_m) } else { ([0.0; 3], 0.0) };
+        let up = if matches!(status, 2 | 5) { 0.0 } else { o.away_m };
+        let age = age.clamp(0.0, AGE_MAX_S);
+        let on = |t: f64| [at[0] + v[0] * t, at[1] + v[1] * t, at[2] + v[2] * t + up];
+        let soon = on(age + o.soon_ms / 1000.0);
+        let a = f64::from(heading) * std::f64::consts::PI / 128.0;
         s.pos.push(at);
-        s.ahead.push([at[0] + v[0] * look, at[1] + v[1] * look, at[2] + v[2] * look]);
+        s.soon.push(soon);
+        s.ahead.push(on(age + o.look_ms / 1000.0));
+        s.view.push([soon[0] + a.cos() * view, soon[1] + a.sin() * view, soon[2]]);
         // a player's links at most: its degree, under the cap
         s.deg.push(p.map_or(0, |p| p.degree.min(cap)));
         s.local[slot as usize] = i as u32;
@@ -923,7 +955,7 @@ fn lobby_pairs(slots: &[Option<Player>], list: &[u32], now: f64, s: &mut Scratch
 /// `hold_ms` before them all, an older one at `keep` its distance), into the links while both ends have room.
 fn link_every_pair(slots: &[Option<Player>], list: &[u32], w: &Weigh, s: &mut Scratch) -> u64 {
     let m = list.len();
-    let Scratch { pos, ahead, deg, mark, since, pairs, order, sorting, local: at, fresh, lpairs, .. } = s;
+    let Scratch { soon, ahead, view, deg, mark, since, pairs, order, sorting, local: at, fresh, lpairs, .. } = s;
     // the race lobbies' links first
     let linked = |fresh: &[Vec<Link>], a: u32, b: u32| fresh[a as usize].iter().any(|l| l.slot == b);
     let mut made = 0;
@@ -953,11 +985,11 @@ fn link_every_pair(slots: &[Option<Player>], list: &[u32], w: &Weigh, s: &mut Sc
         for j in i + 1..m {
             let linked = mark[j] == stamp;
             let d = if !linked {
-                apart(pos, ahead, i, j)
+                apart(soon, ahead, view, i, j)
             } else if w.now - since[j] < w.hold_ms {
                 -1.0
             } else {
-                apart(pos, ahead, i, j) * w.keep
+                apart(soon, ahead, view, i, j) * w.keep
             };
             order.push((order_key(d), pairs.len() as u32));
             pairs.push(Pair { since: if linked { since[j] } else { w.now }, a: i as u32, b: j as u32 });
@@ -990,10 +1022,12 @@ fn has_place(places: &[u32], j: u32) -> bool {
 
 /// The links of a room larger than `exact_room`, as `link_every_pair` makes them from every pair sorted (at one
 /// place in the order the pair of the lower index first), without sorting them all: the last tick's links at their own place,
-/// and each player's nearest one after another (Near) while it has room, merged in that order.  A player walks twice,
-/// by the places now and by the places ahead (`apart` is the nearer of the two): a pair comes first at the nearer of
-/// its two distances, as the order has it, and when it comes again, from the other walk, it is linked already or
-/// cannot be (the same as an entry of one pair coming twice, below).
+/// and each player's nearest one after another (Near) while it has room, merged in that order.  A player walks three
+/// times: by the places soon, by the places ahead, and from its view point over the places soon (`apart` is the
+/// nearest of the four distances, a pair's view distance found by either end's walk): a pair comes first at the
+/// nearest of its distances, as the order has it, and when it comes again, from another walk, it is linked already
+/// or cannot be (the same as an entry of one pair coming twice, below).  A player without a view point (its view
+/// point is its place soon) skips the third walk, which would give what its first gives.
 ///
 /// One heap could hold both.  Here the last tick's links (32,000 of 2000 players) are sorted once, and only the
 /// nearest ones (one a player) are in the heap, which stays small; the two are merged.  The links come out the same:
@@ -1009,8 +1043,9 @@ fn has_place(places: &[u32], j: u32) -> bool {
 fn link_many(slots: &[Option<Player>], list: &[u32], w: &Weigh, s: &mut Scratch) -> u64 {
     let m = list.len();
     let Scratch {
-        pos,
+        soon,
         ahead,
+        view,
         deg,
         local: at,
         fresh,
@@ -1019,6 +1054,7 @@ fn link_many(slots: &[Option<Player>], list: &[u32], w: &Weigh, s: &mut Scratch)
         near,
         grid_a,
         near_a,
+        near_v,
         found,
         olds,
         olinks,
@@ -1029,11 +1065,12 @@ fn link_many(slots: &[Option<Player>], list: &[u32], w: &Weigh, s: &mut Scratch)
         ..
     } = s;
     let cand = |d: f64, i: usize, j: usize, nearest: bool| Cand::new(d, i as u32, j as u32, nearest);
-    grid.build(pos);
+    grid.build(soon);
     grid_a.build(ahead);
     heap.clear();
     near.clear();
     near_a.clear();
+    near_v.clear();
     olds.clear();
     olinks.clear();
     ostart.clear();
@@ -1046,21 +1083,28 @@ fn link_many(slots: &[Option<Player>], list: &[u32], w: &Weigh, s: &mut Scratch)
                 // each link once: by its lower end, or by the only end that lists it (j's links are in already)
                 if i < j || !has_place(&olinks[ostart[j] as usize..ostart[j + 1] as usize], i as u32) {
                     // a link's place in the order: younger than `hold_ms` first, older at `keep` its distance
-                    let d = if w.now - l.since < w.hold_ms { -1.0 } else { apart(pos, ahead, i, j) * w.keep };
+                    let d = if w.now - l.since < w.hold_ms { -1.0 } else { apart(soon, ahead, view, i, j) * w.keep };
                     olds.push(cand(d, i, j, false));
                 }
             }
         }
-        let mut n = Near::new(grid, pos, i as u32, found.pop().unwrap_or_default());
-        if let Some((d, j)) = n.next(grid, pos) {
-            heap.push(cand(d, i, j as usize, true));
+        let mut n = Near::new(grid, soon, i as u32, found.pop().unwrap_or_default());
+        if let Some((d, j)) = n.next(grid, soon) {
+            heap.push(Cand::by(d, i as u32, j, WALK_SOON));
         }
         near.push(n);
         let mut n = Near::new(grid_a, ahead, i as u32, found.pop().unwrap_or_default());
         if let Some((d, j)) = n.next(grid_a, ahead) {
-            heap.push(Cand::ahead(d, i as u32, j));
+            heap.push(Cand::by(d, i as u32, j, WALK_AHEAD));
         }
         near_a.push(n);
+        let mut n = Near::from(grid, view[i], i as u32, found.pop().unwrap_or_default());
+        if view[i] != soon[i] {
+            if let Some((d, j)) = n.next(grid, soon) {
+                heap.push(Cand::by(d, i as u32, j, WALK_VIEW));
+            }
+        }
+        near_v.push(n);
     }
     ostart.push(olinks.len() as u32);
     olds.sort_unstable_by_key(|c| (order_key(c.d), c.pair()));
@@ -1109,12 +1153,13 @@ fn link_many(slots: &[Option<Player>], list: &[u32], w: &Weigh, s: &mut Scratch)
         if c.nearest() {
             // i's next nearest one of that walk, while it has room
             if room(fcount, i) {
-                if c.by_ahead() {
-                    if let Some((d, k)) = near_a[i].next(grid_a, ahead) {
-                        heap.push(Cand::ahead(d, i as u32, k));
-                    }
-                } else if let Some((d, k)) = near[i].next(grid, pos) {
-                    heap.push(cand(d, i, k as usize, true));
+                let next = match c.walk() {
+                    WALK_AHEAD => near_a[i].next(grid_a, ahead),
+                    WALK_VIEW => near_v[i].next(grid, soon),
+                    _ => near[i].next(grid, soon),
+                };
+                if let Some((d, k)) = next {
+                    heap.push(Cand::by(d, i as u32, k, c.walk()));
                 }
             }
             // a link of the last tick: in the order at its own place
@@ -1136,7 +1181,7 @@ fn link_many(slots: &[Option<Player>], list: &[u32], w: &Weigh, s: &mut Scratch)
             }
         }
     }
-    for n in near.drain(..).chain(near_a.drain(..)) {
+    for n in near.drain(..).chain(near_a.drain(..)).chain(near_v.drain(..)) {
         found.push(n.into_found());
     }
     made

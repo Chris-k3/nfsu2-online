@@ -194,6 +194,8 @@ impl Grid {
 /// order.
 pub(crate) struct Near {
     i: u32,
+    /// where the walk is from: list[i]'s position, or a point of its own (`from`)
+    at: [f64; 3],
     x0: i64,
     y0: i64,
     last: i64,
@@ -221,10 +223,14 @@ pub(crate) struct Found {
 impl Near {
     /// `found`: empty vectors to keep them in (reused from tick to tick)
     pub(crate) fn new(g: &Grid, pos: &[[f64; 3]], i: u32, found: Found) -> Near {
-        let a = &pos[i as usize];
-        let (x0, y0) = ((a[0] / g.cell).floor() as i64, (a[1] / g.cell).floor() as i64);
+        Near::from(g, pos[i as usize], i, found)
+    }
+
+    /// the others of list[i] nearest first from point `at` (distance(at, pos[j])), not from its own position
+    pub(crate) fn from(g: &Grid, at: [f64; 3], i: u32, found: Found) -> Near {
+        let (x0, y0) = ((at[0] / g.cell).floor() as i64, (at[1] / g.cell).floor() as i64);
         let last = (x0 - g.x1).max(g.x2 - x0).max(y0 - g.y1).max(g.y2 - y0);
-        Near { i, x0, y0, last, r: 0, found }
+        Near { i, at, x0, y0, last, r: 0, found }
     }
 
     /// its vectors back (emptied), for the next tick
@@ -252,7 +258,7 @@ impl Near {
                 return None;
             }
             let w = Within::new(reach);
-            let a = &pos[self.i as usize];
+            let a = &self.at;
             let Found { pool, ready, .. } = &mut self.found;
             pool.retain(|&(sq, j)| {
                 if w.beyond(sq, || distance(a, &pos[j as usize])) {
@@ -275,7 +281,7 @@ impl Near {
     /// most sqrt(s) (1 + 2e-15)), and every one left is farther (a square over s (1 + MARGIN) is a distance over
     /// sqrt(s) (1 + MARGIN / 2.1)).
     fn order(&mut self, pos: &[[f64; 3]]) {
-        let a = &pos[self.i as usize];
+        let a = &self.at;
         let Found { ready, next, .. } = &mut self.found;
         if ready.len() <= 2 * CHUNK {
             next.extend(ready.drain(..).map(|(_, j)| (distance(a, &pos[j as usize]).to_bits(), j)));
@@ -326,7 +332,7 @@ impl Near {
 
     /// a cell's players into the pool, or into `ready` when they are within reach of the ring being read
     fn cell(&mut self, g: &Grid, pos: &[[f64; 3]], x: i64, y: i64, w: &Within) {
-        let a = &pos[self.i as usize];
+        let a = &self.at;
         let Found { pool, ready, .. } = &mut self.found;
         for &j in g.cell(x, y) {
             if j != self.i {
@@ -359,11 +365,11 @@ impl Within {
 }
 
 /// An entry of the order a large room's pairs are taken in: `(d, min(i, j), max(i, j), i, j, since, nearest)` in 16
-/// bytes (a room of 2000 players has 34,000 of them).  `key` is `min << 33 | max << 3` and three flags: whether i is
-/// the higher one, whether this is i's nearest one (else a link of the last tick), and whether that nearest one is
-/// by the places ahead (else by the places now).  The order of `key >> 3` is the order of (min, max), and the flags
-/// take no part in it.  `since` is not kept: it is the tick's time for a nearest one, and for a link of the last tick
-/// that link's (i's links do not change in the tick).  Places in a room are below 2^30.
+/// bytes (a room of 2000 players has 34,000 of them).  `key` is `min << 34 | max << 4`, which walk found it (2 bits)
+/// and two flags: whether this is i's nearest one (else a link of the last tick) and whether i is the higher one.
+/// The order of `key >> 4` is the order of (min, max), and the walk and the flags take no part in it.  `since` is not
+/// kept: it is the tick's time for a nearest one, and for a link of the last tick that link's (i's links do not change
+/// in the tick).  Places in a room are below 2^30.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Cand {
     pub(crate) d: f64,
@@ -372,25 +378,30 @@ pub(crate) struct Cand {
 
 const I_HIGH: u64 = 1;
 const NEAREST: u64 = 2;
-const AHEAD: u64 = 4;
 const MASK: u64 = (1 << 30) - 1;
+
+/// the walks a player's nearest ones come from (`link_many`): by the places soon, by the places ahead, and from its
+/// view point to the others' places soon
+pub(crate) const WALK_SOON: u8 = 0;
+pub(crate) const WALK_AHEAD: u8 = 1;
+pub(crate) const WALK_VIEW: u8 = 2;
 
 impl Cand {
     pub(crate) fn new(d: f64, i: u32, j: u32, nearest: bool) -> Cand {
         let (lo, hi) = (i.min(j) as u64 & MASK, i.max(j) as u64 & MASK);
-        Cand { d, key: lo << 33 | hi << 3 | if i > j { I_HIGH } else { 0 } | if nearest { NEAREST } else { 0 } }
+        Cand { d, key: lo << 34 | hi << 4 | if nearest { NEAREST } else { 0 } | if i > j { I_HIGH } else { 0 } }
     }
-    /// i's nearest one by the places ahead
-    pub(crate) fn ahead(d: f64, i: u32, j: u32) -> Cand {
+    /// i's nearest one of walk `walk`
+    pub(crate) fn by(d: f64, i: u32, j: u32, walk: u8) -> Cand {
         let mut c = Cand::new(d, i, j, true);
-        c.key |= AHEAD;
+        c.key |= (walk as u64 & 3) << 2;
         c
     }
     fn lo(&self) -> u32 {
-        (self.key >> 33) as u32
+        (self.key >> 34) as u32
     }
     fn hi(&self) -> u32 {
-        ((self.key >> 3) & MASK) as u32
+        ((self.key >> 4) & MASK) as u32
     }
     pub(crate) fn i(&self) -> u32 {
         if self.key & I_HIGH != 0 { self.hi() } else { self.lo() }
@@ -401,20 +412,20 @@ impl Cand {
     pub(crate) fn nearest(&self) -> bool {
         self.key & NEAREST != 0
     }
-    /// a nearest one by the places ahead
-    pub(crate) fn by_ahead(&self) -> bool {
-        self.key & AHEAD != 0
+    /// the walk of a nearest one
+    pub(crate) fn walk(&self) -> u8 {
+        (self.key >> 2 & 3) as u8
     }
     /// (min(i, j), max(i, j)) in one number, in their order
     pub(crate) fn pair(&self) -> u64 {
-        self.key >> 3
+        self.key >> 4
     }
 }
 
 /// the least by d, then min(i, j), then max(i, j)
 #[inline]
 pub(crate) fn before(x: &Cand, y: &Cand) -> bool {
-    x.d < y.d || (x.d == y.d && x.key >> 3 < y.key >> 3)
+    x.d < y.d || (x.d == y.d && x.key >> 4 < y.key >> 4)
 }
 
 /// A binary heap, the least on top: each player's nearest one not taken yet (`link_many`, which says
@@ -522,9 +533,11 @@ mod tests {
         let order: Vec<(f64, u32, u32, bool)> = std::iter::from_fn(|| h.pop()).map(|e| (e.d, e.i(), e.j(), e.nearest())).collect();
         assert_eq!(order, [(-1.0, 7, 8, true), (1.0, 3, 2, false), (1.0, 2, 9, false), (1.0, 6, 5, true), (3.0, 1, 2, false)]);
         let big = Cand::new(0.5, (1 << 30) - 1, (1 << 30) - 2, true);
-        assert_eq!((big.i(), big.j(), big.nearest(), big.by_ahead()), ((1 << 30) - 1, (1 << 30) - 2, true, false));
-        let a = Cand::ahead(0.5, 4, 9);
-        assert_eq!((a.i(), a.j(), a.nearest(), a.by_ahead(), a.pair()), (4, 9, true, true, Cand::new(0.5, 9, 4, false).pair()));
+        assert_eq!((big.i(), big.j(), big.nearest(), big.walk()), ((1 << 30) - 1, (1 << 30) - 2, true, WALK_SOON));
+        let a = Cand::by(0.5, 4, 9, WALK_AHEAD);
+        assert_eq!((a.i(), a.j(), a.nearest(), a.walk(), a.pair()), (4, 9, true, WALK_AHEAD, Cand::new(0.5, 9, 4, false).pair()));
+        let v = Cand::by(0.5, (1 << 30) - 1, 3, WALK_VIEW);
+        assert_eq!((v.i(), v.j(), v.nearest(), v.walk()), ((1 << 30) - 1, 3, true, WALK_VIEW));
     }
 
     #[test]
@@ -579,6 +592,24 @@ mod tests {
                     pos.len()
                 );
             }
+        }
+    }
+
+    // from a point of its own (inside the players' span, on a cell's edge, far outside it): all others but i by
+    // (distance(at, pos[j]), j)
+    #[test]
+    fn near_walks_nearest_first_from_a_point() {
+        let pos: Vec<[f64; 3]> = (0..80).map(|i| [(i * 7 % 40) as f64 * 5.0, (i * 13 % 40) as f64 * 2.5, (i % 3) as f64]).collect();
+        let mut g = Grid::default();
+        g.build(&pos);
+        for (i, at) in [(0u32, [37.5, 20.0, 1.0]), (5, [15.0, 10.0, 0.0]), (79, [-400.0, 900.0, 100.0]), (12, [190.0, -3.0, 0.0])] {
+            let mut n = Near::from(&g, at, i, Found::default());
+            let got: Vec<(f64, u32)> = std::iter::from_fn(|| n.next(&g, &pos)).collect();
+            let mut want: Vec<(f64, u32)> =
+                (0..pos.len() as u32).filter(|&j| j != i).map(|j| (distance(&at, &pos[j as usize]), j)).collect();
+            want.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.cmp(&y.1)));
+            assert_eq!(got.len(), want.len(), "from {at:?}");
+            assert!(got.iter().zip(&want).all(|(a, b)| a.0.to_bits() == b.0.to_bits() && a.1 == b.1), "from {at:?}");
         }
     }
 }

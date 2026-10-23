@@ -9,7 +9,7 @@
 //!
 //! - player -> hub: a HELLO every second (its id, room, status, name), a SNAP twice a second (where its car is), a
 //!   BYE when it stops.
-//! - hub -> player: every second a PEERS message: the players linked to it, { virtual address, port, id }, at most
+//! - hub -> player: twice a second (`tick_ms`) a PEERS message: the players linked to it, { virtual address, port, id }, at most
 //!   `degree` (32: roam_core's group of 33 with itself), or 7 for a player whose HELLO says core version 1 (its group
 //!   was 8, and it drops a longer list); an empty one says the hub is there.
 //! - player -> hub -> player: when its world map opens, a MAPREQ; the hub answers with MAP datagrams (at most three
@@ -17,11 +17,23 @@
 //!   most, each its place (x, y in whole metres) and heading (a byte), which the game marks on the map.
 //!
 //! The links, in each room: the pairs of players with a position younger than `stale_ms` (60 s: one in a shop or a
-//! race keeps its links for a while), nearest first, each player at most its degree of them.  "Nearest" looks ahead: a
-//! pair counts at the nearer of its distance now and its distance once both cars went on `look_ms` (3 s) at the speeds
-//! their last SNAPs gave, so a car a player heads for is linked (and its car loaded) before it is near, and one left
-//! behind gives way first; parked players count as before.  Both ends of a link list
-//! each other (roam_core takes a player only when both hear each other).  A link stays at least `hold_ms` (5 s), and
+//! race keeps its links for a while), nearest first, each player at most its degree of them.  "Nearest" looks ahead,
+//! for the cars a player will see: a pair counts at the nearest of
+//! - its distance once both cars went on `soon_ms` (1 s) at the speeds their last SNAPs gave (from where those SNAPs
+//!   had them, moved on by their age), so a car a player drives away from gives way at once,
+//! - its distance once both went on `look_ms` (4 s), so a car a player heads for is linked (and its car loaded) before
+//!   it is near,
+//! - and the distance from either one's view point, `view_m` (150 m) ahead of where its car points (from its place
+//!   soon_ms on), to the other one soon_ms on: the camera looks that way, so a car in front, parked or driving, shows
+//!   from farther away than one beside or behind it.
+//!
+//! Only a car in free roam moves on and has a view point; a player not in free roam (a shop, a race, the menus,
+//! loading) counts `away_m` (100 m) up, so its links go to the cars shown first.  Parked players in free roam count by
+//! distance and view point.  A simulation of 1400 players (tests/popin.rs, 2026-10-23) against the links of before
+//! (now and 3 s ahead, a tick a second): of the cars within 250 m in front of a driver 84 % shown instead of 63 %,
+//! a car showing within 100 m in front 0.30 times a minute instead of 0.63, a car left behind gone at 300 m instead of
+//! 390; for 600 players in 800 m square, 20 such pop-ins a minute instead of 66.  Both ends of a link list each other
+//! (roam_core takes a player only when both hear each other).  A link stays at least `hold_ms` (5 s), and
 //! after that counts as `keep` (half) its distance: a new link costs a handshake, the car's record and maybe a car
 //! swapped on the screen, so it has to be much nearer to take the place of one (62 simulated players circling within
 //! 240 m changed links 28 times a second with 20 % instead).  The game shows a car for each of a player's links
@@ -102,9 +114,16 @@ pub struct RoamOptions {
     pub cap_up_ms: f64,
     /// under this cap free roam is busy (`crowded()`)
     pub ask_cap: usize,
-    /// how far ahead the links look (ms): a pair counts at the nearer of its distance now and its distance once both
-    /// cars went on this long at their speeds, so a car a player heads for is linked before it is near
+    /// how far ahead the links look (ms): a pair counts at the nearer of its distance once both cars went on soon_ms
+    /// and once they went on look_ms at their speeds, so a car a player heads for is linked before it is near, and one
+    /// it drives away from gives way at once
+    pub soon_ms: f64,
     pub look_ms: f64,
+    /// a player not in free roam (a shop, a race, the menus) counts this far up (m): its links go to the cars shown
+    pub away_m: f64,
+    /// a player's view point, this far ahead of where its car points (m): a car in front counts from there too, so it
+    /// is linked from farther away than one beside or behind
+    pub view_m: f64,
     /// the world map (MAPREQ): at most this many players a answer, one answer a browser every map_gap_ms at most, of
     /// the players in free roam (or paused there) with a position younger than map_fresh_ms
     pub map_max: usize,
@@ -116,7 +135,7 @@ impl Default for RoamOptions {
     fn default() -> Self {
         RoamOptions {
             degree: 32,
-            tick_ms: 1000,
+            tick_ms: 500,
             stale_ms: 60_000.0,
             gone_ms: 6_000.0,
             keep: 0.5,
@@ -130,7 +149,10 @@ impl Default for RoamOptions {
             cap_down_ms: 5_000.0,
             cap_up_ms: 15_000.0,
             ask_cap: 24,
-            look_ms: 3_000.0,
+            soon_ms: 1_000.0,
+            look_ms: 4_000.0,
+            away_m: 100.0,
+            view_m: 150.0,
             map_max: 512,
             map_gap_ms: 1_000.0,
             map_fresh_ms: 5_000.0,

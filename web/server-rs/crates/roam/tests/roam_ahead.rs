@@ -24,7 +24,8 @@ fn join(k: &mut Kit, i: u32) {
     k.from(W(i), &hello_with(100 + i, &HelloOpts { core: 4, ..Default::default() }));
 }
 
-// a car heading for a player far ahead is linked to it before the parked ones beside it; parked, it is not
+// a car heading for a player far ahead is linked to it before the parked ones beside it, and the one it drives away
+// from gives way first; parked, the nearest ones
 #[test]
 fn links_look_ahead_at_the_cars_speeds() {
     for (how, o) in ways() {
@@ -33,10 +34,11 @@ fn links_look_ahead_at_the_cars_speeds() {
             for i in 0..4 {
                 join(&mut k, i);
             }
-            // 0 at 50 m/s along x, 1 parked 150 m ahead of it (where 0 is in 3 s), 2 and 3 parked 40 and 45 m away
+            // 0 at 50 m/s along x, 1 parked 200 m ahead of it (where 0 is in 4 s), 2 parked 40 m behind it (90 m in
+            // a second), 3 parked 45 m beside it (67 m in a second)
             let v = if moving { 50.0 } else { 0.0 };
             k.from(W(0), &snap_moving(100, [0.0, 0.0, 0.0], [v, 0.0, 0.0], 0.0, 2));
-            k.from(W(1), &snap(101, [150.0, 0.0, 0.0]));
+            k.from(W(1), &snap(101, [200.0, 0.0, 0.0]));
             k.from(W(2), &snap(102, [-40.0, 0.0, 0.0]));
             k.from(W(3), &snap(103, [0.0, -45.0, 0.0]));
             k.clear();
@@ -44,8 +46,82 @@ fn links_look_ahead_at_the_cars_speeds() {
             let l = k.lists();
             let has = |i: u32, j: u32| l[&format!("{}:47210", W(i))].iter().any(|e| e.vip == W(j));
             assert_eq!(has(0, 1), moving, "{how}, moving {moving}: 0 and the player it heads for");
-            assert!(has(0, 2), "{how}, moving {moving}: 0 and the nearest parked one");
-            assert_eq!(has(0, 3), !moving, "{how}, moving {moving}");
+            assert_eq!(has(0, 2), !moving, "{how}, moving {moving}: 0 and the one behind it");
+            assert!(has(0, 3), "{how}, moving {moving}: 0 and the one beside it");
+        }
+    }
+}
+
+// a car in front of where a player's car points is linked from farther away (from its view point): 250 m in front
+// before 120 m behind; turned around, the one behind it; without view points, the nearer one
+#[test]
+fn links_see_farther_in_front() {
+    for (how, o) in ways() {
+        for (heading, view, want) in [(0.0, true, 1), (std::f64::consts::PI, true, 2), (0.0, false, 2)] {
+            let mut k = Kit::new(RoamOptions { degree: 1, view_m: if view { 150.0 } else { o.view_m }, ..o.clone() });
+            for i in 0..3 {
+                join(&mut k, i);
+            }
+            // 1 points on along x, 2 away from 0 (their view points far from 0)
+            k.from(W(0), &snap_moving(100, [0.0, 0.0, 0.0], [0.0; 3], heading, 2));
+            k.from(W(1), &snap_moving(101, [250.0, 0.0, 0.0], [0.0; 3], 0.0, 2));
+            k.from(W(2), &snap_moving(102, [-120.0, 0.0, 0.0], [0.0; 3], std::f64::consts::PI, 2));
+            k.hub.tick();
+            let l = k.lists();
+            assert_eq!(
+                l[&format!("{}:47210", W(0))].iter().map(|e| e.vip).collect::<Vec<_>>(),
+                [W(want)],
+                "{how}: heading {heading}, view {view}"
+            );
+        }
+    }
+}
+
+// a player not in free roam (a shop) counts 100 m up: a car in free roam 80 m away comes before it at 10 m; paused in
+// free roam it counts where it is
+#[test]
+fn links_go_to_the_cars_shown_first() {
+    for (how, o) in ways() {
+        for (status, want) in [(4u8, 2), (2, 1), (5, 1), (3, 2)] {
+            let mut k = Kit::new(RoamOptions { degree: 1, ..o.clone() });
+            for i in 0..3 {
+                join(&mut k, i);
+            }
+            k.from(W(0), &snap(100, [0.0, 0.0, 0.0]));
+            k.from(W(1), &snap_n(101, [10.0, 0.0, 0.0], status, 1));
+            k.from(W(2), &snap(102, [80.0, 0.0, 0.0]));
+            k.hub.tick();
+            let l = k.lists();
+            assert_eq!(l[&format!("{}:47210", W(0))].iter().map(|e| e.vip).collect::<Vec<_>>(), [W(want)], "{how}: status {status}");
+        }
+    }
+}
+
+// a car's place is moved on by its SNAP's age (up to a second): heading for 0 at 50 m/s from 400 m, it is 150 m from
+// 0 in 4 s once its SNAP is a second old (before a parked one 175 m away), 200 m when it is new; a paused game's speed
+// moves nothing
+#[test]
+fn links_move_a_car_on_by_its_snaps_age() {
+    for (how, o) in ways() {
+        for (age, status, want) in [(0.0, 2u8, 2), (1000.0, 2, 1), (3000.0, 2, 1), (1000.0, 5, 2)] {
+            let mut k = Kit::new(RoamOptions { degree: 1, ..o.clone() });
+            for i in 0..3 {
+                join(&mut k, i);
+            }
+            k.from(W(0), &snap(100, [0.0, 0.0, 0.0]));
+            k.from(W(1), &snap_moving(101, [400.0, 0.0, 0.0], [-50.0, 0.0, 0.0], std::f64::consts::PI, status));
+            k.from(W(2), &snap(102, [0.0, 175.0, 0.0]));
+            k.step(age);
+            // (0 and 2 just sent theirs)
+            k.from(W(0), &snap(100, [0.0, 0.0, 0.0]));
+            k.from(W(2), &snap(102, [0.0, 175.0, 0.0]));
+            k.hub.tick();
+            let l = k.lists();
+            assert_eq!(
+                l[&format!("{}:47210", W(0))].iter().map(|e| e.vip).collect::<Vec<_>>(),
+                [W(want)],
+                "{how}: a SNAP {age} ms old, status {status}"
+            );
         }
     }
 }
@@ -59,8 +135,8 @@ impl Rng {
     }
 }
 
-// the grid's two walks (now and ahead) give the links every pair sorted gives, tick after tick, with players driving
-// about, parking, a few on one spot, and links held and kept
+// the grid's three walks (soon, ahead, and from the view points) give the links every pair sorted gives, tick after
+// tick, with players driving about, parking, a few on one spot, some in a shop or paused, and links held and kept
 #[test]
 fn the_grid_links_as_every_pair_with_the_cars_moving() {
     let n = 400u32;
@@ -87,7 +163,9 @@ fn the_grid_links_as_every_pair_with_the_cars_moving() {
             if r.unit() < 0.1 {
                 *v = [(r.unit() - 0.5) * 120.0, (r.unit() - 0.5) * 120.0, 0.0];
             }
-            let d = snap_moving(100 + i as u32, *p, *v, r.unit() * 6.0, 2);
+            // some in a shop, some paused (their speeds move nothing, their view points none)
+            let status = if i % 7 == 0 { 4 } else if i % 11 == 0 { 5 } else { 2 };
+            let d = snap_moving(100 + i as u32, *p, *v, r.unit() * 6.0, status);
             every.from(W(i as u32), &d);
             grid.from(W(i as u32), &d);
         }

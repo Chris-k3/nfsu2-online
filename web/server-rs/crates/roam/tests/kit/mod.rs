@@ -225,9 +225,11 @@ impl Kit {
     }
 }
 
-/// the links of a room: every pair weighed (a room of at most exactRoom players), or the grid's nearest (a larger one)
+/// the links of a room: every pair weighed (a room of at most exactRoom players), or the grid's nearest (a larger one);
+/// without view points (the tests' cars point along x: theirs are roam_ahead.rs's), so by the distances (and speeds)
 pub fn ways() -> [(&'static str, RoamOptions); 2] {
-    [("every pair", RoamOptions::default()), ("the grid", RoamOptions { exact_room: 1, ..RoamOptions::default() })]
+    let o = RoamOptions { view_m: 1e-9, ..RoamOptions::default() };
+    [("every pair", o.clone()), ("the grid", RoamOptions { exact_room: 1, ..o })]
 }
 
 /// browser i's address: 10.77.0.(10 + i)

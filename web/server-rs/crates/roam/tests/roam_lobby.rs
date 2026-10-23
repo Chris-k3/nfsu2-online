@@ -183,7 +183,8 @@ fn lobbies_on_the_wire_roam_core_and_the_hub_agree() {
 #[test]
 fn a_lobbys_host_is_linked_with_its_players_and_the_ones_at_its_start_first() {
     for (how, o) in ways() {
-        let mut k = Kit::new(RoamOptions { degree: 4, ..o });
+        // (the players in its race where they are, not away_m up: a crowd that is not in free roam)
+        let mut k = Kit::new(RoamOptions { degree: 4, away_m: 1e-9, ..o });
         for i in 0..11 {
             join(&mut k, i, "", true);
         }
