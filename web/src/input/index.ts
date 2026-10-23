@@ -14,6 +14,9 @@
 //        wheel in WHEEL_DELTA units.  The OS cursor is hidden over the game.
 // Touch: one finger is the mouse, so a tap is a left click (the game's menus
 //        take clicks); other fingers are left alone.
+// Text:  the game's text entry while it is up (a seqlock the game writes at
+//        each Present), and characters typed with no key (a phone's
+//        keyboard, app/textentry.ts) as WM_CHAR.
 // Pads:  polled every frame (gamepad.ts), with the page's share (padPage) and
 //        the touch controls' virtual controller merged in (touchPad).
 // Life:  blur and a hidden page deactivate the game (it parks, as after an
@@ -32,11 +35,12 @@ import { PadPoller, type PadPage, type TouchPad } from './gamepad';
 import { SynthDriver } from './synth';
 import {
   IEV_FOCUS, IEV_KEY_DOWN, IEV_KEY_TAP, IEV_KEY_UP, IEV_MOUSE_DOWN, IEV_MOUSE_MOVE, IEV_MOUSE_UP, IEV_QUIT,
-  IEV_RELEASE_ALL, IEV_WHEEL, IKF_ALT, IKF_CTRL, IKF_DEAD, IKF_REPEAT, IKF_SHIFT, IKF_SYNTH, IM_ATTACHED, IM_EV_DROP,
-  IM_EV_R, IM_EV_W, IM_EVENTS, IM_GAME_INACTIVE, IM_HDR_WORDS, IM_KEYS_HELD, IM_MAGIC, IM_MOUSE_X, IM_MOUSE_Y,
-  IM_NAMES_GEN, IM_OFF_EV, IM_OFF_NAMES, IM_OFF_SYN, IM_QUIT_REQ, IM_SYN_R, IM_SYN_W, IM_VERSION, INPUT_EV_N,
-  INPUT_MAGIC, INPUT_NAME_LEN, INPUT_SYN_N, INPUT_VERSION, IREASON_ELEMENT, IREASON_FULLSCREEN, IREASON_META,
-  IREASON_PAGE, IREASON_PAGEHIDE, IREASON_SCRIPT, IREASON_VISIBILITY, IREASON_WINDOW,
+  IEV_RELEASE_ALL, IEV_TEXT, IEV_WHEEL, IKF_ALT, IKF_CTRL, IKF_DEAD, IKF_REPEAT, IKF_SHIFT, IKF_SYNTH, IM_ATTACHED,
+  IM_EV_DROP, IM_EV_R, IM_EV_W, IM_EVENTS, IM_GAME_INACTIVE, IM_HDR_WORDS, IM_KEYS_HELD, IM_MAGIC, IM_MOUSE_X,
+  IM_MOUSE_Y, IM_NAMES_GEN, IM_OFF_EV, IM_OFF_NAMES, IM_OFF_SYN, IM_QUIT_REQ, IM_SYN_R, IM_SYN_W, IM_TEXT,
+  IM_TEXT_KIND, IM_TEXT_LEN, IM_TEXT_MAX, IM_TEXT_SEQ, IM_VERSION, INPUT_EV_N, INPUT_MAGIC, INPUT_NAME_LEN,
+  INPUT_SYN_N, INPUT_TEXT_BYTES, INPUT_VERSION, IREASON_ELEMENT, IREASON_FULLSCREEN, IREASON_META, IREASON_PAGE,
+  IREASON_PAGEHIDE, IREASON_SCRIPT, IREASON_VISIBILITY, IREASON_WINDOW,
 } from './proto';
 
 export interface ViewRect { x: number; y: number; w: number; h: number }
@@ -66,6 +70,9 @@ export interface InputStats {
 }
 /** the numeric counters (the app's overlay contract: names to numbers) */
 export interface InputCounters { [k: string]: number; 'input events': number; 'keys held': number; 'pad connected': number }
+/** the game's text entry (runtime/web/input_web.c): the most characters it takes, its kind (which characters
+ *  besides letters and digits), its text now */
+export interface TextEntry { max: number; kind: number; text: string }
 export interface InputHandle {
   /** WM_CLOSE to the game.  Before the game's mailbox exists (the first ~0.2 s
    *  after the start) the request waits and is sent when it registers.  false:
@@ -90,6 +97,10 @@ export interface InputHandle {
   touchPad(t: TouchPad | null): void;
   /** performance.now() of a real controller's last button press (0: none) */
   padPressed(): number;
+  /** the game's text entry while it is up, else null */
+  textEntry(): TextEntry | null;
+  /** characters typed with no key (a phone's keyboard), cp1252: WM_CHAR each, 8 deletes, 13 accepts */
+  text(chars: number[]): void;
   /** diagnostic: n empty events, each timed from the page's write until the
    *  input thread has handled it (busy-waits on the main thread, max 20 ms each);
    *  returns the times in microseconds */
@@ -123,6 +134,9 @@ export function attachInput(proc: GameProcess, element: HTMLElement, opts: Input
   // quit requests made before the mailbox registered: sent once it does
   let quitPending = 0;
   const dropped = { n: 0 };
+  // the game's text entry: the last consistent copy (kept while the game is writing it)
+  let textNow: TextEntry | null = null;
+  const win1252 = new TextDecoder('windows-1252');
   let lastUse = performance.now();
   const onUse = () => { lastUse = performance.now(); };
 
@@ -362,6 +376,24 @@ export function attachInput(proc: GameProcess, element: HTMLElement, opts: Input
     },
     touchPad(t) { pads?.setTouch(t); },
     padPressed() { return pads?.lastPress ?? 0; },
+    textEntry() {
+      if (!h || !u8) return null;
+      for (let tries = 0; tries < 4; tries++) {
+        const s0 = Atomics.load(h, IM_TEXT_SEQ);
+        if (s0 & 1) continue;
+        const max = Atomics.load(h, IM_TEXT_MAX), kind = Atomics.load(h, IM_TEXT_KIND);
+        const len = Math.min(Atomics.load(h, IM_TEXT_LEN), INPUT_TEXT_BYTES), o = base + IM_TEXT * 4;
+        const bytes = u8.slice(o, o + len);
+        if (Atomics.load(h, IM_TEXT_SEQ) !== s0) continue;
+        textNow = max > 0 ? { max, kind, text: win1252.decode(bytes) } : null;
+        break;
+      }
+      return textNow;
+    },
+    text(chars) {
+      if (detached) return;
+      for (let i = 0; i < chars.length; i += 3) push(IEV_TEXT, 0, 0, 0, chars.slice(i, i + 3));
+    },
     detach() {
       if (detached) return;
       // whatever the game holds is let go (it may outlive the page's input, e.g. a test page)

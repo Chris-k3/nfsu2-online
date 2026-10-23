@@ -411,6 +411,14 @@ html:has(> body > .stage:not([hidden])) { overflow: hidden; }
   position: absolute; left: 50%; top: 50%; width: 52px; height: 52px; border-radius: 50%;
   transform: translate(calc(-50% + var(--dx, 0px)), -50%); background: rgba(0, 0, 0, 0.4); border: 2px solid rgba(255, 255, 255, 0.5);
 }
+/* the field for a phone's keyboard while the game asks for text (textentry.ts): a value box at the top, where the
+ * keyboard coming up from below leaves it in sight; the stage's no-select would keep WebKit from typing into it */
+.type { position: absolute; z-index: 4; top: max(12px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); margin: 0; }
+.type input {
+  width: 240px; height: 48px; padding: 0 12px; border: 2px solid var(--edge); border-radius: 8px;
+  background: var(--field); color: var(--lime); font: italic 700 16px/24px var(--font);
+  -webkit-user-select: text; user-select: text; touch-action: manipulation;
+}
 /* a note on the game, and the frame-rate counter, go under the row of small buttons */
 .stage:has(> .touch:not([hidden])) :is(.toast:not(.away), .hud-fps) { top: calc(max(12px, env(safe-area-inset-top)) + 60px); }
 /* a touch screen held upright: the game in a 4:5 picture at the top, as wide as the screen and at most 60% of its

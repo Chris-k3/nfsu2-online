@@ -4,11 +4,12 @@
  * Guest threads never return to their worker's event loop, so nothing can
  * be posted to them: everything the page has for the game goes through this
  * shared structure, and every field has exactly one writer.
- *   page -> wasm   an event ring (keys, mouse, focus, quit), the game pad
- *                  state under a seqlock, the key names of the current layout
+ *   page -> wasm   an event ring (keys, text, mouse, focus, quit), the game
+ *                  pad state under a seqlock, the key names of the current layout
  *   wasm -> page   a ring of synthetic input requests (the autotest ns*
  *                  commands, which the page turns into DOM events so they take
- *                  the same path as real input) and a few status words
+ *                  the same path as real input), a few status words, and the
+ *                  game's text entry under a seqlock
  * The header is an array of 32-bit words mirrored by index in
  * web/src/input/proto.ts; web/tools/check-proto.mjs compares the two files. */
 #ifndef NFSU2_INPUT_PROTO_H
@@ -21,6 +22,7 @@
 #define INPUT_EV_N     1024u        /* power of two */
 #define INPUT_SYN_N    256u         /* power of two */
 #define INPUT_NAME_LEN 16u          /* bytes per key name (cp1252, NUL-terminated) */
+#define INPUT_TEXT_BYTES 96u        /* header words IM_TEXT..63: the game's text entry */
 
 /* header words */
 enum {
@@ -54,6 +56,11 @@ enum {
     IM_RUMBLE_STRONG = 30,/* wasm: 0..65535, the low-frequency motor */
     IM_RUMBLE_WEAK = 31,  /* wasm: 0..65535, the high-frequency motor */
     IM_PAD_RUMBLE = 32,   /* page: 1 when the controller driving the pad can rumble */
+    IM_TEXT_SEQ = 33,     /* wasm: seqlock of the text entry words below (odd while writing) */
+    IM_TEXT_MAX = 34,     /* wasm: the game's text entry is up: the most characters it takes (0: none is up) */
+    IM_TEXT_KIND = 35,    /* wasm: its kind, which characters it takes besides letters and digits */
+    IM_TEXT_LEN = 36,     /* wasm: the characters in it now */
+    IM_TEXT = 40,         /* wasm: 40..63, its text (cp1252, NUL-padded, the first INPUT_TEXT_BYTES) */
     IM_HDR_WORDS = 64
 };
 
@@ -69,6 +76,7 @@ enum {
     IEV_FOCUS = 8,        /* a = 1 active / 0 inactive, b = IREASON_* */
     IEV_RELEASE_ALL = 9,  /* b = IREASON_*: every key and button the game holds goes up */
     IEV_QUIT = 10,        /* the player asked to quit: WM_CLOSE */
+    IEV_TEXT = 11,        /* chars typed with no key (a phone's keyboard): WM_CHAR each, 0x08 deletes, 0x0D accepts */
 };
 enum {                    /* event flags */
     IKF_REPEAT = 1,       /* autorepeat */
@@ -116,4 +124,5 @@ _Static_assert(offsetof(HostMailbox, names) == IM_OFF_NAMES, "mailbox layout");
 _Static_assert(offsetof(HostMailbox, ev) == IM_OFF_EV, "mailbox layout");
 _Static_assert(offsetof(HostMailbox, syn) == IM_OFF_SYN, "mailbox layout");
 _Static_assert(sizeof(HostMailbox) == IM_BYTES, "mailbox layout");
+_Static_assert(IM_TEXT + INPUT_TEXT_BYTES / 4 <= IM_HDR_WORDS, "the text entry fits the header");
 #endif

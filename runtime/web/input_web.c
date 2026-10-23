@@ -455,10 +455,14 @@ static void handle(const InEv *e){
         if (mute) release_all("a multiplayer race's trip drives the game", 1);
         fprintf(stderr, "[key] the player's input %s\n", mute ? "muted: the game drives itself to the multiplayer race" : "back");
     }
-    if (mute && (e->type == IEV_KEY_DOWN || e->type == IEV_KEY_TAP || e->type == IEV_MOUSE_MOVE || e->type == IEV_MOUSE_DOWN || e->type == IEV_WHEEL)) return;
+    if (mute && (e->type == IEV_KEY_DOWN || e->type == IEV_KEY_TAP || e->type == IEV_TEXT || e->type == IEV_MOUSE_MOVE || e->type == IEV_MOUSE_DOWN || e->type == IEV_WHEEL)) return;
     switch (e->type){
     case IEV_KEY_DOWN: key_down(e); break;
     case IEV_KEY_UP:   key_up(e); break;
+    case IEV_TEXT:                                       /* a phone's keyboard: characters, no key */
+        if (kbd_log()) fprintf(stderr, "[key] host text, %d char(s)\n", e->nch);
+        for (int i = 0; i < e->nch && i < 3; i++) post(WM_CHAR, e->ch[i], 1u);
+        break;
     case IEV_KEY_TAP: {                                  /* Caps Lock on macOS */
         InEv u = *e; u.type = IEV_KEY_UP; u.flags &= (uint8_t)~IKF_REPEAT;
         InEv d = u; d.type = IEV_KEY_DOWN;
@@ -509,6 +513,39 @@ static void *input_main(void *unused){
         click_release_due();
     }
     return 0;
+}
+
+/* ---- the game's text entry, for the page ------------------------------------------ */
+/* A phone has no keys: while the game's text entry is up (a new profile's
+ * name, the LAN name), the page shows a field of its own that brings up the
+ * phone's keyboard, starts it with the game's text and sends what is typed
+ * as IEV_TEXT (web/src/app/textentry.ts).  The game has one text entry, the
+ * object at 0x83A7B0 (set up by 0x4FF3B0; 0x55DBD0 hands it every WM_CHAR
+ * while +0x210 and +0x214 are set, 0x551270 takes it in): +0x100 the text,
+ * +0x200 its length, +0x204 its kind (0x4FF310: letters and digits, kind 4
+ * also @._, kind 5 also space,@., kinds 0 and 3 also 0xC0..0xFF and the
+ * punctuation of 0x7FA3D0), +0x20C the most it takes.  Published at every
+ * Present (autotest.c) when it changed, under IM_TEXT_SEQ. */
+#define G_TXT 0x0083a7b0u
+void input_web_frame(void){
+    static uint32_t l_max, l_kind, l_len;
+    static uint8_t l_txt[INPUT_TEXT_BYTES];
+    uint32_t max = 0, kind = 0, len = 0;
+    uint8_t txt[INPUT_TEXT_BYTES] = { 0 };
+    if (MR8(G_TXT + 0x210u) && MR32(G_TXT + 0x214u)){
+        max = MR32(G_TXT + 0x20cu); kind = MR32(G_TXT + 0x204u); len = MR32(G_TXT + 0x200u);
+        if (len > max) len = max;
+        for (uint32_t i = 0; i < len && i < INPUT_TEXT_BYTES; i++) txt[i] = MR8(G_TXT + 0x100u + i);
+    }
+    if (max == l_max && kind == l_kind && len == l_len && !memcmp(txt, l_txt, sizeof txt)) return;
+    if (!max != !l_max) fprintf(stderr, "[input] the game's text entry %s\n", max ? "is up" : "is down");
+    l_max = max; l_kind = kind; l_len = len; memcpy(l_txt, txt, sizeof txt);
+    uint32_t s = atomic_load(&MH(IM_TEXT_SEQ));
+    atomic_store(&MH(IM_TEXT_SEQ), s + 1u);
+    atomic_store(&MH(IM_TEXT_MAX), max); atomic_store(&MH(IM_TEXT_KIND), kind); atomic_store(&MH(IM_TEXT_LEN), len);
+    for (unsigned i = 0; i < INPUT_TEXT_BYTES / 4u; i++)
+        atomic_store(&MH(IM_TEXT + i), (uint32_t)txt[4*i] | (uint32_t)txt[4*i+1] << 8 | (uint32_t)txt[4*i+2] << 16 | (uint32_t)txt[4*i+3] << 24);
+    atomic_store(&MH(IM_TEXT_SEQ), s + 2u);
 }
 
 void input_web_init(void){

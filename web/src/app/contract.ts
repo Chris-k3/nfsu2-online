@@ -5,6 +5,7 @@
 // kinds).
 import type { GameProcess } from '../host/process';
 import type { PadPage, TouchPad } from '../input/gamepad';
+import type { TextEntry } from '../input/index';
 
 /** Given to every subsystem. */
 export interface CommonOptions {
@@ -94,6 +95,10 @@ export interface InputSubsystem extends Subsystem {
   touchPad?(t: TouchPad | null): void;
   /** performance.now() of a real controller's last button press (0: none) */
   padPressed?(): number;
+  /** the game's text entry while it is up (a new profile's name, the LAN name), else null */
+  textEntry?(): TextEntry | null;
+  /** characters typed with no key (a phone's keyboard, textentry.ts), cp1252: WM_CHAR each, 8 deletes, 13 accepts */
+  text?(chars: number[]): void;
 }
 
 export interface NetSubsystem extends Subsystem {

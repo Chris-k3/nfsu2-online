@@ -1007,6 +1007,7 @@ void autotest_on_present(CPU *c){
 #ifdef __wasm__
     { void gcpu_frame(void); gcpu_frame(); }        /* per-frame guest busy time (runtime/web/gcpu.c) */
     { void status_web_frame(void); status_web_frame(); } /* whether the player drives (runtime/web/status_web.c) */
+    { void input_web_frame(void); input_web_frame(); }   /* the game's text entry, for a phone's keyboard (runtime/web/input_web.c) */
 #endif
     g_frame++;
     if (g_ctrace) car_trace();

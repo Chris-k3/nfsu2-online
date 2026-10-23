@@ -6,6 +6,7 @@ export const INPUT_VERSION = 1;
 export const INPUT_EV_N = 1024;
 export const INPUT_SYN_N = 256;
 export const INPUT_NAME_LEN = 16;
+export const INPUT_TEXT_BYTES = 96;
 
 // header words
 export const IM_MAGIC = 0;
@@ -36,6 +37,11 @@ export const IM_RUMBLE_SEQ = 29;    // wasm: bumped with every rumble update
 export const IM_RUMBLE_STRONG = 30; // wasm: 0..65535, the low-frequency motor
 export const IM_RUMBLE_WEAK = 31;   // wasm: 0..65535, the high-frequency motor
 export const IM_PAD_RUMBLE = 32;    // page: 1 when the controller driving the pad can rumble
+export const IM_TEXT_SEQ = 33;      // wasm: seqlock over the text entry words (odd while writing)
+export const IM_TEXT_MAX = 34;      // wasm: the game's text entry is up: the most characters it takes (0: none)
+export const IM_TEXT_KIND = 35;     // wasm: which characters it takes besides letters and digits
+export const IM_TEXT_LEN = 36;      // wasm: the characters in it now
+export const IM_TEXT = 40;          // wasm: 40..63, its text (cp1252, NUL-padded)
 export const IM_HDR_WORDS = 64;
 
 // events, page -> wasm
@@ -49,6 +55,7 @@ export const IEV_WHEEL = 7;
 export const IEV_FOCUS = 8;
 export const IEV_RELEASE_ALL = 9;
 export const IEV_QUIT = 10;
+export const IEV_TEXT = 11;
 
 export const IKF_REPEAT = 1;
 export const IKF_ALT = 2;

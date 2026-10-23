@@ -28,6 +28,7 @@ import { deviceDefaults, markTouch, noPinchZoom, padSeen, touchFirst } from './d
 import { markPad, padPress, pageDialog } from './padnav';
 import { controlsSheet, type ControlsSheet } from './controls';
 import { TouchControls } from './touch';
+import { TextField } from './textentry';
 import type { PadPage } from '../input/gamepad';
 import { checkSetting, HOST_FIXED, pageOnly, resolveEnv, settingsUpgrade, TEMPLATE, type Resolved } from './settings';
 import { exists, filesOf, listProfiles, PROFILES_DIR, readText, removeSaveDir, writeFile } from './savefs';
@@ -406,6 +407,7 @@ async function startGame() {
   // a phone's render scale (device.ts): whether it has room for all its pixels, for its next game
   if (r.source.NFSU2_RENDER === 'device') renderCheck = new RenderCheck(session, r.env.NFSU2_RENDER, renderCheckTimes(), logLine);
   touch.start(session);
+  textField.start(session);
   fps.memory = session.proc.memory;
   const st = session;
   const waitStatus = setInterval(() => { if (st.status) { fps.reader = st.status; clearInterval(waitStatus); } }, 100);
@@ -496,9 +498,11 @@ const PAD_PAGE: PadPage = {
 
 let awake: (() => void) | null = null;   // the running game's Wake Lock (display.ts keepScreenOn)
 let touch: TouchControls;                // the controls on the game while a finger drives (touch.ts)
+let textField: TextField;               // the field for a phone's keyboard while the game asks for text (textentry.ts)
 
 function endStage() {
   touch.stop();
+  textField.stop();
   awake?.(); awake = null;
   away?.stop(); away = null;
   renderCheck?.stop(); renderCheck = null;
@@ -993,6 +997,7 @@ export async function boot() {
   stageMenu.onclick = () => { if (session) openMenu(); };
   $('#stage').addEventListener('pointerdown', e => { if (e.pointerType === 'touch') stageMenu.hidden = false; }, { capture: true });
   touch = new TouchControls($('#stage'), { toast, log: logLine });
+  textField = new TextField($('#stage'), { log: logLine });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { void checkNewer(); vault.shown(); } });
   setInterval(() => { if (document.visibilityState === 'visible') void checkNewer(); }, NEWER_EVERY_MS);
 
@@ -1023,7 +1028,7 @@ export async function boot() {
   (window as any).__nfsu2 = {
     get phase() { return phase; }, get lastExit() { return lastExit; }, get fps() { return { game: fps.gameFps, page: fps.pageFps, source: $('#fps').dataset.source }; },
     get session() { return session; }, log, save: SAVE, download: () => download.status, offline: () => offline, displayHz: () => displayHz, retryModule: () => loadModule(),
-    newer: () => newer, tried: () => tried, touch: () => touch.state(), renderCheck: () => renderCheck?.state() ?? null,
+    newer: () => newer, tried: () => tried, touch: () => touch.state(), textField: () => textField.state(), renderCheck: () => renderCheck?.state() ?? null,
     env: () => resolved().env, settingsText: () => settingsText, checks: () => [...checks.values()],
     fpsMode: (m?: FpsMode) => { if (m && FPS_MODES.includes(m)) fps.set(m); return fps.mode; },
     quitTimes: { forcedCloseMaxMs: FORCED_CLOSE_MAX_MS, stopAfterMs: STOP_AFTER_MS },
