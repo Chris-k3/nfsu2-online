@@ -119,11 +119,11 @@ const usage = () => {
 
 const stats = { login: [], chat: [], loginsOk: 0, loginsFailed: 0, races: 0, reports: 0, msgs: 0, resets: 0 };
 const abuse = {};
-let nextPort = 40000;
 
 /** one fake browser: a WebSocket to the switch, virtual TCP to the online host */
 class Browser {
-  constructor(i) { this.i = i; this.conns = new Map(); this.closed = false; }
+  // (each browser's own ports for its game's connections, 40000 up and round again: a long run opens more than fit in 16 bits)
+  constructor(i) { this.i = i; this.conns = new Map(); this.closed = false; this.nextPort = 40000; }
   async open() {
     const u = new URL(BASE); u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:'; u.pathname = '/lan';
     this.ws = new WebSocket(u.href, { headers: { 'x-forwarded-for': `198.18.${this.i >> 8}.${this.i & 255}` } });
@@ -146,7 +146,8 @@ class Browser {
     else if (op === 4) for (const m of c.r.push(f.subarray(24))) { stats.msgs++; const x = { kind: m.kind, code: m.code, f: fieldMap(m.body, []) }; c.on?.(x); for (const w of c.waits.splice(0)) w(x); }
   }
   tcp(port) {
-    const c = { port: nextPort++, cid: (Math.random() * 2 ** 32) >>> 0, r: new FrameReader(1 << 16), waits: [], reset: false, fin: false };
+    const port0 = this.nextPort; this.nextPort = this.nextPort >= 65535 ? 40000 : this.nextPort + 1;
+    const c = { port: port0, cid: (Math.random() * 2 ** 32) >>> 0, r: new FrameReader(1 << 16), waits: [], reset: false, fin: false };
     this.conns.set(c.port, c);
     c.send = (kind, fields = []) => this.ws.readyState === 1 && this.ws.send(lanFrame(4, this.vip, VH, c.port, port, 4, c.cid, encodeFrame(kind, 0, fields)));
     c.raw = buf => this.ws.readyState === 1 && this.ws.send(lanFrame(4, this.vip, VH, c.port, port, 4, c.cid, buf));
@@ -157,6 +158,7 @@ class Browser {
       c.waits.push(w);
     });
     const opened = new Promise((res, rej) => { c.open = res; c.onreset = () => rej(new Error('refused')); setTimeout(() => rej(new Error('no SYNACK')), 10000); });
+    opened.catch(() => {});   // (its caller awaits it; a late rejection is never one nobody hears of)
     this.ws.send(lanFrame(4, this.vip, VH, c.port, port, 1, c.cid));
     c.ready = opened;
     return c;

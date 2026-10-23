@@ -73,6 +73,14 @@ On WSL run it inside a network namespace of its own (`unshare -rn`): with mirror
 Hyper-V's virtual NIC and netfilter, which cost more than the server (the VPS's tunnel reaches the server over a plain
 loopback).  `--server-cpus`/`--gen-cpus` keep the server and the load on cores of their own, as two machines would.
 
+`web/tools/mix-load.mjs` is nfsu2.xyz near its limit, on any machine (ps, not /proc): players driving, idle ones (free
+roam on, in a race or the menus), Online clients (online-load.mjs) and more pages than places, so that a line forms,
+with players leaving and coming back all the while (`--churn`), some dropping their link while they wait
+(`--drop-wait`), and `--blip 150:0.4` as when a tunnel connection goes: 40 % of them at once, back as the page comes
+back.  nfsu2-roamload's bots take compact bundles and deltas as the page does (`--plain`, `--compact` to compare) and
+check every snapshot they get byte for byte against what its sender sent (its state is a function of the sender's
+number and its clock), and the line's order, waits and tickets.
+
 ## Measured against the Node server (2026-10-21, 91e270c, Ryzen 9 5900X, WSL, the server on 6 cores, the load on the other 6)
 
 | 2000 players in free roam | Node | Rust |
@@ -122,6 +130,31 @@ falls to 8 friends and stays there; 12 workers held all 32.  A longer bundle tic
 nothing measurable.  Three quarters of the CPU is the kernel's TCP (`perf`: 47 % in sendto, of it 21 % the loopback
 delivering to the receiver, 11 % recvfrom).
 
+5000 places, mixed as nfsu2.xyz is (2026-10-23, `mix-load.mjs` on one 12-core M-series Mac, server and bots on the same
+cores, the server on 8 workers; 1750 driving, 2750 idle, 500 Online clients and 600 pages more than places, each player
+about 15 minutes, half of them leaving by a dropped link):
+
+| 5 minutes at 5000 places | |
+|---|---|
+| players on the switch, waiting in line | 4839 (4960 at most), 759 (789) |
+| server CPU, memory | 1.9 cores (2.1), 405 MB |
+| snapshots checked byte for byte through deltas, bad | 330 million, 0 |
+| a snapshot's delay p50 / p99 / max, lost | 13 / 42 / 160 ms, 0.1 % (to players who had just left) |
+| let in from the line, let in after one who came later, a ticket's page back at its place | 1579, 0, 440 of 440 |
+| the wait a page was told, against the wait | 1.4 to 1.7 times (the 5-minute pace over the line's first minutes) |
+| Online: logins, p50 / p95 login, races | 42,081, 5 / 26 ms, 10,394 |
+
+The same 1750 driving (2.5 min, every snapshot checked): bytes a driving player gets a second, plain bundles 72,900,
+compact 55,500, compact with deltas 33,300 (40 % under compact, the page's before), at 2.3-2.4 cores each.  The server
+of before (2933f54) against this one, 1750 driving, 1750 idle and 300 Online at 4000 places, compact bundles: 1.93
+against 1.82 cores, 372 against 307 MB, delay p50 / p99 16 / 40 against 14 / 35 ms, an idle player 634 against 47
+bytes a second (the peer list only for LAN play), 21 against 0 refused.  A tunnel's blip (40 % of 4700 at once) at
+5000 with a line: all 1932 back at their addresses, p50 0.6 s and p90 1.4-1.9 s (the bots try again as the page does;
+the Mac's backlog of 128 dropped the rest of the burst's handshakes).  Under 4500 of that load (17 min, 286 million
+snapshots, 0 bad, 127,000 Online logins), real games: roam-pair (a friend's car 15 ms behind, 0.10 m from where it
+is), lan-pair and online-pair pass.  3000 driving at once was more than the bots could take on the same Mac (they fell
+behind, the switch dropped their snapshots; the server stayed at 1.5 cores): 4000 driving is the table above.
+
 ## How the work is shared out
 
 - **HTTP** (nfsu2-http): the server's own HTTP/1.1 and TLS (rustls), a task per connection on a tokio runtime of
@@ -166,7 +199,7 @@ delivering to the receiver, 11 % recvfrom).
 | nfsu2-online | the game's Online mode |
 | nfsu2-vault | keyphrase saves (`/vault`): each player's saves as the page sealed them, one file per keyphrase, the copy of an earlier day, the caps, the sweep of the unused |
 | nfsu2-server (src/) | the routes, the rules, the wiring, the start-up |
-| nfsu2-roamload | up to 4000 simulated free-roam players (as web/tools/roam-crowd.mjs, lighter) |
+| nfsu2-roamload | thousands of simulated players: driving or idle, in line, leaving and coming back (as web/tools/roam-crowd.mjs, lighter) |
 
 Each crate has its own tests (`build.sh --test`: 330 on 2026-10-21).  Where the Node server's answers had to be
 matched exactly, they were checked against its JS while both existed, and the tests keep them as expected values
