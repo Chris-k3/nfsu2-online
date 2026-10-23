@@ -616,7 +616,9 @@ fn greet(peer: &Peer, m: &Map<String, Value>) {
     peer.hello.store(true, Relaxed);
     peer.deltas.store(is_num(m.get("deltas"), 1.0), Relaxed);
     peer.bundle.store(is_num(m.get("bundle"), 1.0), Relaxed);
-    peer.conn.compact.store(is_num(m.get("compact"), 1.0), Relaxed);
+    use crate::conn::{COMPACT, DELTAS, PLAIN};
+    let compact = if !is_num(m.get("compact"), 1.0) { PLAIN } else if is_num(m.get("delta"), 1.0) { DELTAS } else { COMPACT };
+    peer.conn.compact.store(compact, Relaxed);
     let lan = m.get("lan");
     if is_num(lan, 0.0) || is_num(lan, 1.0) {
         peer.lan.store(if is_num(lan, 1.0) { LAN_ON } else { LAN_OFF }, Relaxed);

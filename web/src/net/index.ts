@@ -86,6 +86,8 @@ export interface NetStats {
   framesOut: number; bytesOut: number; framesIn: number; bytesIn: number;
   /** compact bundles from the switch (kind 33: free roam's datagrams in about a quarter fewer bytes) */
   compactIn: number;
+  /** of their free-roam datagrams, those that came as what changed since their source's last one */
+  deltaIn: number;
   /** frames C queued while the switch was not connected (dropped, as UDP would) */
   txOfflineDrop: number;
   /** received frames dropped: RX ring full / larger than a slot / nobody listening on that kind */
@@ -248,6 +250,9 @@ class Link implements NetLink {
   private lanSent = false;
   /** the switch takes bundles (its welcome said so) */
   private bundles = false;
+  /** the last body of each source's free-roam datagrams of each type in this connection's compact bundles (the
+   *  switch's deltas are made against them: proto.ts unpackCompact) */
+  private refs = new Map<number, Uint8Array>();
   /** while a bundle from the switch is taken apart: the endpoints to ring once it is */
   private ringLater: Set<Endpoint> | null = null;
   private pings = new Map<number, number>();
@@ -270,7 +275,7 @@ class Link implements NetLink {
   /** the page's answers so far (AUTO_*): per sender (a vip of the switch, which writes the source), and all */
   private autoSrc = new Map<number, AutoBucket>();
   private autoAll = new AutoBucket();
-  private st = { connections: 0, reconnects: 0, framesOut: 0, bytesOut: 0, framesIn: 0, bytesIn: 0, compactIn: 0, rxFiltered: 0,
+  private st = { connections: 0, reconnects: 0, framesOut: 0, bytesOut: 0, framesIn: 0, bytesIn: 0, compactIn: 0, deltaIn: 0, rxFiltered: 0,
     rttSum: 0, rttN: 0, rttMax: 0, mainMs: 0, mainCalls: 0, rxFull: 0, rxOversize: 0,
     lanOut: 0, lanIn: 0, lanWaited: 0, lanWaitedMax: 0, lanRefused: 0, lanRefuseHeld: 0, lanGone: 0 };
 
@@ -409,15 +414,17 @@ class Link implements NetLink {
     u.searchParams.set('queue', '');
     if (resume) u.searchParams.set('resume', '');
     this.state = 'connecting'; this.setPage(P.NET_PAGE_CONNECTING);
+    this.refs = new Map();
     const ws = new WebSocket(u.href);
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
     ws.onopen = () => {
       // deltas: the switch sends what changed on the peer list, not the whole list each time (nfsu2-lan); lan: LAN
       // play is open, so it takes LAN broadcasts; bundle: this page takes bundles; compact: and compact ones (a
-      // switch of before ignores it and sends bundles as they were)
+      // switch of before ignores it and sends bundles as they were); delta: and in those a free-roam datagram as
+      // what changed since its source's last one (proto.ts unpackCompact; `refs`, kept for this connection)
       this.lanSent = this.lanOpen();
-      ws.send(JSON.stringify({ t: 'hello', name: this.o.name ?? 'player', deltas: 1, lan: this.lanSent ? 1 : 0, bundle: 1, compact: 1,
+      ws.send(JSON.stringify({ t: 'hello', name: this.o.name ?? 'player', deltas: 1, lan: this.lanSent ? 1 : 0, bundle: 1, compact: 1, delta: 1,
         ...(this.vipNum && this.token ? { vip: P.ipStr(this.vipNum), token: this.token } : {}), ...(this.ticket ? { ticket: this.ticket } : {}) }));
       this.pingTimer = setInterval(() => this.ping(), this.o.pingMs ?? 2000);
     };
@@ -464,7 +471,8 @@ class Link implements NetLink {
       for (const ep of this.eps()) { this.publishPeers(ep); this.publishOnline(ep); }
       this.log(`on the virtual LAN as ${this.vip}${this.st.connections > 1 ? (again ? ' (the same address again)' : ' (a new address)') : ''}`);
       if (this.queuedAt) {
-        this.log(`in from the line after ${Math.max(1, Math.round((now() - this.queuedAt) / 60_000))} min`);
+        const s = Math.round((now() - this.queuedAt) / 1000);
+        this.log(`in from the line after ${s < 60 ? `${s} s` : `${Math.round(s / 60)} min`}`);
         this.ticket = ''; this.queuedAt = 0; this.o.onQueue?.(null);
       }
       if (this.full) { this.full = false; this.o.onNotice?.('A place on the server freed up: you can play with others now'); }
@@ -605,7 +613,7 @@ class Link implements NetLink {
       // the same, each frame put together again first (proto.ts unpackCompact)
       const ring = this.ringLater = new Set();
       this.st.compactIn++;
-      P.unpackCompact(u, this.vipNum, f => this.rxFrame(f));
+      this.st.deltaIn += P.unpackCompact(u, this.vipNum, f => this.rxFrame(f), this.refs);
       this.ringLater = null;
       for (const ep of ring) ep.ring();
     } else this.rxFrame(b);
@@ -689,7 +697,7 @@ class Link implements NetLink {
     }
     return {
       state: this.state, vip: this.vip, connections: s.connections, reconnects: s.reconnects,
-      framesOut: s.framesOut, bytesOut: s.bytesOut, framesIn: s.framesIn, bytesIn: s.bytesIn, compactIn: s.compactIn,
+      framesOut: s.framesOut, bytesOut: s.bytesOut, framesIn: s.framesIn, bytesIn: s.bytesIn, compactIn: s.compactIn, deltaIn: s.deltaIn,
       txOfflineDrop: off, rxFullDrop: s.rxFull, rxOversize: s.rxOversize, rxFiltered: s.rxFiltered,
       switchRttMs: f ? f[P.D_SWITCH_RTT_MS] : 0, switchRttMeanMs: s.rttN ? s.rttSum / s.rttN : 0, switchRttMaxMs: s.rttMax,
       txWaitMeanMs: txn ? tws / txn : 0, txWaitMaxMs: twm,

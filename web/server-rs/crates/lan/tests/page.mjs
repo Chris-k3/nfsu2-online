@@ -352,6 +352,24 @@ const cases = {
         sent.map(x => [true, x.dst >>> 0, x.sport, x.dport, x.data.toString('hex')]), 'byte for byte');
       assert.equal(link.stats().framesIn, 3 + sent.length);
       assert.ok(link.stats().compactIn >= 2, 'as compact bundles');
+      // its hello took deltas too: a friend's snapshots, a few bytes new each time and now and then longer, come as
+      // what changed (nfsu2-lan compact.rs Refs, proto.ts unpackCompact) and still reach the game byte for byte
+      const seq = [];
+      let snapNow = Buffer.from(roamDatagram(3, 70));
+      for (let i = 0; i < 60; i++) {
+        const body = Buffer.from(snapNow.subarray(16, snapNow.length - 4));
+        body[(i * 7) % body.length] = i; body[(i * 13 + 3) % body.length] ^= 0x5a;
+        const d = Buffer.alloc(16 + body.length + (i === 30 ? 1 : 0) + 4);
+        snapNow.copy(d, 0, 0, 16); body.copy(d, 16);
+        d.writeUInt16LE(d.length, 6); d.writeUInt32LE(zlib.crc32(d.subarray(0, d.length - 4)), d.length - 4);
+        seq.push(d); snapNow = d;
+      }
+      for (let i = 0; i < seq.length; i += 6) {
+        c.sendBundle(seq.slice(i, i + 6).map(d => ({ f: frameOf(me, d, 1, 47210, 47210) })));
+        await until(() => Atomics.load(roam.w, P.W_RX_HEAD) - Atomics.load(roam.w, P.W_RX_TAIL) >= Math.min(6, seq.length - i));
+        assert.deepEqual(rxTakeRaw(memory, roam).map(g => g.data.toString('hex')), seq.slice(i, i + 6).map(d => d.toString('hex')), `snapshots ${i} on`);
+      }
+      assert.ok(link.stats().deltaIn >= 50, `as deltas (${link.stats().deltaIn} of ${seq.length})`);
       await b.close(); await c.close();
     } finally { link.close(); }
   },

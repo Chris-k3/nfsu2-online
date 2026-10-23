@@ -134,7 +134,11 @@ delivering to the receiver, 11 % recvfrom).
 - **Compact bundles** (nfsu2-lan `compact.rs`, kind 33): to a page whose hello says "compact":1 the datagrams go
   without what the page puts back exactly (its own address, free roam's port, a free-roam datagram's magic,
   version, length and CRC, which the switch checks first): the same bytes reach the game, a snapshot costs 84 bytes
-  on the wire instead of 110.  The port was the limit on nfsu2.xyz (486 Mbit/s of 1000 at 2960 players).
+  on the wire instead of 110.  The port was the limit on nfsu2.xyz (486 Mbit/s of 1000 at 2960 players).  When the
+  hello says "delta":1 too, a snapshot goes as what changed since its friend's last one (a bitmap and the new
+  bytes; the page keeps the same last bodies, and TCP loses nothing): about 40 % fewer bytes for a moving car and
+  75 % for a standing one (estimated from the snapshot's fields, not measured on the live server), 50 ns an entry
+  for the writer on an M-series Mac (`compact::tests::what_an_entry_costs`).
 - **A player behind on its path** (nfsu2-lan `lag.rs`): a WebSocket ping every second times each player's round trip,
   queues past the server included (the kernel's, cloudflared's, the tunnel's).  While its data waits there, the
   player gets only a share of free roam's snapshots (a half for each late round trip, a sixteenth at once past

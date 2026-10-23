@@ -92,8 +92,13 @@ export function ipNum(s: string): number | null {
 // The switch leaves out of each datagram what the page can put back exactly: the page's own address, free roam's
 // port, and a free-roam datagram's "N2FR", version, length and CRC (it checked the CRC first).  Each entry: [0] flags
 // (bits 0-2 the kind, 0x08 to the broadcast address, 0x10 the ports follow, 0x20 a free-roam datagram cut short,
-// 0x40 the whole frame as it is), [1..2] the source's low 16 bits (10.77.x.y), [3..4] the length of what follows.
-const C_BCAST = 0x08, C_PORTS = 0x10, C_ROAM = 0x20, C_WHOLE = 0x40, ROAM_PORT = 47210, ROAM_CUT = 11;
+// 0x40 the whole frame as it is, 0x80 with 0x20 what changed since the last one of its type from the same source),
+// [1..2] the source's low 16 bits (10.77.x.y), [3..4] the length of what follows.  An 0x80 entry (only to a page whose
+// hello said "delta":1): the type, a bitmap of the body's bytes (bit i % 8 of byte i / 8: byte i is new; the body as
+// long as the last one), the new bytes in order.  Every 0x20 entry without 0x08 and 0x10 is its source's and type's
+// last for the next; past COMPACT_REFS_MAX of them, a new one clears them all first, as the switch does.
+const C_BCAST = 0x08, C_PORTS = 0x10, C_ROAM = 0x20, C_WHOLE = 0x40, C_DELTA = 0x80, ROAM_PORT = 47210, ROAM_CUT = 11;
+export const COMPACT_REFS_MAX = 256;
 const CRC_TABLE = (() => {
   const t = new Int32Array(256);
   for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c; }
@@ -106,29 +111,53 @@ export function crc32(b: Uint8Array, n: number): number {
   return (c ^ -1) >>> 0;
 }
 /** a compact bundle's frames, each put together again byte for byte as the switch had it, to `take` in order; `own`
- *  the address this page holds.  A broken entry ends it. */
-export function unpackCompact(u: Uint8Array, own: number, take: (f: ArrayBuffer) => void): void {
+ *  the address this page holds; `refs` the last bodies (a free-roam datagram past its type) by source and type, for a
+ *  page that takes deltas (kept for its connection).  A broken entry ends it.  Returns how many came as deltas. */
+export function unpackCompact(u: Uint8Array, own: number, take: (f: ArrayBuffer) => void, refs?: Map<number, Uint8Array>): number {
   const dv = new DataView(u.buffer, u.byteOffset, u.byteLength);
+  let deltas = 0;
   for (let at = 4; at + 5 <= u.length;) {
-    const flags = u[at], end = at + 5 + dv.getUint16(at + 3);
+    const flags = u[at], src = dv.getUint16(at + 1), end = at + 5 + dv.getUint16(at + 3);
     let p = at + 5;
-    if (end > u.length) return;
+    if (end > u.length) return deltas;
     at = end;
     if (flags === C_WHOLE) { take(u.slice(p, end).buffer); continue; }
-    const data = end - p - (flags & C_PORTS ? 4 : 0), roam = (flags & C_ROAM) !== 0;
-    if (data < (roam ? 1 : 0)) return;
-    const len = roam ? data + ROAM_CUT : data, f = new Uint8Array(F_DATA + len), fv = new DataView(f.buffer);
-    f[F_KIND] = flags & 7;
-    fv.setUint32(F_SRC, (0x0a4d0000 | dv.getUint16(p - 4)) >>> 0);
-    fv.setUint32(F_DST, flags & C_BCAST ? NET_BROADCAST : own >>> 0);
-    if (flags & C_PORTS) { f.set(u.subarray(p, p + 4), F_SPORT); p += 4; }
-    else { fv.setUint16(F_SPORT, ROAM_PORT); fv.setUint16(F_DPORT, ROAM_PORT); }
+    const ports = (flags & C_PORTS) !== 0, roam = (flags & C_ROAM) !== 0, d = p + (ports ? 4 : 0);
+    if (end < d) return deltas;
+    // a free-roam datagram's type and body (as it came, or what changed put on its source's last one)
+    let kind = 0, body: Uint8Array | null = null;
     if (roam) {
-      f.set([0x4e, 0x32, 0x46, 0x52, 1, u[p]], F_DATA);              // "N2FR", version 1, the type
+      if (end - d < 1) return deltas;
+      kind = u[d];
+      const key = src << 8 | kind;
+      if (flags & C_DELTA) {
+        const last = refs?.get(key);
+        if (!last) return deltas;
+        let next = d + 1 + ((last.length + 7) >> 3);
+        if (next > end) return deltas;
+        body = new Uint8Array(last.length);
+        for (let i = 0; i < last.length; i++) body[i] = (u[d + 1 + (i >> 3)] >> (i & 7)) & 1 ? u[next++] : last[i];
+        if (next !== end) return deltas;
+        deltas++;
+      } else body = u.slice(d + 1, end);
+      if (refs && !ports && !(flags & C_BCAST)) {
+        if (refs.size >= COMPACT_REFS_MAX && !refs.has(key)) refs.clear();
+        refs.set(key, body);
+      }
+    }
+    const len = body ? 1 + body.length + ROAM_CUT : end - d, f = new Uint8Array(F_DATA + len), fv = new DataView(f.buffer);
+    f[F_KIND] = flags & 7;
+    fv.setUint32(F_SRC, (0x0a4d0000 | src) >>> 0);
+    fv.setUint32(F_DST, flags & C_BCAST ? NET_BROADCAST : own >>> 0);
+    if (ports) f.set(u.subarray(p, p + 4), F_SPORT);
+    else { fv.setUint16(F_SPORT, ROAM_PORT); fv.setUint16(F_DPORT, ROAM_PORT); }
+    if (body) {
+      f.set([0x4e, 0x32, 0x46, 0x52, 1, kind], F_DATA);              // "N2FR", version 1, the type
       fv.setUint16(F_DATA + 6, len, true);
-      f.set(u.subarray(p + 1, end), F_DATA + 8);
+      f.set(body, F_DATA + 8);
       fv.setUint32(F_DATA + len - 4, crc32(f.subarray(F_DATA), len - 4), true);
-    } else f.set(u.subarray(p, end), F_DATA);
+    } else f.set(u.subarray(d, end), F_DATA);
     take(f.buffer);
   }
+  return deltas;
 }

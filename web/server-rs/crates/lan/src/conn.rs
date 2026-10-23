@@ -17,6 +17,11 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{AttachCtx, BUNDLE_OUT, CLOSE_TIMEOUT, KIND_BUNDLE, LanSwitch, Peer, Stats, compact};
 
+/// how a page takes its datagrams (`Conn::compact`): as bundles of before, compact bundles, compact bundles with deltas
+pub(crate) const PLAIN: u8 = 0;
+pub(crate) const COMPACT: u8 = 1;
+pub(crate) const DELTAS: u8 = 2;
+
 /// ws's readyState
 const OPEN: u8 = 1;
 const CLOSING: u8 = 2;
@@ -123,8 +128,10 @@ pub(crate) struct Conn {
     pub(crate) peer: Mutex<Option<Arc<Peer>>>,
     /// stream segments wait at the switch for this connection (a hint for its writer: pump after each write)
     pub(crate) streaming: AtomicBool,
-    /// its datagrams go as compact bundles (its hello said "compact":1, compact.rs), to the address it holds
-    pub(crate) compact: AtomicBool,
+    /// how its datagrams go (its hello said "compact":1, and "delta":1: compact.rs): `PLAIN`, `COMPACT` or `DELTAS`;
+    /// compact ones leave out the address it holds.  One word, so that its writer never sees compact without the
+    /// deltas its page takes (the page keeps the last bodies of every compact bundle it was sent)
+    pub(crate) compact: AtomicU8,
     pub(crate) vip: AtomicU32,
     /// while it waits in line for a place (queue.rs): its place, and what it sent meanwhile
     pub(crate) wait: Mutex<crate::queue::Wait>,
@@ -147,7 +154,7 @@ impl Conn {
             close: Mutex::new(CloseState::default()),
             peer: Mutex::new(None),
             streaming: AtomicBool::new(false),
-            compact: AtomicBool::new(false),
+            compact: AtomicU8::new(PLAIN),
             vip: AtomicU32::new(0),
             wait: Mutex::new(Default::default()),
         }
@@ -329,6 +336,9 @@ async fn write_loop<W: AsyncWrite + Unpin>(sw: Arc<LanSwitch>, conn: Arc<Conn>, 
     let mut items: Vec<Out> = Vec::new();
     let mut buf: Vec<u8> = Vec::new();
     let mut close_sent = false;
+    // a compact bundle as it is made, and the last bodies its page was sent (compact.rs `Refs`)
+    let mut body: Vec<u8> = Vec::new();
+    let mut refs = compact::Refs::default();
     loop {
         conn.out.wake.notified().await;
         loop {
@@ -344,8 +354,13 @@ async fn write_loop<W: AsyncWrite + Unpin>(sw: Arc<LanSwitch>, conn: Arc<Conn>, 
                 std::mem::swap(&mut *q, &mut items);
                 conn.out.dgram.store(0, Relaxed);
             }
-            let compact = conn.compact.load(Relaxed).then(|| conn.vip.load(Relaxed));
-            let e = encode(&sw.stats, &items, &mut buf, &mut close_sent, compact);
+            let mode = conn.compact.load(Relaxed);
+            let c = (mode != PLAIN).then(|| Compact {
+                own: conn.vip.load(Relaxed),
+                refs: (mode == DELTAS).then_some(&mut refs),
+                body: &mut body,
+            });
+            let e = encode(&sw.stats, &items, &mut buf, &mut close_sent, c);
             conn.out.buffered.fetch_add(e.extra, Relaxed);
             // what the kernel takes leaves `buffered` as it goes (what was skipped after a close frame at the end)
             let mut at = 0;
@@ -385,6 +400,9 @@ async fn write_loop<W: AsyncWrite + Unpin>(sw: Arc<LanSwitch>, conn: Arc<Conn>, 
         if buf.capacity() > KEEP_BUF {
             buf = Vec::new();
         }
+        if body.capacity() > KEEP_BUF {
+            body = Vec::new();
+        }
         if items.capacity() > KEEP_ITEMS {
             items = Vec::new();
         }
@@ -403,12 +421,20 @@ struct Encoded {
 
 /// the items into `buf`: the datagrams first, as bundles (compact ones for a page that takes them: the address it
 /// holds), then the rest in order; nothing after a close frame
-fn encode(stats: &Stats, items: &[Out], buf: &mut Vec<u8>, close_sent: &mut bool, compact: Option<u32>) -> Encoded {
+/// A page that takes compact bundles: the address it holds, the last bodies it was sent when it takes deltas, and the
+/// writer's buffer for the bundle being made.
+pub(crate) struct Compact<'a> {
+    own: u32,
+    refs: Option<&'a mut compact::Refs>,
+    body: &'a mut Vec<u8>,
+}
+
+fn encode(stats: &Stats, items: &[Out], buf: &mut Vec<u8>, close_sent: &mut bool, compact: Option<Compact<'_>>) -> Encoded {
     let mut e = Encoded::default();
     if !*close_sent {
         let start = buf.len();
         match compact {
-            Some(own) => bundle_compact(stats, items, buf, own),
+            Some(c) => bundle_compact(stats, items, buf, c),
             None => bundle(stats, items, buf),
         }
         e.extra = buf.len() - start;
@@ -504,34 +530,33 @@ fn bundle(stats: &Stats, items: &[Out], buf: &mut Vec<u8>) {
 
 /// the datagrams as compact bundles (compact.rs) of BUNDLE_OUT at most, a datagram alone in one too (its 16-byte
 /// header costs more than a bundle's 4 and an entry's 5)
-fn bundle_compact(stats: &Stats, items: &[Out], buf: &mut Vec<u8>, own: u32) {
-    let mut dgrams = items
-        .iter()
-        .filter_map(|it| match it {
-            Out::Dgram { data, src, dst } => Some((data, *src, *dst)),
-            _ => None,
-        })
-        .peekable();
-    let mut chunk: smallvec::SmallVec<[(&Bytes, u32, u32); 32]> = smallvec::SmallVec::new();
-    while dgrams.peek().is_some() {
-        chunk.clear();
-        let mut sum = 4;
-        while let Some(&(d, src, dst)) = dgrams.peek() {
-            let l = compact::entry_len(d, src, dst, own);
-            if !chunk.is_empty() && sum + l > BUNDLE_OUT {
-                break;
-            }
-            sum += l;
-            chunk.push((d, src, dst));
-            dgrams.next();
+fn bundle_compact(stats: &Stats, items: &[Out], buf: &mut Vec<u8>, c: Compact<'_>) {
+    let Compact { own, mut refs, body } = c;
+    body.clear();
+    body.extend_from_slice(&[compact::KIND_COMPACT, 0, 0, 0]);
+    let mut n = 0;
+    for it in items {
+        let Out::Dgram { data, src, dst } = it else { continue };
+        let at = body.len();
+        compact::entry(body, data, *src, *dst, own, refs.as_deref_mut());
+        // a bundle takes datagrams while it stays within BUNDLE_OUT (the one that would not fit begins the next; it
+        // was written as the next one, in order, so the page reads the same entries the writer made)
+        if n > 0 && body.len() > BUNDLE_OUT {
+            compact_out(stats, buf, &body[..at]);
+            body.drain(4..at);
+            n = 0;
         }
-        frame::header(frame::BINARY, sum, buf);
-        buf.extend_from_slice(&[compact::KIND_COMPACT, 0, 0, 0]);
-        for (d, src, dst) in &chunk {
-            compact::entry(buf, d, *src, *dst, own);
-        }
-        stats.bundles_out.inc();
+        n += 1;
     }
+    if n > 0 {
+        compact_out(stats, buf, body);
+    }
+}
+
+fn compact_out(stats: &Stats, buf: &mut Vec<u8>, bundle: &[u8]) {
+    frame::header(frame::BINARY, bundle.len(), buf);
+    buf.extend_from_slice(bundle);
+    stats.bundles_out.inc();
 }
 
 const SHARDS: usize = 16;
