@@ -2750,9 +2750,11 @@ int com_call(CPU *c, uint32_t magic){
                     }
                 }
             }
-            /* is the matrix sane? for c0..c3: last row like (0,0,0,1)
-             * or at least one element of reasonable magnitude */
-            if (sr==0 && n>=4 && pd && mem_is_committed(pd+63)){
+            /* MATCHECK: is the matrix sane? for c0..c3: last row like (0,0,0,1)
+             * or at least one element of reasonable magnitude (a count every
+             * 20,000 uploads, ~5 lines a second in a race: players' logs were
+             * mostly these) */
+            if (ENVC("MATCHECK") && sr==0 && n>=4 && pd && mem_is_committed(pd+63)){
                 static uint64_t good=0, bad=0, zero=0; static int shown=0;
                 int nz=0, big=0;
                 for (int q=0;q<16;q++){

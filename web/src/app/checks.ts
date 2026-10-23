@@ -87,13 +87,41 @@ export async function checkGpu(): Promise<Check & { adapter?: string }> {
       : windows
         ? 'Chrome found no usable graphics adapter. On Windows Chrome runs WebGPU on Direct3D 12, which older graphics (Intel HD 4000 and older, for one) do not have: the game cannot run on them. On newer graphics, update the graphics driver, then restart Chrome. Dawn Info in chrome://gpu says why each adapter is blocked.'
         : 'Chrome found no usable graphics adapter (blocklisted driver or GPU process crash). Check chrome://gpu.' };
-  const info = ad.info ? [ad.info.vendor, ad.info.architecture, ad.info.description].filter(Boolean).join(' ') : '';
+  let info = ad.info ? [ad.info.vendor, ad.info.architecture, ad.info.description].filter(Boolean).join(' ') : '';
+  const ffg = ff && windows && !info ? firefoxGraphics() : null;
+  if (ffg) info = ffg.name;
   // no BC (PowerVR, Mali): the renderer unpacks the textures (web/src/gpu/dxt.ts), so it plays
   if (!ad.features.has('texture-compression-bc')) {
     return { id: 'gpu', label: `WebGPU${info ? ', ' + info : ''}`, state: 'warn', adapter: info,
       detail: 'This GPU cannot read the game\'s compressed textures, so they are unpacked as the game loads. That needs about 200 MB more memory, and loading screens may pause for a moment.' };
   }
+  if (ffg?.integrated) {
+    return { id: 'gpu', label: `WebGPU, ${info}`, state: 'warn', adapter: info,
+      detail: 'Firefox runs the game on the integrated graphics. If this computer also has a graphics card (NVIDIA or AMD), the game runs much better there: in Windows Settings, System, Display, Graphics, set Firefox to High performance, then restart Firefox. Firefox gives the game the graphics its own windows use; Chrome picks the faster one itself.' };
+  }
   return { id: 'gpu', label: `WebGPU${info ? ', ' + info : ''}`, state: 'ok', adapter: info, detail: 'Adapter with BC texture compression.' };
+}
+
+/**
+ * Firefox on Windows: which graphics the game runs on.  Firefox gives WebGPU the adapter its
+ * compositor draws the windows with, whatever powerPreference asks (gfx/wgpu_bindings server.rs:
+ * the D3D12 adapter with the compositor's LUID), and its adapter.info is empty.  WebGL's renderer
+ * string names the same graphics as a vendor and a class (dom/canvas/SanitizeRenderer.cpp): Intel's
+ * integrated graphics become "Intel(R) HD Graphics[ 400]" (Arc cards "Intel(R) Arc(TM) A750
+ * Graphics"), and the Ryzen APUs' unnumbered "AMD Radeon(TM) Graphics" "Radeon HD 3200 Graphics".
+ */
+function firefoxGraphics(): { name: string; integrated: boolean } | null {
+  try {
+    const gl = document.createElement('canvas').getContext('webgl');
+    if (!gl) return null;
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    const r = String(gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
+    gl.getExtension('WEBGL_lose_context')?.loseContext();
+    const vendor = /NVIDIA|GeForce|Quadro/.test(r) ? 'NVIDIA' : /Intel/.test(r) ? 'Intel' : /AMD|Radeon/.test(r) ? 'AMD' : null;
+    if (!vendor) return null;
+    const integrated = vendor === 'Intel' ? !/Arc/.test(r) : vendor === 'AMD' && /Radeon HD 3200/.test(r);
+    return { name: `${vendor} graphics${integrated ? ' (integrated)' : ''}`, integrated };
+  } catch { return null; }
 }
 
 /**

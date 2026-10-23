@@ -43,6 +43,12 @@ export interface RendererOptions {
   /** unpack DXT textures on the CPU even when the GPU has texture-compression-bc (tests the
    *  path of PowerVR and Mali phones on a desktop GPU) */
   noBC?: boolean;
+  /** while a frame waits for a slot, poll the GPU with empty submits (default: in Firefox, whose
+   *  onSubmittedWorkDone otherwise waits for its 100 ms poll timer; see pokeLoop) */
+  poke?: boolean;
+  /** diagnostics: a slower GPU, from a pass of this many iterations of busy work for each pixel
+   *  of a 512x512 target in every frame (tests frame pacing on GPUs slower than this one) */
+  gpuBurn?: number;
   log?: (s: string) => void;
 }
 
@@ -60,6 +66,9 @@ export interface RendererStats {
   /** frames drawn straight into the canvas texture (no composite), and frames that kept the
    *  back buffer because they copied from the screen before drawing to it */
   direct: number; screenReadFirst: number;
+  /** frames that waited over 20 ms for a slot (every one taken by frames the GPU had not reported
+   *  done), the longest such wait in ms, and the empty submits sent while frames waited (poke) */
+  slotWaits: number; slotWaitMsMax: number; pokes: number;
 }
 
 /** Per-frame distributions since the last reset (the perf benchmark's race window). */
@@ -185,8 +194,6 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
     if (!enc.warmDirty) return;
     try { localStorage.setItem(WARM_KEY, JSON.stringify(enc.warmEntries().slice(-4000))); } catch { /* full or off */ }
   }, 5000);
-  log(`[gpu] renderer attached: ${adapter.info?.vendor ?? ''} ${adapter.info?.architecture ?? ''}, canvas ${canvas.width}x${canvas.height} ${canvasFormat}, features ${want.join(' ')}`);
-
   const maxInFlight = opts.maxInFlight ?? 2;
   let imgRect: { x: number; y: number; w: number; h: number } | null = null;
   let inFlight = 0, alive = true, pumping = false;
@@ -197,6 +204,51 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
   let done: number[] = [];
   const dumpWaiters: { name: string; resolve: (b: Blob) => void }[] = [];
   const pending = new Set<Promise<unknown>>();
+  const waitAsync = (Atomics as unknown as { waitAsync(a: Int32Array, i: number, v: number, t?: number):
+    { async: boolean; value: Promise<string> | string } }).waitAsync;
+
+  // A frame waiting for a slot.  Firefox runs onSubmittedWorkDone callbacks only when its GPU
+  // process polls the device: in every queue submit, and otherwise on a 100 ms timer
+  // (WebGPUParent POLL_TIME_MS).  A frame submitted while the one before it was still on the GPU
+  // leaves that one unreported, and the next frame then waits for the timer: two frames per
+  // 100 ms.  The game, late from then on, hands its frames over back to back, so it stays at
+  // 20-30 fps until the queue empties (a minimized window).  An empty submit polls as well
+  // (wgpu-core's Queue::submit runs Device::maintain), so while a frame waits the pump sends one
+  // at once and then every 1-2 ms (Firefox's Atomics.waitAsync times out that finely; its
+  // setTimeout takes 4.5 ms).  Chrome reports done work on its own: no pokes there.
+  const poke = opts.poke ?? /\bFirefox\//.test(navigator.userAgent);
+  const pokeCell = new Int32Array(new SharedArrayBuffer(4));
+  let waitingSince = 0, poking = false, slotWaits = 0, slotWaitMsMax = 0, pokes = 0;
+  let winWaits = 0, winWaitMax = 0, winWaitT = performance.now();
+  // Firefox names no adapter (the start page's GPU check names its graphics)
+  const named = [adapter.info?.vendor, adapter.info?.architecture].filter(Boolean).join(' ') || 'adapter not named';
+  log(`[gpu] renderer attached: ${named}, canvas ${canvas.width}x${canvas.height} ${canvasFormat}, features ${want.join(' ')}${poke ? ', poke' : ''}`);
+  const pokeLoop = async () => {
+    if (poking) return;
+    poking = true;
+    try {
+      while (alive && waitingSince) {
+        device.queue.submit([]); pokes++;
+        const w = waitAsync(pokeCell, 0, 0, 1);
+        if (w.async) await w.value;
+      }
+    } finally { poking = false; }
+  };
+  const waiting = (on: boolean) => {
+    const now = performance.now();
+    if (on && !waitingSince) { waitingSince = now; if (poke) void pokeLoop(); }
+    else if (!on && waitingSince) {
+      const ms = now - waitingSince;
+      waitingSince = 0;
+      if (ms > 20) { slotWaits++; winWaits++; if (ms > slotWaitMsMax) slotWaitMsMax = ms; if (ms > winWaitMax) winWaitMax = ms; }
+    }
+    // frames held up for the GPU go to the log, at most every 30 s
+    if (winWaits && now - winWaitT > 30_000) {
+      log(`[gpu] ${winWaits} frame(s) waited over 20 ms for the GPU in the last ${((now - winWaitT) / 1000).toFixed(0)} s, ` +
+          `the longest ${winWaitMax.toFixed(0)} ms (${frames} frames, ${pokes} pokes${poke ? '' : ', poke off'})`);
+      winWaits = 0; winWaitMax = 0; winWaitT = now;
+    } else if (!winWaits) winWaitT = now;
+  };
 
   const pump = () => {
     if (!alive || pumping) return;
@@ -212,6 +264,7 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
         // a pending frame: its resources first, nothing recorded after it
         const limit = r && !e ? U[cw + C.frame + (r - 1) * (P.FRAME_BYTES >> 2) + F.rqEnd] : head;
         enc.drain(limit);
+        waiting(!!r && !e && inFlight >= maxInFlight);
         if (!r || e || inFlight >= maxInFlight) break;
         if (Atomics.compareExchange(I, cw + C.state, s, s | (r << 2)) !== s) continue;
         try { encodeAndSubmit(r - 1); }
@@ -220,6 +273,28 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
       }
     } finally { pumping = false; }
   };
+
+  // gpuBurn: busy work in every frame's command buffer
+  let burn: ((ce: GPUCommandEncoder) => void) | null = null;
+  if (opts.gpuBurn) {
+    const m = device.createShaderModule({ code: `override N: u32 = 1u;
+@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
+  return vec4f(vec2f(f32((i << 1u) & 2u), f32(i & 2u)) * 2.0 - 1.0, 0.0, 1.0);
+}
+@fragment fn fs(@builtin(position) p: vec4f) -> @location(0) vec4f {
+  var x = p.x * 0.001 + p.y;
+  for (var k = 0u; k < N; k++) { x = fract(sin(x) * 43758.5453 + 0.37); }
+  return vec4f(x, 0.0, 0.0, 1.0);
+}` });
+    const pipe = device.createRenderPipeline({ layout: 'auto', vertex: { module: m, entryPoint: 'vs' },
+      fragment: { module: m, entryPoint: 'fs', targets: [{ format: 'rgba8unorm' }], constants: { N: opts.gpuBurn } } });
+    const view = device.createTexture({ size: [512, 512], format: 'rgba8unorm', usage: GPUTextureUsage.RENDER_ATTACHMENT }).createView();
+    burn = ce => {
+      const p = ce.beginRenderPass({ colorAttachments: [{ view, loadOp: 'clear', storeOp: 'store' }] });
+      p.setPipeline(pipe); p.draw(3); p.end();
+    };
+    log(`[gpu] gpuBurn ${opts.gpuBurn}: busy work in every frame`);
+  }
 
   // GPU timing: a ring of query pairs, each resolved into its own mappable buffer
   const timing = opts.gpuTiming && device.features.has('timestamp-query');
@@ -239,6 +314,7 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
     if (slot >= 0) { qNext = (qNext + 1) % TQ; enc.firstPassTs = { querySet: qs!, beginningOfPassWriteIndex: 2 * slot }; }
     const cur = ctx.getCurrentTexture();
     const st = enc.encodeFrame(b, ce, direct ? cur : undefined);
+    burn?.(ce);
     const scr = enc.screen!;   // the canvas texture itself, or the back buffer
     const tsEnd: GPURenderPassTimestampWrites | undefined = slot >= 0 ? { querySet: qs!, endOfPassWriteIndex: 2 * slot + 1 } : undefined;
     if (slot >= 0 && enc.firstPassTs) {   // the frame had no render pass: time the composite alone
@@ -394,8 +470,6 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
   rafId = requestAnimationFrame(raf);
 
   // ---- doorbell: the game rings it on every handoff and queue flush ----
-  const waitAsync = (Atomics as unknown as { waitAsync(a: Int32Array, i: number, v: number, t?: number):
-    { async: boolean; value: Promise<string> | string } }).waitAsync;
   (async () => {
     while (alive) {
       const I = i32(), b = Atomics.load(I, cw + C.bell);
@@ -424,7 +498,7 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
       pipelineMs: enc.pipeMs, pipelineMsMax: enc.pipeMsMax, gpuMsAvg: gpuMsN ? gpuMsTotal / gpuMsN : 0, gpuMsMax,
       encodeMsAvg: frames ? encMsTotal / frames : 0, encodeMsLast: encMsLast, drawsLast, passesLast, rafHz, inFlight,
       dumps: u32()[cw + C.dumpsDone], missingTarget: enc.missingTarget, conflicts: enc.conflicts, zMismatch: enc.zMismatch, noVs: enc.noVs,
-      direct: directFrames, screenReadFirst: enc.screenReadFirst }),
+      direct: directFrames, screenReadFirst: enc.screenReadFirst, slotWaits, slotWaitMsMax, pokes }),
     window: (reset = false) => {
       const pct = (a: number[]) => {
         if (!a.length) return [];

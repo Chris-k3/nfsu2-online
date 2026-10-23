@@ -343,7 +343,7 @@ async function startGame() {
   // more of this browser than its major version and system (the audit's PRIV-5).  These session lines stay when
   // a long game fills the log (logs.ts keep).
   log.keep(`=== NFSU2 web, ${new Date().toISOString()}, game ${loaded!.info.rev}, server ${serverKind()} ===`);
-  log.keep(`[app] save folder: OPFS ${SAVE} (/save); canvas ${size.w}x${size.h} device pixels, display ${displayHz} Hz; ${browserBrief()}`);
+  log.keep(`[app] save folder: OPFS ${SAVE} (/save); canvas ${size.w}x${size.h} device pixels, display ${displayHz} Hz; ${browserBrief()}; ${checks.get('gpu')?.label ?? 'WebGPU'}`);
   for (const n of r.notes) log.keep(`[app] ${n}`);
   const reg = r.env.NFSU2_REGFILE.replace(/^\/save\//, '');
   if (q.get('reg')) {
