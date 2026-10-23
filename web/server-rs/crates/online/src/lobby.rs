@@ -198,6 +198,12 @@ const COUNTDOWN: u32 = 1 << 12;
 /// CUSTFLAGS bit of a private game (Options: Private Room, SPEED2.EXE 0x58d55d; the game's own search always asks
 /// for it clear, 0x590669: its players come by invitation)
 const PRIVATE: u32 = 1 << 8;
+/// a search's code (the header's [4..7], 0 in the game's own requests) when the player left the game's Filter screen
+/// with the settings it asks for (runtime/olfilter.c)
+const FILTER_SET: &str = "filt";
+/// the Filter's defaults as a search asks for them (Circuit, no car restriction, Collision Detection and Race Breaker
+/// on, unranked, not private): CUSTFLAGS, CUSTMASK, SYSFLAGS, SYSMASK
+const FILTER_DEFAULT: [u32; 4] = [0x40000f3, 0x40001f3, 0, 0xc0000];
 /// the race types a report may name: RACE_TYPES, which have their stat blocks, and the game's seventh (a game with
 /// CUSTFLAGS bit 25, which SPEED2.EXE 0x5fe8d0 reports as 6), which has no stat block or tier points: its results
 /// count nowhere
@@ -801,7 +807,7 @@ impl Core {
             } else {
                 FieldMap::parse(&m.body)
             };
-            self.message(s, &m.kind, &f);
+            self.message(s, &m.kind, &m.code, &f);
         }
         if let Some(e) = self.lobby.s(s).reader.error.clone() {
             self.ldrop(s, &format!("not the lobby protocol ({e})"));
@@ -825,7 +831,7 @@ impl Core {
         self.conn_destroy(conn, why);
     }
 
-    fn message(&mut self, s: SessId, kind: &str, f: &FieldMap) {
+    fn message(&mut self, s: SessId, kind: &str, code: &str, f: &FieldMap) {
         match kind {
             // ---- before the login ----
             // the game's own idea of its address (server.dll: no answer)
@@ -884,7 +890,7 @@ impl Core {
             "gsea" => {
                 self.lobby.sm(s).browsing = true;
                 self.back_from_race(s);
-                self.game_search(s, f)
+                self.game_search(s, f, code == FILTER_SET)
             }
             "gcre" => self.game_create(s, f),
             "gjoi" => self.game_join(s, f),
@@ -1695,13 +1701,17 @@ impl Core {
         f
     }
 
-    /// The game list: every open game but a private one, those the player's Filter asks for first.  The game's search
-    /// asks for its Filter exactly (Game Mode, Collision Detection, Race Breaker, Car Performance Restrictions, Game
-    /// Type: CUSTFLAGS and SYSFLAGS under their masks), and EA's server took it so (server.dll 0x10017870), but with
-    /// this server's players a game of other settings than the Filter's default was seen by no one.
-    fn game_search(&mut self, s: SessId, f: &FieldMap) {
+    /// The game list: every open game but a private one, those the player's Filter asks for first; only those once
+    /// the player set the Filter (`filter_set`: the search's code FILTER_SET), unless it asks for its defaults.  The
+    /// game's search asks for its Filter exactly (Game Mode, Collision Detection, Race Breaker, Car Performance
+    /// Restrictions, Game Type: CUSTFLAGS and SYSFLAGS under their masks), and EA's server took it so (server.dll
+    /// 0x10017870), but with this server's players a game of other settings than the Filter's default was seen by no
+    /// one.  The game's Filter is also the settings of the game it last made or joined, so only the runtime can tell
+    /// one the player set.
+    fn game_search(&mut self, s: SessId, f: &FieldMap, filter_set: bool) {
         let n = |k: &str| jsx::to_uint32(f.num(k, 0.0));
         let (cf, cm, sf, sm) = (n("CUSTFLAGS"), n("CUSTMASK"), n("SYSFLAGS"), n("SYSMASK"));
+        let only_asked = filter_set && [cf & cm, cm, sf & sm, sm] != FILTER_DEFAULT;
         let start = 0i32.max(jsx::to_int32(f.num("START", 0.0))) as usize;
         let count = 50i32.min(0i32.max(jsx::to_int32(f.num("COUNT", 20.0)))) as usize;
         let x = self.lobby.s(s);
@@ -1713,8 +1723,14 @@ impl Core {
             .values()
             .filter(|g| g.started == 0.0 && g.cust_flags & PRIVATE == 0 && (room.is_none() || g.room == 0 || Some(g.room) == room))
             .collect();
-        let list: Vec<GameId> =
-            open.iter().filter(|g| asked(g)).chain(open.iter().filter(|g| !asked(g))).skip(start).take(count).map(|g| g.id).collect();
+        let list: Vec<GameId> = open
+            .iter()
+            .filter(|g| asked(g))
+            .chain(open.iter().filter(|g| !only_asked && !asked(g)))
+            .skip(start)
+            .take(count)
+            .map(|g| g.id)
+            .collect();
         self.lsend(s, "gsea", &fields![("COUNT", list.len())], "");
         for g in list {
             let gf = self.game_fields(g, vec![]);

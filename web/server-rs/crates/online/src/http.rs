@@ -26,7 +26,7 @@ const NEWS: Page = Page {
            - Online works again, on this server instead of EA's. You play under your own name, with no EA account.\r\n\
            - Up to 6 players in every race type (the original had 4, and 6 only in Street X). Drag keeps one car per lane.\r\n\
            - Every track is open, whatever your career has unlocked, and a new game starts at 2 laps.\r\n\
-           - The Lobby lists every open game, whatever its race type and options. The Filter puts the games it asks for first.\r\n\
+           - The Lobby lists every open game, the Filter's first, until you set the Filter: then only its games (its defaults list all).\r\n\
            - Free roam with other players: their cars drive in your city, with their names over them.\r\n\
            - A horn: N, in races and in free roam, eight to pick from in Settings. The others hear it from your car.\r\n\
            - Widescreen, and up to 120 fps on a 120 Hz screen.",

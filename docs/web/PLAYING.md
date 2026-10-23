@@ -373,9 +373,12 @@ Good to know:
 - **Horn:** N (or the controller's left stick click) honks in a race too, as in free roam: the others hear the horn you
   picked from your car. The same in the game's LAN races.
 - **The Lobby lists every open game**, whatever its race type and options (Collision Detection, Race Breaker, Car
-  Performance Restrictions, Ranked). The lobby's **Filter** only puts the games it asks for first; in the original
-  game it hid all others, so a game made with Collision Detection off was seen by no one. A game with **Private
-  Room** on is not listed, as in the original game.
+  Performance Restrictions, Ranked), those its **Filter** asks for first, until you set the Filter: after Apply
+  Filter (or Back) on its screen it lists only the games the Filter asks for. Set the Filter back to its defaults
+  (Circuit, no restriction, both options on, Unranked) to see every game again. A game you create or join gives the
+  Filter its own settings (the original game does that), and the list is the whole one again until you next set it.
+  In the original game the Filter always hid all others, so a game made with Collision Detection off was seen by no
+  one. A game with **Private Room** on is not listed, as in the original game.
 - **Ranked games** need three players at least. Ranked wins give ranking points.
 - **A race counts** in Rankings once two of its players' games sent the same result (every game sends its own at
   the results screen), so a race that only one player finished does not count. Each player races from their own

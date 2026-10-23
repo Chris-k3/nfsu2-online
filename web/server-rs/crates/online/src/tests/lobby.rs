@@ -7,7 +7,7 @@
 //! deleting, the buddy login, and the limits.
 
 use super::world::{C, Opts, World, ip};
-use crate::aries::{Fields, V, encode_fields};
+use crate::aries::{Fields, V, encode_fields, encode_frame};
 use crate::lobby::Limits;
 use crate::vhost::{DATA, lan_frame};
 use crate::{PORT_BUDDY, PORT_HTTP, PORT_LOBBY, PORT_REDIRECTOR, VHOST_VIP};
@@ -292,7 +292,8 @@ fn game_passwords_open() {
     }
 }
 
-// the game list: every open game but a private one, the Filter's games first
+// the game list: every open game but a private one, the Filter's games first; once the player set the Filter
+// (code "filt"), only those, unless it asks for its defaults
 #[test]
 fn the_game_list() {
     let mut w = world();
@@ -328,6 +329,18 @@ fn the_game_list() {
     s.extend(search().into_iter().skip(2));
     w.send(e, "gsea", s);
     assert_eq!(names(&mut w, "+gam"), ["no collision"]);
+    // ranked sprints: unset (the settings of a game made or joined) the others come after; set, only those; set to
+    // the defaults, all of them again
+    let sprint = || {
+        fields![("START", 0), ("COUNT", 20), ("CUSTFLAGS", 0x80000f3), ("CUSTMASK", 0x80001f3), ("SYSFLAGS", 1 << 18), ("SYSMASK", 0xc0000)]
+    };
+    w.send(e, "gsea", sprint());
+    assert_eq!(names(&mut w, "+gam"), ["ranked sprint", "no collision", "as asked"]);
+    w.send_raw(e, &encode_frame("gsea", "filt", &sprint()).unwrap());
+    assert_eq!(w.c(e).l("gsea").g("COUNT"), "1");
+    assert_eq!(names(&mut w, "+gam"), ["ranked sprint"]);
+    w.send_raw(e, &encode_frame("gsea", "filt", &search()).unwrap());
+    assert_eq!(names(&mut w, "+gam"), ["as asked", "no collision", "ranked sprint"]);
     // a private game's players come by invitation: by its name
     w.send(e, "gjoi", fields![("NAME", "private")]);
     assert_eq!(w.c(e).l("gjoi").code, "");

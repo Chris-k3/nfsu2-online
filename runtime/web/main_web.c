@@ -92,6 +92,7 @@ int main(int argc, char **argv){
     { extern void language_install(void); language_install(); }   /* NFSU2_LANGUAGE: the language pack, the exe's tables */
     { extern void sponsors_install(void); sponsors_install(); }   /* the sponsor screens' Continue (help bar) */
     { extern void lobbyclick_install(void); lobbyclick_install(); }   /* the lobby's list ignores a click on a dialog over it */
+    { extern void olfilter_install(void); olfilter_install(); }       /* the Online lobby's Filter, once set, narrows its list */
     { extern void hornmenu_install(void); hornmenu_install(); }   /* the horns' volume (registry HornVolume), its slider's methods */
     { extern void autotest_init(void); autotest_init(); }       /* NFSU2_INPUT_SCRIPT ... */
     { extern void status_web_start(void); status_web_start(); }  /* counters for the page overlay */

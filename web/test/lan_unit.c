@@ -40,6 +40,8 @@ uint32_t win32_get_last_error(CPU *c){ return c && c->fs_base ? MR32(c->fs_base 
 void guest_wait_begin(void){ }
 void guest_wait_end(void){ }
 void online_lobby_read(uint32_t link, const uint8_t *p, int n){ (void)link; (void)p; (void)n; }   /* online.c */
+void olfilter_lobby_mark(uint32_t link, uint8_t *p, int n){ (void)link; (void)p; (void)n; }       /* olfilter.c */
+void olfilter_lobby_sent(uint32_t link, uint8_t *p, int n){ (void)link; (void)p; (void)n; }
 
 static int g_pass, g_fail;
 static void check(const char *what, int ok, const char *fmt, ...){

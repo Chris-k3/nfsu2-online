@@ -290,6 +290,8 @@ static int ws_harness(void){ return nfsu2_test_run(); }
 #define ONLINE_HOST    "pcnfs05.ea.com"
 #define ONLINE_LOBBY   20922u                     /* its lobby's port (nfsu2-online PORT_LOBBY) */
 void online_lobby_read(uint32_t link, const uint8_t *p, int n);   /* online.c: the persona the server gave */
+void olfilter_lobby_mark(uint32_t link, uint8_t *p, int n);       /* olfilter.c: a search with the player's Filter */
+void olfilter_lobby_sent(uint32_t link, uint8_t *p, int n);
 static int g_online;
 static int env_off(const char *v){
     return v && (!strcmp(v, "0") || !strcasecmp(v, "off") || !strcasecmp(v, "no") || !strcasecmp(v, "false"));
@@ -1379,10 +1381,15 @@ static uint32_t do_send(CPU *c, int has_addr){
     int wf = (fl & 1u ? MSG_OOB : 0) | (fl & 4u ? MSG_DONTROUTE : 0);
     int total = 0;
     uint64_t dl = deadline_ms(s->sndtimeo);
+    /* what the game says to the online host's lobby: a search with the Filter the player set is marked (olfilter.c) */
+    uint32_t lob = s->type == 1 && g_online && s->raddr == mkip(10, 77, 0, 1) && s->rport == ONLINE_LOBBY
+                   ? (s->conn_id ? s->conn_id : h) : 0;
     for (;;){
         int sent = 0;
+        if (lob) olfilter_lobby_mark(lob, g_mem + buf + total, len - total);
         int e = send_one(s, g_mem + buf + total, len - total, wf, ip, port, has_addr && s->type != 1, &sent, c);
         if (!e){
+            if (lob) olfilter_lobby_sent(lob, g_mem + buf + total, sent);
             total += sent; st_sent++; st_bytes_out += (uint64_t)sent;
             if (s->type != 1 || total >= len || s->nb) return (uint32_t)total;
             continue;                            /* blocking stream send: everything */

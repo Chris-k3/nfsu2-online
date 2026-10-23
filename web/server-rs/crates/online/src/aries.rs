@@ -3,7 +3,8 @@
 //!
 //! - `[0..3]` kind: four ASCII characters ("auth", "+rom", "@dir", ...)
 //! - `[4..7]` code: four bytes; 0 in a request and in a reply that succeeded, an error tag ("imst", "pass", ...)
-//!   or a subkind ("new7") otherwise
+//!   or a subkind ("new7") otherwise; "filt" in a game list search made with the Filter the player set (the runtime's
+//!   own, runtime/olfilter.c)
 //! - `[8..11]` u32 big-endian: the whole message's length, these 12 bytes included
 //! - `[12..]` the body: KEY=VALUE fields, NUL-terminated
 //!
