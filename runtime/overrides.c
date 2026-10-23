@@ -739,6 +739,60 @@ void sub_0050b410(CPU *c){
     if (nodes){ MR32(0x00838494u) = nodes; MR32(0x0083848cu) = FE_NODES; }
 }
 
+/* --- sub_004df9c0: a screen's list of the player's cars, a stock car of no type ---
+ * The car lot's list (filter 1: the stock cars) and the game's other lists of
+ * the player's cars (0x4ED935: filter 4) are made here (thiscall: the screen,
+ * its +0xEC the player; ret 4) from the player's car records (FEDatabase
+ * +0x3C0, 0x83AD90 + 0xAB4C a player: 91 pointers at +0x9BD8, 0x5162D0),
+ * each one's car type looked up in CarTypeInfo[] ([0x8A1CCC], 46 of 0x890
+ * bytes) with no bound.  The 48 stock cars (0x1C bytes from +0: +8 the
+ * handle, bStringHash of "STOCK_<name>", +0x10 in use, +0x14 1, +0x18 the
+ * type's index, which the vtable 0x79AADC's 0x503A30 returns) are made once,
+ * for a new profile (0x516500: the types the car lot sells), then saved and
+ * loaded with the profile as they are (0x5166B0, 0x516850).  A player's
+ * profile held one in use with an index no car has: the car lot's list read
+ * its CarTypeInfo out of bounds and the game ended as the car lot opened, so
+ * the player could buy no car (2026-10-23 report on c53ecc4: memory access
+ * out of bounds in 0x4DF9C0, at +0xDA; tests/scripts/career_lot_badstock.txt
+ * makes the same trap).  How the profile got it is not known.  Before a list
+ * is made, a stock car in use past the 46 types has the table made again as
+ * the game makes it for a new profile, and the records that leaves unused get
+ * the index of none (-1, as their constructor 0x503A00 leaves it); the
+ * profile keeps the table at its next save. */
+#define FECARS          0x0083ad90u
+#define FECARS_PLAYER   0xab4cu
+#define STOCK_N         48u
+#define STOCK_SZ        0x1cu
+#define CARTYPES_N      46u           /* the builder walks 0x189E0 bytes of CarTypeInfo */
+void sub_004df9c0_orig(CPU *c);
+void sub_00516500(CPU *c);
+void sub_004df9c0(CPU *c){
+    uint32_t who = MR32(c->ecx + 0xecu);
+    if (who < 2u){
+        uint32_t db = FECARS + who * FECARS_PLAYER, bad = STOCK_N;
+        for (uint32_t i = 0; i < STOCK_N && bad == STOCK_N; i++){
+            uint32_t r = db + i * STOCK_SZ;
+            if (MR32(r + 0x10u) && MR32(r + 0x18u) >= CARTYPES_N) bad = i;
+        }
+        if (bad < STOCK_N){
+            uint32_t r = db + bad * STOCK_SZ;
+            fprintf(stderr, "[cars] player %u's stock car %u (handle 0x%08x) has car type %u, none of the game's %u: "
+                    "the stock cars made again, as for a new profile\n", who, bad, MR32(r + 8u), MR32(r + 0x18u), CARTYPES_N);
+            CPU save = *c;
+            c->esp = (c->esp - 256u) & ~15u;
+            PUSH32(0u);                           /* its argument, not read */
+            c->ecx = db;
+            PUSH32(0x004df9c0u);                  /* the ret pops it into eip; the state is put back below */
+            sub_00516500(c);
+            *c = save;
+            for (uint32_t i = 0; i < STOCK_N; i++)
+                if (!MR32(db + i * STOCK_SZ + 0x10u)) MR32(db + i * STOCK_SZ + 0x18u) = 0xffffffffu;
+            fprintf(stderr, "[cars] %u stock cars\n", MR32(db + 0x540u));
+        }
+    }
+    sub_004df9c0_orig(c);
+}
+
 /* --- sub_0073b900: the tick of the music's event system -------------------
  * The event system (the EA Trax player: tracks, pause, fades) guards its
  * state with a plain word, [0x8b7bc0]: the tick sets it while it runs, and
