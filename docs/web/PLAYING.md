@@ -155,12 +155,16 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
   - From then on that browser syncs by itself: its saves go to the server after the game saves and when it closes,
     and a newer save from your other browser comes in when the page opens and when you press Play. If both browsers
     changed them since they last synced, the page asks which to keep. A browser with no profiles never sends its
-    empty saves by itself: it offers the cloud's instead.
+    empty saves by itself: it offers the cloud's instead (keeping the empty ones asks first: every browser on the
+    keyphrase loses its profiles). The page also asks before cloud saves with no profiles, or older than the ones in
+    this browser (a server gone back), replace yours.
   - The profiles, their DVD and magazine covers, the game's options and `settings.ini` go; F12 screenshots stay in
     each browser.
   - The server keeps the copy of an earlier day too: "Go back to ..." brings it back when a day went wrong.
-  - Stop syncing leaves the saves where they are; Delete from cloud deletes them on the server (your browsers keep
-    theirs). A keyphrase nobody used for two years is deleted from the server.
+  - Stop syncing leaves the saves where they are, and the keyphrase in the box; Delete from cloud deletes them on the
+    server (your browsers keep theirs). A keyphrase nobody used for two years is deleted from the server. A browser
+    whose keyphrase the server no longer has keeps it and sends nothing; Sync now looks again and offers to send its
+    saves there.
 - **Autosave:** the game saves your progress by itself after races, purchases and changed options. The game starts
   every profile on Save = Prompt, whose "save?" question opens on No, so Enter through the results skips the save;
   the page sets each profile to Autosave once (the game's Options, Gameplay, Save), at the first Play after the

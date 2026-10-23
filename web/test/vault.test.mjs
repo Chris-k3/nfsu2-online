@@ -6,7 +6,8 @@
 //   the content hash ignores the files' times
 // - VaultSync, two browsers on a server that keeps what /vault keeps (crates/vault's rules, in memory): made in one,
 //   loaded in the other, each one's saves taken by the other, a conflict either way, the same change on both sides,
-//   a browser with no profile left, a torn profile during a game, a keyphrase deleted elsewhere, the server's refusals
+//   a browser with no profile left, a torn profile during a game, a version with no profile or an older one (a server
+//   gone back), a keyphrase deleted elsewhere or lost on the server (still linked, sent again), the server's refusals
 // The real server and two real browsers: web/tools/vault-pair.mjs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -120,13 +121,15 @@ const DAY = 86400000;
 /** /vault as the Rust server answers it (crates/vault, src/app/vault.rs), in memory */
 function server() {
   const kept = new Map();
-  const s = { now: Date.parse('2026-10-22T12:00:00Z'), kept, refuse: 0 };
+  const s = { now: Date.parse('2026-10-22T12:00:00Z'), kept, refuse: 0, off: false };
   const tag = n => `"${n.toString(16).padStart(16, '0')}"`;
   let revs = 1;
   const head = (v, earlier) => ({ etag: tag(v.rev), 'x-vault-saved': String(v.saved), ...(earlier ? { 'x-vault-earlier': String(earlier.saved) } : {}) });
   s.fetch = async (url, init = {}) => {
     const h = Object.fromEntries(Object.entries(init.headers ?? {}).map(([k, v]) => [k.toLowerCase(), v]));
     const token = (h.authorization ?? '').replace(/^Bearer /, '');
+    if (s.off) return new Response('Not found', { status: 404 });            // --vault-gb 0
+    if (!token) return new Response('A keyphrase\'s token is needed', { status: 401 });
     if (s.refuse) return new Response('no', { status: s.refuse });
     const k = kept.get(token), method = init.method ?? 'GET';
     if (method === 'GET') {
@@ -153,8 +156,8 @@ function server() {
 }
 
 /** a browser: its save folder (path -> bytes), its localStorage link, and its VaultSync */
-function browser(srv) {
-  const b = { files: new Map(), link: null, taken: 0 };
+function browser(srv, link = null) {
+  const b = { files: new Map(), link, taken: 0 };
   b.sync = new V.VaultSync({
     files: async () => [...b.files].filter(([p]) => V.keeps(p)).map(([path, data]) => ({ path, data })),
     restore: async zip => {
@@ -315,12 +318,74 @@ test('deleted elsewhere, and the server\'s refusals', async () => {
   assert.equal(srv.kept.size, 0);
   await a.sync.pull();
   assert.equal(a.sync.state.s, 'gone');
-  assert.equal(a.sync.link, null);
   assert.equal(a.money(at('THOM')), 1);
+  // a keeps the keyphrase and sends nothing by itself, after a reload too
+  assert.equal(a.sync.link.phrase, phrase);
+  assert.equal(a.sync.link.gone, true);
+  a.files.set(at('THOM'), profile('THOM', { money: 2 }));
+  await a.sync.push();
+  assert.equal(srv.kept.size, 0);
+  const a2 = browser(srv, a.link); a2.files = a.files;          // a reloaded
+  assert.equal(a2.sync.state.s, 'gone');
+  // the player sends them again: there under the same keyphrase, a syncs again
+  await a.sync.resend();
+  assert.equal(a.sync.state.s, 'synced');
+  assert.ok(!a.sync.link.gone);
+  assert.equal(srv.kept.size, 1);
+  // a server whose folder came back: a browser marked gone syncs again by itself
+  await a2.sync.pull();
+  assert.equal(a2.sync.state.s, 'synced');
+  assert.ok(!a2.sync.link.gone);
+  // a server that keeps no keyphrase saves now (--vault-gb 0): a failure, the link as it was
+  srv.off = true;
+  await assert.rejects(a.sync.pull());
+  assert.deepEqual(a.sync.state, { s: 'error', msg: 'the server keeps no cloud saves now' });
+  assert.equal(a.sync.link.phrase, phrase);
+  assert.ok(!a.sync.link.gone);
+  srv.off = false;
+  await a.sync.pull();
+  assert.equal(a.sync.state.s, 'synced');
   // a server that does not answer
   const c = browser({ fetch: async () => { throw new TypeError('fetch failed'); } });
   seed(c, 1);
   await assert.rejects(c.sync.create());
   assert.deepEqual(c.sync.state, { s: 'error', msg: 'the server does not answer' });
   assert.equal(c.sync.link, null);
+});
+
+test('a version older than the one here, or with no profile, never replaces the saves here by itself', async () => {
+  const srv = server(), a = browser(srv), b = browser(srv);
+  seed(a, 1000);
+  const phrase = await a.sync.create();
+  const got = await b.sync.peek(phrase);
+  for (const e of await unzip(got.zip)) b.files.set(e.name, e.data);
+  await b.sync.adopt(phrase, got.remote);
+  const token = (await V.keysOf(phrase)).token, backup = srv.kept.get(token);
+  // a plays on: b takes it
+  srv.now += 60_000;
+  a.files.set(at('THOM'), profile('THOM', { money: 5000 }));
+  await a.sync.push();
+  await b.sync.pull();
+  assert.equal(b.money(at('THOM')), 5000);
+  // the server goes back (its folder restored from a backup): b keeps its saves and asks
+  srv.kept.set(token, backup);
+  await b.sync.pull();
+  assert.deepEqual([b.sync.state.s, b.sync.state.why], ['conflict', 'older']);
+  assert.equal(b.money(at('THOM')), 5000);
+  await b.sync.keepMine();
+  assert.equal(b.sync.state.s, 'synced');
+  await a.sync.pull();
+  assert.equal(a.sync.state.s, 'synced');
+  assert.equal(a.money(at('THOM')), 5000);
+  // a keeps its empty saves over the cloud's: b, unchanged since, keeps its profile and asks
+  srv.now += 60_000;
+  a.files.delete(at('THOM'));
+  await a.sync.push();
+  assert.deepEqual([a.sync.state.s, a.sync.state.why], ['conflict', 'empty']);
+  await a.sync.keepMine();
+  await b.sync.pull();
+  assert.deepEqual([b.sync.state.s, b.sync.state.why], ['conflict', 'bare']);
+  assert.equal(b.money(at('THOM')), 5000);
+  await b.sync.takeTheirs();
+  assert.ok(!b.files.has(at('THOM')));
 });

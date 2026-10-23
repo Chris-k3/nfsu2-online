@@ -88,7 +88,7 @@ export class VaultPanel {
     on('#vault-earlier', () => this.goBack());
     on('#vault-stop', () => this.stop());
     on('#vault-delete', () => this.remove());
-    on('#vault-mine', () => this.sync?.keepMine().catch(() => {}));
+    on('#vault-mine', () => this.keepMine());
     on('#vault-theirs', () => this.takeTheirs());
     this.$<HTMLFormElement>('#vault-form').onsubmit = e => { e.preventDefault(); if (!this.sync?.link) void this.use(this.input.value); };
     // the dots follow the field's text and its scrolling
@@ -253,7 +253,12 @@ export class VaultPanel {
     const s = this.sync;
     if (!s?.link || this.d.busy()) return;
     this.msg('');
-    try { await s.pull(); await s.push(); } catch { /* the state says why */ }
+    try { await s.pull(); await s.push(); } catch { return; /* the state says why */ }
+    // the server has no saves for the keyphrase: the ones here go there again, if the player says so
+    if (!s.link?.gone || !await this.d.confirm('Send these saves to the cloud again?',
+      'The cloud has no saves for this keyphrase now. The saves here go there under the same keyphrase, and your other browsers with it sync again.', 'Send')) return;
+    try { await s.resend(); this.msg('Sent. This browser syncs again.'); this.d.log('[app] keyphrase: its saves were gone from the server, sent again'); }
+    catch { /* the state says why */ }
   }
 
   private async goBack() {
@@ -275,9 +280,11 @@ export class VaultPanel {
     const s = this.sync;
     if (!s?.link) return;
     if (!await this.d.confirm('Stop syncing here?', 'Your saves stay here and in the cloud. To sync again, you need the keyphrase.', 'Stop syncing')) return;
+    const phrase = s.link.phrase;
     await s.forget().catch(() => {});
-    // the keyphrase stays in the box, to keep or to load again
+    // the keyphrase stays in the box, to keep or to load again (the job's end showed the box empty)
     this.holdsLink = false;
+    this.input.value = phrase;
     this.show();
     this.msg('Stopped syncing. Your saves stay here and in the cloud.');
   }
@@ -294,9 +301,26 @@ export class VaultPanel {
     } catch { /* the state says why */ }
   }
 
+  /** a conflict settled for the saves here; with no profile here, only once the player says so (every browser that
+   *  syncs with the keyphrase loses its profiles then) */
+  private async keepMine() {
+    const s = this.sync, st = s?.state;
+    if (!s?.link || st?.s !== 'conflict') return;
+    const n = s.link.profiles;
+    if (st.why === 'empty' && !await this.d.confirm('Keep this browser\'s saves?',
+      `This browser has no profiles. The cloud's ${n === 1 ? 'profile is' : `${n} profiles are`} deleted, here and in every browser that syncs with this keyphrase.`, 'Keep this browser\'s', true)) return;
+    await s.keepMine().catch(() => {});
+  }
+
+  /** a conflict settled for the keyphrase's version; one with no profile, only once the player says so */
   private async takeTheirs() {
+    const s = this.sync, st = s?.state;
+    if (!s?.link || st?.s !== 'conflict') return;
     if (this.d.busy()) { this.msg(QUIT_FIRST, true); return; }
-    await this.sync?.takeTheirs().catch(() => {});
+    if (st.why === 'bare' && !await this.d.confirm('Use the cloud\'s saves?',
+      'They have no profiles: the profiles here are deleted.', 'Use the cloud\'s', true)) return;
+    if (this.d.busy()) { this.msg(QUIT_FIRST, true); return; }
+    await s.takeTheirs().catch(() => {});
   }
 
   // ---- what it shows ----
@@ -331,8 +355,10 @@ export class VaultPanel {
     const n = l?.profiles ?? 0;
     this.$('#vault-status').textContent = !owner && l ? 'Another tab is syncing these saves.'
       : st.s === 'error' ? (l ? `Sync failed: ${st.msg}. It tries again at the next save.` : `${st.msg[0].toUpperCase()}${st.msg.slice(1)}.`)
-      : st.s === 'gone' ? 'These saves are gone from the cloud: deleted in another browser, or unused for 2 years. Make a new keyphrase to keep them there.'
+      : st.s === 'gone' ? 'The cloud has no saves for this keyphrase now: deleted in another browser, unused for 2 years, or lost on the server. Nothing is sent; Sync now looks again and can send these saves there.'
       : conflict?.why === 'empty' ? `No profiles here, but the cloud has ${n === 1 ? 'one' : n}. Nothing was sent.`
+      : conflict?.why === 'bare' ? `The cloud's saves${conflict.theirs ? ` from ${short(conflict.theirs.saved)}` : ''} have no profiles, but this browser has ${n === 1 ? 'one' : n}. Keep which?`
+      : conflict?.why === 'older' && l ? `The cloud has older saves${conflict.theirs ? ` (${short(conflict.theirs.saved)})` : ''} than this browser's (${short(l.saved)}): the server lost the newer ones. Keep which?`
       : conflict ? `Changed here and in another browser${conflict.theirs ? ` (${short(conflict.theirs.saved)})` : ''}. Keep which?`
       : '';
   }
