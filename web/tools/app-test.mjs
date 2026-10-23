@@ -48,10 +48,15 @@
 //             server says free roam is busy (/players roamBusy: nothing written, asked at the next Play); without
 //             a name no name line, Esc is Not now (roam = off), not asked again; with one, the name to change (a
 //             refused one keeps the question open), Enter in it turns free roam on with the new name
+//   full      a full server (needs one started with --max-peers 1: the step holds that place itself): the first
+//             Play's free-roam question says the server is full, and nothing more is asked after it; in line, the
+//             place over the game and the page menu's Stop waiting; in once the place frees up; a later Play asks to
+//             wait in line or play offline (Esc waits): offline, no network at all; Stop waiting leaves the line
 //   page      what the page shows and asks for: no /server-info, /setup or /ca.crt (all 404), every
 //             setting has a name and a description, the controls sheet is on the page and in F9's dialog
 //   mobile    the start page at phone size
 import { chromium } from 'playwright';
+import { WebSocket } from 'ws';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -954,6 +959,85 @@ try {
       first.cancel === 'Not now' && first.focus === 'confirm-ok' && afterEsc.join() === 'roam = off' && !again && named.field === 'Racer' &&
       refused.open && /not a name/.test(refused.why) && [...afterOn].sort().join() === 'roam = on,roam_name = New Racer' && env.NFSU2_ROAM === '1' && env.NFSU2_ROAM_NAME === 'New Racer',
       { busy, first, afterEsc, askedAgain: again, named, refused, afterOn, env: { NFSU2_ROAM: env.NFSU2_ROAM, NFSU2_ROAM_NAME: env.NFSU2_ROAM_NAME } });
+  }
+
+  // ------------------------------------------------------------- full --
+  // a player's page on a full server (--max-peers 1, the one place held here by a tool's connection to /lan)
+  if (want('full')) {
+    const hold = () => new Promise((res, rej) => {
+      const ws = new WebSocket(`${BASE.replace(/^http/, 'ws')}/lan`);
+      ws.on('message', d => { if (JSON.parse(String(d)).t === 'welcome') res(ws); });
+      ws.on('close', (code, why) => rej(new Error(`the place was not ours: ${code} ${why}`)));
+    });
+    const c6 = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const f = watch(await c6.newPage(), 'F');
+    const dialog = () => f.evaluate(() => ({ title: document.querySelector('#confirm-title').textContent,
+      text: document.querySelector('#confirm-body').textContent, ok: document.querySelector('#confirm-ok').textContent,
+      cancel: document.querySelector('#confirm-cancel').textContent }));
+    const line = () => f.evaluate(() => { const q = document.querySelector('#queue'); return q.hidden ? null : q.textContent; });
+    const stop = async () => {
+      await f.waitForFunction(() => !!window.__nfsu2.session, null, { timeout: 60000 });
+      await f.evaluate(() => window.__nfsu2.session.terminate());
+      await waitPhase(f, ['exited'], 30000);
+    };
+    let holder = await hold();
+    await f.goto(`${BASE}/`);
+    await waitPhase(f, ['ready', 'error'], 60000);
+    await f.waitForFunction(() => /server is full/.test(document.querySelector('#online')?.textContent ?? ''), null, { timeout: 20000 });
+    // the first Play: the free-roam question, saying the server is full; turned on, nothing more is asked
+    await f.click('#play');
+    await f.waitForSelector('#confirm[open]', { timeout: 10000 });
+    const roamAsk = await dialog();
+    await f.locator('#confirm').screenshot({ path: path.join(OUT, 'full-roam-ask.png') });
+    await f.click('#confirm-ok');
+    const second = await f.waitForFunction(() => document.querySelector('#confirm').open, null, { timeout: 1500 }).then(() => true, () => false);
+    await waitPhase(f, ['playing', 'exited'], 60000);
+    // in line: the place over the game, and the menu's Stop waiting
+    await f.waitForFunction(() => !document.querySelector('#queue').hidden, null, { timeout: 60000 });
+    const inLine = await line();
+    await shot(f, 'full-in-line.png');
+    await f.keyboard.press('F9');
+    await f.waitForSelector('#menu[open]');
+    const stopShown = await f.evaluate(() => !document.querySelector('#menu [data-act="offline"]').hidden);
+    await f.locator('#menu').screenshot({ path: path.join(OUT, 'full-menu.png') });
+    await f.click('#menu [data-act="resume"]');
+    // the place frees up (its holder lets go as a page does at the game's end: a dropped one keeps it a minute): in, the
+    // line gone
+    holder.close(1000, 'closed');
+    await f.waitForFunction(() => document.querySelector('#queue').hidden && !!window.__nfsu2.session?.net?.vip(), null, { timeout: 20000 });
+    const inLog = (await f.evaluate(() => window.__nfsu2.log.tail(300))).filter(l => /in line|in from the line|freed up/.test(l));
+    await stop();
+    // a later Play on a full server: wait in line or play offline
+    holder = await hold();
+    await f.click('#play');
+    await f.waitForSelector('#confirm[open]', { timeout: 10000 });
+    const fullAsk = await dialog();
+    await f.locator('#confirm').screenshot({ path: path.join(OUT, 'full-ask.png') });
+    await f.click('#confirm-cancel');
+    await waitPhase(f, ['playing', 'exited'], 60000);
+    await f.waitForTimeout(3000);
+    const offline = await f.evaluate(() => ({ net: !!window.__nfsu2.session?.net, line: !document.querySelector('#queue').hidden }));
+    await stop();
+    // Esc waits in line; Stop waiting leaves it for the rest of the game
+    await f.click('#play');
+    await f.waitForSelector('#confirm[open]', { timeout: 10000 });
+    await f.keyboard.press('Escape');
+    await waitPhase(f, ['playing', 'exited'], 60000);
+    await f.waitForFunction(() => !document.querySelector('#queue').hidden, null, { timeout: 60000 });
+    await f.keyboard.press('F9');
+    await f.waitForSelector('#menu[open]');
+    await f.click('#menu [data-act="offline"]');
+    await f.waitForTimeout(1500);
+    const left = await f.evaluate(() => ({ line: !document.querySelector('#queue').hidden, toast: document.querySelector('#toast').textContent,
+      log: window.__nfsu2.log.tail(100).filter(l => /stopped waiting/.test(l)).length }));
+    await stop();
+    holder.close(1000, 'closed');
+    await c6.close();
+    report('full', /The server is full right now/.test(roamAsk.text) && roamAsk.ok === 'Turn on' && !second &&
+      /^The server is full\. In line for a place: next/.test(inLine ?? '') && stopShown && inLog.some(l => /in from the line/.test(l)) &&
+      fullAsk.title === 'The server is full' && fullAsk.ok === 'Wait in line' && fullAsk.cancel === 'Play offline' &&
+      !offline.net && !offline.line && !left.line && /Playing offline/.test(left.toast) && left.log === 1,
+      { roamAsk, second, inLine, stopShown, inLog, fullAsk, offline, left });
   }
 
   // ------------------------------------------------------------- page --
