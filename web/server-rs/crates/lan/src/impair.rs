@@ -2,6 +2,11 @@
 //! tools/vlanhub.py's impairments: UDP and ICMP are delayed by delay +- jitter ms, lost with loss %, reordered with
 //! reorder % (2 x delay + 5 ms more); TCP (kind 4) is only delayed, in order.  Free roam's frames are never touched
 //! (free roam has its own knob in the runtime).
+//!
+//! `hold=PCT,holdms=MS` is what a player's WebSocket does when a TCP segment is lost on the way: everything after it
+//! waits for its resend, then comes at once.  A UDP or ICMP datagram starts a hold of holdms on its link (one sender to
+//! one receiver) with hold %, and that link's datagrams wait until it ends (theirs, if later), then go in the order they
+//! came.  Not in vlanhub.py.
 
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
@@ -22,11 +27,15 @@ pub(crate) struct Impair {
     jitter: f64,
     loss: f64,
     reorder: f64,
+    hold: f64,
+    holdms: f64,
     seed: f64,
     /// the random numbers: a xorshift32 from `seed` (0 is 1)
     x: Mutex<u32>,
     /// when the last TCP segment from one browser to another goes out (they stay in order)
     tcp_last: Mutex<HashMap<(u32, u32), f64>>,
+    /// until when a link of one browser to another holds its UDP and ICMP (`hold`), and when the last one held goes
+    held: Mutex<HashMap<(u32, u32), (Instant, Instant)>>,
     tx: mpsc::UnboundedSender<Delayed>,
     rx: Mutex<Option<mpsc::UnboundedReceiver<Delayed>>>,
 }
@@ -55,6 +64,7 @@ impl Impair {
             return None;
         }
         let (mut delay, mut jitter, mut loss, mut reorder, mut seed) = (0.0, 0.0, 0.0, 0.0, 1.0);
+        let (mut hold, mut holdms) = (0.0, 300.0);
         for kv in spec.split(',') {
             let mut it = kv.split('=');
             let k = it.next().unwrap_or("");
@@ -64,6 +74,8 @@ impl Impair {
                 "jitter" => jitter = v,
                 "loss" => loss = v,
                 "reorder" => reorder = v,
+                "hold" => hold = v,
+                "holdms" => holdms = v,
                 "seed" => seed = v,
                 _ => {}
             }
@@ -78,9 +90,12 @@ impl Impair {
             jitter,
             loss,
             reorder,
+            hold,
+            holdms,
             seed,
             x: Mutex::new(x),
             tcp_last: Mutex::new(HashMap::new()),
+            held: Mutex::new(HashMap::new()),
             tx,
             rx: Mutex::new(Some(rx)),
         })
@@ -92,6 +107,10 @@ impl Impair {
         for (k, v) in [("delay", self.delay), ("jitter", self.jitter), ("loss", self.loss), ("reorder", self.reorder), ("seed", self.seed)]
         {
             m.insert(k.into(), nfsu2_util::json::num(v));
+        }
+        if self.hold != 0.0 {
+            m.insert("hold".into(), nfsu2_util::json::num(self.hold));
+            m.insert("holdms".into(), nfsu2_util::json::num(self.holdms));
         }
         Value::Object(m)
     }
@@ -127,13 +146,28 @@ impl Impair {
             }
         }
         // under 1 ms is 1 ms (as the Node server's timers had it)
-        let at = Instant::now() + Duration::from_secs_f64(d.max(1.0) / 1000.0);
+        let now = Instant::now();
+        let mut at = now + Duration::from_secs_f64(d.max(1.0) / 1000.0);
+        if self.hold != 0.0 && data[0] != KIND_STREAM {
+            // a held link's datagrams go when the hold ends, in order (never before the one before them)
+            let start = self.rand() * 100.0 < self.hold;
+            let mut held = self.held.lock();
+            let (until, last) = held.entry((from.vip, p.vip)).or_insert((now, now));
+            if start && *until <= now {
+                *until = now + Duration::from_secs_f64(self.holdms.max(0.0) / 1000.0);
+            }
+            if *until > now {
+                at = at.max(*until).max(*last);
+                *last = at;
+            }
+        }
         let _ = self.tx.send(Delayed { at, seq: 0, from: from.clone(), to: p.clone(), data: data.clone(), dst });
     }
 
     /// a browser left: its TCP order is forgotten
     pub(crate) fn forget(&self, vip: u32) {
         self.tcp_last.lock().retain(|k, _| k.0 != vip && k.1 != vip);
+        self.held.lock().retain(|k, _| k.0 != vip && k.1 != vip);
     }
 
     /// the delayed frames go out in the order of their times (equal times in the order they came)

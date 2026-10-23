@@ -671,6 +671,46 @@ async fn lan_impairment_udp_lost_tcp_delayed_in_order_free_roam_untouched() {
     sw.close().await;
 }
 
+// LAN impairment's hold (a lost TCP segment on a player's path): a link's datagrams wait for the hold's end, then come
+// at once, in the order they were sent; another link has holds of its own
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn lan_impairment_hold_releases_a_links_datagrams_at_once_in_order() {
+    let _s = serial().await;
+    let sw = start_full(opts(), "hold=100,holdms=300,seed=5", None, None, None).await;
+    let mut a = Client::connect(sw.port, "A").await;
+    a.welcome().await;
+    let mut b = Client::connect(sw.port, "B").await;
+    b.welcome().await;
+    let t0 = Instant::now();
+    for i in 0..5 {
+        a.udp(b.vip, 3658, 3658, format!("d{i}").as_bytes(), 3, 0);
+        sleep(40).await;
+    }
+    b.until_ms(3000, |g| (g.frames.iter().filter(|f| f.0[0] == 3).count() == 5).then_some(())).await;
+    let got: Vec<(String, f64)> = b
+        .got()
+        .frames
+        .iter()
+        .filter(|f| f.0[0] == 3)
+        .map(|f| (String::from_utf8_lossy(&f.0[16..]).to_string(), f.1.duration_since(t0).as_secs_f64() * 1000.0))
+        .collect();
+    println!("held: {got:?}");
+    assert_eq!(got.iter().map(|g| g.0.as_str()).collect::<Vec<_>>(), ["d0", "d1", "d2", "d3", "d4"], "in order");
+    assert!(got[0].1 >= 290.0, "held until the hold's end: {got:?}");
+    assert!(got[4].1 - got[0].1 < 30.0, "then at once: {got:?}");
+    // the other way, B to A, is a link of its own: its first datagram starts its own hold
+    let t1 = Instant::now();
+    b.udp(a.vip, 3658, 3658, b"back", 3, 0);
+    let r = a.until(|g| g.frames.iter().find(|f| f.0[0] == 3).map(|f| f.1)).await;
+    let ms = r.duration_since(t1).as_secs_f64() * 1000.0;
+    assert!(ms >= 290.0, "B to A held too ({ms:.1} ms)");
+    let im = sw.info().await["impair"].clone();
+    assert_eq!((im["hold"].clone(), im["holdms"].clone()), (100.into(), 300.into()), "{im}");
+    a.close().await;
+    b.close().await;
+    sw.close().await;
+}
+
 // ---- the audit's F1: a departed player's address and the frames meant for it ----
 
 // a departed player's address goes only to its token: an attacker who asks first gets nothing of it

@@ -11,8 +11,9 @@
 //        [--env K=V ...] [--host-env K=V ...] [--join-env K=V ...] [--headed] [--bounce <s>]
 //        [--host-arg X ...] [--join-arg X ...]   more tools/gen_lan_race.py options, e.g. --join-arg --confirm-join
 //                    (a slow link: the joiner answers the game's "connection quality below average" question)
-//        [--impair delay=MS,jitter=MS,loss=PCT,reorder=PCT,seed=N]   (own server only: the switch's
-//                    --lan-impair, vlanhub.py's impairments on LAN play's frames)
+//        [--impair delay=MS,jitter=MS,loss=PCT,reorder=PCT,hold=PCT,holdms=MS,seed=N]   (own server only: the
+//                    switch's --lan-impair, vlanhub.py's impairments on LAN play's frames; hold: a link held for
+//                    holdms, then everything at once, as a player's WebSocket after a lost TCP segment)
 //        [--page play [--size 960x540] [--play-only N]]   the renderer's test page instead of the null
 //                    platform's (WebGPU; frame dumps go to the server's /artifacts/ as i<n>-*.png); --play-only:
 //                    only instance N renders (two renderers at once overloaded a busy machine: §4.4 of the report)
