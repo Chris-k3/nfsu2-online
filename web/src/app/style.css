@@ -25,7 +25,10 @@
   color-scheme: dark;
 }
 
-* { box-sizing: border-box; }
+/* no zooming the page on a phone.  Android's browsers take the viewport's user-scalable=no (index.html); an
+ * iPhone's Safari ignores it, and a double tap zoomed in there.  Panning stays.  On every element, because WebKit
+ * starts a scroller (the settings' text box) over at auto; the game's canvas and touch controls keep none */
+* { box-sizing: border-box; touch-action: pan-x pan-y; }
 html, body { margin: 0; }
 body {
   min-height: 100vh;
@@ -338,7 +341,7 @@ html:has(> body > .stage:not([hidden])) { overflow: hidden; }
 .stage-menu {
   position: absolute; z-index: 4; top: max(12px, env(safe-area-inset-top)); left: max(12px, env(safe-area-inset-left));
   width: 48px; height: 48px; padding: 12px; border: 0; border-radius: 50%;
-  background: rgba(0, 0, 0, 0.4); color: rgba(255, 255, 255, 0.72); touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+  background: rgba(0, 0, 0, 0.4); color: rgba(255, 255, 255, 0.72); -webkit-tap-highlight-color: transparent;
 }
 .stage-menu svg { display: block; width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
 .stage-menu:active { background: rgba(0, 0, 0, 0.72); color: var(--lime); }

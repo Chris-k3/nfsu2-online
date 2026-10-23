@@ -23,7 +23,7 @@ import { loadGame, serverRev, type Loaded } from './loader';
 import { claimInstance } from './instance';
 import { LogRing, downloadBlob, stamp } from './logs';
 import { enterFullscreen, exitFullscreen, isFullscreen, keepScreenOn, measureRefresh, settledSize, trackCanvasSize } from './display';
-import { deviceDefaults, markTouch, padSeen, touchFirst } from './device';
+import { deviceDefaults, markTouch, noPinchZoom, padSeen, touchFirst } from './device';
 import { markPad, padPress, pageDialog } from './padnav';
 import { controlsSheet, type ControlsSheet } from './controls';
 import { TouchControls } from './touch';
@@ -964,6 +964,7 @@ export async function boot() {
   }, { capture: true });
   window.addEventListener('beforeunload', e => { if (session) { e.preventDefault(); e.returnValue = ''; } });
   document.addEventListener('fullscreenchange', () => { if (!isFullscreen() && session) toast(`Full screen left. ${cap(menuName())} has it.`, 3000); });
+  noPinchZoom();
   // the menu's button on the game: on a touch screen from the start, elsewhere from the first touch
   markTouch();
   keySheet = controlsSheet($('#keys'), 'keys', { follow: true });

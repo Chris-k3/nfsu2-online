@@ -34,3 +34,9 @@ export function markTouch() {
   set();
   q.addEventListener('change', set);
 }
+
+/** no pinch zoom on an iPhone: Safari ignores the viewport's user-scalable=no, and cancelling its own gesture events
+ *  is what stops a pinch there (style.css's touch-action stops the double tap) */
+export function noPinchZoom() {
+  for (const t of ['gesturestart', 'gesturechange']) document.addEventListener(t, e => e.preventDefault(), { passive: false });
+}
