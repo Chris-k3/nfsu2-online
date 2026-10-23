@@ -118,7 +118,7 @@ export class LobbyPanel {
         kids.push(el('div', 'lobby-note', s.text ?? ''));
         break;
     }
-    if ((s.v === 'join' || s.v === 'lobby') && s.fee) kids.push(el('div', 'lobby-hint', `Quitting the race costs $${s.fee}`));
+    if (s.v === 'join' && s.fee) kids.push(el('div', 'lobby-hint', `Quitting the race costs $${s.fee}`));
     p.replaceChildren(...kids);
   }
 

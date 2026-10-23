@@ -3505,14 +3505,15 @@ static int mp_line(int64_t host, char *tx, int n){
         return 1;
     case MP_COUNT: {
         int64_t s = (g_mp.start_at - host + 999999) / 1000000;
-        snprintf(tx, (size_t)n, "The race starts in %d (quitting it costs $%d)", (int)(s < 0 ? 0 : s), MPRACE_QUIT_FEE);
+        snprintf(tx, (size_t)n, "The race starts in %d", (int)(s < 0 ? 0 : s));
         return 1; }
     case MP_IDLE: {
         const MpSpot *sp = mp_spot_here();
         MpLobby *l = mp_joinable();
         if (l && (!sp || sp->kind == MPS_ONLY)){
             if (!mprace_car_ok()) snprintf(tx, (size_t)n, "%s's %s: %s", mp_name(l->host), race_kind(l->race), MP_NOCAR);
-            else snprintf(tx, (size_t)n, "Press Enter to join %s's %s (%d of %d)", mp_name(l->host), race_kind(l->race), l->n, l->max);
+            else snprintf(tx, (size_t)n, "Press Enter to join %s's %s (%d of %d). Quitting the race costs $%d", mp_name(l->host), race_kind(l->race),
+                          l->n, l->max, MPRACE_QUIT_FEE);
             return 1;
         }
         if (sp && sp->kind == MPS_ONLY){
@@ -3642,7 +3643,6 @@ static void mp_panel(int64_t host, int in_roam){
             int64_t s = (g_mp.alone_at + g_mp.alone_us - host + 999999) / 1000000;
             if (s <= 60) js_int(&j, "closes", (int)(s < 0 ? 0 : s));
         }
-        js_int(&j, "fee", MPRACE_QUIT_FEE);
     } else if (hud){
         const MpSpot *sp = mp_spot_here();
         MpLobby *l = mp_joinable();

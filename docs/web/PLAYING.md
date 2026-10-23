@@ -304,10 +304,10 @@ Good to know:
     place and prize: about a minute for the way out and back.
   - **Your career is not touched:** the race does not count in it, is neither won nor lost there and opens nothing.
     Only your bank changes: 1st $400, 2nd $300, 3rd $200, 4th $100, nothing for 5th or 6th. **Quitting the race**
-    (its pause menu's Quit) costs $75, and the lobby's panel says so: the host's quit ends the race for everyone, and in
-    a race of two either player's does. A race that ends under you costs nothing. It goes in or out at the crib on the
-    way back, and the crib's autosave saves it with your profile (with the game's Save option at Prompt or Off it waits
-    for your next save, as any change in the crib does).
+    (its pause menu's Quit) costs $75, as the panel says before you join: the host's quit ends the race for everyone,
+    and in a race of two either player's does. A race that ends under you costs nothing. It goes in or out at the crib
+    on the way back, and the crib's autosave saves it with your profile (with the game's Save option at Prompt or Off
+    it waits for your next save, as any change in the crib does).
   - A player who leaves the lobby in the countdown, quits the game, or whose game cannot set off is not waited for; the
     host's game waits a minute at most for the others in the LAN race's room, then starts with those who are ready.
     A race that cannot come together (the host's game gone, nobody else in the game in time) ends the trip: every game
