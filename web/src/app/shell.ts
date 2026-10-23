@@ -15,6 +15,7 @@
 //   script=<url>     autotest input script (NFSU2_INPUT_SCRIPT)
 //   artifacts=<url>  where the autotest's frame dumps are PUT (the server's /artifacts/)
 //   dumpscale=<f>    their scale
+//   rendercheck=W,D  the render check's warm-up and verdict, in seconds of driving (rendercheck.ts)
 // While any of them is given, the start page says whether it is in effect.
 
 import registryDefaults from '../../../app/registry-defaults.txt';
@@ -40,6 +41,7 @@ import { FpsOverlay, FPS_MODES, type FpsMode } from './overlay';
 import { LobbyPanel } from './lobby';
 import { GameSession } from './game';
 import { AwayCheck, AWAY_LIMITS, type AwayLimits } from './away';
+import { RenderCheck, RENDER_CHECK_TIMES, type RenderCheckTimes } from './rendercheck';
 import { moviesKept, Predownload } from './predownload';
 
 type Phase = 'boot' | 'ready' | 'error' | 'waiting' | 'starting' | 'playing' | 'exited';
@@ -47,7 +49,7 @@ type Phase = 'boot' | 'ready' | 'error' | 'waiting' | 'starting' | 'playing' | '
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 
 // the page address's test aids, once boot knows whether the server is a development server
-const TEST_PARAMS = ['env', 'save', 'fresh', 'reg', 'script', 'artifacts', 'dumpscale', 'away'];
+const TEST_PARAMS = ['env', 'save', 'fresh', 'reg', 'script', 'artifacts', 'dumpscale', 'away', 'rendercheck'];
 const addr = new URLSearchParams(location.search);
 let q = new URLSearchParams();
 let SAVE = 'save';
@@ -85,6 +87,7 @@ let refreshMeasured: Promise<void> = Promise.resolve();
 let session: GameSession | null = null;
 let hudWide = true;                      // the running game's HUD is edge-anchored (hud = wide), not 4:3
 let away: AwayCheck | null = null;
+let renderCheck: RenderCheck | null = null;
 let lastExit: { code: number; seconds: number } | null = null;
 const checks = new Map<string, Check>();
 let instance: ReturnType<typeof claimInstance>;
@@ -398,6 +401,8 @@ async function startGame() {
   setPhase('playing', 'Playing', '');
   document.body.dataset.phase = 'playing';
   away = new AwayCheck(session, awayLimits(), awayLine, logLine);
+  // a phone's render scale (device.ts): whether it has room for all its pixels, for its next game
+  if (r.source.NFSU2_RENDER === 'device') renderCheck = new RenderCheck(session, r.env.NFSU2_RENDER, renderCheckTimes(), logLine);
   touch.start(session);
   fps.memory = session.proc.memory;
   const st = session;
@@ -494,6 +499,8 @@ function endStage() {
   touch.stop();
   awake?.(); awake = null;
   away?.stop(); away = null;
+  renderCheck?.stop(); renderCheck = null;
+  Object.assign(DEVICE, deviceDefaults());      // its verdict, for the next game without a reload
   exitFullscreen();
   untrack?.(); untrack = null;
   fps.stop(); fps.reader = null; fps.memory = null;
@@ -635,6 +642,12 @@ function awayLimits(): AwayLimits {
   const [inputS, hiddenS, warnS] = (q.get('away') ?? '').split(',').map(Number);
   const ms = (s: number, d: number) => Number.isFinite(s) && s > 0 ? s * 1000 : d;
   return { inputMs: ms(inputS, AWAY_LIMITS.inputMs), hiddenMs: ms(hiddenS, AWAY_LIMITS.hiddenMs), warnMs: ms(warnS, AWAY_LIMITS.warnMs) };
+}
+/** the render check's times; a test page's address may give them in seconds of driving (rendercheck=warmup,verdict) */
+function renderCheckTimes(): RenderCheckTimes {
+  const [warmS, decideS] = (q.get('rendercheck') ?? '').split(',').map(Number);
+  const ms = (s: number, d: number) => Number.isFinite(s) && s > 0 ? s * 1000 : d;
+  return { warmupMs: ms(warmS, RENDER_CHECK_TIMES.warmupMs), decideMs: ms(decideS, RENDER_CHECK_TIMES.decideMs) };
 }
 
 function toast(msg: string, ms: number) {
@@ -1004,7 +1017,7 @@ export async function boot() {
   (window as any).__nfsu2 = {
     get phase() { return phase; }, get lastExit() { return lastExit; }, get fps() { return { game: fps.gameFps, page: fps.pageFps, source: $('#fps').dataset.source }; },
     get session() { return session; }, log, save: SAVE, download: () => download.status, offline: () => offline, displayHz: () => displayHz, retryModule: () => loadModule(),
-    newer: () => newer, tried: () => tried, touch: () => touch.state(),
+    newer: () => newer, tried: () => tried, touch: () => touch.state(), renderCheck: () => renderCheck?.state() ?? null,
     env: () => resolved().env, settingsText: () => settingsText, checks: () => [...checks.values()],
     fpsMode: (m?: FpsMode) => { if (m && FPS_MODES.includes(m)) fps.set(m); return fps.mode; },
     quitTimes: { forcedCloseMaxMs: FORCED_CLOSE_MAX_MS, stopAfterMs: STOP_AFTER_MS },

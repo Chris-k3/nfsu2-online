@@ -115,11 +115,18 @@ static int drive_state(void){
     }
     return v;
 }
+/* "rate": the frame rate the game paces to now (framerate.c content_rate:
+ * the mode's rate, 30 in a cutscene, at most 120 in a network race; 0 =
+ * uncapped), so the page can tell whether the game keeps up with it
+ * (web/src/app/rendercheck.ts) */
+int hfr_rate_now(void);
 void status_web_frame(void){
-    static int slot = -2, last = -1;
-    if (slot == -2) slot = host_status_slot("drive");
+    static int slot = -2, last = -1, rslot = -2, rlast = -1;
+    if (slot == -2){ slot = host_status_slot("drive"); rslot = host_status_slot("rate"); }
     int v = drive_state();
     if (v != last && slot >= 0){ last = v; host_status_set(slot, v); }
+    int r = hfr_rate_now();
+    if (r != rlast && rslot >= 0){ rlast = r; host_status_set(rslot, r); }
 }
 
 /* main_web.c, before the guest starts */

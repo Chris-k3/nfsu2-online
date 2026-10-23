@@ -82,6 +82,9 @@ export interface Renderer {
   dump(name: string): Promise<Blob>;
   /** distributions of the frames since the last call with reset (or since attach) */
   window(reset?: boolean): RendererWindow;
+  /** each frame's time from its submit until the GPU had done it (onSubmittedWorkDone, so every
+   *  browser has it, timestamp queries or not), ms, since the last call; at most 4096 */
+  doneMs(): number[];
   /** wait for pending dumps */
   flush(): Promise<void>;
   /** where the game's image was last composited in the canvas, in canvas pixels
@@ -191,6 +194,7 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
   // the benchmark window (Renderer.window): per-frame samples, bounded
   const WIN_MAX = 1 << 17;
   let winEnc: number[] = [], winGpu: number[] = [], winDraws = 0, winPasses = 0, winCalls = { ...enc.calls };
+  let done: number[] = [];
   const dumpWaiters: { name: string; resolve: (b: Blob) => void }[] = [];
   const pending = new Set<Promise<unknown>>();
 
@@ -288,7 +292,12 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
       }).catch(() => { qBusy[slot] = false; });
     }
     inFlight++;
-    device.queue.onSubmittedWorkDone().then(() => { inFlight--; pump(); });
+    const tSub = performance.now();
+    device.queue.onSubmittedWorkDone().then(() => {
+      inFlight--;
+      if (done.length < 4096) done.push(performance.now() - tSub);
+      pump();
+    });
     const ms = performance.now() - t0;
     frames++; encMsTotal += ms; encMsLast = ms; drawsLast = st.draws; passesLast = st.passes;
     if (winEnc.length < WIN_MAX) { winEnc.push(ms); winDraws += st.draws; winPasses += st.passes; }
@@ -429,6 +438,7 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
       if (reset) { winEnc = []; winGpu = []; winDraws = 0; winPasses = 0; winCalls = { ...enc.calls }; }
       return w;
     },
+    doneMs: () => { const d = done; done = []; return d; },
     dump: (name: string) => new Promise<Blob>(resolve => dumpWaiters.push({ name, resolve })),
     imageRect: () => imgRect ?? { x: 0, y: 0, w: canvas.width, h: canvas.height },
     flush: async () => {

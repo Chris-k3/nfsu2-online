@@ -16,9 +16,21 @@ export function touchFirst(): boolean { return matchMedia('(pointer: coarse)').m
 
 /** settings.ini keys whose default is another on this device: what applies when neither the file nor the page
  *  address sets them.  Phones: 75% resolution scale (a phone's screen has more pixels than its GPU fills at 60 fps),
- *  and full screen (no browser bars over the game). */
+ *  or 100% once the render check found room to spare on this one (rendercheck.ts), and full screen (no browser
+ *  bars over the game). */
 export function deviceDefaults(): Record<string, string> {
-  return isPhone() ? { render: 'scale:0.75', fullscreen: 'on' } : {};
+  return isPhone() ? { render: rememberedRender() === 'backing' ? 'backing' : 'scale:0.75', fullscreen: 'on' } : {};
+}
+
+/** the render check's verdict on this phone: in this browser only, like the other device defaults (settings.ini,
+ *  and with it the cloud saves, never has it) */
+const RENDER_KEY = 'nfsu2.device.render';
+export function rememberedRender(): string | null {
+  try { return localStorage.getItem(RENDER_KEY); } catch { return null; }
+}
+export function rememberRender(v: string | null) {
+  try { if (v) localStorage.setItem(RENDER_KEY, v); else localStorage.removeItem(RENDER_KEY); }
+  catch { /* storage off: the check measures again next time */ }
 }
 
 /** whether the browser shows the page a controller (Chrome: only after a button press on the page) */

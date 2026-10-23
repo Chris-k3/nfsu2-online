@@ -70,6 +70,8 @@ export interface RendererSubsystem extends Subsystem {
   imageRect(): { x: number; y: number; w: number; h: number };
   /** tests: the next frame as PNG (also uploaded as <name>.png with RendererOptions.artifacts) */
   dump?(name: string): Promise<Blob>;
+  /** each frame's time from its submit until the GPU had done it, ms, since the last call (rendercheck.ts) */
+  doneMs?(): number[];
 }
 
 export interface AudioSubsystem extends Subsystem {

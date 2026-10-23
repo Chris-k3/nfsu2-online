@@ -50,7 +50,9 @@ need the server; your saves are in the browser either way.
 
 **Phones and tablets** (Chrome on Android): a tap is a click, so the game's menus work by touch. The ☰ button opens the
 page menu. On a phone the game goes full screen when you press Play and renders at 75% resolution scale (Settings,
-Display changes both). Held sideways, the game fills the screen with the touch controls over it; held upright, it shows
+Display changes both). After a few minutes of driving the page checks whether the phone keeps its frame rate with GPU
+time to spare; if so, it renders at 100% from the next game on that phone (and goes back to 75% if it later falls
+behind). This only applies while you leave the resolution scale at its default. Held sideways, the game fills the screen with the touch controls over it; held upright, it shows
 in a 4:5 picture at the top with the ☰ button and the touch controls below it. The screen stays on while the game
 runs. Chrome's menu, **Add to Home screen** (or **Install app**), puts the game on the home screen as an app that opens
 full screen; on a PC the same makes it an app with its own window.
@@ -119,7 +121,7 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
 |---|---|
 | Online | its own section under Saves: how many play on this server now, free roam with others, your name (in free roam and online), room, the game's Online mode (on by default); more: solid cars and the free-roam network |
 | Game | language, movies, autosave; more: startup movies (skippable, original or off), sound, pause or keep running in the background, sound output latency |
-| Display | full screen on Play (off: the game plays in the browser window; on by default on phones), resolution scale (phones start at 75%), frame rate (auto follows the screen: 120 on a 120 Hz display, 240 on a 240 Hz one; 60, 120 or 240; Online and LAN races at most 120); more: HUD layout, movie framing, cutscene bars, other cars' headlights (players, all cars, off), frame-rate counter |
+| Display | full screen on Play (off: the game plays in the browser window; on by default on phones), resolution scale (phones start at 75%, 100% once one shows it has the room), frame rate (auto follows the screen: 120 on a 120 Hz display, 240 on a 240 Hz one; 60, 120 or 240; Online and LAN races at most 120); more: HUD layout, movie framing, cutscene bars, other cars' headlights (players, all cars, off), frame-rate counter |
 | Controller | rumble; more: controller on or off, menu buttons, dead zones |
 
 - **Language:** English, French, German, Italian, Spanish, Dutch, Swedish, Danish, Korean, Chinese, Japanese, Russian,
