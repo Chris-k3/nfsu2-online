@@ -262,7 +262,9 @@ Good to know:
   leaves at about a third of it. Such a hit starts the game's slow-motion crash view only when it is hard: from about
   155 km/h of closing speed between two cars of the same weight. You also drive through a car whose player is
   paused (or you are), one that has stood still for a minute (or yours has), and any car within 20 m of a shop's, the garage's or the car lot's door, so a
-  crowd can't wall off an entrance. The same goes for the start of an event
+  crowd can't wall off an entrance. A car that has stayed within 6 m of one spot for 20 s, after at least four hits
+  from at least two other players' cars in the last minute, is in the way: everyone drives through it until it
+  leaves that spot, so nobody can park across a road (the airport's way out) for long. The same goes for the start of an event
   that is open in your career (a race, or one of the stage's other events): within 20 m of it you drive through every
   car, and every car through yours, so nobody blocks it; for players who don't have that event it is an ordinary
   spot. A player on an older version doesn't know about your events or your Ghost mode setting, and collides with

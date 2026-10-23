@@ -203,6 +203,13 @@
 #define PUSH_Q          8             /* pushes held at once (more: merged into the newest) */
 #define IDLE_MPS        1.f           /* a car slower than this stands */
 #define IDLE_US         60000000      /* a car that has stood this long is passable */
+#define BLOCK_M         6.f           /* the player's car that stays this near one spot */
+#define BLOCK_US        20000000      /* ...this long */
+#define BLOCK_HITS      4             /* ...and has had this many hits */
+#define BLOCK_CARS      2             /* ...with this many friends' cars */
+#define BLOCK_WIN_US    60000000      /* ...in this long, anywhere, is passable until it leaves the spot (block_hit) */
+#define BLOCK_GAP_US    1000000       /* a friend's car touching it again after this long is another hit */
+#define BLOCK_Q         64            /* hits kept: more than one car's in BLOCK_WIN_US (one each BLOCK_GAP_US) */
 #define DOOR_M          20.f          /* a car this near a door's trigger is passable */
 #define G_TRIGGERS      0x0088f298u   /* the track's triggers: +0x440 + 4t .. +0x444 + 4t those of type t (0x5D9BF0) */
 #define TRIG_DOOR       14            /* the triggers of the shops, the garage and the car lot (0x5EB040 asks types 13-15) */
@@ -387,6 +394,7 @@ typedef struct {
     uint32_t moded, wheelfix;                 /* other physics modes the game set (roam_game_inert); frames the wheels were put back (wheels_pose) */
     uint32_t blinks;                          /* times the game blinked the car out (unblink) */
     uint32_t hits; float hit_max;             /* hits with the player's car; the most speed the game gave the player's car in one (m/s) */
+    int64_t  touch_t;                         /* when the car last touched the player's car (host time; block_hit) */
 } Slot;
 static Slot g_sl[NSLOT];
 static uint32_t g_world_seen;
@@ -838,8 +846,14 @@ static void ghost_all(void){ for (int k = 0; k < NSLOT; k++) g_sl[k].ghost = 1; 
  * everyone.  Passable no longer, the car is a ghost until it is clear of the
  * player's car, as when it appears.  A player at the new career's start is
  * not shown to others (at_spawn), so there friends' cars are passable for
- * the player too. */
-enum { SOFT_PAUSED = 1, SOFT_IDLE = 2, SOFT_DOOR = 4, SOFT_SPAWN = 8, SOFT_EVENT = 16, SOFT_SAYS = 32 };
+ * the player too.  A car parked across a road (an SUV at the airport's way
+ * out, which the others could not shove away) was passable after a minute
+ * only if its player never nudged it, so a player's car that stays near one
+ * spot after hits by others (there or on its way there: hits shove it) lets
+ * every car through it as well until it leaves that spot (stay_update,
+ * block_hit; only its own game sees all its hits, so it says so with
+ * RC_BIT_PASS). */
+enum { SOFT_PAUSED = 1, SOFT_IDLE = 2, SOFT_DOOR = 4, SOFT_SPAWN = 8, SOFT_EVENT = 16, SOFT_SAYS = 32, SOFT_BLOCK = 64 };
 /* an open event: its trigger's box, and what it leads to (FN_MARKER_WHAT's
  * out[kind]: 1 a race, 2 a shop, 3 a showcase (a cover shoot), 4 another
  * (the table at 0x838424: STAGE_2_SHOW_1, STAGE_3_PERF_1, ...)) */
@@ -850,6 +864,12 @@ static struct {
     uint32_t first, end;                      /* the list was read from these */
     int64_t  paused_since, idle_since;        /* the player is paused / the player's car stands, since (0: not) */
     int      me;                              /* the player's own reasons (SOFT_*) */
+    /* the spot the player's car stays near (BLOCK_M), and its last hits */
+    float    stay[3];
+    int64_t  stay_since;                      /* (0: none: a new one from the next frame in free roam) */
+    int      blocking;                        /* in the way there (SOFT_BLOCK) */
+    struct { uint32_t id; int64_t t; } hit[BLOCK_Q];   /* the friend (peer id) and when; a ring */
+    int      hit_at, hit_n;
     /* the player's open events (events_read), and how many of the career's
      * event triggers there are */
     int      nev, evall;
@@ -939,10 +959,34 @@ static int at_spawn(const float *p){
     float dx = p[0] - SPAWN_X, dy = p[1] - SPAWN_Y, dz = p[2] - SPAWN_Z, r = (float)O.spawn_m;
     return dx * dx + dy * dy + dz * dz < r * r;
 }
+/* the spot the player's car stays near: a new one once the car is farther
+ * than BLOCK_M from it */
+static void stay_update(int64_t host, const float *at){
+    float dx = at[0] - g_pass.stay[0], dy = at[1] - g_pass.stay[1], dz = at[2] - g_pass.stay[2];
+    if (g_pass.stay_since && dx * dx + dy * dy + dz * dz <= BLOCK_M * BLOCK_M) return;
+    if (g_pass.blocking) rlog("[roam] f=%ld my car has left the spot it stood on: friends' cars touch it again\n", rh_frame());
+    memcpy(g_pass.stay, at, sizeof g_pass.stay);
+    g_pass.stay_since = host; g_pass.blocking = 0;
+}
+/* the player's car's hits with friends' cars in the last BLOCK_WIN_US, and
+ * from how many of them (*cars) */
+static int block_hits(int64_t host, int *cars){
+    uint32_t ids[BLOCK_Q];
+    int n = 0, nc = 0;
+    for (int i = 0; i < g_pass.hit_n; i++){
+        if (host - g_pass.hit[i].t > BLOCK_WIN_US) continue;
+        n++;
+        int j = 0;
+        while (j < nc && ids[j] != g_pass.hit[i].id) j++;
+        if (j == nc) ids[nc++] = g_pass.hit[i].id;
+    }
+    *cars = nc;
+    return n;
+}
 /* the player's own reasons, once a frame: paused (a second, as a friend's
  * pause counts), standing, near a door or one of their open events, at the
- * new career's start; any of them, or ghost cars, goes out in the snapshots
- * (local_state: RC_BIT_PASS) */
+ * new career's start, standing in others' way; any of them, or ghost cars,
+ * goes out in the snapshots (local_state: RC_BIT_PASS) */
 static void soft_me(CPU *c, int64_t host, uint8_t status){
     doors_read();
     events_read(c, host);
@@ -953,12 +997,22 @@ static void soft_me(CPU *c, int64_t host, uint8_t status){
     else if (!g_pass.idle_since) g_pass.idle_since = host;
     uint32_t me = player_car();
     float at[3] = { 0.f, 0.f, 0.f };
-    if (ok(me, 0x70)) rd3(me + 0x60u, at);
+    if (ok(me, 0x70)){ rd3(me + 0x60u, at); stay_update(host, at); }
+    else g_pass.stay_since = g_pass.blocking = 0;
+    if (!g_pass.blocking && g_pass.stay_since && host - g_pass.stay_since >= BLOCK_US){
+        int cars = 0, n = block_hits(host, &cars);
+        if (n >= BLOCK_HITS && cars >= BLOCK_CARS){
+            g_pass.blocking = 1;
+            rlog("[roam] f=%ld my car has stayed within %.0f m for %.0f s after %d hits from %d players' cars in %.0f s: every car drives through it\n",
+                 rh_frame(), (double)BLOCK_M, (double)(host - g_pass.stay_since) / 1e6, n, cars, (double)BLOCK_WIN_US / 1e6);
+        }
+    }
     g_pass.me = (g_pass.paused_since && host - g_pass.paused_since >= 1000000 ? SOFT_PAUSED : 0) |
                  (g_pass.idle_since && host - g_pass.idle_since >= IDLE_US ? SOFT_IDLE : 0) |
                  (ok(me, 0x70) && near_door(at[0], at[1]) ? SOFT_DOOR : 0) |
                  (ok(me, 0x70) && near_event(at[0], at[1]) ? SOFT_EVENT : 0) |
-                 (ok(me, 0x70) && at_spawn(at) ? SOFT_SPAWN : 0);
+                 (ok(me, 0x70) && at_spawn(at) ? SOFT_SPAWN : 0) |
+                 (g_pass.blocking ? SOFT_BLOCK : 0);
 }
 /* a shown friend's car's reasons, the player's added; leaving them makes it
  * a ghost.  The friend's own (RC_BIT_PASS): near one of their open events,
@@ -4651,6 +4705,7 @@ void roam_game_frame(CPU *c){
     /* slots (guest calls, outside the lock) */
     if (!in_roam){
         if (w) park_all(c);
+        g_pass.stay_since = g_pass.blocking = 0;
     } else {
         /* the outrun challengers' manager first: whether opponent cars are
          * free this frame depends on it */
@@ -4857,10 +4912,11 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
                     car ? MR32(car + 0x24u) : 0, car ? MR32(car + 0x28u) : 0, car ? MR32(car + 0x554u) : 0, car ? (int16_t)MR16(car + 8u) : -1,
                     car ? (double)MRF32(car + 0x50u) : 0, car ? (double)MRF32(car + 0x54u) : 0, car ? (double)MRF32(car + 0x58u) : 0);
             uint32_t body = car ? rd32(car + 0x3cu) : 0;
-            if (car) rlog("[roam]     %s%s%s%s%s%s%s%s; collision body %s%s; %u hit(s) with my car (at most %.1f m/s)\n", !O.collide ? "solid cars off" : g_sl[k].soft ? "passable:" : g_sl[k].ghost ? "a ghost" : "solid",
+            if (car) rlog("[roam]     %s%s%s%s%s%s%s%s%s; collision body %s%s; %u hit(s) with my car (at most %.1f m/s)\n", !O.collide ? "solid cars off" : g_sl[k].soft ? "passable:" : g_sl[k].ghost ? "a ghost" : "solid",
                           g_sl[k].soft & SOFT_PAUSED ? " paused" : "", g_sl[k].soft & SOFT_IDLE ? " standing" : "",
                           g_sl[k].soft & SOFT_DOOR ? " near a door" : "", g_sl[k].soft & SOFT_SPAWN ? " at the start" : "",
-                          g_sl[k].soft & SOFT_EVENT ? " near my event" : "", g_sl[k].soft & SOFT_SAYS ? " says so" : "",
+                          g_sl[k].soft & SOFT_EVENT ? " near my event" : "", g_sl[k].soft & SOFT_BLOCK ? " my car in the way" : "",
+                          g_sl[k].soft & SOFT_SAYS ? " says so" : "",
                           g_sl[k].soft && g_sl[k].ghost ? " (then a ghost)" : "",
                           !ok(body, 0x20) ? "none" : MR8(body + 0x17u) ? "off" : "on", DUELS && du_busy(k) ? "; takes no outrun now" : "",
                           g_sl[k].hits, (double)g_sl[k].hit_max);
@@ -4877,12 +4933,16 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
         uint32_t me = player_car();
         int ev = !strcasecmp(sub, "events"), n = ev ? g_pass.nev : g_pass.n;
         float mx = me ? MRF32(me + 0x60u) : 0, my = me ? MRF32(me + 0x64u) : 0;
-        rlog("[roam] f=%ld mp %s: %d doors, %d open events of %d; the player at %.1f %.1f is%s%s%s%s%s%s; sends%s%s\n", f, sub, g_pass.n,
+        int64_t now = roam_plat_now_us();
+        int cars = 0, hits = block_hits(now, &cars);
+        rlog("[roam] f=%ld mp %s: %d doors, %d open events of %d; the player at %.1f %.1f is%s%s%s%s%s%s%s; sends%s%s; "
+                "on its spot for %.0f s, %d hit(s) from %d players' cars in %.0f s\n", f, sub, g_pass.n,
                 g_pass.nev, g_pass.evall, (double)mx, (double)my,
                 g_pass.me ? "" : " not passable", g_pass.me & SOFT_PAUSED ? " paused" : "", g_pass.me & SOFT_IDLE ? " standing" : "",
                 g_pass.me & SOFT_DOOR ? " near a door" : "", g_pass.me & SOFT_EVENT ? " near an event" : "",
-                g_pass.me & SOFT_SPAWN ? " at the start" : "",
-                !O.collide || g_pass.me ? " passable" : "", g_du.busy ? " no outruns" : (!O.collide || g_pass.me ? "" : " nothing"));
+                g_pass.me & SOFT_SPAWN ? " at the start" : "", g_pass.me & SOFT_BLOCK ? " in the way" : "",
+                !O.collide || g_pass.me ? " passable" : "", g_du.busy ? " no outruns" : (!O.collide || g_pass.me ? "" : " nothing"),
+                g_pass.stay_since ? (double)(now - g_pass.stay_since) / 1e6 : 0.0, hits, cars, (double)BLOCK_WIN_US / 1e6);
         if (ev) rlog("[roam]   the last sweep of the event triggers: %.0f us in %d frames, at most %.0f us a frame\n",
                      (double)g_pass.ev_cost[0] / 1e3, (int)g_pass.ev_cost[2], (double)g_pass.ev_cost[1] / 1e3);
         for (int i = 0; i < n; i++){
@@ -5419,6 +5479,17 @@ static void push_add(Slot *s, const float *v, int64_t t){
     for (int i = 0; i < 3; i++){ s->pq[s->pqn].v[i] += v[i]; s->push_v[i] += v[i]; }
     s->pq[s->pqn++].t = t;
 }
+/* a friend's car touched the player's car this step: a hit (block_hits)
+ * when it had not touched it for BLOCK_GAP_US, as a car leaning on it
+ * touches it every step */
+static void block_hit(Slot *s, int64_t host){
+    int64_t last = s->touch_t;
+    s->touch_t = host;
+    if (last && host - last < BLOCK_GAP_US) return;
+    g_pass.hit[g_pass.hit_at].id = s->peer_id; g_pass.hit[g_pass.hit_at].t = host;
+    g_pass.hit_at = (g_pass.hit_at + 1) % BLOCK_Q;
+    if (g_pass.hit_n < BLOCK_Q) g_pass.hit_n++;
+}
 /* roam.c, a touching pair (0x5B2610, thiscall: the pair, its bodies at +0xC
  * and +0x10, from the collision step 0x5FFA50): the two are rewound to the
  * moment they touch, the impulse (0x5AF0E0) goes into the bodies' own state,
@@ -5498,6 +5569,7 @@ void roam_game_contact(CPU *c, void (*orig)(CPU *)){
         return;
     }
     s->hit_step = g_step;
+    block_hit(s, roam_plat_now_us());
     contact_get(me, rb, st);
     for (int i = 0; i < CS_N; i++) if (!__builtin_isfinite(st[i])) return;
     for (int i = 0; i < 3; i++){ dv[i] = st[CS_V + i] - st0[CS_V + i]; d2 += dv[i] * dv[i]; push[i] = -(1.f - keep) * dv[i]; }
