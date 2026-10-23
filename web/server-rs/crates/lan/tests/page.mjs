@@ -370,6 +370,26 @@ const cases = {
         assert.deepEqual(rxTakeRaw(memory, roam).map(g => g.data.toString('hex')), seq.slice(i, i + 6).map(d => d.toString('hex')), `snapshots ${i} on`);
       }
       assert.ok(link.stats().deltaIn >= 50, `as deltas (${link.stats().deltaIn} of ${seq.length})`);
+      // free roam's own datagrams (a ping, a pong) wait for the next car state to a friend, at most TX_HOLD_MS (50)
+      // after the page's last send, and go with it as one message; one long after the last send goes at once
+      const ping = roamDatagram(6, 8), pong = roamDatagram(7, 16), carState = roamDatagram(3, 70);
+      const ins = async () => (await state(port)).info.bundlesIn, in0 = await ins(), nb = b.dgrams().length, nc = c.dgrams().length;
+      await sleep(80);
+      txPush(memory, roam, { dst: b.vip, data: ping }); txBell(roam);
+      await b.until(() => b.dgrams().length >= nb + 1);
+      txPush(memory, roam, { dst: b.vip, data: pong }); txBell(roam);
+      await sleep(15);
+      assert.equal(b.dgrams().length, nb + 1, 'a pong right after a send waits');
+      txPush(memory, roam, { dst: c.vip, data: carState }); txBell(roam);
+      await b.until(() => b.dgrams().length >= nb + 2); await c.until(() => c.dgrams().length >= nc + 1);
+      assert.equal(await ins(), in0 + 1, 'the ping alone (a frame), then the pong with the car state (a bundle)');
+      txPush(memory, roam, { dst: b.vip, data: carState }); txBell(roam);
+      await b.until(() => b.dgrams().length >= nb + 3);
+      const t0 = performance.now();
+      txPush(memory, roam, { dst: b.vip, data: ping }); txBell(roam);
+      await b.until(() => b.dgrams().length >= nb + 4);
+      const held = performance.now() - t0;
+      assert.ok(held >= 25, `without a car state it waits until 50 ms after the last send (${held.toFixed(0)} ms)`);
       await b.close(); await c.close();
     } finally { link.close(); }
   },

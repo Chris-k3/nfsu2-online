@@ -127,7 +127,7 @@ pub async fn run(o: Options, cores: usize) {
         Arc::new(Vault::open(VaultOptions::sized(PathBuf::from(&dir), o.vault_gb)).unwrap_or_else(|e| die(&format!("{dir}: {e}"))))
     });
     let lan_sndbuf = env_num("NFSU2_LAN_SNDBUF", LAN_SNDBUF) as usize;
-    // the bundle clock follows the crowd (nfsu2-lan); NFSU2_BUNDLE_MS fixes its tick (0: none), for measurements
+    // the bundle clock's tick, 50 ms (nfsu2-lan); NFSU2_BUNDLE_MS another (0: none), for measurements
     let d = LanOptions::default();
     let fixed = std::env::var_os("NFSU2_BUNDLE_MS").is_some().then(|| env_num("NFSU2_BUNDLE_MS", d.bundle_ms));
     let lan_options = LanOptions {

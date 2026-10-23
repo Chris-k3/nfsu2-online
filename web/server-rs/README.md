@@ -24,8 +24,8 @@ ports; give each its own `--state`.  Knobs for measurements, from the environmen
 | | |
 |---|---|
 | `NFSU2_THREADS` | the runtime's workers (default half the cores, 2 to 8: more did the same work for more CPU; past about 3000 players in free roam more keep them at 32 friends, "Measured" below) |
-| `NFSU2_BUNDLE_MS` | a fixed tick for the bundle clock (default: it follows the crowd, below; 0: no clock, each datagram wakes its writer at once) |
-| `NFSU2_BUNDLE_MAX_MS`, `NFSU2_BUNDLE_BUDGET` | the adaptive tick's longest (25 ms) and its aim (125,000 bundles a second in all) |
+| `NFSU2_BUNDLE_MS` | the bundle clock's tick (default 50 ms, below; 0: no clock, each datagram wakes its writer at once) |
+| `NFSU2_BUNDLE_MAX_MS`, `NFSU2_BUNDLE_BUDGET` | longer than `NFSU2_BUNDLE_MS`: the tick follows the crowd up to it, aiming at the budget's bundles a second in all (125,000) |
 | `NFSU2_LAN_SNDBUF` | SO_SNDBUF of /lan connections (default 32 KiB, which Linux doubles; 0: the kernel's own, which grows to 4 MB) |
 | `NFSU2_REPO` | where the defaults are (web/dist, out/web/nfsu2.wasm, the state in out/web/server): the repo it was built from |
 
@@ -106,9 +106,10 @@ number and its clock), and the line's order, waits and tickets.
 What a crowd costs is its messages, not its bytes: three quarters of the server's CPU is the kernel's TCP for each
 WebSocket message (and the tunnel in front, cloudflared, pays for each again).  The bundle clock's tick decided it
 (2000 players, 32 friends each): 4 ms sent 374,000 messages a second for 8.5 cores and did not keep up; 16 ms,
-132,000 messages for 4.2 cores, everything.  So the tick follows the crowd: 4 ms up to 500 players taking bundles,
-then as long as it takes to send about 125,000 bundles a second in all, 25 ms at most (free roam draws friends' cars
-100 ms in the past).  LAN play's datagrams (Online and LAN races) never wait for the tick: the game draws the other
+132,000 messages for 4.2 cores, everything.  So the tick followed the crowd: 4 ms up to 500 players taking bundles,
+then as long as it took to send about 125,000 bundles a second in all, 25 ms at most.  Since 2026-10-24 it is 50 ms
+for any crowd: at most 20 bundles a second to a page, as many as each friend sends snapshots (free roam draws friends'
+cars 100 ms behind the soonest their snapshots came).  LAN play's datagrams (Online and LAN races) never wait for the tick: the game draws the other
 racers from each update as it comes, and a wait of up to 25 ms at random made them wobble.  And the worker count: 2.9 cores on 4 workers, 3.8 on 8, 4.3 on 12, the same latency up to 8.
 
 4000 players (2026-10-21, the server on CPUs 0-11, nfsu2-roamload on 12-23, 3999 bots and the probe, spread over

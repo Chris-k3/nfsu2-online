@@ -135,6 +135,14 @@ class AutoBucket {
   }
 }
 
+/** Free roam's own datagrams to friends and the hub (pings, pongs, HELLOs, the SNAP to the hub) wait for the next car
+ *  state to its friends, this long after the last send at most: the core runs every 10 ms and answers as datagrams
+ *  come (runtime/web/roam_web.c), so a page sent a message for nearly every pass, about 37 a second against the
+ *  switch's 20 (web/tools/roam-crowd.mjs --loop-ms 10, 2026-10-24); the car states themselves never wait */
+const TX_HOLD_MS = 50;
+/** runtime/roam_core.h: a datagram's type (header byte 5), the car state's */
+const RC_MSG_SNAP = 3;
+
 /** What one drain of a TX ring sends, as bundles (kind 32, nfsu2-lan): a free-roam datagram (kind 1) of the same
  *  bytes as one before it goes in that one's entry with its destination added (when nothing for that destination
  *  came between, so each destination gets its frames in order), everything else in an entry of its own, in the
@@ -196,6 +204,8 @@ class Endpoint {
   i32: Int32Array; f64: Float64Array; dv: DataView; u8: Uint8Array;
   /** LAN: received TCP frames waiting for RX ring room, in order */
   waiting: ArrayBuffer[] = [];
+  /** when its TX ring last went to the switch (performance.now()) */
+  sent = 0;
   constructor(readonly kind: 'roam' | 'lan', readonly ver: number, buf: SharedArrayBuffer, ptr: number, size: number) {
     // shared memory is never detached: views made now stay valid after the
     // memory grows (the mailbox lies inside the current buffer)
@@ -551,12 +561,28 @@ class Link implements NetLink {
     while (!this.closed) {
       const bell = Atomics.load(ep.i32, P.W_TX_BELL);
       this.checkWant();
-      this.drainTx(ep);
-      const w = Atomics.load(ep.i32, P.W_TX_HEAD) !== Atomics.load(ep.i32, P.W_TX_TAIL) ? null
-        : waitAsync(ep.i32, P.W_TX_BELL, bell, 1000);
+      const hold = this.txHold(ep);
+      if (!hold) this.drainTx(ep);
+      const w = !hold && Atomics.load(ep.i32, P.W_TX_HEAD) !== Atomics.load(ep.i32, P.W_TX_TAIL) ? null
+        : waitAsync(ep.i32, P.W_TX_BELL, bell, hold || 1000);
       if (w && w.async) { sync = 0; await w.value; }
       else if (++sync >= 32) { sync = 0; await new Promise(r => setTimeout(r, 0)); }
     }
+  }
+  /** how long free roam's TX ring may wait still (ms; 0: send it now): while it holds only free roam's own datagrams,
+   *  until the next car state to a friend comes or TX_HOLD_MS after the last send (to a switch that takes bundles) */
+  private txHold(ep: Endpoint): number {
+    if (ep.kind !== 'roam' || !this.bundles || this.state !== 'online') return 0;
+    const i32 = ep.i32, dv = ep.dv, txOff = i32[P.W_TX_OFF], head = Atomics.load(i32, P.W_TX_HEAD);
+    let tail = Atomics.load(i32, P.W_TX_TAIL);
+    const left = ep.sent + TX_HOLD_MS - performance.now();
+    if (tail === head || left <= 0) return 0;
+    for (; tail !== head; tail = (tail + 1) | 0) {
+      const s = txOff + ((tail >>> 0) % P.NET_TX_SLOTS) * P.NET_SLOT_BYTES;
+      if (dv.getUint32(s + P.S_KIND, true) !== P.NET_KIND_UDP || dv.getUint32(s + P.S_LEN, true) < 6) return 0;
+      if (dv.getUint8(s + P.S_DATA + 5) === RC_MSG_SNAP && dv.getUint32(s + P.S_DST_IP, true) !== P.NET_ROAM_HUB) return 0;
+    }
+    return Math.ceil(left);
   }
   private drainTx(ep: Endpoint) {
     const i32 = ep.i32, dv = ep.dv;
@@ -597,6 +623,7 @@ class Link implements NetLink {
       Atomics.store(i32, P.W_TX_TAIL, tail);
     }
     if (bundle) for (const m of bundle.messages()) ws!.send(m);
+    if (open) ep.sent = performance.now();
     if (n) {
       ep.f64[P.D_TX_WAIT_MS_SUM] += waitSum; ep.f64[P.D_TX_WAIT_MS_MAX] = waitMax;
       Atomics.add(i32, P.W_TX_WAIT_N, n);

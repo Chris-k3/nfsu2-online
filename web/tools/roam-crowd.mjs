@@ -5,11 +5,17 @@
 //   node web/tools/roam-crowd.mjs [--base http://localhost:8655] [--n 62] [--seconds 120] [--room <name>]
 //        [--track <pose.csv>] [--speed 15] [--spread 20] [--car 350Z] [--cars A,B,..|all] [--parts <list>|@<file>] [--stagger 50] [--states 1]
 //        [--out <summary.json>]
-//        [--race 1-3:60:120] [--bundle] [--first 0]
+//        [--race 1-3:60:120] [--bundle] [--first 0] [--loop-ms 10] [--hold 50]
 //
 // --bundle the players send and take bundles as the page does (web/src/net/index.ts TxBundle, nfsu2-lan kind 32): what
 //          one tick or one received message made them send goes as one message, a snapshot to several friends once
 //          with their addresses.  Without it each datagram is a message of its own, as a page of before sends them.
+// --loop-ms the core's timers run this often (the game's network thread: runtime/web/roam_web.c, rc_tick every 10 ms),
+//          each pass's datagrams one message, a car state still 20 times a second; without it everything runs once a
+//          car state (50 ms), so a player's pings, pongs and HELLOs mostly go with its snapshots: fewer messages than
+//          a page sends.
+// --hold   a player's own datagrams (pings, pongs, HELLOs, the SNAP to the hub) wait for its next car state to a friend,
+//          this many ms after its last message at most, as the page holds them (web/src/net/index.ts TX_HOLD_MS)
 // --first  the first player's number (from 0), for several of these at once on one server: their names and client
 //          addresses stay apart.
 // --cars   the players' cars in turn (car type names, CarTypeInfo +0), or all: the game's 31 player cars, PEUGOT to
@@ -38,6 +44,7 @@ const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && i + 1
 const BASE = opt('base', 'http://localhost:8655'), N = +opt('n', 62), SECONDS = +opt('seconds', 120), ROOM = opt('room', '');
 const SPEED = +opt('speed', 15), CAR = opt('car', '350Z'), STAGGER = +opt('stagger', 50), TRACK = opt('track', ''), OUTF = opt('out', '');
 const STATES = +opt('states', 1), SPREAD = +opt('spread', 20), BUNDLE = argv.includes('--bundle'), FIRST = +opt('first', 0);
+const LOOP_MS = +opt('loop-ms', 0), HOLD = +opt('hold', 0);
 const PARTS = (p => p.startsWith('@') ? fs.readFileSync(p.slice(1), 'utf8').trim() : p)(opt('parts', ''));
 const RACE = (opt('race', '').match(/^(\d+)-(\d+):(\d+):(\d+)$/) ?? []).slice(1).map(Number);
 const ALL_CARS = ['PEUGOT', 'FOCUS', 'COROLLA', '240SX', 'MIATA', 'CIVIC', 'PEUGOT106', 'CORSA', 'HUMMER', 'NAVIGATOR', 'ESCALADE', 'TIBURON',
@@ -180,30 +187,35 @@ class Bot {
     if (this.bundles) this.q.push(f); else { this.ws.send(f); st.outMsg++; }
   }
   /** what waits, as bundles */
-  flush() {
+  flush(now = false) {
     if (!this.q.length) return;
+    if (HOLD && !now && performance.now() - (this.sent ?? 0) < HOLD && !this.q.some(f => f[21] === 3 && f.readUInt32BE(8) !== HUB)) return;
     if (this.ws.readyState === 1) for (const m of bundled(this.q)) { this.ws.send(m); st.outMsg++; }
-    this.q = [];
+    this.q = []; this.sent = performance.now();
   }
-  tick(t) {
+  tick(t, snap = true) {
     if (!this.ready) return;
     const racing = RACE.length === 4 && this.i + 1 >= RACE[0] && this.i + 1 <= RACE[1] && t >= RACE[2] && t < RACE[3];
     if (racing !== !!this.racing) {
       this.racing = racing; this.x.crowd_status(racing ? 3 : 2);
       console.log(`roam-crowd: t=${t.toFixed(0)}s ${this.name} ${racing ? 'in a race' : 'back in free roam'}`);
     }
-    if (racing) { this.x.crowd_wait(nowUs()); this.flush(); return; }
+    if (racing || !snap) { this.x.crowd_wait(nowUs()); this.flush(); return; }
     const { p, v } = track(t, this.i);
     this.x.crowd_tick(nowUs(), p[0], p[1], p[2], v[0], v[1], v[2], Math.atan2(v[1], v[0]));
     this.flush();
   }
-  stop() { if (this.ready) { this.x.crowd_stop(); this.flush(); } setTimeout(() => this.ws.close(), 200); }
+  stop() { if (this.ready) { this.x.crowd_stop(); this.flush(true); } setTimeout(() => this.ws.close(), 200); }
 }
 
 const bots = [];
 for (let i = 0; i < N; i++) { const b = new Bot(FIRST + i); bots.push(b); await b.start(); await new Promise(r => setTimeout(r, STAGGER)); }
 const t0 = performance.now();
-const timer = setInterval(() => { const t = (performance.now() - t0) / 1000; for (const b of bots) b.tick(t); }, 50);
+let passes = 0;
+const timer = setInterval(() => {
+  const t = (performance.now() - t0) / 1000, snap = !LOOP_MS || passes++ % Math.round(50 / LOOP_MS) === 0;
+  for (const b of bots) b.tick(t, snap);
+}, LOOP_MS || 50);
 let last = { ...st }, lastT = performance.now();
 const samples = [];
 const report = setInterval(() => {

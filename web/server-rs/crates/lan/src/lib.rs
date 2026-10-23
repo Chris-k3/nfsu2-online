@@ -150,13 +150,16 @@
 //!   2.19 against 0.94 cores).  Text, stream segments and LAN play's datagrams wake it at once: a race sends each
 //!   car 5 to 20 times a second, and a tick's wait (up to 25 ms, at random, at each pass through the switch: two
 //!   between joiners, whose updates go through the race's creator) made the other cars wobble.
-//! - The clock's tick follows the crowd: `bundle_ms` (4 ms) while few take bundles, longer as more do, so that the
-//!   switch sends about `bundle_budget` (125,000) bundles a second in all, up to `bundle_max_ms` (25 ms).  What a
-//!   crowd costs is its messages, not its bytes: each is a TCP segment, which the kernel (and the tunnel in front,
-//!   cloudflared, again) pays for whole.  2000 players in free roam with 32 friends each, on 6 cores of a Ryzen
-//!   5900X: at 4 ms, 374,000 messages a second and 8.5 cores, not keeping up (the hub cut their links to 22); at
-//!   16 ms, 132,000 messages, 4.2 cores, every link, a snapshot 11 ms (p50) to 25 ms (p99) from player to player.
-//!   Free roam draws friends' cars 100 ms in the past.
+//! - The clock ticks every `bundle_ms` (50 ms): a page gets at most 20 bundles a second, as many as each friend sends
+//!   snapshots (roam_rate 20), however few play.  What a crowd costs is its messages, not its bytes: each is a TCP
+//!   segment, which the kernel (and the tunnel in front, cloudflared, again) pays for whole.  2000 players in free
+//!   roam with 32 friends each, on 6 cores of a Ryzen 5900X: at 4 ms, 374,000 messages a second and 8.5 cores, not
+//!   keeping up (the hub cut their links to 22); at 16 ms, 132,000 messages, 4.2 cores, every link, a snapshot 11 ms
+//!   (p50) to 25 ms (p99) from player to player.  Free roam draws friends' cars 100 ms behind the soonest each one's
+//!   snapshots came in the last 2 s (roam_core.c off_estimate), so a wait of up to 50 ms here is in that.  The tick
+//!   may instead follow the crowd, `bundle_ms` while few take bundles and longer as more do, so that the switch sends
+//!   about `bundle_budget` bundles a second in all, up to `bundle_max_ms` (by default the same as `bundle_ms`: fixed);
+//!   it did that from 4 to 25 ms until 2026-10-24.
 //! - The Online host and the free-roam hub are actors on threads of their own (nfsu2-util `Host`); the switch
 //!   posts them their frames in order and they send through [`LanSwitch::send_to`] from their thread.
 //! - Counters that every frame touches are sharded (`nfsu2_util::Counter`); the per-peer ones are the peer's own.
@@ -374,8 +377,8 @@ impl Default for LanOptions {
             online_queue: 1 << 20,
             peers_ms: 250,
             full_peers_ms: 1000.0,
-            bundle_ms: 4,
-            bundle_max_ms: 25,
+            bundle_ms: 50,
+            bundle_max_ms: 50,
             bundle_budget: 125_000,
             send_buffer_os: 0,
             max_payload: 64 << 10,
@@ -1253,8 +1256,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_bundle_tick_follows_the_crowd() {
-        let o = LanOptions::default();
+    fn the_bundle_tick_is_50_ms_or_follows_the_crowd() {
+        assert_eq!(bundle_tick(&LanOptions::default(), 0), Duration::from_millis(50));
+        assert_eq!(bundle_tick(&LanOptions::default(), 5000), Duration::from_millis(50));
+        let o = LanOptions { bundle_ms: 4, bundle_max_ms: 25, ..LanOptions::default() };
         assert_eq!(bundle_tick(&o, 0), Duration::from_millis(4));
         assert_eq!(bundle_tick(&o, 500), Duration::from_millis(4));
         assert_eq!(bundle_tick(&o, 1000), Duration::from_millis(8));
