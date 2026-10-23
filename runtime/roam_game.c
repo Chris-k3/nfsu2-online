@@ -5283,7 +5283,24 @@ static void push_add(Slot *s, const float *v, int64_t t){
  * same ram now left the two at 5.6 and 4.4 m/s; at 32 m/s into a standing
  * car (the game: the driver back at -3.5, the other off at 35.5) 14.3 and
  * 18.2, 7.6 and 10.5 into one of 2.9 t; head on, 32 against 18.4 m/s, both
- * on at 4.0 and 9.3 (the game: thrown back at 23 and 37 m/s). */
+ * on at 4.0 and 9.3 (the game: thrown back at 23 and 37 m/s).
+ * The game's crash view (slow motion and the jump camera: Player mode 6,
+ * 0x6022E0) starts inside the pair's impulse (0x5AF0E0 -> 0x5A9620 ->
+ * 0x59FB70) when the hit on the player's car (its impulse, capped at 40
+ * first) reaches 30.  It weighed the game's whole hit, against an immovable
+ * car: twice what the player's car keeps of one of the same weight, so a
+ * friend's car started it at half the closing speed a car of the game's own
+ * needs.  For the pair the threshold is the game's over the part the
+ * player's car keeps (the cap raised to it), and a next pass of the same
+ * step (none kept) never starts it.  Measured with two 240SX (1.22 t): the
+ * hit is about 1.85 x the velocity change it makes, 67 for 32 m/s into a
+ * standing car (the rammer turned back at -3.5 m/s), so the view came from
+ * about 53 km/h of closing speed and now from about 105; that ram starts it
+ * on both screens (67 against 60), and on neither with friends' cars
+ * counted as 0.4 t (121).  The crashed mark the same hit sets (car +0x38,
+ * 0x5F6BE0, read by the physics) keeps the game's own 30. */
+#define G_CRASH_VIEW    0x007a1864u   /* float 30: the hit (t m/s) that starts the crash view */
+#define G_CRASH_CAP     0x007a1858u   /* float 40: what 0x59FB70 caps the hit at first */
 void roam_game_contact(CPU *c, void (*orig)(CPU *)){
     uint32_t pair = c->ecx, me = O.on && O.collide && O.hit_share != 100 ? player_car() : 0;
     uint32_t mb = ok(me, 0x40) ? rd32(me + 0x3cu) : 0;
@@ -5298,9 +5315,19 @@ void roam_game_contact(CPU *c, void (*orig)(CPU *)){
     if (!ok(rb, 0xcc)){ orig(c); return; }
     Slot *s = &g_sl[k];
     float st0[CS_N], st[CS_N];
+    float mm = car_mass(me, 1), mf = car_mass(s->car, 0);
+    float keep = O.hit_share >= 0 ? (float)O.hit_share / 100.f : mf / (mm + mf), dv[3], push[3], d2 = 0;
+    int again = s->hits && s->hit_step == g_step;
+    uint32_t pl = rd32(G_PLAYER1), mode = ok(pl, 0x5c) ? MR32(pl + 0x58u) : 0;
+    float view = MRF32(G_CRASH_VIEW), cap = MRF32(G_CRASH_CAP), need = again || keep <= 0.f ? 1e30f : view / keep;
     contact_get(me, rb, st0);
+    MRF32(G_CRASH_VIEW) = need;
+    if (need > cap) MRF32(G_CRASH_CAP) = need;
     orig(c);
-    if (s->hits && s->hit_step == g_step){
+    MRF32(G_CRASH_VIEW) = view; MRF32(G_CRASH_CAP) = cap;
+    if (mode != 6u && ok(pl, 0x5c) && MR32(pl + 0x58u) == 6u)
+        rlog("[roam] f=%ld hit with %s's car: the crash view (my car's part of the hit over %.0f)\n", rh_frame(), s->name, (double)view);
+    if (again){
         /* the pair again in the same step's next pass: the friend's car
          * stood where it was for the step (a body without physics moves
          * only with the pose, next frame), so the game met it again and
@@ -5312,8 +5339,6 @@ void roam_game_contact(CPU *c, void (*orig)(CPU *)){
     }
     s->hit_step = g_step;
     contact_get(me, rb, st);
-    float mm = car_mass(me, 1), mf = car_mass(s->car, 0);
-    float keep = O.hit_share >= 0 ? (float)O.hit_share / 100.f : mf / (mm + mf), dv[3], push[3], d2 = 0;
     for (int i = 0; i < CS_N; i++) if (!__builtin_isfinite(st[i])) return;
     for (int i = 0; i < 3; i++){ dv[i] = st[CS_V + i] - st0[CS_V + i]; d2 += dv[i] * dv[i]; push[i] = -(1.f - keep) * dv[i]; }
     for (int i = 0; i < CS_N; i++) st[i] = st0[i] + keep * (st[i] - st0[i]);
