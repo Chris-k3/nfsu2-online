@@ -140,6 +140,10 @@ pub(crate) struct Conn {
     pub(crate) vip: AtomicU32,
     /// while it waits in line for a place (queue.rs): its place, and what it sent meanwhile
     pub(crate) wait: Mutex<crate::queue::Wait>,
+    /// the operator removed it (a kick or a ban: `LanSwitch::expel_conn`)
+    pub(crate) expelled: AtomicBool,
+    /// the id its page keeps (its hello's "id"), for `who`
+    pub(crate) browser: std::sync::OnceLock<Arc<str>>,
 }
 
 impl Conn {
@@ -162,6 +166,8 @@ impl Conn {
             compact: AtomicU8::new(PLAIN),
             vip: AtomicU32::new(0),
             wait: Mutex::new(Default::default()),
+            expelled: AtomicBool::new(false),
+            browser: Default::default(),
         }
     }
 
@@ -279,6 +285,13 @@ impl Conn {
         self.close.lock().received.clone().unwrap_or((1006, Bytes::new()))
     }
 
+    /// its page let go of its place itself (1000 "idle" or "closed": no network feature in use, or the game ended),
+    /// or the operator removed it: nothing is kept for it (its address, its place in line)
+    pub(crate) fn let_go(&self) -> bool {
+        let (code, reason) = self.close_code();
+        (code == 1000 && (&reason[..] == b"idle" || &reason[..] == b"closed")) || self.expelled.load(Relaxed)
+    }
+
     /// ws's closeTimeout: a client that never answers the close frame is cut after 30 s
     fn close_timer(self: &Arc<Self>) {
         let me = self.clone();
@@ -292,7 +305,7 @@ impl Conn {
 }
 
 /// a close frame's payload for a code and its reason (1005: none, ws's `close()`)
-fn close_payload(code: u16, reason: &[u8]) -> Bytes {
+pub(crate) fn close_payload(code: u16, reason: &[u8]) -> Bytes {
     if code == 1005 {
         return Bytes::new();
     }

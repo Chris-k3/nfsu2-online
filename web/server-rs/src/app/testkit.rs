@@ -76,7 +76,8 @@ impl Kit {
             let opts = nfsu2_vault::VaultOptions::sized(std::path::PathBuf::from(&o.state).join("vault"), o.vault_gb);
             Arc::new(nfsu2_vault::Vault::open(opts).expect("the vault"))
         });
-        let app = Arc::new(App::new(o, real_state, key, lan, None, None, vault, 2, 0));
+        let bans = Arc::new(nfsu2_bans::Bans::open(std::path::Path::new(&o.state)).expect("the bans"));
+        let app = Arc::new(App::new(o, real_state, key, lan, None, None, vault, bans, 2, 0));
         app.refresh_manifest().await.expect("the manifest");
         let (listener, _) = nfsu2_http::bind("127.0.0.1", 0, None).await.expect("a port");
         let addr = listener.local_addr().expect("its address");

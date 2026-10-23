@@ -29,6 +29,8 @@ where
     // left it again: two locks a message)
     let killed = conn.kill.cancelled();
     tokio::pin!(killed);
+    // its first control message, the hello, names its page's id: a banned one goes (the crate doc's Kicks and bans)
+    let mut first_text = true;
     loop {
         // (a page that waited in line has its peer once the line let it in: queue.rs)
         if peer.is_none() && wait.is_none() {
@@ -53,6 +55,9 @@ where
         // (a connection that was cut is no longer open: what it sent last goes nowhere)
         match m {
             Ok(Message::Text(b)) => {
+                if std::mem::take(&mut first_text) && sw.hello_refused(&conn, &ctx, &b) {
+                    continue;
+                }
                 if wait.take().is_some() {
                     peer = sw.admit(&conn, &ctx, first_hello(&sw, &b));
                 } else if let Some(p) = peer.as_ref().filter(|_| conn.open()) {

@@ -14,7 +14,7 @@ import { StatusReader } from './status';
 import { DATA_BASE, MANIFEST_URL } from '../host/datacache';
 import type { GameInfo } from './loader';
 import type { PadPage } from '../input/gamepad';
-import type { NetQueue } from '../net';
+import type { NetQueue, NetRemoved } from '../net';
 
 export interface SessionOptions {
   module: WebAssembly.Module;
@@ -35,6 +35,10 @@ export interface SessionOptions {
   netBack?(): void;
   /** the server is full: the game's place in line for one (null: not in line) */
   netQueue?(q: NetQueue | null): void;
+  /** this browser's own id on the server's LAN (page-id.ts) */
+  netId?: string;
+  /** the server's operator removed the player from playing with others (a kick or a ban) */
+  netRemoved?(r: NetRemoved): void;
   /** the game finished writing a file of the save overlay (path relative to /save) */
   onSaved?(path: string): void;
   /** tests: where frame dumps go, and their scale */
@@ -107,7 +111,9 @@ export class GameSession {
       ...common, stage: o.stage, toggleFullscreen: o.toggleFullscreen, padPage: o.padPage, viewRect: () => s.viewRect(),
     })).then(i => { s.input = i; });
     if (o.netName !== null)
-      void attach('network', () => attachNet(s.proc, { ...common, name: o.netName!, notice: o.notice, lobby: o.lobby, back: o.netBack, queue: o.netQueue })).then(n => { s.net = n; });
+      void attach('network', () => attachNet(s.proc, {
+        ...common, name: o.netName!, id: o.netId, notice: o.notice, lobby: o.lobby, back: o.netBack, queue: o.netQueue, removed: o.netRemoved,
+      })).then(n => { s.net = n; });
     return s;
   }
 

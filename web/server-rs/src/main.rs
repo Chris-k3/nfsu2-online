@@ -17,6 +17,8 @@
 //!                      counts, whether a newcomer waits in line, how many do and whether free roam is busy, nothing
 //!                      else (never cached);
 //!                      ?room=<hash> adds room, how many of roam are in that free-roam room
+//!   (and for the operator, nothing on the network: control.sock in the state folder, which `nfsu2-server ctl` talks
+//!   to: who is on, kick, ban, unban; src/ctl.rs, app/control.rs)
 //!   test aids, only with --dev: the test pages (/test/) and source maps from web/dist-dev (web/build.mjs writes them
 //!   there, never into web/dist), the repo's test scripts (/tests/), PUT /artifacts/<name>.png (with --artifacts)
 //!
@@ -40,6 +42,7 @@ use mimalloc::MiMalloc;
 static GLOBAL: MiMalloc = MiMalloc;
 
 mod app;
+mod ctl;
 mod options;
 mod paths;
 
@@ -61,6 +64,10 @@ fn main() {
     let argv: Vec<String> = std::env::args_os().skip(1).map(|a| a.to_string_lossy().into_owned()).collect();
     let cwd = std::env::current_dir().map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| "/".into());
     let env = |k: &str| std::env::var_os(k).map(|v| v.to_string_lossy().into_owned());
+    // an operator's command to the running server (src/ctl.rs), not a server
+    if argv.first().is_some_and(|a| a == "ctl") {
+        std::process::exit(ctl::run(&argv[1..], &env, &repo(&cwd), &cwd));
+    }
     let o = options::parse(&argv, &env, &repo(&cwd), &cwd, &options::RealFs).unwrap_or_else(|m| die(&m));
     let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
     // half the cores, 2 to 8: more workers do the same work for more CPU (parking and waking, stealing from each

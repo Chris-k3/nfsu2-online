@@ -157,8 +157,22 @@ pub async fn run(o: Options, cores: usize) {
         h.attach_switch(lan.switch_send());
     }
 
-    let app = Arc::new(App::new(o, real_state, etag_key, lan.clone(), online, roam.clone(), vault.clone(), (cores / 2).max(2), lan_sndbuf));
+    // the operator's bans, and the control socket that makes them (control.rs)
+    let bans = Arc::new(nfsu2_bans::Bans::open(Path::new(&o.state)).unwrap_or_else(|e| die(&format!("{}/bans.json: {e}", o.state))));
+    let app = Arc::new(App::new(
+        o,
+        real_state,
+        etag_key,
+        lan.clone(),
+        online,
+        roam.clone(),
+        vault.clone(),
+        bans,
+        (cores / 2).max(2),
+        lan_sndbuf,
+    ));
     let o = &app.o;
+    let control = super::control::listen(app.clone());
 
     // the switch's players, every 5 minutes while any are on
     {
@@ -399,6 +413,12 @@ pub async fn run(o: Options, cores: usize) {
             None => "no keyphrase saves (--vault-gb 0)".into(),
         }
     ));
+    let bans = app.bans.list(nfsu2_util::now_ms()).len();
+    lines.push(if control {
+        format!("  bans      : {bans}; nfsu2-server ctl who, kick, ban, unban, bans (through {})", paths::join(&o.state, super::control::SOCKET))
+    } else {
+        format!("  bans      : {bans}; no kick or ban (the control socket could not be made: above)")
+    });
     if !o.online_trace.is_empty() {
         lines.push(format!("  trace     : lobby messages (secrets redacted) into {}", o.online_trace));
     }

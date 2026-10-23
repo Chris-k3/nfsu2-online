@@ -125,6 +125,18 @@ impl App {
         }
         let (r, w) = stream.split();
         let share = Arc::new((share, hold));
+        // the operator's bans (control.rs): by the address's keyed hash now, by its page's id at its hello
+        let ident = (!key_.is_empty()).then(|| self.bans.addr(&key_));
+        let refuse = ident.as_ref().and_then(|a| self.bans.by_addr(a, nfsu2_util::now_ms())).map(|b| {
+            log::limited("ban", "turned away", &key_, &format!("[ban] turned away a client of ban #{} \"{}\" (its address)", b.id, b.name), 2);
+            bytes::Bytes::from(b.message())
+        });
+        let (bans, a, k0) = (self.bans.clone(), ident.clone(), key_.clone());
+        let on_hello: nfsu2_lan::OnHello = Box::new(move |id| {
+            let b = bans.by_page(id, a.as_deref(), nfsu2_util::now_ms())?;
+            log::limited("ban", "turned away", &k0, &format!("[ban] turned away a client of ban #{} \"{}\" (its page)", b.id, b.name), 2);
+            Some(bytes::Bytes::from(b.message()))
+        });
         // a reconnecting page says ?resume and sends its old address with the token in its first message (nfsu2-lan);
         // the group and site ids stand for the client's address without naming it (the shared limits)
         let (k1, k2) = (key_.clone(), key_.clone());
@@ -142,6 +154,9 @@ impl App {
                 let line = format!("[lan] {} \"{}\" left ({n} on the switch)", vip_str(vip), js::printable(name, 32));
                 log::limited("lan", "joins and leaves", &k2, &line, 20);
             })),
+            ident,
+            refuse,
+            on_hello: Some(on_hello),
         };
         self.lan.attach(Held { inner: r, _share: share.clone() }, Held { inner: w, _share: share }, pre, opts);
     }

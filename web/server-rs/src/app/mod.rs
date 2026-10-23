@@ -11,6 +11,7 @@
 //! address and nickname, never by their real address (--access-log is the one opt-in that records client addresses).
 
 mod blocks;
+pub mod control;
 mod etag;
 mod files;
 mod lan;
@@ -218,6 +219,8 @@ pub struct App {
     pub roam: Option<Arc<nfsu2_roam::RoamHub>>,
     /// keyphrase saves (/vault), none with --vault-gb 0
     pub vault: Option<vault::VaultRoute>,
+    /// the operator's bans (the control socket: control.rs), checked at /lan
+    pub bans: Arc<nfsu2_bans::Bans>,
     /// SO_SNDBUF for /lan connections (NFSU2_LAN_SNDBUF, a measurement knob; 0: the kernel's own, which Linux grows
     /// to megabytes, ahead of the switch's own queue rules)
     lan_sndbuf: usize,
@@ -241,6 +244,7 @@ impl App {
         online: Option<Arc<OnlineHost>>,
         roam: Option<Arc<nfsu2_roam::RoamHub>>,
         vault: Option<Arc<nfsu2_vault::Vault>>,
+        bans: Arc<nfsu2_bans::Bans>,
         pool_threads: usize,
         lan_sndbuf: usize,
     ) -> App {
@@ -298,6 +302,7 @@ impl App {
             online,
             roam,
             vault: vault.map(vault::VaultRoute::new),
+            bans,
             lan_sndbuf,
             o,
         }

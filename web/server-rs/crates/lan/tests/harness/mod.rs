@@ -1,7 +1,8 @@
 //! The switch's test harness: `start` and `start_full` (a switch behind a listener on 127.0.0.1:0 that answers the
 //! upgrade to /lan and attaches with ?resume, ?queue, ?g= and ?s=), the fake browser `Client` (tokio-tungstenite),
 //! `raw_ws` and `raw_peer` (plain sockets that read only when told to), `frame_of`, `bundle_of`, `throttle`.  The listener also
-//! answers GET /state with what the page tests read of the switch (they run in node: tests/page.mjs).
+//! answers GET /state with what the page tests read of the switch (they run in node: tests/page.mjs), and GET
+//! /expel?vip=&code=&msg= with the operator's kick or ban of that player.
 #![allow(dead_code)]
 
 use std::collections::HashSet;
@@ -113,6 +114,16 @@ async fn serve(lan: Arc<LanSwitch>, mut s: TcpStream) {
         .find(|(k, _)| k.trim().eq_ignore_ascii_case("sec-websocket-key"))
         .map(|(_, v)| v.trim().to_string());
     let (path, query) = target.split_once('?').unwrap_or((&target, ""));
+    // the operator's kick (code 4001) or ban (4003) of vip, with msg: the page tests remove their page this way
+    if path == "/expel" {
+        let arg = |k: &str| query.split('&').find_map(|kv| kv.strip_prefix(&format!("{k}="))).unwrap_or("").to_string();
+        let code: u16 = arg("code").parse().unwrap_or(4001);
+        let m = json!({ "t": if code == 4001 { "kick" } else { "ban" }, "msg": arg("msg") });
+        let done = lan.expel(arg("vip").parse().unwrap_or(0), Bytes::from(m.to_string()), code);
+        let answer = format!("HTTP/1.1 {}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", if done { "200 OK" } else { "404 Not Found" });
+        let _ = s.write_all(answer.as_bytes()).await;
+        return;
+    }
     if path == "/state" {
         let body = state(&lan).await.to_string();
         let answer = format!(
@@ -128,6 +139,7 @@ async fn serve(lan: Arc<LanSwitch>, mut s: TcpStream) {
     }
     let (mut resume, mut queue) = (false, false);
     let (mut group, mut site) = (None, None);
+    let (mut ident, mut refuse, mut gate) = (None, None, None);
     for kv in query.split('&').filter(|kv| !kv.is_empty()) {
         let (k, v) = kv.split_once('=').unwrap_or((kv, ""));
         match k {
@@ -135,12 +147,20 @@ async fn serve(lan: Arc<LanSwitch>, mut s: TcpStream) {
             "queue" => queue = true,
             "g" if group.is_none() => group = Some(v.to_string()),
             "s" if site.is_none() => site = Some(v.to_string()),
+            // the server's bans: its id for the client's address, a client it turns away at once, a page id it turns
+            // away at the hello (with {"t":"ban","msg":<id>})
+            "ident" => ident = Some(v.to_string()),
+            "refuse" => refuse = Some(Bytes::from(json!({ "t": "ban", "msg": v }).to_string())),
+            "gate" => gate = Some(v.to_string()),
             _ => {}
         }
     }
+    let on_hello: Option<nfsu2_lan::OnHello> = gate.map(|g| {
+        Box::new(move |id: &str| (id == g).then(|| Bytes::from(json!({ "t": "ban", "msg": id }).to_string()))) as nfsu2_lan::OnHello
+    });
     let pre = Bytes::copy_from_slice(&buf[end..]);
     let (r, w) = s.into_split();
-    lan.attach(r, w, pre, AttachOpts { resume, queue, group, site, ..AttachOpts::default() });
+    lan.attach(r, w, pre, AttachOpts { resume, queue, group, site, ident, refuse, on_hello, ..AttachOpts::default() });
 }
 
 /// what the page tests read of the switch (sw.lan.peers, info(), reserved)
@@ -299,6 +319,8 @@ pub struct Opts {
     pub bundle: bool,
     /// and compact bundles (kind 33): its frames come as they are in `frames`, `unpack_compact` takes them apart
     pub compact: bool,
+    /// its page's id (the hello's "id")
+    pub id: Option<&'static str>,
 }
 
 pub fn deltas() -> Opts {
@@ -350,6 +372,9 @@ impl Client {
         }
         if o.compact {
             extra.insert("compact".into(), 1.into());
+        }
+        if let Some(id) = o.id {
+            extra.insert("id".into(), id.into());
         }
         let q = match (resume.is_some(), query.is_empty()) {
             (true, true) => "?resume".to_string(),

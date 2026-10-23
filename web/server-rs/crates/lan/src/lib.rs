@@ -121,6 +121,19 @@
 //! through `send_to` (its own lists, every second: charged to nobody), and its `Host::peer_gone` hears of every
 //! browser that left.  It is on no peer list (`Host::listed`).
 //!
+//! ## Kicks and bans
+//!
+//! The operator removes a player (the server's control socket, nfsu2-bans): [`LanSwitch::expel`] sends its page a
+//! control message, {"t":"kick","msg":...} or {"t":"ban","msg":...,"until":ms} (no until: for good), then closes
+//! the connection with [`CLOSE_KICKED`] or [`CLOSE_BANNED`]; the page shows the message and stays off the switch for
+//! the rest of that game.  Its address is free at once (no reservation: its token is of no use to it now).  A banned
+//! client is turned away the same way before it gets a place: by its address when it connects
+//! (`AttachOpts::refuse`, the server checks), or by the id its page keeps in its storage, which the hello names
+//! ("id", at most 64 characters: `AttachOpts::on_hello` asks the server).  The switch keeps who was on it for the
+//! operator's `who` ([`LanSwitch::who`]): each player's address and name, the opaque id the server gave its client
+//! address (`AttachOpts::ident`, a keyed hash) and its page's id, and the same of the players who left in the last
+//! `GONE_MS`, so that one who just left can still be banned.  None of it is ever sent to a peer.
+//!
 //! ## Test aids
 //!
 //! The trace (`Tap`, the server's --online-trace, nfsu2-online's trace.rs) sees every frame the switch takes from a
@@ -224,6 +237,12 @@ pub const NETS: usize = 20;
 /// addresses the switch hands out: host bytes 2-251 in each of the twenty /24s
 pub const ADDRS: usize = NETS * 250;
 pub const BROADCAST: u32 = 0xFFFF_FFFF;
+/// the close codes of a kick and a ban (the crate doc's Kicks and bans): the page stays off the switch after them
+pub const CLOSE_KICKED: u16 = 4001;
+pub const CLOSE_BANNED: u16 = 4003;
+/// the players who left in this long are kept for `who` (ms), this many at most
+const GONE_MS: i64 = 60 * 60_000;
+const GONE_MAX: usize = 2000;
 
 pub(crate) const BASE: u32 = (10 << 24) | (77 << 16);
 /// free roam's datagrams (and LAN play's broadcasts): dropped first (`roam_queue`)
@@ -450,6 +469,8 @@ impl LanOptions {
 pub type OnJoin = Box<dyn Fn(u32, bool, usize) + Send + Sync>;
 /// `AttachOpts::on_leave`: (vip, name, players on the switch now)
 pub type OnLeave = Box<dyn Fn(u32, &str, usize) + Send + Sync>;
+/// `AttachOpts::on_hello`: the id the hello names -> the control message that turns the client away, or None
+pub type OnHello = Box<dyn Fn(&str) -> Option<Bytes> + Send + Sync>;
 
 /// What the server tells the switch about a new connection (never its address: the crate doc's What a peer learns).
 #[derive(Default)]
@@ -467,6 +488,12 @@ pub struct AttachOpts {
     pub on_join: Option<OnJoin>,
     /// (vip, name, players on the switch now)
     pub on_leave: Option<OnLeave>,
+    /// an opaque id of the client's address for the operator's bans (a keyed hash: never the address), kept for `who`
+    pub ident: Option<String>,
+    /// a banned client: this control message, then the close with `CLOSE_BANNED`; it never gets a place
+    pub refuse: Option<Bytes>,
+    /// the hello's id (its page's own): a message back turns the client away as `refuse` does
+    pub on_hello: Option<OnHello>,
 }
 
 /// What the players on the switch do (`LanSwitch::breakdown`).
@@ -653,6 +680,9 @@ pub(crate) struct Peer {
     share: AtomicU32,
     /// it follows the whole peer list (its LAN play is not shut: members.rs `list_for`); set under the `members` lock
     listed: AtomicBool,
+    /// its client's id for the operator's bans (`AttachOpts::ident`), and when it took its place (ms since 1970)
+    ident: Option<Arc<str>>,
+    since: i64,
 }
 
 impl Peer {
@@ -672,6 +702,18 @@ impl Peer {
     fn takes_bundles(&self) -> bool {
         self.bundle.load(Relaxed)
     }
+    /// as `who` shows it
+    fn who(&self, doing: &'static str, left: Option<i64>) -> Who {
+        Who {
+            vip: self.vip,
+            name: self.name().to_string(),
+            ident: self.ident.clone(),
+            browser: self.conn.browser.get().cloned(),
+            since: self.since,
+            left,
+            doing,
+        }
+    }
 }
 
 /// What the switch keeps of a connection while it is open.
@@ -682,6 +724,8 @@ pub(crate) struct AttachCtx {
     site: Option<Arc<Group>>,
     on_join: Option<OnJoin>,
     on_leave: Option<OnLeave>,
+    ident: Option<Arc<str>>,
+    on_hello: Option<OnHello>,
 }
 
 /// The sender's buckets while the Online host handles its frame: what the host sends because of it is spent from
@@ -750,6 +794,8 @@ pub struct LanSwitch {
     stats: Arc<Stats>,
     /// the bundle clock (none at bundle_ms 0)
     clock: Option<Arc<conn::Clock>>,
+    /// the players who left in the last `GONE_MS`, oldest first (`who`)
+    gone: Mutex<std::collections::VecDeque<Who>>,
     stopped: CancellationToken,
 }
 
@@ -816,6 +862,7 @@ impl LanSwitch {
             conn_ids: AtomicU64::new(0),
             stats: Arc::new(Stats::default()),
             clock,
+            gone: Mutex::new(Default::default()),
             stopped: CancellationToken::new(),
             me: me.clone(),
             o,
@@ -907,10 +954,22 @@ impl LanSwitch {
     {
         let group = self.join_group(false, opts.group.as_deref());
         let site = opts.site.as_deref().map(|s| self.join_group(true, Some(s)));
-        let ctx = Arc::new(AttachCtx { resume: opts.resume, queue: opts.queue, group, site, on_join: opts.on_join, on_leave: opts.on_leave });
+        let ctx = Arc::new(AttachCtx {
+            resume: opts.resume,
+            queue: opts.queue,
+            group,
+            site,
+            on_join: opts.on_join,
+            on_leave: opts.on_leave,
+            ident: opts.ident.map(Arc::from),
+            on_hello: opts.on_hello,
+        });
         let conn = Arc::new(Conn::new(self.conn_ids.fetch_add(1, Relaxed)));
-        // without ?resume the welcome comes at once; a resume's hello comes first (the reader waits for it)
-        if !ctx.resume {
+        // a banned client hears why and goes (its reader answers the close handshake); without ?resume the welcome
+        // comes at once; a resume's hello comes first (the reader waits for it)
+        if let Some(m) = opts.refuse {
+            self.expel_conn(&conn, m, CLOSE_BANNED);
+        } else if !ctx.resume {
             self.admit(&conn, &ctx, None);
         }
         tokio::spawn(conn::run(self.clone(), conn, r, w, pre, ctx));
@@ -1038,6 +1097,84 @@ impl LanSwitch {
         (n.other_bytes, n.other_entries) = (s.other_bytes.get(), s.other_entries.get());
         (n.waiting, n.waited) = self.line_view();
         n
+    }
+
+    /// Who is on the switch, then who left it in the last `GONE_MS` (oldest first), for the operator's `who`, kick and
+    /// ban (the crate doc's Kicks and bans).  What each one on it does is counted as `breakdown` counts it.
+    pub async fn who(&self) -> Vec<Who> {
+        let online = match &self.online {
+            Some(h) => h.vips().await.unwrap_or_default(),
+            None => Default::default(),
+        };
+        let roam = match &self.roam {
+            Some(h) => h.vips().await.unwrap_or_default(),
+            None => Default::default(),
+        };
+        let mut v: Vec<Who> = self
+            .all
+            .load()
+            .iter()
+            .map(|p| {
+                let doing = if online.contains(&p.vip) {
+                    "Online"
+                } else if p.lan() == Some(true) {
+                    "LAN screens"
+                } else if roam.contains(&p.vip) {
+                    "free roam"
+                } else {
+                    ""
+                };
+                p.who(doing, None)
+            })
+            .collect();
+        let mut g = self.gone.lock();
+        let now = nfsu2_util::now_ms();
+        while g.front().is_some_and(|w| w.left.is_some_and(|t| now - t > GONE_MS)) {
+            g.pop_front();
+        }
+        v.extend(g.iter().cloned());
+        v
+    }
+
+    /// The operator removes the player at `vip` (the crate doc's Kicks and bans): its page gets `msg` (a control
+    /// message), then the close with `code` (`CLOSE_KICKED` or `CLOSE_BANNED`).  False: nobody is there.
+    pub fn expel(&self, vip: u32, msg: Bytes, code: u16) -> bool {
+        let guard = slot(vip).map(|i| self.table[i].load());
+        let Some(p) = guard.as_ref().and_then(|g| g.as_ref()).filter(|p| p.open()) else { return false };
+        self.expel_conn(&p.conn, msg, code);
+        true
+    }
+
+    /// a connection removed, with or without a place: the message, then the close; its address is not kept for its
+    /// token (`closed`), nor its place in line (`left_line`)
+    pub(crate) fn expel_conn(&self, conn: &Arc<Conn>, msg: Bytes, code: u16) {
+        conn.expelled.store(true, Relaxed);
+        conn.push(Out::Text(msg));
+        let reason: &[u8] = if code == CLOSE_KICKED { b"kicked" } else { b"banned" };
+        conn.close(conn::close_payload(code, reason));
+    }
+
+    /// a hello (the first control message of a connection) whose id the server turns away: the connection goes, and
+    /// true.  The id is kept for `who` either way.
+    pub(crate) fn hello_refused(&self, conn: &Arc<Conn>, ctx: &AttachCtx, b: &Bytes) -> bool {
+        if b.len() > self.o.max_text || !conn.open() {
+            return false;
+        }
+        let Some(serde_json::Value::Object(m)) = text::parse_json(b) else { return false };
+        if m.get("t").and_then(serde_json::Value::as_str) != Some("hello") {
+            return false;
+        }
+        let Some(id) = m.get("id").and_then(serde_json::Value::as_str).filter(|i| !i.is_empty() && i.len() <= 64) else {
+            return false;
+        };
+        let _ = conn.browser.set(id.into());
+        match ctx.on_hello.as_ref().and_then(|f| f(id)) {
+            Some(msg) => {
+                self.expel_conn(conn, msg, CLOSE_BANNED);
+                true
+            }
+            None => false,
+        }
     }
 
     /// the switch's counts and its players, as JSON (for the tests: names and virtual addresses only, never a real
@@ -1277,6 +1414,22 @@ pub struct PeerView {
     pub open: bool,
     /// bytes queued to it and not yet taken by the kernel (its `OutQueue::buffered`)
     pub buffered: usize,
+}
+
+/// A player on the switch, or one who left in the last `GONE_MS`, as the operator's `who` sees it.
+#[derive(Clone, Debug)]
+pub struct Who {
+    pub vip: u32,
+    pub name: String,
+    /// its client's id for bans (`AttachOpts::ident`) and its page's (the hello's "id"), when it had them
+    pub ident: Option<Arc<str>>,
+    pub browser: Option<Arc<str>>,
+    /// when it took its place, and when it left (ms since 1970; None: on the switch now)
+    pub since: i64,
+    pub left: Option<i64>,
+    /// what it does now: "Online" (in the game's Online mode), "LAN screens" (the LAN or Online screens open),
+    /// "free roam", or "" (the menus, starting or leaving; and the ones who left)
+    pub doing: &'static str,
 }
 
 /// A reservation as the tests see it.

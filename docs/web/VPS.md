@@ -418,9 +418,9 @@ counts its 101 MB). Without `TEXPACKS` Upscaled plays with the game's own textur
   them, but for the memory: the unit's 3 GB was too little for 110 players (2.6 GB). It writes only to `/state`.
   At the memory limit the kernel stops the server and Docker starts it again.
 - **Keep the state volume.** It holds the ETag key (a new key makes every player's browser download the game data
-  again), the switch's addresses (`lan-addresses.json`: a player who reconnects gets the same one back) and the
-  Online mode's records (`online/`) and the players' keyphrase saves (`vault/`). `docker compose down` keeps it;
-  `down -v` deletes it.
+  again), the switch's addresses (`lan-addresses.json`: a player who reconnects gets the same one back), the
+  Online mode's records (`online/`), the players' keyphrase saves (`vault/`) and your [bans](#kick-and-ban)
+  (`bans.json`, `bans.key`). `docker compose down` keeps it; `down -v` deletes it.
 - **In every mode the server:**
   - answers only `GET` and `HEAD` (and `PUT` and `DELETE` at `/vault`, the keyphrase saves, from its own pages), and
     only for its own names (any other `Host` gets 421);
@@ -475,7 +475,7 @@ type, the game's class and rating, the race's average rating, power, weight, top
 power had in the race). For evening out the cars: `docker compose logs -t server --since 24h | grep '\[race\]'`.
 
 - **No player's real IP address** is written, and the page sends the server nothing about the player but the
-  nickname, and after a multiplayer race its car and place.
+  nickname, a random id the browser keeps for [bans](#kick-and-ban), and after a multiplayer race its car and place.
 - **`--access-log`** adds a line per request with the client's IP address and the URL. It is off by default, for
   debugging only: add it to the server's `command` in `compose.yml` (`["--behind-proxy", "--access-log"]`), and
   the log then holds your friends' addresses for as long as Docker keeps it.
@@ -486,6 +486,50 @@ power had in the race). For evening out the cars: `docker compose logs -t server
   the log never fills the disk.
 
 The console names paths and addresses: it is yours.
+
+## Kick and ban
+
+You can take a player out of playing with others (free roam, Online mode and LAN races) for now, for a while or for
+good, with a message their game shows them. Their game goes on, on their own. `web/deploy/nfsu2` runs the commands
+in the server's container: copy it next to `compose.yml` once (`scp web/deploy/nfsu2 root@<vps>:/srv/nfsu2/`, then
+`chmod +x /srv/nfsu2/nfsu2` on the VPS), and on the VPS:
+
+```sh
+cd /srv/nfsu2
+./nfsu2 who                              # who is on: address, name, what they do, for how long; and who left in the last hour
+./nfsu2 who bob                          # only names with "bob" in them
+./nfsu2 kick Bob Stop ramming people     # off now, with that message; reloading the page brings them back
+./nfsu2 ban Bob 3d Ramming, 3 days       # off, and turned away for 3 days: 30m, 12h, 3d, 2w, or perm for good
+./nfsu2 ban 10.77.4.17 perm              # a player by address, when two have the same name
+./nfsu2 bans                             # the bans: number, name, until when, the message
+./nfsu2 unban Bob                        # or unban '#4'
+```
+
+From your own computer it is one line: `ssh root@<vps> /srv/nfsu2/nfsu2 kick Bob Stop ramming`. The message needs
+no quotes, but over ssh an apostrophe needs them twice (`"'Don't ram'"`), or log in first.
+
+- **What the player sees**: a box in the middle of the game, "You were removed from playing with others: Stop
+  ramming people." or "You can't play with others until 27 Oct 2026, 15:05: Ramming, 3 days." (in their own time
+  and language), and that they can keep playing on their own. Nothing connects them again until they reload (a
+  kick) or the ban ends. A page loaded before this version does not know the message: it shows the server as gone
+  for a while and keeps trying.
+- **What a ban names**: there are no accounts, so a ban names the player two ways, the random id their browser
+  keeps for the site and their address (an IPv4 address or an IPv6 /56). A page with either is turned away. The
+  address only for a week after it was last the player's: addresses change hands (a phone network gives many people
+  one address in turn), so a ban for good would one day hit strangers. The browser's id comes from the page, and
+  when it shows up at a new address (a VPN, the phone), that address is banned too. A ban also takes off whoever is on
+  the switch from that address at the moment (a household): `ban` lists who it removed. A player who clears the
+  site's data and changes networks comes back; no ban can stop that without accounts.
+- **Who left**: `ban` takes a player who left in the last hour too (`who` lists them), so you can ban someone who
+  is gone already. `kick` needs them on.
+- **Banning again** replaces the earlier ban of the same player: `ban Bob perm` after `ban Bob 1d` leaves one ban,
+  for good.
+- **What is kept**: `bans.json` in the state volume, with keyed hashes of the addresses and ids only (the key,
+  `bans.key`, beside it): no address or id can be read back from them. The log has a `[ban]` line for each kick, ban
+  and lift, and when a banned player is turned away (2 a minute per client at most).
+- **How it works**: the commands go to `control.sock` in the state volume, which only the server's own user and
+  root can open; nothing on the network reaches it. Without Docker: `sudo /opt/nfsu2-web/nfsu2-server ctl --state
+  /var/lib/nfsu2-web who` (and the same for the others).
 
 ## SSH
 

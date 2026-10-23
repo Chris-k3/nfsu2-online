@@ -6,7 +6,7 @@
 import type { GameProcess } from '../host/process';
 import type { PadPage, TouchPad } from '../input/gamepad';
 import type { TextEntry } from '../input/index';
-import type { NetQueue } from '../net';
+import type { NetQueue, NetRemoved } from '../net';
 
 /** Given to every subsystem. */
 export interface CommonOptions {
@@ -58,6 +58,10 @@ export interface NetOptions extends CommonOptions {
   back?: () => void;
   /** the server is full: this page's place in line for one (null: not in line) */
   queue?: (q: NetQueue | null) => void;
+  /** this browser's own id (page-id.ts): the operator's bans name a page by it */
+  id?: string;
+  /** the operator removed this player from playing with others (a kick or a ban) */
+  removed?: (r: NetRemoved) => void;
 }
 
 /** What an attach call returns.  Everything but detach is optional. */

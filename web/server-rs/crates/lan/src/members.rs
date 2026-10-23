@@ -197,6 +197,8 @@ impl LanSwitch {
             probe: parking_lot::Mutex::new(crate::lag::Probe::new(now)),
             share: crate::lag::SHARE_FULL.into(),
             listed: false.into(),
+            ident: ctx.ident.clone(),
+            since: now_ms(),
         });
         if let Some(h) = &hello {
             peer.ctl.lock().texts.take_at(now, 1.0);
@@ -233,7 +235,8 @@ impl LanSwitch {
 
     /// the 'close' of a connection: its client's limits let go, and for the holder of an address, the address
     /// reserved for its token (not when the page closed the connection itself, 1000 "idle" or "closed": no network
-    /// feature in use, or the game ended; such a page comes back without a token, so its address is free at once).
+    /// feature in use, or the game ended; such a page comes back without a token, so its address is free at once; nor
+    /// when the operator removed it).  It is kept a while for the operator's `who`.
     /// An old connection's late close must not take the address from a new holder.
     pub(crate) fn closed(&self, conn: &Arc<Conn>, ctx: &AttachCtx) {
         self.leave_group(false, &ctx.group);
@@ -247,7 +250,6 @@ impl LanSwitch {
         self.streams.lock().remove(conn.id);
         conn.streaming.store(false, Relaxed);
         let vip = peer.vip;
-        let (code, reason) = conn.close_code();
         let mut m = self.members.lock();
         if !m.peers.get(&vip).is_some_and(|p| Arc::ptr_eq(p, &peer)) {
             return;
@@ -258,8 +260,7 @@ impl LanSwitch {
             self.table[i].store(None);
         }
         self.publish(&m);
-        let done = code == 1000 && (&reason[..] == b"idle" || &reason[..] == b"closed");
-        if done {
+        if conn.let_go() {
             self.stats.released.inc();
         } else {
             self.reserve(&mut m, vip, &peer);
@@ -277,6 +278,13 @@ impl LanSwitch {
             h.peer_gone(vip);
         }
         drop(m);
+        {
+            let mut g = self.gone.lock();
+            if g.len() >= crate::GONE_MAX {
+                g.pop_front();
+            }
+            g.push_back(peer.who("", Some(now_ms())));
+        }
         if let Some(im) = &self.impair {
             im.forget(vip);
         }

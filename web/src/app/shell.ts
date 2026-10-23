@@ -31,7 +31,7 @@ import { controlsSheet, type ControlsSheet } from './controls';
 import { TouchControls } from './touch';
 import { TextField } from './textentry';
 import type { PadPage } from '../input/gamepad';
-import type { NetQueue } from '../net';
+import type { NetQueue, NetRemoved } from '../net';
 import { checkSetting, HOST_FIXED, pageOnly, resolveEnv, settingsUpgrade, TEMPLATE, type Resolved } from './settings';
 import { exists, filesOf, listProfiles, PROFILES_DIR, readText, removeSaveDir, writeFile } from './savefs';
 import { turnOnAutosave } from './profile';
@@ -44,6 +44,7 @@ import { FpsOverlay, FPS_MODES, type FpsMode } from './overlay';
 import { LobbyPanel } from './lobby';
 import { GameSession } from './game';
 import { AwayCheck, AWAY_LIMITS, type AwayLimits } from './away';
+import { pageId } from './page-id';
 import { RenderCheck, RENDER_CHECK_TIMES, type RenderCheckTimes } from './rendercheck';
 import { moviesKept, Predownload } from './predownload';
 
@@ -446,6 +447,7 @@ async function startGame() {
     // scope, and with it this game, reachable
     session = await GameSession.start({
       module: loaded!.module, info: loaded!.info, saveDir: SAVE, env: r.env, canvas, stage, audio, displayHz, netName, notice, lobby, netBack, netQueue, onSaved,
+      netId: net ? pageId() : undefined, netRemoved,
       artifacts: q.get('artifacts') ?? undefined, dumpScale: q.get('dumpscale') ? +q.get('dumpscale')! : undefined,
       toggleFullscreen, padPage: PAD_PAGE, log: logLine, onFatal: stopFatal,
     });
@@ -583,6 +585,7 @@ function endStage() {
   textField.stop();
   awake?.(); awake = null;
   away?.stop(); away = null;
+  hideRemoved();
   renderCheck?.stop(); renderCheck = null;
   Object.assign(DEVICE, deviceDefaults());      // its verdict, for the next game without a reload
   exitFullscreen();
@@ -726,6 +729,29 @@ function netQueue(q: NetQueue | null) {
   const t = $('#queue');
   t.hidden = q === null;
   t.textContent = q ? queueText(q) : '';
+}
+/** the operator removed the player from playing with others (net/index.ts: a kick or a ban): why, over the game, until
+ *  the player plays on (an input REMOVED_MS after it came up) */
+const REMOVED_MS = 8000;
+let removedTimer: ReturnType<typeof setInterval> | null = null;
+function netRemoved(r: NetRemoved) {
+  const why = r.msg ? `: ${r.msg}${/[.!?]$/.test(r.msg) ? '' : '.'}` : '.';
+  const head = !r.ban ? 'You were removed from playing with others'
+    : r.until ? `You can't play with others until ${new Date(r.until).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}`
+    : "You can't play with others any more";
+  const t = $('#removed');
+  t.textContent = `${head}${why} You can keep playing on your own.`;
+  t.hidden = false;
+  const from = performance.now() + REMOVED_MS;
+  if (removedTimer) clearInterval(removedTimer);
+  removedTimer = setInterval(() => {
+    const last = session?.input?.lastInput?.() ?? null;
+    if (last !== null && last > from) hideRemoved();
+  }, 500);
+}
+function hideRemoved() {
+  if (removedTimer) { clearInterval(removedTimer); removedTimer = null; }
+  $('#removed').hidden = true;
 }
 /** the away check's message over the game (away.ts), null: none */
 function awayLine(text: string | null) {

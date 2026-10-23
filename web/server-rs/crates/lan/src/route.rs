@@ -417,6 +417,8 @@ pub(crate) mod tests {
             site: None,
             on_join: None,
             on_leave: None,
+            ident: None,
+            on_hello: None,
         });
         let p = sw.admit(&conn, &ctx, None).expect("admitted");
         (conn, ctx, p)

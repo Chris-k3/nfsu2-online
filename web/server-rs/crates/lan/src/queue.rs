@@ -189,15 +189,15 @@ impl LanSwitch {
         true
     }
 
-    /// a connection that ended while it waited: its place goes when the page let go (1000 "idle" or "closed"), else
+    /// a connection that ended while it waited: its place goes when the page let go (1000 "idle" or "closed", or the
+    /// operator removed it), else
     /// it is kept for its ticket for `reserve_ms` (a newer connection of the same page that took it changes nothing)
     pub(crate) fn left_line(&self, conn: &Arc<Conn>) {
         let id = conn.wait.lock().id;
         if id == 0 {
             return;
         }
-        let (code, reason) = conn.close_code();
-        let done = code == 1000 && (&reason[..] == b"idle" || &reason[..] == b"closed");
+        let done = conn.let_go();
         let mut m = self.members.lock();
         let Some(w) = m.line.waiters.get_mut(&id) else { return };
         if !w.conn.as_ref().is_some_and(|(c, _)| Arc::ptr_eq(c, conn)) {

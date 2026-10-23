@@ -1,4 +1,4 @@
-//! Four tests of the page (web/src/net/index.ts): the page's own code, bundled as the app bundles it, run in node
+//! Five tests of the page (web/src/net/index.ts): the page's own code, bundled as the app bundles it, run in node
 //! (tests/page.mjs) against this switch.  Skipped (with a message) without node.
 
 mod harness;
@@ -94,5 +94,18 @@ async fn the_page_takes_friends_car_states_by_their_fields() {
     }
     let sw = start(opts()).await;
     page("fpred", &[sw.port]).await;
+    sw.close().await;
+}
+
+// the page: kicked, it tells the game and stays off the switch for the rest of the game, whatever wants it; a page
+// whose id is banned is turned away at its hello the same way
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_page_removed_by_the_operator_stays_off() {
+    let _s = serial().await;
+    if no_node() {
+        return;
+    }
+    let sw = start(opts()).await;
+    page("removed", &[sw.port]).await;
     sw.close().await;
 }

@@ -43,6 +43,13 @@
 // (kind 33: the same frames, about a quarter fewer bytes, proto.ts unpackCompact)
 // once its hello says "compact":1 as well.
 //
+// The operator may remove a player (web/server-rs/crates/lan, Kicks and bans):
+// the switch sends {"t":"kick"} or {"t":"ban"} with the operator's message,
+// then closes with 4001 or 4003.  The page tells the player (onRemoved) and
+// stays off the switch for the rest of this game, as after goOffline.  The
+// hello names this browser's own id (NetOptions.id), which a ban names
+// besides the player's address.
+//
 // TCP frames are never dropped here: while the LAN RX ring is full they wait
 // in order (the C side's streams have no retransmission; the WebSocket and the
 // switch are reliable and ordered).  A TCP connect to this browser while it has
@@ -56,6 +63,8 @@ import { N } from '../app/i18n';
 export interface NetOptions {
   /** the name other players see on the switch's peer list */
   name?: string;
+  /** this browser's own id (app/page-id.ts), in the hello: the operator's bans name a page by it */
+  id?: string;
   /** the switch (default: /lan on this page's origin, wss on https) */
   url?: string;
   /** state changes, one line each */
@@ -72,12 +81,20 @@ export interface NetOptions {
   /** the server is full and this page waits in line for a place: where it is, as the switch last said; null: not
    *  (any more) */
   onQueue?: (q: NetQueue | null) => void;
+  /** the operator removed this player from playing with others (a kick or a ban), with its message: the page stays
+   *  off the switch for the rest of this game */
+  onRemoved?: (r: NetRemoved) => void;
   /** milliseconds between pings to the switch (default 2000) */
   pingMs?: number;
   /** milliseconds no mailbox wants the switch before the page lets it go (default 10000) */
   idleMs?: number;
 }
 export interface NetPeer { vip: string; name: string; self: boolean }
+/** a kick or a ban, as the switch said it: the operator's message (maybe ""), and a ban's end (ms since 1970; none:
+ *  for good) */
+export interface NetRemoved { ban: boolean; msg: string; until?: number }
+/** the switch's close codes for a kick and a ban */
+const CLOSE_KICKED = 4001, CLOSE_BANNED = 4003;
 /** a place in line: pos 1 is the next in, of everyone in line, eta about how many seconds until its turn (when the
  *  switch can tell: a few have gone in) */
 export interface NetQueue { pos: number; of: number; eta?: number }
@@ -295,8 +312,11 @@ class Link implements NetLink {
   /** our place in line (the switch's ticket for it: the same place again after a dropped link), and since when */
   private ticket = '';
   private queuedAt = 0;
-  /** the player chose to stop waiting and play offline (goOffline): nothing takes the switch again this game */
+  /** the player chose to stop waiting and play offline (goOffline), or the operator removed them: nothing takes the
+   *  switch again this game */
   private stayOff = false;
+  /** the switch's kick or ban message, until its close comes */
+  private removal: NetRemoved | null = null;
   /** the roam mailbox's solid word (setSolid): 0 not switched, 1 off, 2 on */
   private solid = 0;
   /** the switch's peer list (the online host on it too), as its last whole list and the changes since made it */
@@ -463,6 +483,7 @@ class Link implements NetLink {
       // a friend's car state by its fields, rounded (proto.ts fpredTake; `fp`)
       this.lanSent = this.lanOpen();
       ws.send(JSON.stringify({ t: 'hello', name: this.o.name ?? 'player', deltas: 1, lan: this.lanSent ? 1 : 0, bundle: 1, compact: 1, delta: 1, fpred: 1,
+        ...(this.o.id ? { id: this.o.id } : {}),
         ...(this.vipNum && this.token ? { vip: P.ipStr(this.vipNum), token: this.token } : {}), ...(this.ticket ? { ticket: this.ticket } : {}) }));
       this.pingTimer = setInterval(() => this.ping(), this.o.pingMs ?? 2000);
     };
@@ -476,6 +497,16 @@ class Link implements NetLink {
       if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null; }
       this.pings.clear();
       if (this.closed) return;
+      if (e.code === CLOSE_KICKED || e.code === CLOSE_BANNED) {
+        const r = this.removal ?? { ban: e.code === CLOSE_BANNED, msg: '' };
+        this.removal = null;
+        this.stayOff = true;
+        this.release('away');
+        this.log(`the operator ${r.ban ? `banned this player${r.until ? ` until ${new Date(r.until).toISOString()}` : ' for good'}` : 'kicked this player'}` +
+          `${r.msg ? ` ("${r.msg}")` : ''}: no switch for the rest of this game`);
+        this.o.onRemoved?.(r);
+        return;
+      }
       const was = this.state;
       this.state = 'offline'; this.setPage(P.NET_PAGE_OFFLINE);
       this.lost = true;
@@ -528,6 +559,9 @@ class Link implements NetLink {
         } else this.log(`back in line, ${m.pos} of ${m.of}`);
       }
       this.o.onQueue?.({ pos: m.pos, of: m.of, ...(typeof m.eta === 'number' ? { eta: m.eta } : {}) });
+    } else if (m.t === 'kick' || m.t === 'ban') {
+      // its close follows
+      this.removal = { ban: m.t === 'ban', msg: typeof m.msg === 'string' ? m.msg : '', ...(typeof m.until === 'number' ? { until: m.until } : {}) };
     } else if (m.t === 'peers' && Array.isArray(m.peers)) {
       const old = this.peerMap;
       this.peerMap = new Map();

@@ -1,4 +1,4 @@
-// Four tests of the page (web/src/net/index.ts, bundled as the app bundles it) against the Rust switch, started by
+// Six tests of the page (web/src/net/index.ts, bundled as the app bundles it) against the Rust switch, started by
 // tests/page.rs, which passes its ports.  What they read of the switch's insides (its peers, info(), reserved) comes
 // from the harness's GET /state.
 //   node page.mjs <case> <port> [<port> ...]
@@ -347,6 +347,42 @@ const cases = {
       assert.notEqual(P.ipStr(Atomics.load(roam.w, P.W_VIP) >>> 0), v1, 'a new address');
       assert.ok(logs.some(l => /the player is away/.test(l)) && logs.some(l => /here again/.test(l)), 'the console says so');
     } finally { link.close(); }
+  },
+
+  // the page: kicked, it tells the game and stays off the switch for the rest of the game, whatever wants it; a page
+  // whose id is banned is turned away at its hello the same way
+  async removed([port]) {
+    const { attachNet } = await pageNet(port);
+    const memory = new WebAssembly.Memory({ initial: 10, maximum: 10, shared: true }), roam = mailbox(memory, 0);
+    const mem2 = new WebAssembly.Memory({ initial: 10, maximum: 10, shared: true }), roam2 = mailbox(mem2, 0);
+    const logs = [], told = [];
+    const size = async () => (await state(port)).peers.length;
+    const link = attachNet(fakeGame(memory, { 4: roam }), { url: `ws://127.0.0.1:${port}/lan`, name: 'P', id: 'page-p', pingMs: 60_000, idleMs: 100,
+      log: l => logs.push(l), onRemoved: r => told.push(r) });
+    const banned = attachNet(fakeGame(mem2, { 4: roam2 }), { url: `ws://127.0.0.1:${port}/lan?gate=page-b`, name: 'B', id: 'page-b', pingMs: 60_000,
+      onRemoved: r => told.push(r) });
+    try {
+      want(roam, 1);
+      const vip = P.ipNum(await link.online);
+      await until(async () => (await size()) === 1);
+      assert.equal((await fetch(`http://127.0.0.1:${port}/expel?vip=${vip}&code=4001&msg=Stop`)).status, 200);
+      await until(() => told.length === 1);
+      assert.deepEqual(told[0], { ban: false, msg: 'Stop' });
+      assert.equal(link.state, 'away');
+      assert.equal(Atomics.load(roam.w, P.W_PAGE_STATE), P.NET_PAGE_IDLE, 'C hears that the page let go');
+      await until(async () => (await size()) === 0);
+      assert.equal((await state(port)).reserved, 0, 'its address free at once');
+      want(roam, 0); want(roam, 1); link.setAway(true); link.setAway(false); await sleep(300);
+      assert.equal(await size(), 0, 'nothing connects again: not a want, not the away check');
+      assert.ok(logs.some(l => /the operator kicked this player \("Stop"\): no switch for the rest of this game/.test(l)), logs.join('\n'));
+      // its id banned: told at its hello, and off
+      want(roam2, 1);
+      await until(() => told.length === 2);
+      assert.deepEqual(told[1], { ban: true, msg: 'page-b' });
+      assert.equal(banned.state, 'away');
+      await sleep(300);
+      assert.equal(await size(), 0);
+    } finally { link.close(); banned.close(); }
   },
 
   // the page: what C queued at once goes as one bundle, a snapshot to several friends once; bundles from the switch are

@@ -491,6 +491,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "nfsu2-bans"
+version = "0.1.0"
+dependencies = [
+ "hmac",
+ "nfsu2-util",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
 name = "nfsu2-headers"
 version = "0.1.0"
 dependencies = [
@@ -614,6 +627,7 @@ dependencies = [
  "hmac",
  "libc",
  "mimalloc",
+ "nfsu2-bans",
  "nfsu2-headers",
  "nfsu2-http",
  "nfsu2-lan",
@@ -951,6 +965,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba"
 dependencies = [
  "serde_core",
+ "serde_derive",
 ]
 
 [[package]]

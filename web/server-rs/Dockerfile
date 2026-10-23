@@ -8,7 +8,7 @@
 # sources into the build); those are mounted:
 #   /game     the NFS Underground 2 folder (the one with SPEED2.EXE), read-only, readable by everyone
 #   /module   nfsu2.wasm and nfsu2.json, built with web/build.sh from the image's revision, read-only
-#   /state    the server's keys (ETags, the switch's tokens) and the Online mode's records: a volume, kept across
+#   /state    the server's keys (ETags, the switch's tokens), the Online mode's records and the bans: a volume, kept across
 #             updates (a new ETag key would make every browser download the game data again)
 # The server runs as uid 1000 (the user of the Node server's image before it, so a state volume that one wrote stays
 # writable) and listens on 127.0.0.1:8080 of the network it is given: the VPS's own, with Caddy in front
