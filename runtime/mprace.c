@@ -403,8 +403,10 @@ int mprace_speed_limit(uint32_t car, float mph){
  * takes the racers' ratings and a target between their middle and the best
  * (log target = (1 - s) mean(log rating) + s log(best), s =
  * MPRACE_BALANCE_SHARE: the slower cars come most of the way up, the
- * faster ones a little down), and for every car the engine power that gives
- * it the target's rating, from -MPRACE_BALANCE_DOWN to +MPRACE_BALANCE_UP:
+ * faster ones a little down), and for every car the engine power that takes
+ * its rating MPRACE_BALANCE_CLOSE of the way to the target, in logs (of two
+ * cars, one rated 1.34 times the other, 1.03 times is left), from
+ * -MPRACE_BALANCE_DOWN to +MPRACE_BALANCE_UP:
  * its rating at power f is the game's sum (0x5B4DC0) with the push f times
  * as strong (the push is the torque's; the rating goes as about f^1.16 for
  * every car, stock or with every part).  The engine's power is its curve and
@@ -418,7 +420,7 @@ int mprace_speed_limit(uint32_t car, float mph){
  * Only in the race types that the rating decides (drag, sprint,
  * circuit, URL): in Street X and drift races the better-rated cars placed
  * like the others (the live server's lines of 2026-10-23).
- * NFSU2_MPRACE_BALANCE (a test aid): "UP,DOWN,SHARE" instead, 0 none. */
+ * NFSU2_MPRACE_BALANCE (a test aid): "UP,DOWN,SHARE,CLOSE" instead, 0 none. */
 static float rating_at(uint32_t pi, float f){
     uint32_t t = pi + PI_PUSH; float m = MRF32(pi + PI_MASS), k = MRF32(pi + PI_DRAG), sum = 0.f;
     if (!(m > 0.f)) return 0.f;
@@ -429,18 +431,20 @@ static float rating_at(uint32_t pi, float f){
     }
     return sum;
 }
-typedef struct { float up, down, share; int on; } Balance;
+typedef struct { float up, down, share, close; int on; } Balance;
 static Balance balance_conf(void){
     static Balance b; static int got;
     if (!got){
         const char *e = getenv("NFSU2_MPRACE_BALANCE");
-        b.up = MPRACE_BALANCE_UP; b.down = MPRACE_BALANCE_DOWN; b.share = MPRACE_BALANCE_SHARE; b.on = 1;
+        b.up = MPRACE_BALANCE_UP; b.down = MPRACE_BALANCE_DOWN; b.share = MPRACE_BALANCE_SHARE; b.close = MPRACE_BALANCE_CLOSE; b.on = 1;
         if (e && *e){
-            float u = 0.f, d = 0.f, s = b.share;
-            int n = sscanf(e, "%f,%f,%f", &u, &d, &s);
+            float u = 0.f, d = 0.f, s = b.share, c = b.close;
+            int n = sscanf(e, "%f,%f,%f,%f", &u, &d, &s, &c);
             if (n < 2 || !(u > 0.f || d > 0.f)) b.on = 0;
-            else { b.up = u; b.down = d; b.share = s; }
+            else { b.up = u; b.down = d; b.share = s; b.close = c; }
         }
+        if (!(b.close >= 0.f)) b.close = 0.f;
+        if (b.close > 1.f) b.close = 1.f;
         if (!(b.up >= 0.f)) b.up = 0.f;
         if (b.up > 2.f) b.up = 2.f;
         if (!(b.down >= 0.f)) b.down = 0.f;
@@ -513,15 +517,16 @@ static float balance_race(uint32_t ours, int mode){
     const char *no = !b.on ? "off" : !balanced_mode(mode) ? "not in this race type" : k < 2 ? "fewer than 2 rated cars" : 0;
     if (no){ fprintf(stderr, "[mprace] f=%ld balance: %s\n", autotest_frame(), no); return 1.f; }
     float target = expf((1.f - b.share) * logs / (float)k + b.share * logf(best));
-    fprintf(stderr, "[mprace] f=%ld balance: %d cars, their target rating %.1f (best %.1f; power +%.0f %% to -%.0f %%)\n", autotest_frame(), k,
-            (double)target, (double)best, (double)(b.up * 100.f), (double)(b.down * 100.f));
+    fprintf(stderr, "[mprace] f=%ld balance: %d cars, their target rating %.1f (best %.1f; %.0f %% of each car's way there; power +%.0f %% "
+            "to -%.0f %%)\n", autotest_frame(), k, (double)target, (double)best, (double)(b.close * 100.f), (double)(b.up * 100.f),
+            (double)(b.down * 100.f));
     for (int i = 0; i < n; i++){
         if (!(r[i] > 0.f)) continue;
         /* (the push table stays as built: the rating at f is the sum's, the torque the engine's.  The sum need not
          * be the game's rating: in a drag race every car has 95 % of its mass, and the push and drag per kg are
          * 1/0.95 of the rating's (the live races of 2026-10-23: every drag car's power 0.957 of what it should have
-         * been), so each car's target is put in its own sum's terms) */
-        float was = rating_at(pi[i], 1.f), want = was > 0.f ? target * was / r[i] : target;
+         * been), so each car's goal is put in its own sum's terms) */
+        float goal = r[i] * powf(target / r[i], b.close), was = rating_at(pi[i], 1.f), want = was > 0.f ? goal * was / r[i] : goal;
         float f = balance_factor(pi[i], want, 1.f - b.down, 1.f + b.up), now = was > 0.f ? rating_at(pi[i], f) * r[i] / was : 0.f;
         float lim = MRF32(pi[i] + PI_LIMIT_MPH), n2o = MRF32(pi[i] + PI_NITROUS);
         int j = g_bal.n++;
@@ -529,9 +534,9 @@ static float balance_race(uint32_t ours, int mode){
         balance_apply(j);
         if (car[i] == ours) our_f = f;
         CarPerf p; mprace_car_perf(car[i], &p);
-        fprintf(stderr, "[mprace]   racer %d%s: %s rated %.1f (%.1f by the sum) -> power x%.3f, %.0f kW, rated %.1f; governor %.0f mph -> none, "
-                "nitrous %.3f -> %.3f kN m\n", i, car[i] == ours ? " (ours)" : "", p.name, (double)r[i], (double)was, (double)f,
-                (double)(p.power / 1000.f), (double)now, (double)lim, (double)n2o, (double)MRF32(pi[i] + PI_NITROUS));
+        fprintf(stderr, "[mprace]   racer %d%s: %s rated %.1f (%.1f by the sum), its goal %.1f -> power x%.3f, %.0f kW, rated %.1f; governor %.0f mph "
+                "-> none, nitrous %.3f -> %.3f kN m\n", i, car[i] == ours ? " (ours)" : "", p.name, (double)r[i], (double)was, (double)goal,
+                (double)f, (double)(p.power / 1000.f), (double)now, (double)lim, (double)n2o, (double)MRF32(pi[i] + PI_NITROUS));
     }
     g_bal.check_at = autotest_frame() + 60;
     return our_f;
