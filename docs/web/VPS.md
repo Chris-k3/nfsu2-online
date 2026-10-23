@@ -159,11 +159,13 @@ sees a keyphrase, a key or a save, and its files name no player.
   day; 60 saves, then one every 2 s; 60 loads, then one a second; and 30 loads of keyphrases there are not, then 30
   an hour, so nobody learns anything by guessing. A version is at most 256 KB. More gets 429 (or 413, or 507 when the
   room is full).
-- **What all clients may do:** new keyphrases come at most as many a day as would fill the room in 30 days if each held
-  the most it can (two versions of 256 KB), 2000 a day at least (50 GB: about 2,800; 140 GB: about 7,900; the start-up
-  line says), a quarter of that at once; more gets 503 and the console a line `[vault] refused a new keyphrase:
-  today's N are taken`. Without it, anyone with enough addresses could fill the room within days, and keep every new
-  player out for the two years the files stay. Saves of the keyphrases already there never wait for it.
+- **What all clients may do:** the saves add at most as many bytes a day to the disk as fill the room for new
+  keyphrases in 30 days (50 GB: 1.5 GB a day; 140 GB: 4.2 GB; the start-up line says), a quarter of that at once. A
+  new keyphrase counts as 32 KB at least (a player's saves pack into 6-14 KB, two versions of them), so 50 GB takes
+  about 45,000 new keyphrases a day; a save that grows its keyphrase past 32 KB counts what it adds. More gets 503 and
+  the console a line `[vault] refused a save: the 1.50 GB a day the saves may add are taken for now`. Without it,
+  anyone with enough addresses could fill the room within days, and keep every new player out for the two years the
+  files stay. A save that keeps its size, or stays within 32 KB, never waits for it.
 - **The disk:** any save that would grow a file stops (507, `[vault] refused a save: the disk has less than ...`)
   while the disk under the state folder has less than 2 GB or 100,000 inodes free, whatever `NFSU2_VAULT_GB` says.
 - **Backups:** copy `vault/` while the server runs: each file is replaced whole, by a rename. Without the folder the

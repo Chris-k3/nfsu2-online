@@ -33,7 +33,7 @@ const LAN_SNDBUF: u64 = 32 << 10;
 const VAULT_SWEEP_EVERY: Duration = Duration::from_secs(24 * 3600);
 
 /// "1.2 GB", "340.5 MB"
-fn size(bytes: u64) -> String {
+pub(super) fn size(bytes: u64) -> String {
     if bytes >= 1_000_000_000 { format!("{:.2} GB", bytes as f64 / 1e9) } else { format!("{:.1} MB", bytes as f64 / 1e6) }
 }
 
@@ -371,12 +371,12 @@ pub async fn run(o: Options, cores: usize) {
             Some(v) => {
                 let vo = v.store.options();
                 format!(
-                    "keyphrase saves (/vault) in {}, up to {} (new keyphrases until {}, {} a day at most); one unused for \
-                     two years goes",
+                    "keyphrase saves (/vault) in {}, up to {} (new keyphrases until {}, growing {} a day at most); one \
+                     unused for two years goes",
                     vo.dir.display(),
                     size(vo.max_bytes),
                     size(vo.new_until),
-                    vo.new_per_day
+                    size(vo.per_day)
                 )
             }
             None => "no keyphrase saves (--vault-gb 0)".into(),

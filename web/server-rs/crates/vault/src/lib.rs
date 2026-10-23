@@ -36,11 +36,15 @@
 //!   6-14 KB, so that is dozens of profiles);
 //! - new keyphrases stop once all of them take [`VaultOptions::new_until`] bytes, every write that grows a file at
 //!   [`VaultOptions::max_bytes`] (counted in 4 KB blocks, as the disk takes them); what is kept stays readable;
-//! - new keyphrases come at most [`VaultOptions::new_per_day`] a day from all clients together, a quarter of that at
-//!   once: as many as fill the room in [`FILL_DAYS`] when each takes the most it can (both versions at `max_body`),
-//!   2000 at least.  The per-client limits alone let anyone with enough addresses fill the room within days, and
-//!   whatever fills it stays two years (the third security audit, 2026-10-23); so a flood now takes a month, and
-//!   leaves a line a day in the log;
+//! - what the saves add to the disk comes at most [`VaultOptions::per_day`] bytes a day from all clients together, a
+//!   quarter of that at once: what fills the room for new keyphrases in [`FILL_DAYS`], 2000 new keyphrases' worth at
+//!   least.  A new keyphrase counts as [`VaultOptions::base`] at least (32 KB: two versions of a 14 KB save folder)
+//!   and may grow to that without counting again; a save that grows its file past it counts what it adds.  So no
+//!   byte on the disk goes uncounted, also of small keyphrases grown later, and a save that keeps its size, or stays
+//!   within `base`, never waits for it.  The per-client limits alone let anyone with enough addresses fill the room
+//!   within days, and whatever fills it stays two years (the third security audit, 2026-10-23); so a flood now takes
+//!   a month, and leaves a line a minute in the log.  (The first cap counted keyphrases, each as the most it can hold,
+//!   528 KB: 50 GB took 2838 a day, and turned players away at 4,300 at once, 2026-10-23.);
 //! - every write that grows a file stops while the disk under the folder has less than [`VaultOptions::min_free`]
 //!   bytes free, or fewer than [`VaultOptions::min_free_files`] files (inodes): the caps count bytes, the room given
 //!   may be more than the disk has, and many small files run a disk out of inodes before its bytes;
@@ -48,7 +52,7 @@
 //!   [`KEPT`] (an operator's choice for one keyphrase: kept however long it goes unused).
 //!
 //! The totals behind the caps are counted by [`Vault::sweep`] (at the start, then daily) and kept up to date by each
-//! write; until the first count ends only the day's new keyphrases and the free disk limit them.  A write during a
+//! write; until the first count ends only the day's bytes and the free disk limit them.  A write during a
 //! sweep may be missed by its count: the next one sets it right; a file that goes while the sweep looks at it (a
 //! save's rename, a delete) is passed over.
 //!
@@ -73,7 +77,7 @@ pub const DAY_MS: i64 = 86_400_000;
 pub const BLOCK: u64 = 4096;
 /// a temporary file that was never renamed (the server stopped mid-write) goes at the first sweep an hour after
 const STALE_TMP_MS: i64 = 3_600_000;
-/// the days new keyphrases take at the least to fill the room, each at the most it can hold (`sized`)
+/// the days the saves take at the least to fill the room for new keyphrases (`sized`)
 pub const FILL_DAYS: u64 = 30;
 
 pub struct VaultOptions {
@@ -85,8 +89,10 @@ pub struct VaultOptions {
     pub max_bytes: u64,
     /// new keyphrases stop at this many bytes in all
     pub new_until: u64,
-    /// new keyphrases a day at most, from all clients together (a quarter of it at once)
-    pub new_per_day: u64,
+    /// the bytes the saves may add to the disk a day, all clients together (a quarter of it at once)
+    pub per_day: u64,
+    /// what a new keyphrase counts as at the least: its file grows to it without counting again
+    pub base: u64,
     /// every write that grows a file stops while the disk has fewer bytes free than this...
     pub min_free: u64,
     /// ...or fewer files (inodes)
@@ -96,18 +102,19 @@ pub struct VaultOptions {
 }
 
 impl VaultOptions {
-    /// `gb` gigabytes in all, new keyphrases until 90 % of it and at most what fills that in [`FILL_DAYS`], 256 KB a
-    /// version, 2 GB and 100,000 files kept free on the disk, two years unused
+    /// `gb` gigabytes in all, new keyphrases until 90 % of it, the saves adding at most what fills that in
+    /// [`FILL_DAYS`], 256 KB a version, a new keyphrase 32 KB at the least, 2 GB and 100,000 files kept free on the
+    /// disk, two years unused
     pub fn sized(dir: PathBuf, gb: f64) -> VaultOptions {
         let max_bytes = (gb * 1e9) as u64;
-        let (max_body, new_until) = (256 << 10, max_bytes / 10 * 9);
-        let biggest = disk(HEAD as u64 + 2 * max_body as u64);
+        let (max_body, new_until, base) = (256 << 10, max_bytes / 10 * 9, 32 << 10);
         VaultOptions {
             dir,
             max_body: max_body as usize,
             max_bytes,
             new_until,
-            new_per_day: (new_until / biggest / FILL_DAYS).max(2000),
+            per_day: (new_until / FILL_DAYS).max(2000 * base),
+            base,
             min_free: 2_000_000_000,
             min_free_files: 100_000,
             unused_ms: 730 * DAY_MS,
@@ -188,7 +195,7 @@ pub enum Put {
     Full,
     /// the disk is nearly full (`min_free`, `min_free_files`): nothing that grows a file
     DiskLow,
-    /// the day's new keyphrases are taken (`new_per_day`): a new one later
+    /// the day's bytes are taken (`per_day`): a new keyphrase, or a save that grows one, later
     Busy,
 }
 
@@ -210,8 +217,8 @@ pub struct Vault {
     count: AtomicI64,
     counted: AtomicBool,
     seq: AtomicU64,
-    /// the new keyphrases there is room for now (`new_per_day`'s bucket) and when it was last filled up (ms)
-    news: Mutex<(f64, i64)>,
+    /// the bytes the saves may add now (`per_day`'s bucket) and when it was last filled up (ms)
+    room: Mutex<(f64, i64)>,
 }
 
 fn u32_at(b: &[u8], i: usize) -> u32 {
@@ -287,24 +294,24 @@ impl Vault {
             count: AtomicI64::new(0),
             counted: AtomicBool::new(false),
             seq: AtomicU64::new(0),
-            news: Mutex::new((Self::news_burst(&o), 0)),
+            room: Mutex::new((Self::room_burst(&o), 0)),
             o,
         })
     }
 
-    /// the new keyphrases there may be at once: a quarter of a day's
-    fn news_burst(o: &VaultOptions) -> f64 {
-        (o.new_per_day as f64 / 4.0).max(1.0)
+    /// the bytes the saves may add at once: a quarter of a day's
+    fn room_burst(o: &VaultOptions) -> f64 {
+        o.per_day as f64 / 4.0
     }
 
-    /// one new keyphrase out of the day's, if there is one left (the bucket refills at new_per_day a day)
-    fn take_new(&self, now: i64) -> bool {
-        let mut q = self.news.lock();
+    /// `n` bytes out of the day's, if they are left (the bucket refills at per_day a day)
+    fn take_room(&self, n: u64, now: i64) -> bool {
+        let mut q = self.room.lock();
         let (v, t) = *q;
-        let refill = if t == 0 { 0.0 } else { (now - t).max(0) as f64 * self.o.new_per_day as f64 / DAY_MS as f64 };
-        let v = (v + refill).min(Self::news_burst(&self.o));
-        let ok = v >= 1.0;
-        *q = (if ok { v - 1.0 } else { v }, now.max(t));
+        let refill = if t == 0 { 0.0 } else { (now - t).max(0) as f64 * self.o.per_day as f64 / DAY_MS as f64 };
+        let v = (v + refill).min(Self::room_burst(&self.o));
+        let ok = v >= n as f64;
+        *q = (if ok { v - n as f64 } else { v }, now.max(t));
         ok
     }
 
@@ -443,7 +450,14 @@ impl Vault {
             _ => (Meta { cur: Version { rev: Self::new_rev(&[]), saved: now }, prev: None, flags: 0, created: now }, &[]),
         };
         let bytes = file_bytes(&meta, body, prev_body);
-        let grows = disk(bytes.len() as u64) as i64 - old.as_ref().map_or(0, |b| disk(b.len() as u64) as i64);
+        let (was, will) = (old.as_ref().map(|b| disk(b.len() as u64)), disk(bytes.len() as u64));
+        let grows = will as i64 - was.unwrap_or(0) as i64;
+        // what counts against the day's bytes: a new keyphrase at least `base`, a save what it grows the file past
+        // both its blocks and `base`
+        let counts = match was {
+            None => will.max(self.o.base),
+            Some(was) => will.saturating_sub(was.max(self.o.base)),
+        };
         if self.counted.load(Ordering::Relaxed) {
             let total = self.bytes.load(Ordering::Relaxed);
             let over = |cap: u64| total + grows > cap as i64;
@@ -454,7 +468,7 @@ impl Vault {
         if grows > 0 && !self.disk_ok() {
             return Ok(Put::DiskLow);
         }
-        if old.is_none() && !self.take_new(now) {
+        if counts > 0 && !self.take_room(counts, now) {
             return Ok(Put::Busy);
         }
         self.write(&p, &bytes)?;

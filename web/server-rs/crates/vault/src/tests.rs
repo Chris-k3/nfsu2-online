@@ -133,25 +133,42 @@ fn the_caps_count_disk_blocks_once_counted() {
 }
 
 #[test]
-fn new_keyphrases_come_at_most_new_per_day() {
-    // 8 a day: 2 at once, then one every 3 hours; saves of the keyphrases there never wait
-    let (_d, v) = vault(|o| o.new_per_day = 8);
-    let ids: Vec<Id> = (0..5u8).map(|i| id_of(&[i])).collect();
+fn the_saves_add_at_most_per_day() {
+    // 32 blocks a day: 8 at once, then one every 45 minutes; a new keyphrase counts as 2 blocks at least
+    let (_d, v) = vault(|o| {
+        o.per_day = 32 * BLOCK;
+        o.base = 2 * BLOCK;
+    });
+    let ids: Vec<Id> = (0..10u8).map(|i| id_of(&[i])).collect();
+    // a version whose file takes n blocks (no earlier copy: all of it on one day)
+    let blocks = |n: u64| vec![7u8; (n * BLOCK) as usize - HEAD];
     let m0 = saved(v.put(&ids[0], Cond::New, b"x", T0).unwrap());
-    saved(v.put(&ids[1], Cond::New, b"x", T0).unwrap());
-    assert_eq!(v.put(&ids[2], Cond::New, b"x", T0 + HOUR).unwrap(), Put::Busy);
-    assert!(!file(&v, &ids[2]).exists());
-    saved(v.put(&ids[0], Cond::Rev(m0.cur.rev), b"bigger", T0 + HOUR).unwrap());
-    saved(v.put(&ids[2], Cond::New, b"x", T0 + 3 * HOUR).unwrap());
-    assert_eq!(v.put(&ids[3], Cond::New, b"x", T0 + 3 * HOUR).unwrap(), Put::Busy);
-    // a day later: 2 at once again, not 8
-    saved(v.put(&ids[3], Cond::New, b"x", T0 + 30 * HOUR).unwrap());
-    saved(v.put(&ids[4], Cond::New, b"x", T0 + 30 * HOUR).unwrap());
-    assert_eq!(v.put(&id_of(b"five"), Cond::New, b"x", T0 + 30 * HOUR).unwrap(), Put::Busy);
-    // what `sized` gives: as many a day as fill the room in FILL_DAYS at the most each can hold, 2000 at least
-    let o = VaultOptions::sized(PathBuf::from("/x"), 140.0);
-    assert_eq!(o.new_per_day, 126_000_000_000 / disk(HEAD as u64 + 2 * (256 << 10)) / FILL_DAYS);
-    assert_eq!(VaultOptions::sized(PathBuf::from("/x"), 1.0).new_per_day, 2000);
+    for id in &ids[1..4] {
+        saved(v.put(id, Cond::New, b"x", T0).unwrap());
+    }
+    assert_eq!(v.put(&ids[4], Cond::New, b"x", T0).unwrap(), Put::Busy);
+    assert!(!file(&v, &ids[4]).exists());
+    // a keyphrase there grows to `base` without counting, and saves at its size never wait
+    let m0 = saved(v.put(&ids[0], Cond::Rev(m0.cur.rev), &blocks(2), T0).unwrap());
+    let m0 = saved(v.put(&ids[0], Cond::Rev(m0.cur.rev), &blocks(2), T0).unwrap());
+    // past it, what it adds counts: so small keyphrases grown later fill nothing faster
+    assert_eq!(v.put(&ids[0], Cond::Rev(m0.cur.rev), &blocks(3), T0).unwrap(), Put::Busy);
+    let m0 = saved(v.put(&ids[0], Cond::Rev(m0.cur.rev), b"y", T0).unwrap());
+    // two hours on, 2.7 blocks: a new keyphrase, then not a block more
+    saved(v.put(&ids[4], Cond::New, b"x", T0 + 2 * HOUR).unwrap());
+    assert_eq!(v.put(&ids[0], Cond::Rev(m0.cur.rev), &blocks(3), T0 + 2 * HOUR).unwrap(), Put::Busy);
+    // an hour more: the block it grows past `base`
+    saved(v.put(&ids[0], Cond::Rev(m0.cur.rev), &blocks(3), T0 + 3 * HOUR).unwrap());
+    // a day later: 8 blocks at once again, not 32
+    for id in &ids[5..9] {
+        saved(v.put(id, Cond::New, b"x", T0 + 30 * HOUR).unwrap());
+    }
+    assert_eq!(v.put(&ids[9], Cond::New, b"x", T0 + 30 * HOUR).unwrap(), Put::Busy);
+    // what `sized` gives: what fills the room for new keyphrases in FILL_DAYS, 2000 new keyphrases' worth at least
+    let o = VaultOptions::sized(PathBuf::from("/x"), 50.0);
+    assert_eq!((o.per_day, o.base), (1_500_000_000, 32 << 10));
+    assert_eq!(VaultOptions::sized(PathBuf::from("/x"), 140.0).per_day, 126_000_000_000 / FILL_DAYS);
+    assert_eq!(VaultOptions::sized(PathBuf::from("/x"), 1.0).per_day, 2000 * (32 << 10));
 }
 
 #[test]
