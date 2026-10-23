@@ -336,6 +336,8 @@ pub struct LanOptions {
     /// second in all (the crate doc says why); `bundle_ms` or less: a fixed tick
     pub bundle_max_ms: u64,
     pub bundle_budget: u64,
+    /// each tick is the tick give or take this share of it, at random (conn.rs `Clock` says why)
+    pub bundle_jitter: f64,
     /// SO_SNDBUF for /lan connections (NFSU2_LAN_SNDBUF; 0: the kernel's own, which Linux grows to megabytes)
     pub send_buffer_os: usize,
     /// the largest WebSocket message a client may send (the server's `limits::WS_MAX_PAYLOAD`, the ws library's
@@ -380,6 +382,7 @@ impl Default for LanOptions {
             bundle_ms: 50,
             bundle_max_ms: 50,
             bundle_budget: 125_000,
+            bundle_jitter: 0.4,
             send_buffer_os: 0,
             max_payload: 64 << 10,
         }
@@ -759,7 +762,7 @@ impl LanSwitch {
                 m.reserved.insert(v, members::Reservation { hash, until, group: None, site: None });
             }
         }
-        let clock = (o.bundle_ms > 0).then(|| Arc::new(conn::Clock::new(Duration::from_millis(o.bundle_ms))));
+        let clock = (o.bundle_ms > 0).then(|| Arc::new(conn::Clock::new(Duration::from_millis(o.bundle_ms), o.bundle_jitter)));
         let sw = Arc::new_cyclic(|me| LanSwitch {
             impair: impair::Impair::parse(impair),
             online_vip: online.as_ref().map(|h| h.vip()),

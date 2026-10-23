@@ -140,8 +140,21 @@ class AutoBucket {
  *  come (runtime/web/roam_web.c), so a page sent a message for nearly every pass, about 37 a second against the
  *  switch's 20 (web/tools/roam-crowd.mjs --loop-ms 10, 2026-10-24); the car states themselves never wait */
 const TX_HOLD_MS = 50;
-/** runtime/roam_core.h: a datagram's type (header byte 5), the car state's */
-const RC_MSG_SNAP = 3;
+/** runtime/roam_core.h: a datagram's type (header byte 5): the car state, a ping and its answer */
+const RC_MSG_SNAP = 3, RC_MSG_PING = 6, RC_MSG_PONG = 7;
+
+/** A ping's send time (t0) or a pong's (t2) moved on by the time it waited here since the core made it (its slot's
+ *  S_T_MS, the same clock): the round trip a friend's solid car is drawn ahead by (roam_game.c render_delay) is the
+ *  network's, not this page's TX_HOLD_MS.  f: a free-roam frame, len its datagram's bytes; the CRC made again */
+function sentNow(f: Frame, len: number, waitedMs: number) {
+  const d = P.F_DATA, type = f[d + 5];
+  if (len < 24 || (type !== RC_MSG_PING && type !== RC_MSG_PONG) || f[d] !== 0x4e || f[d + 1] !== 0x32 || f[d + 2] !== 0x46 || f[d + 3] !== 0x52) return;
+  const us = Math.round(waitedMs * 1000), at = d + (type === RC_MSG_PING ? 16 : 24);
+  if (!(us > 0) || us > 1e6 || at + 4 > d + len - 4) return;
+  const fv = new DataView(f.buffer);
+  fv.setUint32(at, (fv.getUint32(at, true) + us) >>> 0, true);
+  fv.setUint32(d + len - 4, P.crc32(f.subarray(d), len - 4), true);
+}
 
 /** What one drain of a TX ring sends, as bundles (kind 32, nfsu2-lan): a free-roam datagram (kind 1) of the same
  *  bytes as one before it goes in that one's entry with its destination added (when nothing for that destination
@@ -613,6 +626,7 @@ class Link implements NetLink {
         fv.setUint16(P.F_SPORT, dv.getUint16(s + P.S_SRC_PORT, true));
         fv.setUint16(P.F_DPORT, dv.getUint16(s + P.S_DST_PORT, true));
         f.set(ep.u8.subarray(s + P.S_DATA, s + P.S_DATA + len), P.F_DATA);   // a copy: a socket cannot send shared memory
+        if (ep.kind === 'roam' && f[P.F_KIND] === P.NET_KIND_UDP) sentNow(f, len, t - dv.getFloat64(s + P.S_T_MS, true));
         if (bundle) bundle.add(f, dst >>> 0); else ws!.send(f);
         this.st.framesOut++; this.st.bytesOut += len;
         if (ep.kind === 'lan') this.st.lanOut++;

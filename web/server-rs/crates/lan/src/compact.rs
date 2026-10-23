@@ -51,6 +51,36 @@ const ROAM_CUT: usize = 11;
 /// magic, version, length and CRC checked out (`mark`), so a compact bundle may leave them out
 pub(crate) const ROAM_OK: u8 = 1;
 
+/// runtime/roam_core.h: a free-roam datagram's type (its byte 5), a ping's and its answer's
+const RC_PING: u8 = 6;
+const RC_PONG: u8 = 7;
+/// the longest of them (a pong: its 16-byte frame header, the datagram's 16, three times and the CRC)
+pub(crate) const TIMED_MAX: usize = 16 + 16 + 12 + 4;
+
+/// a free-roam ping or pong to a page that takes compact bundles: queued with the time (conn.rs `Out::Dgram`), so that
+/// its bundle can move its send time on by its wait (`waited`)
+pub(crate) fn timed(data: &[u8]) -> bool {
+    data.len() >= 40 && data.len() <= TIMED_MAX && data[1] == ROAM_OK && matches!(data[16 + 5], RC_PING | RC_PONG)
+}
+
+/// A ping's send time (t0, which its answer brings back) or a pong's (t2) moved on by the time it waited for the bundle
+/// clock, in a copy (`into`); anything else as it is.  The game draws a friend's solid car ahead by half the smallest
+/// round trip of its last 8 pings (roam_game.c render_delay): a ping or pong that went with its player's car state
+/// (the page holds them for it, web/src/net TX_HOLD_MS) waited for this clock about as long each time, and drew the
+/// car up to 40 ms ahead (roam-pair, 2026-10-24: 0.16-0.31 m off on average against 0.06-0.09 m).  The CRC is left as
+/// it was: an entry of free roam's leaves it out, and the page makes it again (`plan` gives every `timed` one F_ROAM).
+pub(crate) fn waited<'a>(data: &'a [u8], us: u32, into: &'a mut [u8; TIMED_MAX]) -> &'a [u8] {
+    if us == 0 || us >= 1_000_000 || !timed(data) {
+        return data;
+    }
+    let m = &mut into[..data.len()];
+    m.copy_from_slice(data);
+    let at = 16 + if data[16 + 5] == RC_PING { 16 } else { 24 };
+    let t = u32::from_le_bytes([m[at], m[at + 1], m[at + 2], m[at + 3]]).wrapping_add(us);
+    m[at..at + 4].copy_from_slice(&t.to_le_bytes());
+    m
+}
+
 /// a free-roam datagram (runtime/roam_core.c rc_encode) as the game's decoder takes it: "N2FR", version 1, its length
 /// (u16 LE) the datagram's, the CRC-32 (zlib's, LE) of what comes before it
 fn roam_ok(d: &[u8]) -> bool {
@@ -441,6 +471,34 @@ pub(crate) mod tests {
             assert_eq!(g, f);
         }
         assert!(delta_bytes * 10 < plain_bytes * 7, "{delta_bytes} bytes with deltas, {plain_bytes} without");
+    }
+
+    // a ping's t0 and a pong's t2 come to the page moved on by their wait, with a CRC that checks out; the rest of them,
+    // a snapshot, and one that did not wait come as they were
+    #[test]
+    fn a_ping_and_a_pong_come_with_their_wait_counted_out() {
+        let (own, src) = (BASE | 0x0305, BASE | 0x0102);
+        let ping = mark(&frame(1, src, own, ROAM_PORT, ROAM_PORT, &roam(RC_PING, &1_000_000u32.to_le_bytes())));
+        let pong_body: Vec<u8> = [500u32, 7000, 7000].iter().flat_map(|t| t.to_le_bytes()).collect();
+        let pong = mark(&frame(1, src, own, ROAM_PORT, ROAM_PORT, &roam(RC_PONG, &pong_body)));
+        let snap = mark(&frame(1, src, own, ROAM_PORT, ROAM_PORT, &roam(3, &[9; 52])));
+        assert!(timed(&ping) && timed(&pong) && !timed(&snap));
+        let mut into = [0u8; TIMED_MAX];
+        let mut b = vec![KIND_COMPACT, 0, 0, 0];
+        let mut refs = Refs::default();
+        for (f, us) in [(&ping, 2500), (&pong, 31_000), (&snap, 40_000), (&ping, 0)] {
+            let d = waited(f, us, &mut into).to_vec();
+            entry(&mut b, &d, src, own, own, Some(&mut refs));
+        }
+        let got = unpack_with(&b, own, Some(&mut HashMap::new()));
+        let t = |g: &Vec<u8>, at: usize| u32::from_le_bytes(g[16 + at..16 + at + 4].try_into().unwrap());
+        assert_eq!(t(&got[0], 16), 1_002_500, "the ping's t0");
+        assert_eq!((t(&got[1], 16), t(&got[1], 20), t(&got[1], 24)), (500, 7000, 38_000), "the pong's t0, t1, t2");
+        for g in &got {
+            assert!(roam_ok(&g[16..]), "a CRC that checks out");
+        }
+        assert_eq!(got[2], snap.to_vec().iter().enumerate().map(|(i, &x)| if i == 1 { 0 } else { x }).collect::<Vec<u8>>());
+        assert_eq!(t(&got[3], 16), 1_000_000, "no wait, no change");
     }
 
     // past REFS_MAX sources the writer's last bodies all go, and the page's with them: still byte for byte

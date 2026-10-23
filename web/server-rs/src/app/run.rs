@@ -136,6 +136,7 @@ pub async fn run(o: Options, cores: usize) {
         bundle_ms: fixed.unwrap_or(d.bundle_ms),
         bundle_max_ms: fixed.unwrap_or_else(|| env_num("NFSU2_BUNDLE_MAX_MS", d.bundle_max_ms)),
         bundle_budget: env_num("NFSU2_BUNDLE_BUDGET", d.bundle_budget),
+        bundle_jitter: env_num("NFSU2_BUNDLE_JITTER", (d.bundle_jitter * 100.0) as u64) as f64 / 100.0,
         send_buffer_os: lan_sndbuf,
         ..d
     };

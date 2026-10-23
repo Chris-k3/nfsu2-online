@@ -39,11 +39,13 @@ pub(crate) enum Out {
         src: u32,
         dst: u32,
     },
-    /// a datagram to a peer that takes bundles: into the writer's next bundle (one alone goes as a `Frame`)
+    /// a datagram to a peer that takes bundles: into the writer's next bundle (one alone goes as a `Frame`); `at`: when
+    /// it was queued (`now_us`), for a free-roam ping or pong only (compact.rs `timed`), else 0
     Dgram {
         data: Bytes,
         src: u32,
         dst: u32,
+        at: u32,
     },
     Ping([u8; 8]),
     Pong(Bytes),
@@ -212,7 +214,8 @@ impl Conn {
         let n = 4 + data.len();
         let total = {
             let mut q = self.out.q.lock();
-            q.push(Out::Dgram { data, src, dst });
+            let at = if compact::timed(&data) { now_us() | 1 } else { 0 };
+            q.push(Out::Dgram { data, src, dst, at });
             self.out.dgram.fetch_add(n, Relaxed) + n
         };
         match clock {
@@ -490,7 +493,7 @@ fn one_frame(buf: &mut Vec<u8>, data: &[u8], src: u32, dst: u32) {
 /// goes as it is
 fn bundle(stats: &Stats, items: &[Out], buf: &mut Vec<u8>) {
     let mut dgrams = items.iter().filter_map(|it| match it {
-        Out::Dgram { data, src, dst } => Some((data, *src, *dst)),
+        Out::Dgram { data, src, dst, .. } => Some((data, *src, *dst)),
         _ => None,
     });
     let Some(mut next) = dgrams.next() else { return };
@@ -541,8 +544,10 @@ fn bundle_compact(stats: &Stats, items: &[Out], buf: &mut Vec<u8>, c: Compact<'_
     body.clear();
     body.extend_from_slice(&[compact::KIND_COMPACT, 0, 0, 0]);
     let mut n = 0;
+    let (now, mut moved) = (now_us(), [0u8; compact::TIMED_MAX]);
     for it in items {
-        let Out::Dgram { data, src, dst } = it else { continue };
+        let Out::Dgram { data, src, dst, at: queued } = it else { continue };
+        let data = compact::waited(data, if *queued != 0 { now.wrapping_sub(*queued) } else { 0 }, &mut moved);
         let at = body.len();
         compact::entry(body, data, *src, *dst, own, refs.as_deref_mut());
         // a bundle takes datagrams while it stays within BUNDLE_OUT (the one that would not fit begins the next; it
@@ -557,6 +562,12 @@ fn bundle_compact(stats: &Stats, items: &[Out], buf: &mut Vec<u8>, c: Compact<'_
     if n > 0 {
         compact_out(stats, buf, body);
     }
+}
+
+/// the switch's clock for a datagram's wait for the bundle clock: µs since its first reading, wrapping
+pub(crate) fn now_us() -> u32 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    START.get_or_init(std::time::Instant::now).elapsed().as_micros() as u32
 }
 
 fn compact_out(stats: &Stats, buf: &mut Vec<u8>, bundle: &[u8]) {
@@ -575,16 +586,36 @@ struct Shard(Mutex<Vec<Arc<Conn>>>);
 /// connection, so that senders to different receivers rarely meet on one lock, and each shard ticks on a task of its
 /// own, at a phase of its own: the wake-ups of a crowd's writers are spread over the tick and over the runtime's
 /// workers (one task waking them all put them all on its own worker, for the others to steal).  Its tick can change
-/// while it runs (the switch's `bundle_tick`).
+/// while it runs (the switch's `bundle_tick`).  Each tick is the period give or take `jitter` of it, at random: the game
+/// takes the smallest delay of a friend's snapshots in 2 s for the path's (roam_core.c off_estimate) and draws a solid
+/// car where its driver is now from it, and a tick as long as the time between those snapshots (50 ms, roam_rate 20)
+/// made each wait about as long as the one before, so the car came out behind by that wait (roam-pair, 2026-10-24: up
+/// to 14 ms, 0.22 m off on average).  A tick that wanders gives each snapshot another wait, and the smallest of 2 s
+/// is about none.
 pub(crate) struct Clock {
     shards: Box<[Shard]>,
     period_us: AtomicU64,
+    jitter: f64,
 }
 
 impl Clock {
-    pub(crate) fn new(period: Duration) -> Self {
+    pub(crate) fn new(period: Duration, jitter: f64) -> Self {
         let shards = (0..SHARDS).map(|_| Shard(Mutex::new(Vec::new()))).collect();
-        Clock { shards, period_us: AtomicU64::new(period.as_micros() as u64) }
+        let jitter = if jitter.is_finite() { jitter.clamp(0.0, 0.9) } else { 0.0 };
+        Clock { shards, period_us: AtomicU64::new(period.as_micros() as u64), jitter }
+    }
+
+    /// the next tick's length: the period, give or take `jitter` of it (`rng` a shard's own xorshift state)
+    fn next_period(&self, rng: &mut u64) -> Duration {
+        let p = self.period();
+        if self.jitter <= 0.0 {
+            return p;
+        }
+        *rng ^= *rng << 13;
+        *rng ^= *rng >> 7;
+        *rng ^= *rng << 17;
+        let u = (*rng >> 11) as f64 / (1u64 << 53) as f64;
+        p.mul_f64(1.0 + self.jitter * (2.0 * u - 1.0))
     }
 
     pub(crate) fn period(&self) -> Duration {
@@ -615,6 +646,8 @@ impl Clock {
         for shard in 0..SHARDS {
             let me = me.clone();
             let phase = period * shard as u32 / SHARDS as u32;
+            let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() as u64);
+            let mut rng = (seed ^ (shard as u64 + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15)) | 1;
             tokio::spawn(async move {
                 let mut next = tokio::time::Instant::now() + phase;
                 let mut spare = Vec::new();
@@ -623,7 +656,7 @@ impl Clock {
                     let Some(c) = me.upgrade() else { return };
                     c.tick(shard, &mut spare);
                     // a tick that came late does not make the next ones come sooner
-                    next = (next + c.period()).max(tokio::time::Instant::now());
+                    next = (next + c.next_period(&mut rng)).max(tokio::time::Instant::now());
                 }
             });
         }
@@ -637,7 +670,20 @@ mod tests {
     fn dg(len: usize, dst: u32) -> Out {
         let mut d = vec![1u8; len];
         d[8..12].copy_from_slice(&0xFFFF_FFFFu32.to_be_bytes());
-        Out::Dgram { data: Bytes::from(d), src: 0x0A4D_0002, dst }
+        Out::Dgram { data: Bytes::from(d), src: 0x0A4D_0002, dst, at: 0 }
+    }
+
+    #[test]
+    fn a_tick_wanders_within_its_jitter_and_keeps_its_mean() {
+        let c = Clock::new(Duration::from_millis(50), 0.4);
+        let mut rng = 0x1234_5678_9ABC_DEF1u64;
+        let ticks: Vec<Duration> = (0..10_000).map(|_| c.next_period(&mut rng)).collect();
+        assert!(ticks.iter().all(|t| (Duration::from_millis(30)..=Duration::from_millis(70)).contains(t)));
+        let mean = ticks.iter().sum::<Duration>() / ticks.len() as u32;
+        assert!((Duration::from_micros(49_500)..=Duration::from_micros(50_500)).contains(&mean), "{mean:?}");
+        assert!(ticks.iter().any(|t| *t < Duration::from_millis(32)) && ticks.iter().any(|t| *t > Duration::from_millis(68)));
+        assert_eq!(Clock::new(Duration::from_millis(50), 0.0).next_period(&mut rng), Duration::from_millis(50));
+        assert_eq!(Clock::new(Duration::from_millis(50), f64::NAN).next_period(&mut rng), Duration::from_millis(50));
     }
 
     #[test]
