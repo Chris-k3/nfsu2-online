@@ -251,3 +251,110 @@ fn a_lobbys_host_is_linked_with_its_players_and_the_ones_at_its_start_first() {
         assert_eq!(k.info("lobbyLinks"), 0.0, "{how}: none for a lobby whose start is not its host's");
     }
 }
+
+/// a RACEREP datagram as roam_core.c lays it out: lobby, race; mode, laps, track; place, players, flags, type, class,
+/// 3 zero bytes; rating, field, factor, kW, kg, km/h, time; the name in 16 bytes
+#[allow(clippy::too_many_arguments)]
+fn racerep(sender: u32, lobby: u32, place: u8, players: u8, flags: u8, rating: f32, name: &[u8], payload_len: usize) -> Vec<u8> {
+    let mut p = vec![0u8; payload_len];
+    p[0..4].copy_from_slice(&lobby.to_le_bytes());
+    p[4..8].copy_from_slice(&0x0BADF00Du32.to_le_bytes());
+    p[8] = 2; // drag
+    p[9] = 1;
+    p[10..12].copy_from_slice(&4401u16.to_le_bytes());
+    p[12] = place;
+    p[13] = players;
+    p[14] = flags;
+    p[15] = 0;
+    p[16] = 3;
+    for (k, v) in [rating, 241.4, 1.0, 128.0, 1055.0, 256.0, 0.0].iter().enumerate() {
+        p[20 + 4 * k..24 + 4 * k].copy_from_slice(&v.to_le_bytes());
+    }
+    p[48..48 + name.len()].copy_from_slice(name);
+    dgram(14, sender, &p)
+}
+
+// a player's race report is one [race] line: the race, how it did, its car; one a race (its lobby) and none sooner
+// than 20 s after its last; a report with a field out of range, or from no player the hub knows, is none
+#[test]
+fn race_reports_are_logged_once_a_race() {
+    let mut k = Kit::new(RoamOptions::default());
+    k.from(W(0), &hello_with(100, &HelloOpts { core: 5, name: b"Ann", ..Default::default() }));
+    k.from(W(1), &racerep(101, 0xA1, 1, 2, 0, 239.3, b"PEUGOT", 64));
+    assert!(k.lines.lock().is_empty(), "no report from a browser the hub does not know");
+    k.from(W(0), &racerep(100, 0xA1, 0, 2, 2, 239.3, b"PEUGOT", 64));
+    assert_eq!(
+        k.lines.lock().as_slice(),
+        ["[race] lobby 000000a1, race 0badf00d (drag, track 4401, 1 lap, 2 cars): Ann quit; PEUGOT (type 0), class 3, rating 239.3 \
+          (the cars' average 241.4), 128 kW, 1055 kg, 256 km/h, power x1.000"]
+    );
+    k.lines.lock().clear();
+    k.step(30000.0);
+    k.from(W(0), &racerep(100, 0xA1, 1, 2, 0, 239.3, b"PEUGOT", 64));
+    assert!(k.lines.lock().is_empty(), "the same race again: none");
+    k.from(W(0), &racerep(100, 0xA2, 1, 2, 0, 239.3, b"PEUGOT", 64));
+    assert_eq!(k.lines.lock().len(), 1, "another race: its line");
+    assert!(k.lines.lock()[0].contains(": Ann 1st of 2;"), "{:?}", k.lines.lock());
+    k.lines.lock().clear();
+    k.from(W(0), &racerep(100, 0xA3, 1, 2, 0, 239.3, b"PEUGOT", 64));
+    assert!(k.lines.lock().is_empty(), "another race within 20 s of the last: none");
+    k.step(25000.0);
+    for (what, d) in [
+        ("a place past its cars", racerep(100, 0xA4, 3, 2, 0, 239.3, b"PEUGOT", 64)),
+        ("no cars", racerep(100, 0xA4, 0, 0, 0, 239.3, b"PEUGOT", 64)),
+        ("an unknown flag", racerep(100, 0xA4, 1, 2, 4, 239.3, b"PEUGOT", 64)),
+        ("a rating out of range", racerep(100, 0xA4, 1, 2, 0, 9999.0, b"PEUGOT", 64)),
+        ("a rating not a number", racerep(100, 0xA4, 1, 2, 0, f32::NAN, b"PEUGOT", 64)),
+        ("an unprintable name", racerep(100, 0xA4, 1, 2, 0, 239.3, b"PE\x07GOT", 64)),
+        ("a short one", racerep(100, 0xA4, 1, 2, 0, 239.3, b"PEUGOT", 60)),
+        ("another sender in the datagram", racerep(101, 0xA4, 1, 2, 0, 239.3, b"PEUGOT", 64)),
+    ] {
+        k.from(W(0), &d);
+        assert!(k.lines.lock().is_empty(), "{what}: none");
+    }
+    k.from(W(0), &racerep(100, 0xA4, 1, 2, 1, 239.3, b"PEUGOT", 64));
+    assert!(k.lines.lock()[0].contains(": Ann (host) 1st of 2;"), "{:?}", k.lines.lock());
+    assert_eq!(k.info("raceReports"), 3.0);
+}
+
+// the wire: roam_core's report is the hub's line
+#[test]
+fn race_reports_on_the_wire_roam_core_and_the_hub_agree() {
+    let deps = repo().join("deps");
+    let wasi = std::fs::read_dir(&deps).ok().and_then(|d| {
+        let mut v: Vec<PathBuf> =
+            d.flatten().filter(|e| e.file_name().to_string_lossy().starts_with("wasi-sdk-")).map(|e| e.path()).collect();
+        v.sort();
+        v.pop()
+    });
+    let Some(wasi) = wasi else {
+        eprintln!("no wasi-sdk in deps/: skipped");
+        return;
+    };
+    if Command::new("node").arg("--version").output().is_err() {
+        eprintln!("no node: skipped");
+        return;
+    }
+    let w = Path::new(env!("CARGO_TARGET_TMPDIR")).join("roam_hubwire_racerep.wasm");
+    let out = Command::new(wasi.join("bin/clang"))
+        .current_dir(repo())
+        .args(["--target=wasm32-wasip1-threads", "-pthread", "-O2", "-ffp-contract=off", "-Iruntime", "-o"])
+        .arg(&w)
+        .args(["web/test/roam_hubwire.c", "runtime/roam_core.c"])
+        .arg("-Wl,--import-memory,--export-memory,--shared-memory,--initial-memory=67108864,--max-memory=268435456")
+        .output()
+        .expect("clang");
+    assert!(out.status.success(), "clang: {}", String::from_utf8_lossy(&out.stderr));
+    let o = Command::new("node").arg(repo().join("web/test/wasi-run.mjs")).arg(&w).arg("racerep").output().expect("node");
+    let hexed = String::from_utf8_lossy(&o.stdout).trim().to_string();
+    let d: Vec<u8> = (0..hexed.len() / 2).map(|i| u8::from_str_radix(&hexed[2 * i..2 * i + 2], 16).unwrap()).collect();
+    assert_eq!(d.len(), 16 + 64 + 4, "{hexed}");
+    let mut k = Kit::new(RoamOptions::default());
+    k.from(W(0), &hello_with(0x1234ABCD, &HelloOpts { core: 5, name: b"Ann K.", ..Default::default() }));
+    k.from(W(0), &d);
+    assert_eq!(
+        k.lines.lock().as_slice(),
+        ["[race] lobby a1b2c3d4, race 0badf00d (sprint, track 4102, 1 lap, 3 cars): Ann K. (host) 2nd of 3 in 95.50 s; 350Z (type 22), \
+          class 2, rating 316.6 (the cars' average 280.5), 214 kW, 1450 kg, 249 km/h, power x1.250"]
+    );
+}

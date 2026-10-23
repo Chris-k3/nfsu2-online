@@ -16,6 +16,11 @@ pub(crate) const MSG_MAPREQ: u8 = 10;
 pub(crate) const MSG_MAP: u8 = 11;
 pub(crate) const MSG_LOBBY: u8 = 12;
 pub(crate) const MSG_LOBBIES: u8 = 13;
+/// a player's report of a multiplayer race (roam_core.h RC_MSG_RACEREP): only to the hub, which logs it
+pub(crate) const MSG_RACEREP: u8 = 14;
+/// its payload's bytes (roam_core.h RC_RACEREP_BYTES) and its car name's (RC_RACEREP_NAME)
+const RACEREP_BYTES: usize = 64;
+const RACEREP_NAME: usize = 16;
 /// HELLO's flag: this player takes race lobbies (roam_core.h RC_HF_LOBBY)
 pub(crate) const HF_LOBBY: u16 = 0x0080;
 /// a LOBBY's ops (roam_core.h RC_LOBBY_*) the hub keeps: the host's advert and its end, and a player's ask to join
@@ -75,8 +80,89 @@ pub(crate) enum Msg<'a> {
         /// its players (n of them, the host first), 0 after them
         ids: [u32; LOBBY_PLAYERS],
     },
+    /// a player's report of a race it raced (roam_core.h rc_racerep), checked as roam_core.c's racerep_ok
+    RaceRep(RaceRep<'a>),
     Bye,
     Other,
+}
+
+/// roam_core.h rc_racerep: the race, how the reporter did, its car as the game rated it
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct RaceRep<'a> {
+    pub lobby: u32,
+    pub race: u32,
+    /// the network race's type: 0 circuit, 1 sprint, 2 drag, 3 drift, 4 URL, 10 Street X
+    pub mode: u8,
+    pub laps: u8,
+    pub track: u16,
+    /// 1 .. players; 0: not finished
+    pub place: u8,
+    pub players: u8,
+    pub host: bool,
+    /// left with its pause menu's Quit
+    pub quit: bool,
+    pub car_type: u8,
+    /// 0 fastest .. 3; -1 not rated
+    pub class: i8,
+    pub rating: f64,
+    /// the average rating of the race's cars
+    pub field: f64,
+    /// its engine power times this in the race
+    pub factor: f64,
+    pub kw: f64,
+    pub kg: f64,
+    pub kmh: f64,
+    /// s, 0: none
+    pub time: f64,
+    /// the car type's name, printable ASCII
+    pub name: &'a [u8],
+}
+
+/// a RACEREP's payload (at o, RACEREP_BYTES long), or None where roam_core.c's decoder would not take it
+fn racerep(d: &[u8], o: usize) -> Option<RaceRep<'_>> {
+    let f = |k: usize| f32_le(d, o + k);
+    let (lobby, race, players, place, flags, class) = (u32_le(d, o), u32_le(d, o + 4), d[o + 13], d[o + 12], d[o + 14], d[o + 16] as i8);
+    let nums = [f(20), f(24), f(28), f(32), f(36), f(40), f(44)];
+    let lim = [(0.0, 5000.0), (0.0, 5000.0), (0.01, 100.0), (0.0, 10000.0), (0.0, 50000.0), (0.0, 2000.0), (0.0, 100000.0)];
+    if lobby == 0
+        || race == 0
+        || !(1..=LOBBY_PLAYERS as u8).contains(&players)
+        || place > players
+        || !(-1..=3).contains(&class)
+        || flags & !3 != 0
+    {
+        return None;
+    }
+    // (the decoder's float ranges: f32 bounds compared as f32, the same as f64 for these values)
+    if !nums.iter().zip(lim).all(|(&x, (lo, hi))| x.is_finite() && x >= lo as f32 as f64 && x <= hi as f32 as f64) {
+        return None;
+    }
+    let raw = &d[o + 48..o + 48 + RACEREP_NAME];
+    let name = &raw[..raw.iter().position(|&c| c == 0).unwrap_or(RACEREP_NAME)];
+    if !name.iter().all(|c| (0x20..=0x7e).contains(c)) {
+        return None;
+    }
+    Some(RaceRep {
+        lobby,
+        race,
+        mode: d[o + 8],
+        laps: d[o + 9],
+        track: u16_le(d, o + 10),
+        place,
+        players,
+        host: flags & 1 != 0,
+        quit: flags & 2 != 0,
+        car_type: d[o + 15],
+        class,
+        rating: nums[0],
+        field: nums[1],
+        factor: nums[2],
+        kw: nums[3],
+        kg: nums[4],
+        kmh: nums[5],
+        time: nums[6],
+        name,
+    })
 }
 
 fn u16_le(d: &[u8], o: usize) -> u16 {
@@ -173,6 +259,7 @@ pub(crate) fn decode(d: &[u8]) -> Option<(u8, u32, Msg<'_>)> {
             }
             Msg::Lobby { op, to: u32_le(d, 20), lobby, race, x: u16_le(d, 32) as i16, y: u16_le(d, 34) as i16, n: n as u8, max, state, ids }
         }
+        MSG_RACEREP if end == HDR + RACEREP_BYTES => Msg::RaceRep(racerep(d, HDR)?),
         MSG_BYE => Msg::Bye,
         _ => Msg::Other,
     };
@@ -189,7 +276,7 @@ pub fn decode_roam(d: &[u8]) -> Option<RoamMsg> {
         }
         Msg::Snap { sender, status, p, .. } => RoamMsg::Snap { sender, status, p },
         Msg::Bye => RoamMsg::Bye { sender },
-        Msg::MapReq { .. } | Msg::Lobby { .. } | Msg::Other => RoamMsg::Other { kind, sender },
+        Msg::MapReq { .. } | Msg::Lobby { .. } | Msg::RaceRep(_) | Msg::Other => RoamMsg::Other { kind, sender },
     })
 }
 

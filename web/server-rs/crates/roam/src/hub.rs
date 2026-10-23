@@ -50,6 +50,50 @@ const LOBBY_JOIN_MS: f64 = 6000.0;
 /// game drops a player of its lobby who is farther (roam_game.c MP_STAY_M + 10 m), and leaves the lobby itself past
 /// MP_STAY_M (40 m)
 const LOBBY_STAY_M: f64 = 50.0;
+/// a player's race reports logged: one a race (its lobby), and none sooner than this after its last
+const REPORT_GAP_MS: f64 = 20000.0;
+
+/// A player's race report as a log line (one each player of a race, back in free roam: the lines of one race share
+/// its lobby), for evening out the cars: the race, how the player did, the car as its game rated it.  Grep `[race]`.
+fn race_line(player: &str, r: &wire::RaceRep) -> String {
+    const MODES: [&str; 5] = ["circuit", "sprint", "drag", "drift", "URL"];
+    let mode = MODES.get(r.mode as usize).copied().unwrap_or(if r.mode == 10 { "Street X" } else { "race" });
+    let how = match r.place {
+        0 if r.quit => "quit".to_string(),
+        0 => "did not finish".to_string(),
+        n => format!(
+            "{n}{} of {}",
+            match n {
+                1 => "st",
+                2 => "nd",
+                3 => "rd",
+                _ => "th",
+            },
+            r.players
+        ),
+    };
+    let time = if r.time > 0.0 { format!(" in {:.2} s", r.time) } else { String::new() };
+    let name: String = r.name.iter().map(|&c| c as char).collect();
+    format!(
+        "[race] lobby {:08x}, race {:08x} ({mode}, track {}, {} lap{}, {} cars): {player}{} {how}{time}; {name} (type {}), \
+         class {}, rating {:.1} (the cars' average {:.1}), {:.0} kW, {:.0} kg, {:.0} km/h, power x{:.3}",
+        r.lobby,
+        r.race,
+        r.track,
+        r.laps,
+        if r.laps == 1 { "" } else { "s" },
+        r.players,
+        if r.host { " (host)" } else { "" },
+        r.car_type,
+        r.class,
+        r.rating,
+        r.field,
+        r.kw,
+        r.kg,
+        r.kmh,
+        r.factor
+    )
+}
 
 /// a link: the player it is to, and since when
 #[derive(Clone, Copy, Debug)]
@@ -68,8 +112,7 @@ struct Player {
     /// as the player last sent it (roam_core.h RC_ST_*: 2 in free roam, 5 paused there): the world map and
     /// `in_roam()` read it
     status: u8,
-    /// kept as the player last sent it; nothing reads it yet
-    #[allow(dead_code)]
+    /// kept as the player last sent it (its race reports' lines name it)
     name: String,
     degree: usize,
     p: Option<[f64; 3]>,
@@ -84,6 +127,8 @@ struct Player {
     lobby: Option<(HubLobby, f64)>,
     /// the lobby it asked to join (its id), and when
     join: Option<(u32, f64)>,
+    /// the lobby of the race it last reported, and when (one report a race is logged)
+    reported: Option<(u32, f64)>,
     /// its links after the last tick (a HELLO of another start of the game empties them)
     links: Vec<Link>,
     /// its place in `order`
@@ -148,6 +193,8 @@ struct Stats {
     cap_cuts: u64,
     /// links a race lobby needed made before the others (`lobby_pairs`), at the last tick
     lobby_links: u64,
+    /// players' race reports logged
+    race_reports: u64,
 }
 
 /// one pair of a room weighed (every pair of a room of at most `exact_room` players): since when it is linked; a and b
@@ -442,6 +489,7 @@ impl Hub {
                     lobbies: false,
                     lobby: None,
                     join: None,
+                    reported: None,
                     links: Vec::new(),
                     at: 0,
                 })
@@ -453,6 +501,7 @@ impl Hub {
         p.seen = now;
         p.hub_port = dport;
         let mut ask = None;
+        let mut report = None;
         match m {
             Msg::Hello { sender, core, status, room, name, lobbies } => {
                 // another start of the game on the same endpoint
@@ -483,7 +532,16 @@ impl Hub {
                 wire::LOBBY_JOIN => p.join = Some((lobby, now)),
                 _ => {}
             },
+            // one report a race (its lobby), and none within REPORT_GAP_MS of the player's last
+            Msg::RaceRep(r) if sender == p.id && !p.reported.is_some_and(|(l, t)| l == r.lobby || now - t < REPORT_GAP_MS) => {
+                p.reported = Some((r.lobby, now));
+                report = Some(race_line(&p.name, &r));
+            }
             _ => {}
+        }
+        if let Some(line) = report {
+            self.st.race_reports += 1;
+            (self.log)(&line);
         }
         if let Some(req) = ask {
             self.map(slot, req, now);
@@ -743,6 +801,7 @@ impl Hub {
             "busy": num(st.busy),
             "capCuts": st.cap_cuts,
             "lobbyLinks": st.lobby_links,
+            "raceReports": st.race_reports,
         })
     }
 

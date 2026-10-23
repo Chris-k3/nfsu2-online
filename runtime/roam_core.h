@@ -63,6 +63,10 @@
 #define RC_LOBBY_INBOX   16         /* LOBBY messages held for the game side */
 #define RC_LOBBIES_ENTRY 11         /* a LOBBIES entry: x, y (int16, m), race (u32), n, max, state (u8) */
 #define RC_LOBBIES_MAX   96         /* entries per LOBBIES datagram (the hub's nearest) */
+#define RC_RACEREP_BYTES 64         /* a RACEREP's payload: lobby, race (u32); mode, laps (u8); track (u16); place, players,
+                                       flags, type, class (u8), 3 bytes 0; rating, field, factor, kW, kg, km/h, time (f32);
+                                       the name (16 bytes, NUL padded) */
+#define RC_RACEREP_NAME  16         /* its car type's name */
 
 /* message types (header byte 5) */
 enum { RC_MSG_HELLO = 1, RC_MSG_PEERS = 2, RC_MSG_SNAP = 3, RC_MSG_CFG = 4, RC_MSG_CFG_REQ = 5,
@@ -81,7 +85,14 @@ enum { RC_MSG_HELLO = 1, RC_MSG_PEERS = 2, RC_MSG_SNAP = 3, RC_MSG_CFG = 4, RC_M
         * with one LOBBIES datagram after its MAP (req echoed; n entries of
         * RC_LOBBIES_ENTRY bytes, nearest first: where each lobby's race
         * starts, its race, players, most players and state) */
-       RC_MSG_LOBBY = 12, RC_MSG_LOBBIES = 13 };
+       RC_MSG_LOBBY = 12, RC_MSG_LOBBIES = 13,
+       /* a player's report of a multiplayer race it raced (rc_racerep), only
+        * to the hub, once back in free roam: the server logs it.  A hub before
+        * it ignores the type, and no player is sent one */
+       RC_MSG_RACEREP = 14 };
+/* RACEREP flags */
+#define RC_RR_HOST       0x01       /* the reporter hosted the race */
+#define RC_RR_QUIT       0x02       /* ...left it with its pause menu's Quit */
 /* LOBBY ops.  lobby: the host's id for it (nonzero); race: the career race's
  * name hash (race record +8, the same table in every game); x, y: where it
  * starts (m); ids: the players in it, the host first */
@@ -222,6 +233,27 @@ typedef struct {
     uint32_t ids[RC_LOBBY_MAX];    /* the host first */
 } rc_lobby;
 
+/* a RACEREP (RC_RACEREP_BYTES on the wire): the race (its lobby, the career
+ * race's name hash, the network race's type, track and laps), how the
+ * reporter did, and its car as the game rated it (mprace.c CarPerf) */
+typedef struct {
+    uint32_t lobby, race;
+    uint8_t  mode;                 /* the network race's type: 0 circuit, 1 sprint, 2 drag, 3 drift, 4 URL, 10 Street X */
+    uint8_t  laps;
+    uint16_t track;
+    uint8_t  place;                /* 1 .. players; 0: not finished */
+    uint8_t  players;              /* the race's cars (1 .. RC_LOBBY_MAX) */
+    uint8_t  flags;                /* RC_RR_* */
+    uint8_t  type;                 /* the car's CarTypeInfo index */
+    int8_t   cls;                  /* the game's class: 0 fastest .. 3, -1 not rated */
+    float    rating;               /* the game's rating of the car */
+    float    field;                /* the average rating of the race's cars */
+    float    factor;               /* the car's engine power times this in the race (1: as it is) */
+    float    kw, kg, kmh;          /* its engine's most power, its mass, its top speed */
+    float    time;                 /* the race's time, s (0: none) */
+    char     name[RC_RACEREP_NAME + 1];   /* the car type's name, printable */
+} rc_racerep;
+
 typedef struct {
     rc_hdr h;
     union {
@@ -238,6 +270,7 @@ typedef struct {
         struct { uint16_t req, total; uint8_t part, nparts, n; const uint8_t *data; } map;   /* data: n entries */
         rc_lobby lobby;
         struct { uint16_t req; uint8_t n; const uint8_t *data; } lobbies;   /* data: n entries */
+        rc_racerep racerep;
     } u;
 } rc_msg;
 
@@ -488,6 +521,8 @@ int  rc_ask_map(rc_session *s, int64_t now_us);
 int  rc_send_lobby(rc_session *s, const rc_lobby *l);
 /* the oldest LOBBY message for us not taken yet; 1 when there was one */
 int  rc_take_lobby(rc_session *s, uint32_t *from, rc_lobby *l);
+/* a race report to the hub (RC_MSG_RACEREP), while it answers; 1 when sent */
+int  rc_send_racerep(rc_session *s, const rc_racerep *r);
 const char *rc_status_name(int st);
 
 #endif

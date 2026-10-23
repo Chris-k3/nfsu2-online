@@ -441,8 +441,14 @@ server included: cloudflared's, the tunnel's) and how many of them get fewer of 
 with the updates left out since the last line. Many players behind while the server is idle: look at the tunnel
 (the cloudflared copies' sites, below). Counts only, no names or addresses.
 
+After each multiplayer race from free roam, every player's game reports it once back in free roam, and the log has a
+`[race]` line for each: the race (its lobby, which every player's line of that race shares, the race type, track,
+laps and cars), the player's nickname, place (or "did not finish", "quit") and the car as the game rated it (its
+type, the game's class and rating, the race's average rating, power, weight, top speed, and the factor its engine
+power had in the race). For evening out the cars: `docker compose logs -t server --since 24h | grep '\[race\]'`.
+
 - **No player's real IP address** is written, and the page sends the server nothing about the player but the
-  nickname.
+  nickname, and after a multiplayer race its car and place.
 - **`--access-log`** adds a line per request with the client's IP address and the URL. It is off by default, for
   debugging only: add it to the server's `command` in `compose.yml` (`["--behind-proxy", "--access-log"]`), and
   the log then holds your friends' addresses for as long as Docker keeps it.

@@ -200,6 +200,9 @@ static struct {
     int      quit_race, fee;                       /* the player quit the race (its pause menu); the fee the bank paid */
     int      paused, quit, lan, hosted, named, carset, created, settings, joined, started, left, career, resumed, crib_go, ndlg, host_gone;
     int      logged_place, perf_logged;
+    CarPerf  rep_car;                              /* the race's report: our car as rated in the race, the race's cars, */
+    int      rep_cars, rep_mode, rep_track, rep_laps;   /* the network race's type, track and laps, */
+    float    rep_field;                            /* the cars' average rating */
     uint32_t room[10];                             /* the host's room as last logged */
     long     ready, dlg_at, wait_at;
     char     keys[16]; int nkeys; long key_at;     /* keys to press, one every 20 frames: L LEFT, R RETURN, E ESCAPE */
@@ -365,6 +368,21 @@ void mprace_perf_log(const char *who, uint32_t car){
     for (int i = 0; i < 9; i++) fprintf(stderr, " %.0f", (double)p.torque[i]);
     fprintf(stderr, " N m\n");
 }
+/* the race's cars as this game has them: each racer's car and its physics info (0: none, or not rated yet);
+ * 1 when there are racers and all are rated */
+#define RACE_CARS_MAX 8
+static int race_cars(uint32_t *car, uint32_t *pi, int *n){
+    uint32_t gs = rd(G_RACESTATUS), cnt = gs ? rd(gs + 0x24u) : 0; int all = 1;
+    *n = 0;
+    if (!cnt || cnt > RACE_CARS_MAX) return 0;
+    for (uint32_t i = 0; i < cnt; i++){
+        car[i] = rd(rd(gs + 0xbd0u + 4u * i)); pi[i] = perf_info(car[i]);
+        if (pi[i] && (int8_t)MR8(pi[i] + PI_CLASS) < 0) pi[i] = 0;
+        if (!pi[i]) all = 0;
+    }
+    *n = (int)cnt;
+    return all;
+}
 void mprace_perf_survey(CPU *c, uint32_t car){
     uint32_t pi = perf_info(car), types = rd(G_CARTYPES);
     if (!pi || !types){ fprintf(stderr, "[mprace] perf survey: the car has no physics info\n"); return; }
@@ -451,6 +469,14 @@ int mprace_place(void){ return M.place; }
 int mprace_prize(void){ return M.prize; }
 int mprace_quit(void){ return M.quit_race; }
 int mprace_fee(void){ return M.fee; }
+int mprace_report(MpReport *r){
+    memset(r, 0, sizeof *r);
+    if (!M.raced || !M.perf_logged || M.rep_car.type < 0) return 0;
+    r->mode = M.rep_mode; r->track = M.rep_track; r->laps = M.rep_laps; r->cars = M.rep_cars;
+    r->place = M.place; r->host = M.r.host; r->quit = M.quit_race;
+    r->field = M.rep_field; r->factor = 1.f; r->car = M.rep_car;
+    return 1;
+}
 const char *mprace_why(void){ return M.why[0] ? M.why : "unknown"; }
 void mprace_host_gone(void){ if (!M.r.host && M.goal == G_RACE_GOAL && (M.phase == MPR_OUT || M.phase == MPR_LAN)) M.host_gone = 1; }
 void mprace_player_gone(void){
@@ -736,18 +762,21 @@ static int step_racing(long f){
     }
     if (M.phase != MPR_RACE) return 0;
     if (!M.perf_logged){
-        /* our car's performance in the race, once its physics info is rated (or 20 s on) */
-        uint32_t pl = rd(G_PLAYER1), car = pl ? rd(pl + 4u) : 0, pi = perf_info(car);
-        if ((pi && (int8_t)MR8(pi + PI_CLASS) >= 0) || f - M.since > 60 * 20){
+        /* the race's cars, once all are rated (or 20 s on): ours and every racer's in the log (GRaceStatus: +0x24
+         * racers, +0xBD0 theirs, each +0 its car, [[car +0x14] +4] its driver), and ours for the race's report */
+        uint32_t pl = rd(G_PLAYER1), car = pl ? rd(pl + 4u) : 0, cars[RACE_CARS_MAX], pis[RACE_CARS_MAX]; int nc;
+        if (race_cars(cars, pis, &nc) || f - M.since > 60 * 20){
             mprace_perf_log("our car in the race", car); M.perf_logged = 1;
-            /* and every racer's, as this game has them (GRaceStatus: +0x24 racers, +0xBD0 theirs, each +0 its car,
-             * [[car +0x14] +4] its driver) */
-            uint32_t gs = rd(G_RACESTATUS), n = gs ? rd(gs + 0x24u) : 0;
-            for (uint32_t i = 0; i < n && i < 8; i++){
-                uint32_t rc = rd(rd(gs + 0xbd0u + 4u * i)); char who[48];
-                snprintf(who, sizeof who, "racer %u (driver %d%s)", i, (int)rd(rd(rc + 0x14u) + 4u), rc == car ? ", ours" : "");
-                mprace_perf_log(who, rc);
+            float sum = 0.f; int k = 0;
+            for (int i = 0; i < nc; i++){
+                char who[48];
+                snprintf(who, sizeof who, "racer %d (driver %d%s)", i, (int)rd(rd(cars[i] + 0x14u) + 4u), cars[i] == car ? ", ours" : "");
+                mprace_perf_log(who, cars[i]);
+                if (pis[i] && MRF32(pis[i] + PI_RATING) > 0.f){ sum += MRF32(pis[i] + PI_RATING); k++; }
             }
+            mprace_car_perf(car, &M.rep_car);
+            M.rep_cars = nc; M.rep_field = k ? sum / (float)k : 0.f;
+            M.rep_mode = (int)rd(G_NET + N_MODE); M.rep_track = (int)(rd(G_NET + N_TRACK) & 0xffffu); M.rep_laps = (int)(rd(G_NET + N_LAPS) & 0xffffu);
         }
     }
     if (on("UI_PostRaceResults.fng")){

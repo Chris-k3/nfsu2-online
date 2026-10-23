@@ -3164,6 +3164,27 @@ static void mp_send_all(uint8_t op, uint8_t arg){
     roam_plat_unlock();
 }
 static void mp_send_one(uint8_t op, uint8_t arg, uint32_t to){ roam_plat_lock(); mp_send(op, arg, to); roam_plat_unlock(); }
+/* the trip's race reported to the server's hub, back in free roam (RC_MSG_RACEREP): the race, our place, our car as
+ * the game rated it in the race; the server logs it ([race] lines), for evening out the cars */
+static float rr_in(float v, float lo, float hi){ return !(v >= lo) ? lo : v > hi ? hi : v; }
+static void mp_report(void){
+    MpReport r;
+    if (!g_mp.l.id || !g_mp.l.race || !mprace_report(&r)) return;
+    rc_racerep m; memset(&m, 0, sizeof m);
+    m.lobby = g_mp.l.id; m.race = MR32(g_mp.l.race + 8u);
+    m.mode = (uint8_t)r.mode; m.laps = (uint8_t)r.laps; m.track = (uint16_t)r.track;
+    m.players = (uint8_t)(r.cars < 1 ? 1 : r.cars > RC_LOBBY_MAX ? RC_LOBBY_MAX : r.cars);
+    m.place = (uint8_t)(r.place < 0 || r.place > m.players ? 0 : r.place);
+    m.flags = (uint8_t)((r.host ? RC_RR_HOST : 0) | (r.quit ? RC_RR_QUIT : 0));
+    m.type = (uint8_t)r.car.type; m.cls = (int8_t)(r.car.cls < -1 || r.car.cls > 3 ? -1 : r.car.cls);
+    m.rating = rr_in(r.car.rating, 0.f, 5000.f); m.field = rr_in(r.field, 0.f, 5000.f); m.factor = rr_in(r.factor, 0.01f, 100.f);
+    m.kw = rr_in(r.car.power / 1000.f, 0.f, 10000.f); m.kg = rr_in(r.car.mass, 0.f, 50000.f); m.kmh = rr_in(r.car.top * 3.6f, 0.f, 2000.f);
+    m.time = rr_in(r.time, 0.f, 100000.f);
+    for (int i = 0; i < RC_RACEREP_NAME && r.car.name[i]; i++){ char ch = r.car.name[i]; m.name[i] = ch >= 0x20 && ch < 0x7f ? ch : '?'; }
+    roam_plat_lock(); int sent = rc_send_racerep(&g_s, &m); roam_plat_unlock();
+    rlog("[roam] f=%ld race lobby %08x: its race reported to the server%s: place %d of %d, %s rated %.1f (the cars' average %.1f)\n", rh_frame(),
+         m.lobby, sent ? "" : " (not sent: no hub)", m.place, m.players, m.name, (double)m.rating, (double)m.field);
+}
 /* we open a lobby for race r */
 static int mp_open(int64_t host, uint32_t r){
     if (g_mp.st != MP_IDLE || !r) return 0;
@@ -3424,6 +3445,7 @@ static void mp_frame(CPU *c, int64_t host, int in_roam, int world_runs, const ui
         else if (mprace_quit() && mprace_fee()) snprintf(t, sizeof t, "Multiplayer race: you quit it, $%d fee", mprace_fee());
         else if (mprace_quit()) snprintf(t, sizeof t, "Multiplayer race: you quit it");
         else snprintf(t, sizeof t, "Multiplayer race: not finished");
+        mp_report();
         mprace_ack();
         mp_note(host, t); mp_to(MP_IDLE, host);
         return;

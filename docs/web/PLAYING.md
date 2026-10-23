@@ -320,8 +320,10 @@ Good to know:
   people you would show your name and car to.
 - **Who sees what:** with free roam off (the default), the game does not join the server's network at all. With it
   on, everyone on the server sees your name and status, and players in free roam with you see your car and where it
-  is. The server reads where your car is, to pick the players near you, and keeps nothing of it. Nobody sees your
-  real address: the server gives each player a virtual one (`10.77.x.x`).
+  is. The server reads where your car is, to pick the players near you, and keeps nothing of it. After a multiplayer
+  race your game tells the server your place and your car as the game rates it (its type, power, weight, top
+  speed), and its log keeps that with your name, for evening out the cars. Nobody sees your real address: the server
+  gives each player a virtual one (`10.77.x.x`).
 - **A tab in the background** (or another window in front) pauses your game. The others see you as paused: your car stays where you stopped, with "paused" after your name, until you come back.
 - **Closing the tab:** the others see your car disappear after a few seconds.
 - **Messages over the game** say when a player joins free roam, goes into a race, is back in free roam after it,

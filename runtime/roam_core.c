@@ -287,6 +287,17 @@ static int lobby_ok(const rc_lobby *l){
     }
     return 1;
 }
+/* a RACEREP's fields: a lobby and a race, 1 to RC_LOBBY_MAX cars and a place among them (0: none), a class, numbers
+ * in range, a printable name */
+static int in(float f, float lo, float hi){ return f_finite(f) && f >= lo && f <= hi; }
+static int racerep_ok(const rc_racerep *r){
+    if (!r->lobby || !r->race || r->players < 1 || r->players > RC_LOBBY_MAX || r->place > r->players) return 0;
+    if (r->cls < -1 || r->cls > 3 || r->flags & ~(RC_RR_HOST | RC_RR_QUIT)) return 0;
+    if (!in(r->rating, 0.f, 5000.f) || !in(r->field, 0.f, 5000.f) || !in(r->factor, 0.01f, 100.f) || !in(r->kw, 0.f, 10000.f)
+        || !in(r->kg, 0.f, 50000.f) || !in(r->kmh, 0.f, 2000.f) || !in(r->time, 0.f, 100000.f)) return 0;
+    uint32_t n = 0; while (n < RC_RACEREP_NAME && r->name[n]) n++;
+    return printable(r->name, n);
+}
 int rc_encode(const rc_msg *m, uint8_t *out, int cap){
     rc_w w; rc_w_init(&w, out, (uint32_t)(cap < RC_MAX_DGRAM ? cap : RC_MAX_DGRAM));
     rc_put8(&w, RC_MAGIC0); rc_put8(&w, RC_MAGIC1); rc_put8(&w, RC_MAGIC2); rc_put8(&w, RC_MAGIC3);
@@ -353,6 +364,18 @@ int rc_encode(const rc_msg *m, uint8_t *out, int cap){
         if (m->u.lobbies.n > RC_LOBBIES_MAX) return -1;
         rc_put16(&w, m->u.lobbies.req); rc_put8(&w, m->u.lobbies.n); rc_putb(&w, m->u.lobbies.data, (uint32_t)m->u.lobbies.n * RC_LOBBIES_ENTRY);
         break;
+    case RC_MSG_RACEREP: {
+        const rc_racerep *r = &m->u.racerep;
+        if (!racerep_ok(r)) return -1;
+        rc_put32(&w, r->lobby); rc_put32(&w, r->race); rc_put8(&w, r->mode); rc_put8(&w, r->laps); rc_put16(&w, r->track);
+        rc_put8(&w, r->place); rc_put8(&w, r->players); rc_put8(&w, r->flags); rc_put8(&w, r->type); rc_put8(&w, (uint8_t)r->cls);
+        rc_put8(&w, 0); rc_put8(&w, 0); rc_put8(&w, 0);
+        rc_putf(&w, r->rating); rc_putf(&w, r->field); rc_putf(&w, r->factor); rc_putf(&w, r->kw); rc_putf(&w, r->kg);
+        rc_putf(&w, r->kmh); rc_putf(&w, r->time);
+        uint8_t nm[RC_RACEREP_NAME] = {0};
+        for (int i = 0; i < RC_RACEREP_NAME && r->name[i]; i++) nm[i] = (uint8_t)r->name[i];
+        rc_putb(&w, nm, RC_RACEREP_NAME);
+        break; }
     default: return -1;
     }
     if (w.err || w.n + RC_CRC > w.cap) return -1;
@@ -469,6 +492,18 @@ int rc_decode(const uint8_t *buf, int len, rc_msg *m){
         if (!r_have(&r, (uint32_t)m->u.lobbies.n * RC_LOBBIES_ENTRY)) return RC_E_SHORT;
         m->u.lobbies.data = r.p + r.n; r.n += (uint32_t)m->u.lobbies.n * RC_LOBBIES_ENTRY;
         break;
+    case RC_MSG_RACEREP: {
+        rc_racerep *q = &m->u.racerep;
+        q->lobby = rc_get32(&r); q->race = rc_get32(&r); q->mode = (uint8_t)rc_get8(&r); q->laps = (uint8_t)rc_get8(&r);
+        q->track = (uint16_t)rc_get16(&r); q->place = (uint8_t)rc_get8(&r); q->players = (uint8_t)rc_get8(&r);
+        q->flags = (uint8_t)rc_get8(&r); q->type = (uint8_t)rc_get8(&r); q->cls = (int8_t)rc_get8(&r);
+        (void)rc_get8(&r); (void)rc_get8(&r); (void)rc_get8(&r);
+        q->rating = rc_getf(&r); q->field = rc_getf(&r); q->factor = rc_getf(&r); q->kw = rc_getf(&r); q->kg = rc_getf(&r);
+        q->kmh = rc_getf(&r); q->time = rc_getf(&r);
+        rc_getb(&r, q->name, RC_RACEREP_NAME); q->name[RC_RACEREP_NAME] = 0;
+        if (r.err) return RC_E_SHORT;
+        if (!racerep_ok(q)) return RC_E_FIELD;
+        break; }
     default: return RC_E_TYPE;
     }
     if (r.err) return RC_E_SHORT;
@@ -812,6 +847,14 @@ int rc_send_lobby(rc_session *s, const rc_lobby *l){
         return s->tx != before;
     }
     return 0;
+}
+int rc_send_racerep(rc_session *s, const rc_racerep *r){
+    if (s->closed || !s->conf.hub_ip || !s->hub_heard_us) return 0;
+    rc_msg m; hdr(s, &m, RC_MSG_RACEREP);
+    m.u.racerep = *r;
+    uint32_t before = s->tx;
+    tx_to(s, s->conf.hub_ip, s->conf.hub_port, &m);
+    return s->tx != before;
 }
 int rc_take_lobby(rc_session *s, uint32_t *from, rc_lobby *l){
     if (!s->n_lobby_in) return 0;

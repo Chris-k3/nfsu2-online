@@ -8,7 +8,8 @@
  *                                 "map <gen> <total> <n> x,y,h ..." (what it holds)
  *   roam_hubwire lobby            a race lobby's advert to the hub (to 0), as roam_core encodes it, in hex
  *   roam_hubwire lobbies <hex>... a session that takes race lobbies asks for the world map as above and takes
- *                                 these datagrams; then "lobbies <gen> <n> x,y,race,n,max,state ..." */
+ *                                 these datagrams; then "lobbies <gen> <n> x,y,race,n,max,state ..."
+ *   roam_hubwire racerep          a race's report to the hub, as roam_core encodes it, in hex */
 #include "roam_core.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -88,6 +89,12 @@ int main(int argc, char **argv){
         rc_lobby *l = &m.u.lobby;
         l->op = RC_LOBBY_ADVERT; l->state = RC_LS_OPEN; l->max = 6; l->to = 0; l->lobby = 0xA1B2C3D4u; l->race = 0x0BADF00Du;
         l->x = -1234; l->y = 567; l->n = 2; l->ids[0] = 0x1234ABCDu; l->ids[1] = 0x55u;
+    } else if (!strcmp(argv[1], "racerep")){
+        m.h.type = RC_MSG_RACEREP;
+        rc_racerep *r = &m.u.racerep;
+        r->lobby = 0xA1B2C3D4u; r->race = 0x0BADF00Du; r->mode = 1; r->laps = 1; r->track = 4102; r->place = 2; r->players = 3;
+        r->flags = RC_RR_HOST; r->type = 22; r->cls = 2; r->rating = 316.6f; r->field = 280.5f; r->factor = 1.25f;
+        r->kw = 214.f; r->kg = 1450.f; r->kmh = 249.f; r->time = 95.5f; strcpy(r->name, "350Z");
     } else if (!strcmp(argv[1], "bye")){
         m.h.type = RC_MSG_BYE; m.u.bye.reason = 0;
     } else return 2;
