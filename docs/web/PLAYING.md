@@ -157,7 +157,7 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
 - **Where they are:** your profiles and career are saved **in this browser, on this PC** (the site storage for
   the server's address). They are not on the server, unless you use cloud saves (below). Each address keeps its own
   save store, so stick to one.
-- **Cloud saves:** Make keyphrase (in Saves, beside Cloud saves) keeps your saves on the server too, under a
+- **Cloud saves:** Enable cloud saving (in Saves, beside Cloud saves) keeps your saves on the server too, under a
   keyphrase only you have: `nfsu2-xyz-` and 8 words. In another browser (another PC, a phone), enter it in the box
   and press Load: any case, with or without `nfsu2-xyz`. There is no account and no email.
   - The page locks the saves with the keyphrase before they leave the browser: the server keeps bytes it cannot

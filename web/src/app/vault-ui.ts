@@ -330,7 +330,7 @@ export class VaultPanel {
     if (!s) return;
     const l = s.link, st = s.state, owner = this.d.owner(), busy = this.d.busy();
     const working = st.s === 'working';
-    // beside the heading: Make keyphrase, or what it is doing, or when it last synced
+    // beside the heading: Enable cloud saving, or what it is doing, or when it last synced
     this.$('#vault-make').hidden = !!l || working;
     const note = this.$('#vault-when');
     note.hidden = !l && !working;
