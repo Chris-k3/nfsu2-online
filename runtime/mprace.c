@@ -517,8 +517,12 @@ static float balance_race(uint32_t ours, int mode){
             (double)target, (double)best, (double)(b.up * 100.f), (double)(b.down * 100.f));
     for (int i = 0; i < n; i++){
         if (!(r[i] > 0.f)) continue;
-        /* (the push table stays as built: the rating at f is the sum's, the torque the engine's) */
-        float f = balance_factor(pi[i], target, 1.f - b.down, 1.f + b.up), was = rating_at(pi[i], 1.f), now = rating_at(pi[i], f);
+        /* (the push table stays as built: the rating at f is the sum's, the torque the engine's.  The sum need not
+         * be the game's rating: in a drag race every car has 95 % of its mass, and the push and drag per kg are
+         * 1/0.95 of the rating's (the live races of 2026-10-23: every drag car's power 0.957 of what it should have
+         * been), so each car's target is put in its own sum's terms) */
+        float was = rating_at(pi[i], 1.f), want = was > 0.f ? target * was / r[i] : target;
+        float f = balance_factor(pi[i], want, 1.f - b.down, 1.f + b.up), now = was > 0.f ? rating_at(pi[i], f) * r[i] / was : 0.f;
         float lim = MRF32(pi[i] + PI_LIMIT_MPH), n2o = MRF32(pi[i] + PI_NITROUS);
         int j = g_bal.n++;
         g_bal.car[j] = car[i]; g_bal.f[j] = f;
