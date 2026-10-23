@@ -99,6 +99,15 @@ The start page shows these keys under **Controls**, and F9, Controls shows them 
   handbrake, A and X shift, Y and B are camera and look back, View respawns, Start pauses; D-pad up starts an event
   or takes an outrun, left and right are the map and messages. A click of the left stick is the horn, unless your
   car has hydraulics: then the stick clicks are the game's hydraulics (left: pressurize, right: bounce).
+- **Steering wheel:** a Logitech G29, G920 or G923, and other wheels the browser shows as a game controller. The
+  wheel steers, the pedals are throttle and brake (and reverse), the paddles shift down and up, Cross (A) is nitrous,
+  Square (X) the handbrake, Circle and Triangle (B and Y) look back and camera, Share respawns, Options pauses, PS
+  opens the page menu; the red dial and Enter work the menus. The game gets a wheel, as the PC game did with one:
+  the car's wheels follow yours, with no delay. Full lock is a quarter turn of a 900° wheel (270° from lock to lock).
+  No browser knows a wheel's layout, so the page guesses it from how the wheel reports itself; if steering or a pedal
+  is wrong, or you want another full lock, open Controls, Controller and press Set up the wheel: turn it to full
+  lock, then press each pedal. That is kept in this browser. A browser cannot drive a wheel's motor: no force
+  feedback.
 - **The page menu on a controller:** Home, or both sticks pressed in, opens it (where the browser passes Home on; on
   Windows the Game Bar may take it). The D-pad or left stick moves in it, A picks, B closes it; meanwhile the game
   gets no controller input. A stick pressed in alone reaches the game a moment later (0.12 s), so the shortcut never

@@ -52,6 +52,8 @@
  *                              LS RS HOME DUP DDOWN DLEFT DRIGHT (or CROSS,
  *                              CIRCLE, SQUARE, TRIANGLE, L1, R1, VIEW, MENU...)
  *     pad connect|disconnect   plug / unplug the synthetic controller
+ *     pad connect wheel        plug it in as a steering wheel (LX the wheel,
+ *                              LT/RT the pedals; dinput_pad.c's driving device)
  *     tappad BUTTON [frames]   press, release after frames (default 6)
  *     axis LX|LY|RX|RY V       stick position, -1..1 (+X right, +Y down)
  *     trigger LT|RT V          trigger position, 0..1
@@ -394,7 +396,7 @@ static void load_script(const char *path){
             e.n = a3[0] ? atol(a3) : 0; }
         else if (!strcasecmp(cmd, "pad")){ e.cmd = C_PAD;
             if (!strcasecmp(a1, "connect") || !strcasecmp(a1, "disconnect")){
-                e.key = PAD_PLUG; e.n = !strcasecmp(a1, "connect"); }
+                e.key = PAD_PLUG; e.n = !strcasecmp(a1, "connect") ? (!strcasecmp(a2, "wheel") ? 2 : 1) : 0; }
             else { int b = gamepad_button_by_name(a1);
                 if (b < 0){ fprintf(stderr, "[autotest] script line %d: unknown pad button '%s'\n", ln, a1); continue; }
                 e.key = (unsigned)b; e.n = strcasecmp(a2, "up") != 0; } }

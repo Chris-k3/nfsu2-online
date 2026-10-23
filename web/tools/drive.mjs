@@ -19,7 +19,10 @@
 //                                             the fake standard gamepad's state
 //                                             (buttons not named keep their value)
 //   {"padtap": 0, "until": "regex", "every": ms, "timeout": ms}  press and release button i
-//   {"padinit": {"id": "..."}}                the fake pad's Gamepad.id from the start (default Xbox)
+//   {"padinit": {"id": "...", "mapping": "", "axes": [...], "buttons": n}}
+//                                             the fake pad from the start: its Gamepad.id (default Xbox),
+//                                             mapping (default "standard"; "" a wheel's), axes at rest and
+//                                             number of buttons (a wheel: "pad" steps then give all its axes)
 //   {"eval": "js expression"}                 page.evaluate, the result is logged
 //   {"waitfor": "js expression", "timeout": ms}   until it is true in the page
 //   {"clicksel": "#play"}                      a trusted click on that element
@@ -49,8 +52,10 @@ const [vw, vh] = (opt('--size') ?? '1280x720').split('x').map(Number);
 const viewport = opt('--size') === 'window' ? null : { width: vw, height: vh };
 const steps = JSON.parse(fs.readFileSync(stepsFile, 'utf8'));
 const usesPad = steps.some(s => s.pad || s.padtap !== undefined || s.padinit);
-// {"padinit": {"id": "..."}}: the controller the fake pad claims to be from the start
-const padId = steps.find(s => s.padinit)?.padinit?.id ?? 'Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e Product: 0b13)';
+// {"padinit": {...}}: the controller the fake pad claims to be from the start
+const padInit = steps.find(s => s.padinit)?.padinit ?? {};
+const padSpec = { id: padInit.id ?? 'Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e Product: 0b13)',
+  mapping: padInit.mapping ?? 'standard', axes: padInit.axes ?? [0, 0, 0, 0], buttons: padInit.buttons ?? 17 };
 const args = ['--enable-unsafe-webgpu', ...(process.env.CHROME_ARGS ? process.env.CHROME_ARGS.split(' ') : [])];
 
 const cdp = opt('--cdp'), osPid = opt('--os-pid');
@@ -59,11 +64,11 @@ const ctx = cdp ? (await chromium.connectOverCDP(cdp)).contexts()[0]
   ? await chromium.launchPersistentContext(profile, { channel: 'chrome', headless: !headed, args, viewport, bypassCSP: true })
   : await (await chromium.launch({ channel: 'chrome', headless: !headed, args })).newContext({ viewport, bypassCSP: true });   // string waitForFunction needs eval; the server's CSP forbids it
 const page = ctx.pages()[0] ?? await ctx.newPage();
-if (usesPad) await page.addInitScript((id) => {
-  // a standard-mapping controller whose state the driver sets
-  const pad = { id, index: 0, connected: true,
-    mapping: 'standard', timestamp: 0, axes: [0, 0, 0, 0], vibrationActuator: null,
-    buttons: Array.from({ length: 17 }, () => ({ pressed: false, touched: false, value: 0 })) };
+if (usesPad) await page.addInitScript((spec) => {
+  // a controller (standard mapping unless padinit says otherwise) whose state the driver sets
+  const pad = { id: spec.id, index: 0, connected: true,
+    mapping: spec.mapping, timestamp: 0, axes: spec.axes.slice(), vibrationActuator: null,
+    buttons: Array.from({ length: spec.buttons }, () => ({ pressed: false, touched: false, value: 0 })) };
   window.__fakePad = pad;
   window.__setPad = (s) => {
     if (s.id) pad.id = s.id;
@@ -72,7 +77,7 @@ if (usesPad) await page.addInitScript((id) => {
     pad.timestamp = performance.now();
   };
   navigator.getGamepads = () => [pad, null, null, null];
-}, padId);
+}, padSpec);
 
 const lines = [];
 let waiters = [];

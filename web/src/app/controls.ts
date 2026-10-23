@@ -1,7 +1,8 @@
 // The Controls sheet: the start page's (#keys), and its copy in the menu's Controls dialog (shell.ts openHelp).
 // Three tabs: the keyboard (on a touch screen: touch), the controller and this site.  The controller's tab is a
 // drawing of a pad with what each button the game uses does beside it, the buttons named as Xbox or PlayStation
-// names them (the switch under it; a PlayStation controller connecting picks those names).
+// names them (the switch under it; a PlayStation controller connecting picks those names).  While a steering wheel
+// is connected, the tab is the wheel's instead (wheel-setup.ts).
 //
 // The drawing: a front view in its own units (260 x 180, x 130 the middle, the triggers above y 0) at SCALE in the
 // SVG's 336 px, the labels in rows of px left and right of it and over its middle, each joined to its control by a
@@ -9,6 +10,7 @@
 
 import { familyOf } from '../input/gamepad';
 import { PADF_PLAYSTATION } from '../input/proto';
+import { wheelSection } from './wheel-setup';
 
 export type Tab = 'keys' | 'pad' | 'site';
 export type Family = 'xb' | 'ps';
@@ -154,6 +156,7 @@ export function controlsSheet(root: HTMLElement, id: string, opts: { tab?: Tab; 
     </div></div>`;
   const svg = pad.querySelector('svg')!;
   const radios = [...pad.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+  wheelSection(pad, cap);
 
   let tab: Tab = opts.tab ?? 'keys', fam: Family = opts.fam ?? 'xb', picked = false;
   const sheet: ControlsSheet = {

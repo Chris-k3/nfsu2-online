@@ -126,7 +126,7 @@ static uint32_t gbuf_alloc(uint32_t n){
 uint32_t com_scratch(uint32_t n){ return gbuf_alloc(n); }
 /* runtime/dinput_pad.c: the DirectInput gamepad (device kind 3) */
 int      dipad_guid(uint32_t guid);
-void     dipad_created(uint32_t dev);
+void     dipad_created(uint32_t dev, uint32_t guid);
 int      dipad_enum(CPU *c, uint32_t devtype, uint32_t cb, uint32_t ref, uint32_t flags);
 uint32_t dipad_call(CPU *c, uint32_t self, const char *nm, int nargs, const uint32_t *args);
 /* ... and its force-feedback effects (IDirectInputEffect) */
@@ -4282,7 +4282,7 @@ int com_call(CPU *c, uint32_t magic){
             }
             MR32(d+8) = kind;
             if (kind == 1) dikbd_created(d);
-            if (kind == 3) dipad_created(d);
+            if (kind == 3) dipad_created(d, g);
             if(pp) MR32(pp)=d; r=0; }
         else if (MID(EnumDevices)){
             /* (dwDevType, lpCallback, pvRef, dwFlags)

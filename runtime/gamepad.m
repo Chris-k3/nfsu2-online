@@ -178,7 +178,7 @@ int gamepad_read(PadState *s){
     os_unfair_lock_lock(&g_lk);
     *s = g_syn.connected ? g_syn : g_real;      /* the script's pad wins while connected */
     os_unfair_lock_unlock(&g_lk);
-    stick_dz(&s->axis[PAD_AXIS_LX], &s->axis[PAD_AXIS_LY], dz);
+    if (!s->wheel) stick_dz(&s->axis[PAD_AXIS_LX], &s->axis[PAD_AXIS_LY], dz);   /* a (script's) wheel: none */
     stick_dz(&s->axis[PAD_AXIS_RX], &s->axis[PAD_AXIS_RY], dz);
     s->axis[PAD_AXIS_LT] = trig_dz(s->axis[PAD_AXIS_LT], tdz);
     s->axis[PAD_AXIS_RT] = trig_dz(s->axis[PAD_AXIS_RT], tdz);
@@ -188,10 +188,11 @@ int gamepad_read(PadState *s){
 /* ---- synthetic controller (autotest) --------------------------------------- */
 void gamepad_synth_connect(int on){
     os_unfair_lock_lock(&g_lk);
-    if (on != g_syn.connected){
+    if ((on != 0) != g_syn.connected || (on == 2) != g_syn.wheel){   /* 2: a steering wheel */
         memset(&g_syn, 0, sizeof g_syn);
         g_syn.connected = on ? 1 : 0;
         g_syn.synthetic = 1;
+        g_syn.wheel = on == 2;
         g_syn.family = PADF_XBOX;
         snprintf(g_syn.name, sizeof g_syn.name, "Virtual Controller (autotest)");
     }

@@ -29,6 +29,22 @@
  *           10 LT and 11 RT pressed to the end of their travel (as a
  *           DualShock 4 under DirectInput reports L2/R2 twice)
  *
+ * A steering wheel (PadState.wheel: the page maps the wheel to LX, the gas
+ * and brake pedals to RT and LT, its buttons onto the pad's, see
+ * web/src/input/wheel.ts) is offered as a driving device instead, with an
+ * instance GUID of its own, so the game keeps its bindings apart from the
+ * pad's and gives it the wheel layout below (g_prof_wheel).  The device type
+ * matters: 0x5cd1f0 marks a driving device's slot ([0x86e5bc + slot], read by
+ * 0x5c1000), and the steering then takes 0x4061c0, the wheel's position
+ * straight to the car's steering angle, where a pad's or the keyboard's goes
+ * through 0x416bb0, which turns the car's wheels towards it at a limited rate
+ * (input controller +0x1e0, full left from straight ahead: the wheel's in the
+ * first frame, the pad's within 16 standing, not within 45 at speed;
+ * tests/scripts/pad_wheel_switch.txt).  The game creates its device once, so when a
+ * controller of the other kind takes over (a wheel after a pad, or back), the
+ * device of the old kind is let go as in hotplug mode (two polls at rest,
+ * then DIERR_INPUTLOST) and the game's rescan finds the new one.
+ *
  *   NFSU2_PAD=0         no game pad device (also off/no/false)
  *   NFSU2_PAD=hotplug   the device exists only while a controller is
  *                       connected (DirectInput-faithful: unplugging reports
@@ -89,7 +105,9 @@ uint32_t com_scratch(uint32_t n);
 #define DIDFT_FFACTUATOR     0x01000000u
 #define DIDC_FORCEFEEDBACK   0x00000100u
 #define DI8DEVTYPE_GAMEPAD 0x15u
+#define DI8DEVTYPE_DRIVING 0x16u
 #define PAD_DEVTYPE     (0x00010000u | (2u << 8) | DI8DEVTYPE_GAMEPAD)  /* HID, STANDARD */
+#define WHEEL_DEVTYPE   (0x00010000u | (3u << 8) | DI8DEVTYPE_DRIVING)  /* HID, DUALPEDALS */
 
 /* ---- configuration ---------------------------------------------------- */
 enum { MODE_OFF, MODE_ALWAYS, MODE_HOTPLUG };
@@ -139,8 +157,25 @@ static uint32_t obj_type(int i){
     return DIDFT_PSHBUTTON | ((uint32_t)(i - NAXES - NPOVS) << 8);
 }
 /* The names a controls screen shows; positional buttons, so a PlayStation
- * pad's A is "Cross" and a Nintendo pad's A is its bottom button "B". */
-static const char *obj_name(int i, int fam){
+ * pad's A is "Cross" and a Nintendo pad's A is its bottom button "B".  A
+ * wheel's are the ones the page puts there (web/src/input/wheel.ts): its
+ * face buttons, the paddles on LB and RB, the pedals on the triggers. */
+static const char *wheel_obj_name(int i, int fam){
+    static const char *const ax[NAXES] = {"Wheel", "Y Axis", "Brake Pedal", "X Rotation", "Y Rotation", "Gas Pedal"};
+    static const char *const btn[3][NBTNS] = {
+        {"A", "B", "X", "Y", "Left Paddle", "Right Paddle", "Back", "Start", "L3", "R3",
+         "Brake Pedal Full", "Gas Pedal Full"},
+        {"A", "B", "X", "Y", "Left Paddle", "Right Paddle", "View", "Menu", "LSB", "RSB",
+         "Brake Pedal Full", "Gas Pedal Full"},
+        {"Cross", "Circle", "Square", "Triangle", "Left Paddle", "Right Paddle", "Share", "Options", "L3", "R3",
+         "Brake Pedal Full", "Gas Pedal Full"} };
+    if (i < NAXES) return ax[i];
+    if (i == NAXES) return "D-pad";
+    if (i < NAXES + NPOVS) return "Wheel Directions";
+    return btn[fam == PADF_XBOX ? 1 : fam == PADF_PLAYSTATION ? 2 : 0][i - NAXES - NPOVS];
+}
+static const char *obj_name(int i, int fam, int wheel){
+    if (wheel) return wheel_obj_name(i, fam);
     static const char *const ax[NAXES] = {"Left Stick X", "Left Stick Y", "Left Trigger",
                                           "Right Stick X", "Right Stick Y", "Right Trigger"};
     static const char *const trig[4][2] = {{"Left Trigger", "Right Trigger"}, {"LT", "RT"},
@@ -182,17 +217,24 @@ static void put_guid(uint32_t p, uint32_t d1, uint16_t d2, uint16_t d3, const ui
     MR32(p) = d1; MR16(p + 4) = d2; MR16(p + 6) = d3;
     for (int i = 0; i < 8; i++) MR8(p + 8 + i) = d4[i];
 }
-/* guidInstance never changes: the game keys saved bindings on it. */
+/* guidInstance never changes: the game keys saved bindings on it.  The
+ * wheel's differs from the pad's in its last byte (2), so each keeps its own. */
 static const uint8_t k_inst_d4[8] = {0x80, 0x00, 'N', 'F', 'S', 'U', '2', 0x01};
 #define INST_D1 0x50414447u               /* "GDAP" */
-static void put_instance_guid(uint32_t p){ put_guid(p, INST_D1, 0x4E46, 0x11F0, k_inst_d4); }
+static void put_instance_guid(uint32_t p, int wheel){
+    put_guid(p, INST_D1, 0x4E46, 0x11F0, k_inst_d4);
+    if (wheel) MR8(p + 15) = 0x02;
+}
+/* 1: the pad's guidInstance, 2: the wheel's, 0: neither */
 int dipad_guid(uint32_t g){
     if (!g || !mem_is_committed(g + 15) || MR32(g) != INST_D1) return 0;
-    return !memcmp(g_mem + g + 8, k_inst_d4, 8) && MR16(g + 4) == 0x4E46 && MR16(g + 6) == 0x11F0;
+    if (memcmp(g_mem + g + 8, k_inst_d4, 7) || MR16(g + 4) != 0x4E46 || MR16(g + 6) != 0x11F0) return 0;
+    return MR8(g + 15) == 0x01 ? 1 : MR8(g + 15) == 0x02 ? 2 : 0;
 }
 /* A HID-style product GUID {PIDVID-0000-0000-0000-504944564944}; the VID/PID
  * collide with none of the game's own lists (0x7fe7f8, 0x800588, 0x5cef00). */
-static uint32_t family_vidpid(int fam){
+static uint32_t family_vidpid(int fam, int wheel){
+    if (wheel) return 0x55451209u;                    /* pid.codes test range, as the generic pad */
     switch (fam){
     case PADF_XBOX:        return 0x0B13045Eu;        /* Xbox Wireless Controller */
     case PADF_PLAYSTATION: return 0x0CE6054Cu;        /* DualSense */
@@ -200,20 +242,21 @@ static uint32_t family_vidpid(int fam){
     default:               return 0x55441209u;        /* pid.codes test range */
     }
 }
-static void write_devinst(uint32_t p, uint32_t size, const PadState *s){
+/* the device instance: the pad, or the wheel (wheel), with the name of the controller driving it */
+static void write_devinst(uint32_t p, uint32_t size, const PadState *s, int wheel){
     static const uint8_t pidvid[8] = {0x00, 0x00, 'P', 'I', 'D', 'V', 'I', 'D'};
     if (size > 0x244u || size < 0x24u) size = 0x244u;
     mem_commit(p, size);
     memset(g_mem + p, 0, size);
     MR32(p) = size;
-    put_instance_guid(p + 0x04);
-    put_guid(p + 0x14, family_vidpid(s->family), 0, 0, pidvid);
+    put_instance_guid(p + 0x04, wheel);
+    put_guid(p + 0x14, family_vidpid(s->family, wheel), 0, 0, pidvid);
     if (size < 0x28u) return;
-    MR32(p + 0x24) = PAD_DEVTYPE;
-    const char *nm = s->connected && s->name[0] ? s->name : "Gamepad";
+    MR32(p + 0x24) = wheel ? WHEEL_DEVTYPE : PAD_DEVTYPE;
+    const char *nm = s->connected && s->name[0] && !!s->wheel == !!wheel ? s->name : wheel ? "Steering Wheel" : "Gamepad";
     if (size >= 0x12cu) snprintf((char *)(g_mem + p + 0x28), 260, "%s", nm);
     if (size >= 0x230u) snprintf((char *)(g_mem + p + 0x12c), 260, "%s", nm);
-    if (size >= 0x244u){ MR16(p + 0x240) = 1; MR16(p + 0x242) = 5; }   /* Generic Desktop / Game Pad */
+    if (size >= 0x244u){ MR16(p + 0x240) = 1; MR16(p + 0x242) = wheel ? 4 : 5; }   /* Generic Desktop / Joystick, Game Pad */
     int dipad_ff_on(void);
     if (size >= 0x240u && dipad_ff_on()) put_guid(p + 0x230, 0x4646504Eu, 0x4E46, 0x11F0, k_inst_d4);   /* guidFFDriver */
 }
@@ -228,6 +271,8 @@ typedef struct {
     uint32_t last_btn, fe_prev;
     int      fe_down[3];                 /* Enter / Escape / Q keystroke is down */
     int      rest;                       /* hotplug: polls answered at rest since the unplug */
+    int      wheel;                      /* created as the wheel (its guidInstance), not the pad */
+    int      gone;                       /* answered DIERR_INPUTLOST: the game let it go */
 } Dev;
 static Dev g_dev[4];
 static Dev *dev_of(uint32_t obj, int create){
@@ -243,23 +288,33 @@ static Dev *dev_of(uint32_t obj, int create){
     for (int a = 0; a < NAXES; a++){ d->mn[a] = 0; d->mx[a] = 65535; d->sat[a] = 10000; }
     return d;
 }
-void dipad_created(uint32_t obj){
-    dev_of(obj, 1);
+/* CreateDevice with one of our guidInstances (guid: the pad's or the wheel's) */
+void dipad_created(uint32_t obj, uint32_t guid){
+    Dev *d = dev_of(obj, 1);
+    d->wheel = dipad_guid(guid) == 2;
     PadState s; gamepad_read(&s);
-    if (pad_log()) fprintf(stderr, "[pad] CreateDevice -> 0x%08x (%s)\n", obj, s.connected ? s.name : "no controller yet");
+    if (pad_log()) fprintf(stderr, "[pad] CreateDevice -> 0x%08x, the %s (%s)\n", obj, d->wheel ? "wheel" : "pad",
+                           s.connected ? s.name : "no controller yet");
 }
 
 /* ---- enumeration ------------------------------------------------------------- */
+static int g_kind = -1;                  /* the device last offered: 0 the pad, 1 the wheel (-1: none yet) */
 /* IDirectInput8::EnumDevices: offer the pad for DI8DEVCLASS_ALL, _GAMECTRL
- * and DI8DEVTYPE_GAMEPAD.  Returns 1 when the callback said DIENUM_STOP. */
+ * and DI8DEVTYPE_GAMEPAD, or the wheel (a wheel drives the pad) for _ALL,
+ * _GAMECTRL and DI8DEVTYPE_DRIVING.  Returns 1 when the callback said
+ * DIENUM_STOP. */
 int dipad_enum(CPU *c, uint32_t devtype, uint32_t cb, uint32_t ref, uint32_t flags){
     int mode = pad_mode();
     if (mode == MODE_OFF || !cb) return 0;
-    uint32_t t = devtype & 0xFFu;
-    if (t != 0u && t != 4u && t != DI8DEVTYPE_GAMEPAD) return 0;
     int dipad_ff_on(void);
     if ((flags & 0x100u) && !dipad_ff_on()) return 0;        /* DIEDFL_FORCEFEEDBACK */
     PadState s; gamepad_read(&s);
+    /* a device of the other kind is being let go (dipad_call): the new one
+     * comes with the rescan after it is gone */
+    for (int i = 0; i < 4; i++) if (g_dev[i].obj && !g_dev[i].gone && g_dev[i].rest > 0) return 0;
+    int wheel = s.connected ? !!s.wheel : g_kind > 0;
+    uint32_t t = devtype & 0xFFu;
+    if (t != 0u && t != 4u && t != (wheel ? DI8DEVTYPE_DRIVING : DI8DEVTYPE_GAMEPAD)) return 0;
     /* The game's own rescan every 32 frames (0x5cfa10 reads [0x8364e8]
      * every frame) finds a controller plugged in later.  Hotplug mode keeps
      * it on.  The default mode offers the device once a controller has been
@@ -272,10 +327,12 @@ int dipad_enum(CPU *c, uint32_t devtype, uint32_t cb, uint32_t ref, uint32_t fla
         if (mem_is_committed(0x8364e8u)) MR32(0x8364e8u) = mode == MODE_HOTPLUG || !s.connected;
         if (!s.connected) return 0;
     }
+    else if (mem_is_committed(0x8364e8u)) MR32(0x8364e8u) = 0;   /* the rescan after a change of kind: done */
     seen = 1;
+    g_kind = wheel;
     static uint32_t ddi = 0;
     if (!ddi) ddi = com_scratch(0x260);
-    write_devinst(ddi, 0x244u, &s);
+    write_devinst(ddi, 0x244u, &s, wheel);
     static int nlog = 0;
     if (pad_log() && nlog < 8){ nlog++;
         fprintf(stderr, "[pad] EnumDevices(type 0x%x) -> \"%s\"\n", devtype, (char *)(g_mem + ddi + 0x12c)); }
@@ -411,10 +468,17 @@ static const uint32_t g_prof_game[32] = {
 static const uint32_t g_prof_fe[32] = {
     0x1f, 0x22, 0x23, 0x2e, 0x26, 0x27, 0x2f, 0x24, 0, 0, 0, 0, 0, 0, 0, 0,
     0x1c, 0x1b, 0x1d, 0x1e,   0x1c, 0x1b, 0x1d, 0x1e,   0, 0, 0, 0,   0, 0, 0, 0 };
+/* The wheel's, in game: the paddles shift (right up, left down), the bottom
+ * face button (A, Cross) is nitrous, the left one (X, Square) the e-brake,
+ * the others, the pedals pressed to the floor, the D-pad and the rest as the
+ * pad's.  Its front end is the pad's. */
+static const uint32_t g_prof_wheel[32] = {
+    0x06, 0x09, 0x05, 0x0a, 0x08, 0x07, 0x0e, 0x0c, 0x16, 0x13, 0x02, 0x01, 0, 0, 0, 0,
+    0x12, 0x0f, 0x10, 0x11,   0, 0, 0, 0,   0, 0, 0, 0,   0, 0, 0, 0 };
 
-static void apply_profile(uint32_t ch){
+static void apply_profile(uint32_t ch, int wheel){
     for (int i = 0; i < 32; i++){
-        MR32(ch + 0x018 + 4u * (uint32_t)i) = g_prof_game[i];
+        MR32(ch + 0x018 + 4u * (uint32_t)i) = (wheel ? g_prof_wheel : g_prof_game)[i];
         MR32(ch + 0x098 + 4u * (uint32_t)i) = g_prof_fe[i];
         MR32(ch + 0x118 + 4u * (uint32_t)i) = 0;            /* secondary tables unused */
         MR32(ch + 0x198 + 4u * (uint32_t)i) = 0;
@@ -429,7 +493,7 @@ static void apply_profile(uint32_t ch){
     MR32(ch + 0x350) = 0x14;  MR32(ch + 0x360) = 1;          /* combined pedal (unused) */
     MR8(ch + 0x364) = 1; MR8(ch + 0x365) = 1; MR8(ch + 0x366) = 1;
     MR8(ch + 0x367) = 0; MR8(ch + 0x368) = 0;
-    if (pad_log()) fprintf(stderr, "[pad] default layout applied to input channel 0x%08x\n", ch);
+    if (pad_log()) fprintf(stderr, "[pad] default %s layout applied to input channel 0x%08x\n", wheel ? "wheel" : "pad", ch);
 }
 /* 0x5b81b0(devinfo, tableA, tableB): the game's built-in profile lookup,
  * called from the channel set-up 0x5c11a0 (device attach, and "reset to
@@ -437,8 +501,9 @@ static void apply_profile(uint32_t ch){
 void sub_005b81b0_orig(CPU *c);
 void sub_005b81b0(CPU *c){
     uint32_t ddi = MR32(c->esp + 4u), ta = MR32(c->esp + 8u);
-    if (pad_mode() != MODE_OFF && ddi && dipad_guid(ddi + 4u) && ta > 0x18u){
-        apply_profile(ta - 0x18u);
+    int ours = pad_mode() != MODE_OFF && ddi ? dipad_guid(ddi + 4u) : 0;
+    if (ours && ta > 0x18u){
+        apply_profile(ta - 0x18u, ours == 2);
         c->eax = (c->eax & 0xFFFFFF00u) | 1u;
         POP32(c->eip);
         return;
@@ -447,7 +512,7 @@ void sub_005b81b0(CPU *c){
 }
 
 /* ---- IDirectInputDevice8 methods for the pad --------------------------------------- */
-static void write_objinst(uint32_t p, uint32_t size, int i, int fam){
+static void write_objinst(uint32_t p, uint32_t size, int i, int fam, int wheel){
     if (!size || size > 0x13cu) size = 0x13cu;
     mem_commit(p, size);
     memset(g_mem + p, 0, size);
@@ -461,7 +526,7 @@ static void write_objinst(uint32_t p, uint32_t size, int i, int fam){
     MR32(p + 0x18) = obj_type(i) | (act ? DIDFT_FFACTUATOR : 0u);
     MR32(p + 0x1c) = (i < NAXES ? DIDOI_ASPECTPOSITION : 0u) | (act ? DIDOI_FFACTUATOR : 0u);
     if (act && size >= 0x12cu){ MR32(p + 0x124) = 10000u; MR32(p + 0x128) = 1u; }   /* dwFFMaxForce, dwFFForceResolution */
-    if (size >= 0x124u) snprintf((char *)(g_mem + p + 0x20), 260, "%s", obj_name(i, fam));
+    if (size >= 0x124u) snprintf((char *)(g_mem + p + 0x20), 260, "%s", obj_name(i, fam, wheel));
     if (size >= 0x134u){
         MR16(p + 0x130) = i >= NAXES + NPOVS ? 9u : 1u;      /* Button / Generic Desktop */
         MR16(p + 0x132) = i < NAXES ? k_axis_usage[i] : i < NAXES + NPOVS ? 0x39u
@@ -835,21 +900,35 @@ void dipad_effect_free(uint32_t obj){
 uint32_t dipad_call(CPU *c, uint32_t self, const char *nm, int nargs, const uint32_t *a){
     Dev *d = dev_of(self, 1);
     PadState s; gamepad_read(&s);
-    int lost = pad_mode() == MODE_HOTPLUG && !s.connected && !on_controls_page();
+    /* a controller of the other kind drives the pad (a wheel, and this is the
+     * pad, or back): this device makes way for one of that kind */
+    int other = s.connected && !!s.wheel != d->wheel;
+    int lost = ((pad_mode() == MODE_HOTPLUG && !s.connected) || other) && !on_controls_page();
     (void)nargs;
     if (!strcmp(nm, "GetDeviceState")){
         uint32_t cb = a[1], p = a[2];
-        /* Unplugged (hotplug mode): answer two polls with the pad at rest
-         * before DIERR_INPUTLOST.  The game drops the device's channel with
-         * its last values, which then stay applied (steering, throttle,
-         * held buttons) until its next 32-frame rescan, about 0.3 s. */
-        if (lost && d->rest >= 2) return DIERR_INPUTLOST;
+        /* Unplugged (hotplug mode), or the other kind: answer two polls with
+         * the pad at rest before DIERR_INPUTLOST.  The game drops the
+         * device's channel with its last values, which then stay applied
+         * (steering, throttle, held buttons) until its next 32-frame rescan,
+         * about 0.3 s, which then finds the device of the new kind. */
+        if (lost && d->rest >= 2){
+            if (other && !d->gone){
+                if (mem_is_committed(0x8364e8u)) MR32(0x8364e8u) = 1;
+                fprintf(stderr, "[pad] %s drives the pad: the game's %s device makes way for a %s\n",
+                        s.name, d->wheel ? "wheel" : "pad", s.wheel ? "wheel" : "pad");
+            }
+            d->gone = 1;
+            return DIERR_INPUTLOST;
+        }
         d->rest = lost ? d->rest + 1 : 0;
         if (!p || !cb || cb > 0x110u) return DIERR_INVALIDPARAM;
         mem_commit(p, cb);
-        fill_state(g_mem + p, cb, d, &s);
+        PadState at = s;
+        if (lost) memset(&at, 0, sizeof at);
+        fill_state(g_mem + p, cb, d, &at);
         ff_mix();
-        fe_keys(d, s.buttons);
+        fe_keys(d, at.buttons);
         if (pad_log() && s.buttons != d->last_btn){
             fprintf(stderr, "[pad] buttons 0x%04x  LX %+.2f LY %+.2f LT %.2f RT %.2f\n", s.buttons,
                     (double)s.axis[PAD_AXIS_LX], (double)s.axis[PAD_AXIS_LY],
@@ -881,7 +960,7 @@ uint32_t dipad_call(CPU *c, uint32_t self, const char *nm, int nargs, const uint
         uint32_t sz = MR32(p); if (sz < 0x18u || sz > 0x2cu) sz = 0x2cu;
         mem_commit(p, sz); memset(g_mem + p, 0, sz); MR32(p) = sz;
         MR32(p + 0x04) = 0x00000001u;                         /* DIDC_ATTACHED */
-        MR32(p + 0x08) = PAD_DEVTYPE;
+        MR32(p + 0x08) = d->wheel ? WHEEL_DEVTYPE : PAD_DEVTYPE;
         MR32(p + 0x0c) = NAXES; MR32(p + 0x10) = NBTNS; MR32(p + 0x14) = NPOVS;
         if (dipad_ff_on()){
             MR32(p + 0x04) |= DIDC_FORCEFEEDBACK;
@@ -892,7 +971,7 @@ uint32_t dipad_call(CPU *c, uint32_t self, const char *nm, int nargs, const uint
     if (!strcmp(nm, "GetDeviceInfo")){
         uint32_t p = a[1];
         if (!p || !mem_is_committed(p + 3)) return DIERR_INVALIDPARAM;
-        write_devinst(p, MR32(p), &s);
+        write_devinst(p, MR32(p), &s, d->wheel);
         return DI_OK;
     }
     if (!strcmp(nm, "EnumObjects")){
@@ -904,7 +983,7 @@ uint32_t dipad_call(CPU *c, uint32_t self, const char *nm, int nargs, const uint
             uint32_t t = obj_type(i);
             if ((fl & DIDFT_TYPEMASK) && !(fl & t & DIDFT_TYPEMASK)) continue;   /* DIDFT_ALL = 0 */
             if ((fl & DIDFT_FFACTUATOR) && !(i < 2 && dipad_ff_on())) continue;
-            write_objinst(oi, 0x13cu, i, s.family);
+            write_objinst(oi, 0x13cu, i, s.family, d->wheel);
             uint32_t args[2] = { oi, ref };
             if (call_guest(c, cb, 2, args) == 0u) break;      /* DIENUM_STOP */
         }
@@ -915,7 +994,7 @@ uint32_t dipad_call(CPU *c, uint32_t self, const char *nm, int nargs, const uint
         int i = obj_find(obj, how);
         if (i < 0) return DIERR_OBJECTNOTFOUND;
         if (!p || !mem_is_committed(p + 3)) return DIERR_INVALIDPARAM;
-        write_objinst(p, MR32(p), i, s.family);
+        write_objinst(p, MR32(p), i, s.family, d->wheel);
         return DI_OK;
     }
     if (!strcmp(nm, "SetProperty") || !strcmp(nm, "GetProperty")){
@@ -956,7 +1035,7 @@ uint32_t dipad_call(CPU *c, uint32_t self, const char *nm, int nargs, const uint
         case 8u:  if (set || !dipad_ff_on()) return DIERR_UNSUPPORTED; MR32(h + 16) = 0; return DI_OK;   /* FFLOAD */
         case 3u:  if (!set){ MR32(h + 16) = 1; return DI_OK; } return DIERR_UNSUPPORTED;   /* GRANULARITY */
         case 15u: if (!set){ MR32(h + 16) = 0; return DI_OK; } return DIERR_UNSUPPORTED;   /* JOYSTICKID */
-        case 24u: if (!set){ MR32(h + 16) = family_vidpid(s.family); return DI_OK; } return DIERR_UNSUPPORTED;
+        case 24u: if (!set){ MR32(h + 16) = family_vidpid(s.family, d->wheel); return DI_OK; } return DIERR_UNSUPPORTED;
         default:  return set ? DI_OK : DIERR_UNSUPPORTED;
         }
     }

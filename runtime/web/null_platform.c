@@ -204,7 +204,7 @@ static PadState g_synth;
 WEAK int  gamepad_env_flag(const char *nm, int dflt){ const char *e = getenv(nm); if (!e || !*e) return dflt; return !(e[0] == '0' || !strcmp(e, "off") || !strcmp(e, "no")); }
 WEAK void gamepad_init(void){ }
 WEAK int  gamepad_read(PadState *s){ if (g_synth.connected){ *s = g_synth; return 1; } memset(s, 0, sizeof *s); return 0; }
-WEAK void gamepad_synth_connect(int on){ g_synth.connected = on; g_synth.synthetic = 1; g_synth.family = PADF_XBOX; snprintf(g_synth.name, sizeof g_synth.name, "script pad"); }
+WEAK void gamepad_synth_connect(int on){ g_synth.connected = !!on; g_synth.wheel = on == 2; g_synth.synthetic = 1; g_synth.family = PADF_XBOX; snprintf(g_synth.name, sizeof g_synth.name, "script pad"); }
 WEAK void gamepad_synth_button(int b, int down){ if (b >= 0 && b < PAD_NBUTTONS){ if (down) g_synth.buttons |= 1u << b; else g_synth.buttons &= ~(1u << b); } }
 WEAK void gamepad_synth_axis(int a, float v){ if (a >= 0 && a < PAD_NAXES) g_synth.axis[a] = v; }
 WEAK int  gamepad_button_by_name(const char *nm){

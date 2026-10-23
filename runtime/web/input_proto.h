@@ -60,6 +60,7 @@ enum {
     IM_TEXT_MAX = 34,     /* wasm: the game's text entry is up: the most characters it takes (0: none is up) */
     IM_TEXT_KIND = 35,    /* wasm: its kind, which characters it takes besides letters and digits */
     IM_TEXT_LEN = 36,     /* wasm: the characters in it now */
+    IM_PAD_WHEEL = 37,    /* page: 1 when the controller driving the pad is a steering wheel (under IM_PAD_SEQ) */
     IM_TEXT = 40,         /* wasm: 40..63, its text (cp1252, NUL-padded, the first INPUT_TEXT_BYTES) */
     IM_HDR_WORDS = 64
 };

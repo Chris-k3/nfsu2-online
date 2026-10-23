@@ -969,6 +969,7 @@ static void read_real(PadState *s){
         t.connected = (int)atomic_load_explicit(&MH(IM_PAD_CONNECTED), memory_order_relaxed);
         t.family = (int)atomic_load_explicit(&MH(IM_PAD_FAMILY), memory_order_relaxed);
         t.buttons = atomic_load_explicit(&MH(IM_PAD_BUTTONS), memory_order_relaxed);
+        t.wheel = atomic_load_explicit(&MH(IM_PAD_WHEEL), memory_order_relaxed) == 1u;
         for (int i = 0; i < PAD_NAXES; i++){
             uint32_t v = atomic_load_explicit(&MH(IM_PAD_AXIS + i), memory_order_relaxed);
             memcpy(&t.axis[i], &v, 4);
@@ -984,8 +985,8 @@ static void read_real(PadState *s){
     uint32_t gen = atomic_load(&MH(IM_PAD_GEN));
     if (gen != gen_seen){
         gen_seen = gen;
-        fprintf(stderr, "[pad] player 1 controller: %s (%s)\n", s->connected ? s->name : "none",
-                s->connected ? family_name(s->family) : "-");
+        fprintf(stderr, "[pad] player 1 controller: %s (%s%s)\n", s->connected ? s->name : "none",
+                s->connected ? family_name(s->family) : "-", s->connected && s->wheel ? ", a steering wheel" : "");
     }
 }
 static void stick_dz(float *x, float *y, float dz){
@@ -1009,8 +1010,9 @@ int gamepad_read(PadState *s){
     if (syn) *s = g_syn;                         /* the script's pad wins while connected */
     pthread_mutex_unlock(&g_pad_mx);
     if (!syn) read_real(s);
-    if (!syn && mprace_owns_input()){ int con = s->connected; memset(s, 0, sizeof *s); s->connected = con; }   /* (handle above) */
-    stick_dz(&s->axis[PAD_AXIS_LX], &s->axis[PAD_AXIS_LY], dz);
+    if (!syn && mprace_owns_input()){ int con = s->connected, wh = s->wheel; memset(s, 0, sizeof *s); s->connected = con; s->wheel = wh; }   /* (handle above) */
+    /* a wheel's position is the steering, with no dead zone around the middle (its pedals keep the triggers') */
+    if (!s->wheel) stick_dz(&s->axis[PAD_AXIS_LX], &s->axis[PAD_AXIS_LY], dz);
     stick_dz(&s->axis[PAD_AXIS_RX], &s->axis[PAD_AXIS_RY], dz);
     s->axis[PAD_AXIS_LT] = trig_dz(s->axis[PAD_AXIS_LT], tdz);
     s->axis[PAD_AXIS_RT] = trig_dz(s->axis[PAD_AXIS_RT], tdz);
@@ -1030,14 +1032,16 @@ void gamepad_rumble(float strong, float weak){
     atomic_store_explicit(&MH(IM_RUMBLE_WEAK), w, memory_order_relaxed);
     atomic_fetch_add_explicit(&MH(IM_RUMBLE_SEQ), 1u, memory_order_release);
 }
+/* on: 0 unplugged, 1 a pad, 2 a steering wheel */
 void gamepad_synth_connect(int on){
     pthread_mutex_lock(&g_pad_mx);
-    if (on != g_syn.connected){
+    if ((on != 0) != g_syn.connected || (on == 2) != g_syn.wheel){
         memset(&g_syn, 0, sizeof g_syn);
         g_syn.connected = on ? 1 : 0;
         g_syn.synthetic = 1;
+        g_syn.wheel = on == 2;
         g_syn.family = PADF_XBOX;
-        snprintf(g_syn.name, sizeof g_syn.name, "Virtual Controller (autotest)");
+        snprintf(g_syn.name, sizeof g_syn.name, on == 2 ? "Virtual Wheel (autotest)" : "Virtual Controller (autotest)");
     }
     pthread_mutex_unlock(&g_pad_mx);
 }

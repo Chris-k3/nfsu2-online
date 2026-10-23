@@ -5,10 +5,14 @@
 // navigator.getGamepads() exists on the page's main thread only, so the page
 // polls it every frame and publishes the pad into the HostMailbox under a
 // seqlock; the guest reads it when the game polls its device.  The first
-// connected controller with the standard mapping drives the pad (one that
-// connects later takes over only when it goes away), as gamepad.m does;
-// without a standard one the first controller is read as if it were.
-// Chrome exposes a controller only after a button press on the page.
+// connected controller with the standard mapping, or a steering wheel
+// (wheel.ts: the wheel, its pedals and buttons made the pad's, and the game
+// offered a driving device), drives the pad (one that connects later takes
+// over only when it goes away), as gamepad.m does; without either the first
+// controller is read as if it had the standard mapping, but for an axis
+// resting at an end when it showed up (a pedal, a throttle, a trigger),
+// which is no stick.  Chrome exposes a controller only after a button press
+// on the page.
 //
 // Rumble goes the other way: runtime/dinput_pad.c plays the game's
 // force-feedback effects as two motor levels in the mailbox, updated every
@@ -23,25 +27,31 @@
 // game.
 import {
   IM_OFF_PAD_NAME, IM_PAD_AXIS, IM_PAD_BUTTONS, IM_PAD_CONNECTED, IM_PAD_FAMILY, IM_PAD_GEN, IM_PAD_RUMBLE, IM_PAD_SEQ,
-  IM_RUMBLE_SEQ, IM_RUMBLE_STRONG, IM_RUMBLE_WEAK,
+  IM_PAD_WHEEL, IM_RUMBLE_SEQ, IM_RUMBLE_STRONG, IM_RUMBLE_WEAK,
   PAD_A, PAD_AXIS_LT, PAD_AXIS_LX, PAD_AXIS_LY, PAD_AXIS_RT, PAD_AXIS_RX, PAD_AXIS_RY, PAD_B, PAD_BACK, PAD_DDOWN,
   PAD_DLEFT, PAD_DRIGHT, PAD_DUP, PAD_HOME, PAD_LB, PAD_LS, PAD_RB, PAD_RS, PAD_START, PAD_X, PAD_Y,
   PADF_GENERIC, PADF_NINTENDO, PADF_PLAYSTATION, PADF_XBOX,
 } from './proto';
+import {
+  describeMap, findHat, guessMap, hatDirs, loadMap, readWheel, usbIds, WHEEL_MAP_EVENT, wheelOf, type WheelInfo, type WheelMap,
+} from './wheel';
 
-export interface PadSnapshot { connected: boolean; buttons: number; axes: number[]; family: number; name: string; index: number }
+export interface PadSnapshot { connected: boolean; buttons: number; axes: number[]; family: number; name: string; index: number; wheel?: boolean }
 
 // standard mapping: buttons[i] -> PAD_* (6 and 7 are the analog triggers)
 const BUTTON_OF: (number | -1)[] = [PAD_A, PAD_B, PAD_X, PAD_Y, PAD_LB, PAD_RB, -1, -1, PAD_BACK, PAD_START,
   PAD_LS, PAD_RS, PAD_DUP, PAD_DDOWN, PAD_DLEFT, PAD_DRIGHT, PAD_HOME];
 
 /** the controller family and a display name from Gamepad.id: Chrome writes
- *  "Name (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)", Firefox "054c-0ce6-Name" */
+ *  "Name (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)", Firefox "054c-0ce6-Name"
+ *  (on Linux and macOS without the leading zeros: "54c-ce6-Name").
+ *  A wheel's family is its buttons' (a G29's are PlayStation's, a G920's Xbox's). */
 export function familyOf(id: string): { family: number; name: string } {
-  const v = (/Vendor:\s*([0-9a-f]{4})/i.exec(id) ?? /^([0-9a-f]{4})-[0-9a-f]{4}-/i.exec(id))?.[1]?.toLowerCase();
-  let name = id.replace(/\s*\((?:STANDARD GAMEPAD\s*)?(?:Vendor:[^)]*)?\)\s*$/i, '').replace(/^[0-9a-f]{4}-[0-9a-f]{4}-/i, '').trim();
+  const v = usbIds(id)?.vendor;
+  let name = id.replace(/\s*\((?:STANDARD GAMEPAD\s*)?(?:Vendor:[^)]*)?\)\s*$/i, '').replace(/^[0-9a-f]{1,4}-[0-9a-f]{1,4}-/i, '').trim();
   if (!name) name = 'Game Controller';
-  const s = id.toLowerCase();
+  const s = id.toLowerCase(), w = wheelOf(id)?.layout;
+  if (w === 'ps' || w === 'xbox') return { family: w === 'ps' ? PADF_PLAYSTATION : PADF_XBOX, name };
   const family = v === '045e' || /xbox|xinput/.test(s) ? PADF_XBOX
     : v === '054c' || /dualsense|dualshock|playstation/.test(s) ? PADF_PLAYSTATION
     : v === '057e' || /pro controller|joy-con|nintendo/.test(s) ? PADF_NINTENDO : PADF_GENERIC;
@@ -49,14 +59,19 @@ export function familyOf(id: string): { family: number; name: string } {
 }
 
 /** a Gamepad in the standard mapping -> the virtual pad (sticks -1..1 with
- *  +y down, which is already the Gamepad API's direction; triggers 0..1) */
-export function mapStandard(g: Gamepad): PadSnapshot {
+ *  +y down, which is already the Gamepad API's direction; triggers 0..1).
+ *  notStick: axes read as 0 (a controller without the standard mapping: those
+ *  that rested at an end when it showed up) */
+export function mapStandard(g: Gamepad, notStick?: ReadonlySet<number>): PadSnapshot {
   let buttons = 0;
   for (let i = 0; i < BUTTON_OF.length && i < g.buttons.length; i++) {
     const b = BUTTON_OF[i], bt = g.buttons[i];
     if (b >= 0 && bt && (bt.pressed || bt.value > 0.5)) buttons |= 1 << b;
   }
-  const ax = (i: number) => { const v = g.axes[i]; return typeof v === 'number' && isFinite(v) ? Math.max(-1, Math.min(1, v)) : 0; };
+  const ax = (i: number) => {
+    const v = g.axes[i];
+    return typeof v === 'number' && isFinite(v) && !notStick?.has(i) ? Math.max(-1, Math.min(1, v)) : 0;
+  };
   const tr = (i: number) => { const b = g.buttons[i]; return b ? Math.max(0, Math.min(1, b.value || (b.pressed ? 1 : 0))) : 0; };
   const axes = [0, 0, 0, 0, 0, 0];
   axes[PAD_AXIS_LX] = ax(0); axes[PAD_AXIS_LY] = ax(1); axes[PAD_AXIS_RX] = ax(2); axes[PAD_AXIS_RY] = ax(3);
@@ -64,6 +79,18 @@ export function mapStandard(g: Gamepad): PadSnapshot {
   const { family, name } = familyOf(g.id);
   return { connected: true, buttons, axes, family, name, index: g.index };
 }
+
+/** a steering wheel -> the virtual pad (wheel.ts): the wheel on LX, the brake and gas pedals on LT and RT */
+export function mapWheel(g: Gamepad, m: WheelMap, hat: number): PadSnapshot {
+  const pressed = g.buttons.map(b => !!b && (b.pressed || b.value > 0.5));
+  const { buttons, axes } = readWheel(g.axes, pressed, m, hat);
+  const { family, name } = familyOf(g.id);
+  return { connected: true, buttons, axes, family, name, index: g.index, wheel: true };
+}
+
+/** what the poller knows of the controller driving the pad: its axes when it showed up, and if it is a wheel, the
+ *  model, how it makes the pad and the axis of its D-pad */
+interface Seen { index: number; id: string; axes0: number[]; ends: Set<number>; wheel: WheelInfo | null; map: WheelMap | null; hat: number }
 
 /** what the page itself does with the controller */
 export interface PadPage {
@@ -99,7 +126,6 @@ function stickDirs(x: number, y: number, prev: number): number {
 
 export class PadPoller {
   private order: number[] = [];            // controller indices in connection order
-  private active = -1;
   private last: PadSnapshot | null = null;
   private f32 = new Float32Array(1);
   private i32 = new Int32Array(this.f32.buffer);
@@ -124,6 +150,8 @@ export class PadPoller {
   // controller: when it last buzzed
   private touch: TouchPad | null = null;
   private buzzAt = 0;
+  // the controller driving the pad as it showed up (a wheel's layout comes from it)
+  private seen: Seen | null = null;
   /** performance.now() of a real controller's last button press (0: none yet) */
   lastPress = 0;
   // views of the game's memory: dropped by dispose(), so nothing keeps an ended
@@ -138,6 +166,11 @@ export class PadPoller {
     this.log(`[pad] disconnected: ${e.gamepad.id}`);
     this.poll();
   };
+  // the player set up a wheel (or went back to the guess): read its layout again
+  private onWheelMap = () => {
+    if (this.seen) this.seen.map = null;
+    this.poll();
+  };
 
   /** onPress: a button went down; onUse: that, or a stick or trigger moved a quarter of its range; page: the page's
    *  menu and dialogs */
@@ -147,12 +180,14 @@ export class PadPoller {
     this.h = h; this.u8 = u8;
     addEventListener('gamepadconnected', this.onConnect);
     addEventListener('gamepaddisconnected', this.onDisconnect);
+    addEventListener(WHEEL_MAP_EVENT, this.onWheelMap);
   }
 
   /** stop for good: listeners removed, the mailbox views dropped */
   dispose() {
     removeEventListener('gamepadconnected', this.onConnect);
     removeEventListener('gamepaddisconnected', this.onDisconnect);
+    removeEventListener(WHEEL_MAP_EVENT, this.onWheelMap);
     this.rumble(null);
     this.h = null; this.u8 = null;
   }
@@ -170,14 +205,10 @@ export class PadPoller {
     for (const g of pads) if (g && g.connected) { live.add(g.index); if (!this.order.includes(g.index)) this.order.push(g.index); }
     this.order = this.order.filter(i => live.has(i));
     const byIndex = (i: number) => pads[i] ?? null;
-    let pick = this.order.find(i => byIndex(i)?.mapping === 'standard');
+    let pick = this.order.find(i => { const p = byIndex(i); return !!p && (p.mapping === 'standard' || !!wheelOf(p.id)); });
     if (pick === undefined) pick = this.order[0];
     const g = pick === undefined ? null : byIndex(pick);
-    if ((pick ?? -1) !== this.active) {
-      this.active = pick ?? -1;
-      if (g && g.mapping !== 'standard') this.log(`[pad] ${g.id}: no standard mapping in this browser, read as if it had one`);
-    }
-    const s: PadSnapshot = g ? mapStandard(g) : { connected: false, buttons: 0, axes: [0, 0, 0, 0, 0, 0], family: PADF_GENERIC, name: '', index: -1 };
+    const s: PadSnapshot = g ? this.read(g) : { connected: false, buttons: 0, axes: [0, 0, 0, 0, 0, 0], family: PADF_GENERIC, name: '', index: -1 };
     this.rumble(g);
     const pressed = s.buttons & ~this.pressedBefore;
     this.pressedBefore = s.buttons;
@@ -189,6 +220,40 @@ export class PadPoller {
     if (this.same(out)) return;
     this.publish(out, !this.last || this.last.connected !== out.connected || this.last.index !== out.index || this.last.name !== out.name);
     this.last = out;
+  }
+
+  /** the controller driving the pad as the pad: a wheel through its layout (the player's, or the guess from how it
+   *  showed up), one in the standard mapping as it is, any other as if it were, but for the axes that rested at an
+   *  end when it showed up, and with Chrome's hat switch as its D-pad */
+  private read(g: Gamepad): PadSnapshot {
+    let k = this.seen;
+    if (!k || k.index !== g.index || k.id !== g.id) {
+      const axes0 = Array.from(g.axes, v => typeof v === 'number' && isFinite(v) ? v : 0);
+      const ends = new Set<number>();
+      axes0.forEach((v, i) => { if (Math.abs(v) >= 0.9 && Math.abs(v) <= 1.05) ends.add(i); });
+      k = this.seen = { index: g.index, id: g.id, axes0, ends, wheel: wheelOf(g.id), map: null, hat: findHat(axes0) };
+      if (g.mapping !== 'standard') {
+        this.log(`[pad] ${g.id}: no standard mapping in this browser; ${g.axes.length} axes at ` +
+          `[${axes0.map(v => v.toFixed(2)).join(' ')}], ${g.buttons.length} buttons`);
+        if (!k.wheel) this.log(`[pad] read as if it had one${ends.size ? `, but for axes ${[...ends].join(', ')} (at an end: no stick)` : ''}` +
+          `${k.hat >= 0 ? `, the D-pad on axis ${k.hat}` : ''}`);
+      }
+    }
+    if (k.hat < 0 && g.mapping !== 'standard') {
+      k.hat = findHat(g.axes);
+      if (k.hat >= 0) this.log(`[pad] ${g.id}: the D-pad on axis ${k.hat}`);
+    }
+    if (k.wheel && g.mapping === 'standard') return { ...mapStandard(g), wheel: true };
+    if (k.wheel) {
+      if (!k.map) {
+        k.map = loadMap(g.id) ?? guessMap(k.wheel, k.axes0, g.buttons.length);
+        this.log(`[pad] ${g.id}: a steering wheel, ${describeMap(k.map, k.hat)}`);
+      }
+      return mapWheel(g, k.map, k.hat);
+    }
+    const s = mapStandard(g, g.mapping === 'standard' ? undefined : k.ends);
+    if (g.mapping !== 'standard' && k.hat >= 0) s.buttons |= hatDirs(g.axes[k.hat]);
+    return s;
   }
 
   /** The page's share of the controller: Home, or the second stick pressed in while the other is, opens or closes its
@@ -222,7 +287,7 @@ export class PadPoller {
 
   private same(s: PadSnapshot) {
     const l = this.last;
-    return !!l && l.connected === s.connected && l.buttons === s.buttons && l.index === s.index &&
+    return !!l && l.connected === s.connected && l.buttons === s.buttons && l.index === s.index && !!l.wheel === !!s.wheel &&
       l.axes.every((v, i) => v === s.axes[i]);
   }
 
@@ -236,6 +301,7 @@ export class PadPoller {
     Atomics.store(h, IM_PAD_CONNECTED, s.connected ? 1 : 0);
     Atomics.store(h, IM_PAD_FAMILY, s.family);
     Atomics.store(h, IM_PAD_BUTTONS, s.buttons);
+    Atomics.store(h, IM_PAD_WHEEL, s.connected && s.wheel ? 1 : 0);
     for (let i = 0; i < 6; i++) { this.f32[0] = s.axes[i]; Atomics.store(h, IM_PAD_AXIS + i, this.i32[0]); }
     if (newPad) {
       const name = s.name.replace(/[^\x20-\x7e]/g, '?').slice(0, 63);

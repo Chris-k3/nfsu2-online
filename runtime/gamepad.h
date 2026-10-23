@@ -27,6 +27,9 @@ typedef struct {
     float    axis[PAD_NAXES];    /* sticks -1..1 (+x right, +y down), triggers 0..1 */
     int      family;             /* PADF_x */
     int      synthetic;          /* driven by the input script */
+    int      wheel;              /* a steering wheel (the browser's): LX the wheel, LT and RT
+                                    the brake and gas pedals, the buttons as the page put them;
+                                    dinput_pad.c then offers the game a driving device */
     char     name[64];           /* "Xbox Wireless Controller", ... */
 } PadState;
 
