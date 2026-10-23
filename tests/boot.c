@@ -166,6 +166,7 @@ int main(int argc,char**argv){
     { extern void overrides_install(void); overrides_install(); }
     { extern void language_install(void); language_install(); }   /* NFSU2_LANGUAGE: the language pack, the exe's tables */
     { extern void sponsors_install(void); sponsors_install(); }   /* the sponsor screens' Continue (help bar) */
+    { extern void lobbyclick_install(void); lobbyclick_install(); }   /* the lobby's list ignores a click on a dialog over it */
     { extern void autotest_init(void); autotest_init(); }       /* NFSU2_INPUT_SCRIPT ... */
     if (getenv("BT")) g_bt_on = 1;
     g_report_fn = all_reports;
