@@ -10,11 +10,14 @@
 #   -n first: only say what it would do
 #
 # What it does: checks that the folder holds both files of one commit and that the registry has the image's tag;
-# copies the files to <dir>/module.new; then on the VPS keeps the running module and .env (module.prev, .env.prev,
-# for --undo), moves the new files into module/ (a rename each: no half-written file is ever served), makes them
-# readable for the container (644), sets NFSU2_IMAGE in .env, pulls and restarts only the server (`docker compose
-# up -d server`: cloudflared and the rest stay up), and waits until it is healthy with the new module.
-# Everyone in the game is cut off for a few seconds and reconnects; pages notice the new module by its ETag.
+# copies the files to <dir>/module.new; then on the VPS pulls the image first (the running server reads its module
+# from disk at every request, so the new one goes in only once its image is there: a pull that fails leaves the site
+# as it was, the files waiting in module.new), keeps the running module and .env (module.prev, .env.prev, for
+# --undo; a try again of the same release keeps the ones before it), moves the new files into module/ (a rename
+# each: no half-written file is ever served), makes them readable for the container (644), sets NFSU2_IMAGE in .env,
+# restarts only the server at once (`docker compose up -d server`: cloudflared and the rest stay up), and waits
+# until it is healthy with the new module.  Everyone in the game is cut off for a few seconds and reconnects; pages
+# notice the new module by its ETag.
 #
 #   NFSU2_DIR    the folder on the VPS (default /srv/nfsu2)
 #   NFSU2_REPO   the image without its tag (default ghcr.io/th0mk/nfsu2-web-rs)
@@ -42,10 +45,17 @@ if [ "$what" = undo ]; then
   img=$(grep '^NFSU2_IMAGE=' .env.prev | cut -d= -f2- || true)
 fi
 [ -f module.new/nfsu2.wasm ] && [ -f module.new/nfsu2.json ] || { echo "release: no module in $NFSU2_DIR/module.new" >&2; exit 1; }
+say "image: ${img:-as compose.yml says}"
+NFSU2_IMAGE="$img" docker compose pull -q server
 if [ "$what" = release ]; then
-  rm -rf module.prev && mkdir module.prev
-  cp -p module/nfsu2.wasm module/nfsu2.json module.prev/ 2>/dev/null || true
-  cp -p .env .env.prev
+  # the module and image of this release in place already (a try that stopped after the move): the ones kept stay
+  if cmp -s module/nfsu2.json module.new/nfsu2.json && [ "$(grep '^NFSU2_IMAGE=' .env | cut -d= -f2- || true)" = "$img" ]; then
+    say "this release again: the module and .env of before it stay kept"
+  else
+    rm -rf module.prev && mkdir module.prev
+    cp -p module/nfsu2.wasm module/nfsu2.json module.prev/ 2>/dev/null || true
+    cp -p .env .env.prev
+  fi
 fi
 chmod 644 module.new/nfsu2.wasm module.new/nfsu2.json
 mv -f module.new/nfsu2.wasm module/nfsu2.wasm
@@ -57,8 +67,6 @@ if [ -n "$img" ]; then
 else
   sed -i '/^NFSU2_IMAGE=/d' .env
 fi
-say "image: ${img:-as compose.yml says}"
-docker compose pull -q server
 docker compose up -d server
 say "waiting for the server to be healthy..."
 for i in $(seq 1 90); do

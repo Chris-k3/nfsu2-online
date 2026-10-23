@@ -90,9 +90,11 @@ web/deploy/release.sh root@<vps> <folder> <commit>     # the image of a later co
 web/deploy/release.sh root@<vps> --undo                # back to the module and image before
 ```
 
-It checks that the registry has the image (CI cancels a commit's image when a newer push comes), copies the module
-into place by renames, sets `NFSU2_IMAGE` in `.env`, restarts only the server and waits until it is healthy; `-n`
-first only says what it would do. `NFSU2_DIR` names another folder than `/srv/nfsu2`.
+It checks that the registry has the image (CI cancels a commit's image when a newer push comes), pulls it on the VPS
+before anything changes there (a pull that fails leaves the site as it was), copies the module into place by
+renames, sets `NFSU2_IMAGE` in `.env`, restarts only the server and waits until it is healthy; `-n` first only says
+what it would do. Run again after a failure, it keeps the module and image of before for `--undo`. `NFSU2_DIR` names
+another folder than `/srv/nfsu2`.
 
 **When something is wrong:**
 
