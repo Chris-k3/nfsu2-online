@@ -60,4 +60,29 @@ int  mprace_owns_input(void);
 int  mprace_covered(void);
 /* where the trip is, for the player: "Leaving free roam", "Loading the race", ... */
 const char *mprace_step(void);
+
+/* A car's performance as the game rates it (its physics info with the
+ * performance parts in, mprace.c): the class and rating the game gave it,
+ * the top speed its push and drag allow, its mass, the engine's torque
+ * curve and the power from it */
+typedef struct {
+    int      type;                 /* CarTypeInfo index */
+    char     name[24];             /* the type's name without CAR_NAME_ */
+    int      cls;                  /* the game's class: 0 fastest .. 3, -1 not rated */
+    float    rating;               /* the game's rating: the push beyond drag over the speeds (class 0 above 500, 1 above 401, 2 above 273) */
+    float    top;                  /* top speed, m/s */
+    float    mass;                 /* kg, the weight upgrade's in (the game has tonnes) */
+    float    rpm_idle, rpm_max;
+    float    torque[9];            /* N m (the game has kN m) at rpm_idle + i (rpm_max - rpm_idle) / 8 */
+    float    power;                /* the curve's most, W */
+} CarPerf;
+/* the performance of a car (a car object: its physics info [car + 0x10] +
+ * 0x10); 0 when it has none */
+int  mprace_car_perf(uint32_t car, CarPerf *p);
+/* one log line: who's car and its numbers */
+void mprace_perf_log(const char *who, uint32_t car);
+struct CPU;
+/* test aid: the player's car rated as every player car type, stock and with
+ * every performance part, then put back (roam mp perf survey) */
+void mprace_perf_survey(struct CPU *c, uint32_t car);
 #endif

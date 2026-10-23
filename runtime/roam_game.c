@@ -4792,6 +4792,15 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
              (double)MRF32(me + 0x440u), (int)(int8_t)MR32(me + 0x434u), es.eng, es.eng_acc, es.eng_dcl, es.eng_base);
         return 1;
     }
+#if MPRACES
+    if (!strcasecmp(sub, "perf")){
+        /* "mp perf [survey]": the player's car's performance as the game rates it (mprace.c); survey: as every player
+         * car type, stock and with every performance part, then the car as it was (a test aid) */
+        if (!strcasecmp(a1, "survey")) mprace_perf_survey(c, player_car());
+        else mprace_perf_log("mp perf", player_car());
+        return 1;
+    }
+#endif
     if (!strcasecmp(sub, "map")){
         /* the open world map's car markers, its race lobbies' icons and labels
          * (and with "strings" every string object of its package) */

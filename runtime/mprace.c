@@ -199,7 +199,7 @@ static struct {
     int      place, prize, paid, raced, owns;
     int      quit_race, fee;                       /* the player quit the race (its pause menu); the fee the bank paid */
     int      paused, quit, lan, hosted, named, carset, created, settings, joined, started, left, career, resumed, crib_go, ndlg, host_gone;
-    int      logged_place;
+    int      logged_place, perf_logged;
     uint32_t room[10];                             /* the host's room as last logged */
     long     ready, dlg_at, wait_at;
     char     keys[16]; int nkeys; long key_at;     /* keys to press, one every 20 frames: L LEFT, R RETURN, E ESCAPE */
@@ -269,6 +269,124 @@ static void to_phase(int ph){
     M.phase = ph; M.since = clk();
 }
 
+/* ---- a car's performance, as the game rates it -------------------------------------------------- */
+/* A car's physics info is [car + 0x10] + 0x10 (the ride's; the race's racer
+ * setup 0x5B5CC0 and the front end's car stats read it so), built by
+ * 0x5B4DC0 from its CarTypeInfo (+0 the type's index) and its performance
+ * parts (+0x2E0, set by 0x5A64A0(level, category), -1 every category):
+ *  - 0x5AC4F0 copies the type's physics block (CarTypeInfo +0x110, 0x2B0
+ *    bytes) to +0x30 and puts each part category's changes in: 0x5A6B50 the
+ *    weight (+0x140 the mass), 0x5A6BD0 the gearbox, 0x5A6D00 and 0x5A6E30
+ *    the engine's torque curve (+0x230: 9 points from the idle rpm +0x220 to
+ *    the most +0x228, 0x7881F4 = 8 steps), and so on;
+ *  - 0x5B5AB0 makes the push per kg at every speed from the torque, gears
+ *    and wheels (+0x55C, a table: +0 points, +4 its first speed, +8 its
+ *    last, +0xC points per m/s, +0x10 the values; 0x5764D0 reads it);
+ *  - its rating (+8, a float) adds up the push beyond drag (speed squared
+ *    times +0x290, per kg) in steps of 3 mph (0x7A1A80) over those speeds,
+ *    and the class (+4, a byte; -1 not rated yet) is 0 above 500, 1 above
+ *    401, 2 above 273 (0x7A1A84), else 3; a type with CarTypeInfo +0x844
+ *    set is class 3 unrated;
+ *  - its top speed (0x5B5930) is the first of those speeds where drag is no
+ *    less than the push, at most +0x2C0 mph when that is set. */
+#define PI_TYPE         0x000u
+#define PI_CLASS        0x004u
+#define PI_RATING       0x008u
+#define PI_MASS         0x140u
+#define PI_RPM_IDLE     0x220u
+#define PI_RPM_MAX      0x228u
+#define PI_TORQUE       0x230u
+#define PI_DRAG         0x290u
+#define PI_LIMIT_MPH    0x2c0u
+#define PI_PARTS        0x2e0u
+#define PI_PARTS_SIZE   0x94u         /* up to +0x374, the next of its parts */
+#define PI_PUSH         0x55cu
+#define FN_PI_BUILD     0x005b4dc0u   /* thiscall info (mode 0, 1, 1): the copy, the push table, rating and class */
+#define FN_PI_PARTS     0x005a64a0u   /* thiscall info +0x2E0 (level, category or -1) */
+#define PI_STEP         1.3410819f    /* 0x7A1A80: 3 mph */
+#define G_CARTYPES      0x008a1cccu   /* CarTypeInfo[] */
+#define G_RACESTATUS    0x00890118u   /* GRaceStatus: +0x24 racers, +0xBD0 their entries (+0 the car) */
+#define CARTYPE_SIZE    0x890u
+#define N_PLAYER_TYPES  31            /* CarTypeInfo 0..30: the player's cars; then traffic */
+static uint32_t perf_info(uint32_t car){
+    uint32_t r = okm(car, 0x14) ? rd(car + 0x10u) : 0;
+    return r && okm(r + 0x10u, PI_PUSH + 0x14u) ? r + 0x10u : 0;
+}
+static float push_at(uint32_t t, float v){                               /* 0x5764D0 */
+    int n = (int)rd(t); uint32_t vals = rd(t + 0x10u);
+    if (n < 1 || n > 4096 || !okm(vals, 4u * (uint32_t)n)) return 0.f;
+    float x = (v - MRF32(t + 4u)) * MRF32(t + 0xcu);
+    int i = (int)x;
+    if (i < 0 || x <= 0.f) return MRF32(vals);
+    if (i >= n - 1) return MRF32(vals + 4u * (uint32_t)(n - 1));
+    float fr = x - (float)i;
+    return MRF32(vals + 4u * (uint32_t)i) * (1.f - fr) + MRF32(vals + 4u * (uint32_t)(i + 1)) * fr;
+}
+int mprace_car_perf(uint32_t car, CarPerf *p){
+    memset(p, 0, sizeof *p); p->cls = -1; p->type = -1;
+    uint32_t pi = perf_info(car), types = rd(G_CARTYPES);
+    if (!pi) return 0;
+    p->type = (int)rd(pi + PI_TYPE);
+    if (types && p->type >= 0 && p->type < 64 && okm(types + CARTYPE_SIZE * (uint32_t)p->type, 0x40)){
+        uint32_t nm = types + CARTYPE_SIZE * (uint32_t)p->type;
+        int k = 0; for (; k < (int)sizeof p->name - 1 && MR8(nm + (uint32_t)k); k++) p->name[k] = (char)MR8(nm + (uint32_t)k);
+        p->name[k] = 0;
+    }
+    /* (the game's units: the mass in tonnes, the torque in kN m) */
+    float mass_t = MRF32(pi + PI_MASS);
+    p->cls = (int)(int8_t)MR8(pi + PI_CLASS); p->rating = MRF32(pi + PI_RATING); p->mass = mass_t * 1000.f;
+    p->rpm_idle = MRF32(pi + PI_RPM_IDLE); p->rpm_max = MRF32(pi + PI_RPM_MAX);
+    for (int i = 0; i < 9; i++){
+        p->torque[i] = MRF32(pi + PI_TORQUE + 4u * (uint32_t)i) * 1000.f;
+        float rpm = p->rpm_idle + (float)i * (p->rpm_max - p->rpm_idle) / 8.f, w = p->torque[i] * rpm / 9.5493043f;
+        if (w > p->power) p->power = w;
+    }
+    /* the top speed, as 0x5B5930 finds it */
+    uint32_t t = pi + PI_PUSH;
+    float v = MRF32(t + 4u), last = MRF32(t + 8u), k = MRF32(pi + PI_DRAG);
+    if (mass_t > 0.f){
+        while (v < last){
+            if (v * k * v / mass_t > push_at(t, v)) break;
+            v += PI_STEP;
+        }
+        float lim = MRF32(pi + PI_LIMIT_MPH);
+        if (lim > 0.f && lim * 0.44702727f < v) v = lim * 0.44702727f;
+        p->top = v;
+    }
+    return 1;
+}
+void mprace_perf_log(const char *who, uint32_t car){
+    CarPerf p;
+    if (!mprace_car_perf(car, &p)){ fprintf(stderr, "[mprace] f=%ld %s: no physics info\n", autotest_frame(), who); return; }
+    fprintf(stderr, "[mprace] f=%ld %s: %s (type %d), class %d, rating %.1f, top speed %.0f km/h, %.0f kg, %.0f kW (%.0f hp), "
+            "%.0f kW per t; torque %.0f..%.0f rpm:", autotest_frame(), who, p.name, p.type, p.cls, (double)p.rating,
+            (double)(p.top * 3.6f), (double)p.mass, (double)(p.power / 1000.f), (double)(p.power / 745.7f),
+            p.mass > 0.f ? (double)(p.power / p.mass) : 0.0, (double)p.rpm_idle, (double)p.rpm_max);
+    for (int i = 0; i < 9; i++) fprintf(stderr, " %.0f", (double)p.torque[i]);
+    fprintf(stderr, " N m\n");
+}
+void mprace_perf_survey(CPU *c, uint32_t car){
+    uint32_t pi = perf_info(car), types = rd(G_CARTYPES);
+    if (!pi || !types){ fprintf(stderr, "[mprace] perf survey: the car has no physics info\n"); return; }
+    uint8_t parts[PI_PARTS_SIZE]; uint32_t type = rd(pi + PI_TYPE);
+    for (uint32_t i = 0; i < PI_PARTS_SIZE; i++) parts[i] = MR8(pi + PI_PARTS + i);
+    for (int t = 0; t < N_PLAYER_TYPES; t++){
+        for (int lv = 0; lv <= 3; lv += 3){
+            uint32_t a[3] = { (uint32_t)lv, 0xffffffffu, 0 };
+            MR32(pi + PI_TYPE) = (uint32_t)t;
+            call(c, FN_PI_PARTS, pi + PI_PARTS, 2, a);
+            a[0] = 0; a[1] = 1; a[2] = 1;
+            call(c, FN_PI_BUILD, pi, 3, a);
+            mprace_perf_log(lv ? "perf survey, every part" : "perf survey, stock", car);
+        }
+    }
+    MR32(pi + PI_TYPE) = type;
+    for (uint32_t i = 0; i < PI_PARTS_SIZE; i++) MR8(pi + PI_PARTS + i) = parts[i];
+    uint32_t a[3] = { 0, 1, 1 };
+    call(c, FN_PI_BUILD, pi, 3, a);
+    mprace_perf_log("perf survey, the car again", car);
+}
+
 /* The race's setup (0x53FEB0) looks the network car's handle up among the
  * front end's cars (G_FECARS +0x9BD8: 91 records, 0x5036F0; each +8 its
  * handle) and fills the race car's description from the one it finds; with
@@ -324,6 +442,7 @@ int mprace_start(const MpRace *r){
     fprintf(stderr, "[mprace] f=%ld start: %s, mode %d, track %d%s, %d laps, %d players, LAN name %s%s%s\n", M.frame0,
             r->host ? "host" : "join", r->mode, r->track, r->reverse ? " reverse" : "", r->laps, r->players, r->name,
             r->host ? "" : ", host ", r->host ? "" : r->host_name);
+    { uint32_t pl = rd(G_PLAYER1); mprace_perf_log("our car in free roam", pl ? rd(pl + 4u) : 0); }
     return 1;
 }
 int mprace_phase(void){ return M.phase; }
@@ -616,6 +735,21 @@ static int step_racing(long f){
         if (!M.load_at) M.load_at = f;
     }
     if (M.phase != MPR_RACE) return 0;
+    if (!M.perf_logged){
+        /* our car's performance in the race, once its physics info is rated (or 20 s on) */
+        uint32_t pl = rd(G_PLAYER1), car = pl ? rd(pl + 4u) : 0, pi = perf_info(car);
+        if ((pi && (int8_t)MR8(pi + PI_CLASS) >= 0) || f - M.since > 60 * 20){
+            mprace_perf_log("our car in the race", car); M.perf_logged = 1;
+            /* and every racer's, as this game has them (GRaceStatus: +0x24 racers, +0xBD0 theirs, each +0 its car,
+             * [[car +0x14] +4] its driver) */
+            uint32_t gs = rd(G_RACESTATUS), n = gs ? rd(gs + 0x24u) : 0;
+            for (uint32_t i = 0; i < n && i < 8; i++){
+                uint32_t rc = rd(rd(gs + 0xbd0u + 4u * i)); char who[48];
+                snprintf(who, sizeof who, "racer %u (driver %d%s)", i, (int)rd(rd(rc + 0x14u) + 4u), rc == car ? ", ours" : "");
+                mprace_perf_log(who, rc);
+            }
+        }
+    }
     if (on("UI_PostRaceResults.fng")){
         /* our place; while the results are up, again until there is one (our
          * row may be filled in after the screen came: finishing just then) */
