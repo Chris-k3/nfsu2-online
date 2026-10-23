@@ -601,6 +601,12 @@ What follows from this setup:
   players got the other cars seconds late while the server was idle. A copy's sites are in its log:
   `docker logs nfsu2-web-cloudflared-1 2>&1 | grep 'Registered tunnel connection'`. Restart only the copy with the
   bad site (`docker restart nfsu2-web-cloudflared-1`); `docker compose restart cloudflared` drops every player.
+- **A fifth copy over HTTP/2**, off unless started (`cloudflared-h2`, profile `h2`): the four take QUIC, which
+  sends each small message as its own UDP packet (8.9 cores at 4,300 players on nfsu2.xyz, 2026-10-23); this one
+  takes TCP, so its CPU per player can be compared with theirs at the same moment. Start it with
+  `docker compose --profile h2 up -d --no-deps cloudflared-h2`, take it away with
+  `docker compose --profile h2 rm -sf cloudflared-h2`. Over TCP a lost packet holds up every player on that
+  connection until it is sent again, not only the one it was for. Whether it takes less CPU is **UNVERIFIED**.
 - **Small receive buffers** in the namespace (`sysctls` on `net`: 128 KiB at most, not Linux's 32 MiB): what a
   player's connection does not take waits at the server, which then sends that player fewer of free roam's
   updates, instead of piling up unread at cloudflared. A change to it recreates `net`, and with it cloudflared and

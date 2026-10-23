@@ -41,6 +41,21 @@ services:
     environment:
       TUNNEL_TOKEN: ${TUNNEL_TOKEN:?set TUNNEL_TOKEN in .env, the tunnel's token}
     logging: { driver: local }
+  # a fifth copy over HTTP/2 (TCP) instead of QUIC, to compare its CPU per player with the four's (nfsu2.xyz,
+  # 2026-10-23: the four took 8.9 cores at 4,300 players, most of it in the kernel, sending small UDP packets one
+  # at a time); started only when asked for, and nothing else is touched then:
+  #   docker compose --profile h2 up -d --no-deps cloudflared-h2      and to take it away again:
+  #   docker compose --profile h2 rm -sf cloudflared-h2               (its players reconnect over the four)
+  cloudflared-h2:
+    profiles: [h2]
+    image: cloudflare/cloudflared:2026.9.3
+    restart: unless-stopped
+    network_mode: service:net
+    command: ["tunnel", "--no-autoupdate", "--protocol", "http2", "run"]
+    cgroup_parent: ${NFSU2_SLICE:-nfsu2.slice}
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?set TUNNEL_TOKEN in .env, the tunnel's token}
+    logging: { driver: local }
   server:
     network_mode: service:net
     environment:
