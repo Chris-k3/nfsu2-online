@@ -313,7 +313,7 @@ export class SavesPanel {
     this.root.dataset.files = String(files.length);
     if (this.deps.download.running) { this.showData(); return; }     // it counts as it goes
     const n = ++this.counted;
-    const [kept, data] = await Promise.all([cacheBytes(), gameDataKept(this.deps.download.language()).catch(() => null)]);
+    const [kept, data] = await Promise.all([cacheBytes(), gameDataKept(this.deps.download.language(), this.deps.download.texpack()).catch(() => null)]);
     if (n !== this.counted) return;
     this.kept = kept; this.data = data;
     this.showData();

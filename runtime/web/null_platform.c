@@ -229,8 +229,9 @@ WEAK void perflog_guest_frame(void){ }
 
 /* ------------------------------------------------- texture packs */
 /* texrep.m (optional upscaled-texture packs, "textures = upscaled") is
- * Metal/Objective-C.  The browser has no pack support yet (the tex track's
- * job): every guest-side hook is inert, as texrep.m is with the option off.
+ * Metal/Objective-C.  The browser's texture packs (ui_textures) are
+ * texrep_web.c's; without it every guest-side hook is inert, as texrep.m is
+ * with the option off.
  * The frame-rate counter (fpscounter.m) needs no stand-in: nothing outside
  * metal.m calls it, and the page draws its own (web/src/app overlay). */
 WEAK void texrep_created(unsigned mid, unsigned w, unsigned h, unsigned levels, unsigned d3dfmt, unsigned usage, unsigned pool){
@@ -242,8 +243,7 @@ WEAK void texrep_released(unsigned mid){ (void)mid; }
 WEAK void texrep_frame(void){ }
 WEAK void texrep_report(void){ }
 WEAK int  texrep_wanted(void){ return 0; }
-WEAK void texrep_set_shown(int on){
-    static int said; if (on != 0 && !said++) fprintf(stderr, "[texrep] texture packs are not available in the browser yet\n"); }
+WEAK void texrep_set_shown(int on){ (void)on; }
 WEAK int  texrep_shown(void){ return 0; }
 WEAK int  texrep_status(char *buf, size_t n){ (void)buf; (void)n; return 0; }
 

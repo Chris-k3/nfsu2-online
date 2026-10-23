@@ -5,7 +5,7 @@
 // keep), else as byte ranges.  The page starts it ("Download all game data")
 // and stops it before a game starts, since the I/O worker writes the same files.
 //
-// Page -> worker: { t: 'start', manifestUrl, dataBase, language }, { t: 'stop' }
+// Page -> worker: { t: 'start', manifestUrl, dataBase, language, texpack }, { t: 'stop' }
 // Worker -> page: { t: 'progress', have, total }   (bytes in the cache; at most every 250 ms)
 //                 { t: 'done', have, total }       (all of it is in the cache)
 //                 { t: 'stopped' }                 (after 'stop')
@@ -18,7 +18,7 @@ import {
 } from './datacache';
 import { fmtBytes } from '../app/checks';
 
-export type ToPredownload = { t: 'start'; manifestUrl: string; dataBase: string; language: string } | { t: 'stop' };
+export type ToPredownload = { t: 'start'; manifestUrl: string; dataBase: string; language: string; texpack: string } | { t: 'stop' };
 export type FromPredownload =
   | { t: 'progress' | 'done'; have: number; total: number }
   | { t: 'stopped' } | { t: 'error'; msg: string };
@@ -43,12 +43,12 @@ class Retry extends Error {}
 
 function closeFile(cf: CacheFile | null) { if (cf) { cf.h.flush(); cf.h.close(); cf.haveH.flush(); cf.haveH.close(); } }
 
-async function download(cfg: { manifestUrl: string; dataBase: string; language: string }): Promise<{ have: number; total: number } | null> {
+async function download(cfg: { manifestUrl: string; dataBase: string; language: string; texpack: string }): Promise<{ have: number; total: number } | null> {
   const r = await fetch(cfg.manifestUrl, { cache: 'no-cache', signal: abort.signal });
   if (!r.ok) throw new Error(`the list of game files did not load (HTTP ${r.status})`);
   const m = await r.json() as Manifest;
   const served = blockRuns(m), runMax = served ? 1 : RUN;
-  const scan = await scanCache(aheadFiles(manifestFiles(m), cfg.language));
+  const scan = await scanCache(aheadFiles(manifestFiles(m), cfg.language, cfg.texpack));
   const total = scan.total;
   let have = scan.have, shown = 0;
   const progress = (now = false) => {

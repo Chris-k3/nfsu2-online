@@ -200,6 +200,8 @@ const DEVICE = deviceDefaults();
 function resolved(host: Record<string, string> = {}): Resolved { return resolveEnv(settingsText, ENVIRONMENT, host, DEVICE); }
 /** the game's language (runtime/language.c): which language pack the page fetches ahead and counts */
 const language = (r: Resolved = resolved()) => (r.env.NFSU2_LANGUAGE ?? 'english').toLowerCase();
+/** the texture pack picked (runtime/web/texrep_web.c), '' for none: the one the page fetches ahead and counts */
+const texpack = (r: Resolved = resolved()) => { const v = (r.env.NFSU2_UI_TEXTURES ?? '').toLowerCase(); return v === 'original' ? '' : v; };
 
 // ----------------------------------------------------------------- play --
 function stageCanvas(): HTMLCanvasElement {
@@ -929,8 +931,12 @@ export async function boot() {
   // made here once: a closure made per game (in startGame) would keep that game's scope reachable
   fps.extra = () => session?.stats() ?? {};
   settings = new SettingsPanel($('#settings'), {
-    // another language counts other files as the game data (its language pack); a keyphrase sends the file
-    saveDir: SAVE, environment: ENVIRONMENT, defaults: DEVICE, onSaved: t => { const was = language(); settingsText = t; if (language() !== was) void saves.refresh(); vault?.changed(); players?.now(); },
+    // another language or texture pack counts other files as the game data (its pack); a keyphrase sends the file
+    saveDir: SAVE, environment: ENVIRONMENT, defaults: DEVICE, onSaved: t => {
+      const was = language() + '/' + texpack(); settingsText = t;
+      if (language() + '/' + texpack() !== was) void saves.refresh();
+      vault?.changed(); players?.now();
+    },
     // the tab that owns the saves is the one whose Play reads the file: another tab only looks
     readOnly: () => !instance.owner, say: pageToast,
   }, $('#online'));
@@ -940,7 +946,7 @@ export async function boot() {
   window.addEventListener('online', () => players?.now());
   window.addEventListener('resize', placeNotices);
   window.addEventListener('resize', placeLobby);
-  download = new Predownload(s => saves.showData(s), logLine, () => language());
+  download = new Predownload(s => saves.showData(s), logLine, () => language(), () => texpack());
   saves = new SavesPanel($('#saves'), $('#game-data'), {
     saveDir: SAVE, busy: () => !!session || starting || !instance.owner, confirm: confirmBox,
     onRestored: () => { void loadSettings(); void settings.refresh(); }, download, onChanged: () => vault.changed(),

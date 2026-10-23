@@ -32,18 +32,24 @@ export interface CacheFile { h: FileSystemSyncAccessHandle; have: Uint8Array; ha
 export const manifestFiles = (m: Manifest): DataFile[] => m.files.filter(f => !f.d).map(f => ({ path: f.p, size: f.s ?? 0, mtime: f.m ?? 0 }));
 const parts = (f: DataFile) => f.path.toLowerCase().split('/');
 /** The files a game in this language reads: the folder's, but where its language pack (LANGPACKS/<language>,
- *  runtime/language.c) has a file of the same path, that one; no other language's pack. */
-function gameFiles(files: DataFile[], language: string): DataFile[] {
+ *  runtime/language.c) has a file of the same path, that one; no other language's pack; of the texture packs
+ *  (TEXPACKS/<name>.pak, runtime/web/texrep_web.c) only the one picked (texpack, '' for none). */
+function gameFiles(files: DataFile[], language: string, texpack: string): DataFile[] {
   const own = new Set(files.filter(f => { const p = parts(f); return p[0] === 'langpacks' && p[1] === language; })
     .map(f => parts(f).slice(2).join('/')));
-  return files.filter(f => { const p = parts(f); return p[0] === 'langpacks' ? p[1] === language : !own.has(p.join('/')); });
+  return files.filter(f => {
+    const p = parts(f);
+    if (p[0] === 'texpacks') return p.length === 2 && p[1] === `${texpack}.pak`;
+    return p[0] === 'langpacks' ? p[1] === language : !own.has(p.join('/'));
+  });
 }
 const isMovie = (f: DataFile) => { const p = parts(f); return (p[0] === 'langpacks' ? p[2] : p[0]) === 'movies'; };
 /** What "Preload the game data" fetches: all but the movies (MOVIES/, a third of the folder in VP6 video that
  *  does not compress).  They stream as they play, and with Movies off the game never opens them. */
-export const aheadFiles = (files: DataFile[], language: string) => gameFiles(files, language).filter(f => !isMovie(f));
+export const aheadFiles = (files: DataFile[], language: string, texpack = '') =>
+  gameFiles(files, language, texpack).filter(f => !isMovie(f));
 /** The movies a game in this language can open. */
-export const languageMovies = (files: DataFile[], language: string) => gameFiles(files, language).filter(isMovie);
+export const languageMovies = (files: DataFile[], language: string) => gameFiles(files, language, '').filter(isMovie);
 export const dataUrl = (base: string, path: string) => base + path.split('/').map(encodeURIComponent).join('/');
 export function cacheKey(f: DataFile) { return `${f.path.replace(/[^A-Za-z0-9._-]/g, '_')}.${f.size}.${f.mtime}`; }
 export const blockCount = (size: number) => Math.ceil(size / BLOCK);

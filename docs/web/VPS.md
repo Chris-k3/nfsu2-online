@@ -126,8 +126,9 @@ The rest of this guide is reference.
 - **What it serves:** the page, the game module, the game's own files from your game folder (read-only) and the
   multiplayer switch. Of the game folder it serves only `SPEED2.EXE`, `server.dll`, `server.cfg` and the game's
   data folders (`CARS`, `CREDITS`, `FRONTEND`, `GLOBAL`, `LANGUAGES`, `memcard`, `MOVIES`, `NIS`, `pfdata`, `SOUND`,
-  `speech`, `SUBTITLES`, `TRACKS`), the language packs (`LANGPACKS`, [Languages](#languages)), compared without
-  case, and everything in those folders except dot files.
+  `speech`, `SUBTITLES`, `TRACKS`), the language packs (`LANGPACKS`, [Languages](#languages)) and the texture packs
+  (`TEXPACKS`, [Texture packs](#texture-packs)), compared without case, and everything in those folders except dot
+  files.
   Nothing else at the top of the folder: never an installer's log (`unins000.dat` names the PC, the Windows account
   and the install time), a `SAVE` folder, mod plugins and their settings, or anything else you keep there.
 - **What it never shows:** anything about the VPS or the other players (`web/test/deploy.test.mjs` checks what is
@@ -361,6 +362,24 @@ voices (Russian 94 MB), and the dubbed movies (206 MB in all) stream in place of
 `LANGPACKS` every language but Russian, Portuguese and Polish still plays its text, with English voices and movies;
 those three play in English. All but English, French, German, Italian and Spanish (whose texts leave the lines their
 dubs speak empty) show the movies' subtitles; the North American game shows none.
+
+## Texture packs
+
+Settings, Display, Menus and HUD, Upscaled (the default, but on phones) shows LunicAura106's "Upscaled HUD" (UHUD,
+[nfsmods.xyz/mod/4319](https://nfsmods.xyz/mod/4319)): the menus, the race HUD, the fonts and the car and brand logos
+redrawn at four times their size. It comes from a texture pack, `TEXPACKS/uhud.pak` in the game folder, which the
+port reads in place of the game's textures on the GPU only (`runtime/web/texrep_web.c`): the game keeps reading its
+own files and keeps its layout. The mod's own installer and plugin are not used.
+
+1. Download the mod's archive (`NFSU2UHUD11192022a.7z`) and extract it into an empty folder, not the game folder
+   (`7z x`; `bsdtar` and Windows' `tar` read it too).
+2. `tools/texpacks.py "<your game folder>" --uhud "<the mod's folder>"` builds `TEXPACKS/uhud.pak` (101 MB, a few
+   seconds) and prints what it holds.
+3. Copy it like the rest, from inside the game folder:
+   `rsync -rlt TEXPACKS root@<vps>:/srv/nfsu2/game/`, then the same `chmod`.
+
+A player's browser fetches the pack only with Upscaled; its blocks compress to about 5 MB ("Preload the game data"
+counts its 101 MB). Without `TEXPACKS` Upscaled plays with the game's own textures.
 
 ## How it runs
 

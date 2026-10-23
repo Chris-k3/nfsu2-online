@@ -25,6 +25,7 @@
 #include "host_abi.h"
 #include "gpu_proto.h"
 #include "wgsl.h"
+#include "texrep.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -234,9 +235,10 @@ static void rq_commit(GwCmd *c){
  * Ids, sizes and formats live here (com.c reads them back synchronously);
  * the GPU textures live on the page.  Freed ids are reused three guest
  * frames later, as on the Mac: frames recorded before the Release may still
- * name the id. */
+ * name the id.  pack: a texture pack's texture stands in for the game's
+ * (metal_replace_texture), whose own uploads are dropped from then on. */
 #define MAXTEX 16384
-static struct { uint16_t w, h; uint8_t levels, cube, rt, live; uint32_t fmt, lvlmask; } g_tex[MAXTEX];
+static struct { uint16_t w, h; uint8_t levels, cube, rt, live, pack; uint32_t fmt, lvlmask; } g_tex[MAXTEX];
 static unsigned g_texn = 1;
 static unsigned g_tfree[MAXTEX], g_ntfree = 0;
 #define TFQ 16384
@@ -272,7 +274,7 @@ static unsigned tex_new(unsigned w, unsigned h, unsigned levels, unsigned f, uns
     if (!id) return 0;
     if (!levels) levels = 1;
     g_tex[id].w = (uint16_t)w; g_tex[id].h = (uint16_t)h; g_tex[id].levels = (uint8_t)(levels > 255 ? 255 : levels);
-    g_tex[id].cube = cube ? 1 : 0; g_tex[id].rt = rt ? 1 : 0; g_tex[id].live = 1;
+    g_tex[id].cube = cube ? 1 : 0; g_tex[id].rt = rt ? 1 : 0; g_tex[id].live = 1; g_tex[id].pack = 0;
     g_tex[id].fmt = f; g_tex[id].lvlmask = 0;
     g_tex_created++;
     GwCmd *c = rq_begin(GW_TEX_CREATE, 0);
@@ -310,6 +312,7 @@ static void tex_free_due(int now){
         g_tfq_h = (g_tfq_h + 1) % TFQ; g_tfq_n--;
         if (!g_tex[id].live) continue;
         g_tex[id].live = 0; g_tex_released++;
+        texrep_released(id);
         GwCmd *c = rq_begin(GW_TEX_FREE, 0);
         if (c){ c->a[0] = id; rq_commit(c); }
         g_tfree[g_ntfree++] = id;
@@ -321,9 +324,8 @@ long metal_tex_uploaded(void){ return g_tex_uploaded; }
 
 /* UnlockRect: the whole level, copied now (the lock buffer is rewritten at
  * the next Lock and freed at Release). */
-void metal_upload_texture_face(unsigned id, unsigned level, unsigned face, const void *data,
-                               unsigned pitch, unsigned w, unsigned h, unsigned f){
-    if (!id || id >= MAXTEX || !g_tex[id].live || !data) return;
+static void tex_upload(unsigned id, unsigned level, unsigned face, const void *data,
+                       unsigned pitch, unsigned w, unsigned h, unsigned f){
     unsigned bpb, blk = fmt_blk(f, &bpb);
     if (!blk || level >= g_tex[id].levels) return;
     unsigned lw = w >> level, lh = h >> level; if (!lw) lw = 1; if (!lh) lh = 1;
@@ -339,6 +341,29 @@ void metal_upload_texture_face(unsigned id, unsigned level, unsigned face, const
     c->a[0] = id; c->a[1] = level | (face << 16); c->a[2] = lw; c->a[3] = lh; c->a[4] = pitch; c->a[5] = rows;
     memcpy((uint8_t *)c + GW_CMD_HDR, data, bytes);
     rq_commit(c);
+}
+void metal_upload_texture_face(unsigned id, unsigned level, unsigned face, const void *data,
+                               unsigned pitch, unsigned w, unsigned h, unsigned f){
+    if (!id || id >= MAXTEX || !g_tex[id].live || !data || g_tex[id].pack) return;
+    tex_upload(id, level, face, data, pitch, w, h, f);
+}
+/* texrep_web.c: the texture becomes a pack's, w x h in format f with the
+ * levels in data (level 0 first, each metal_level_pitch x metal_level_rows);
+ * the game's own uploads to it are dropped from then on.  data NULL makes it
+ * the game's again, empty, at the size given (the game's), for its uploads. */
+void metal_replace_texture(unsigned id, unsigned w, unsigned h, unsigned levels, unsigned f, const uint8_t *data){
+    unsigned bpb;
+    if (!id || id >= MAXTEX || !g_tex[id].live || g_tex[id].rt || g_tex[id].cube || !fmt_blk(f, &bpb)) return;
+    if (!levels) levels = 1;
+    g_tex[id].w = (uint16_t)w; g_tex[id].h = (uint16_t)h; g_tex[id].levels = (uint8_t)(levels > 255 ? 255 : levels);
+    g_tex[id].fmt = f; g_tex[id].lvlmask = 0; g_tex[id].pack = data != NULL;
+    GwCmd *c = rq_begin(GW_TEX_CREATE, 0);        /* the page frees the old one first */
+    if (c){ c->a[0] = id; c->a[1] = w; c->a[2] = h; c->a[3] = levels; c->a[4] = f; c->a[5] = 0; rq_commit(c); }
+    for (unsigned l = 0; data && l < levels; l++){
+        unsigned pitch = metal_level_pitch(w, l, f);
+        tex_upload(id, l, 0u, data, pitch, w, h, f);
+        data += (size_t)pitch * metal_level_rows(h, l, f);
+    }
 }
 void metal_upload_texture(unsigned id, unsigned level, const void *data, unsigned pitch, unsigned w, unsigned h, unsigned f){
     metal_upload_texture_face(id, level, 0u, data, pitch, w, h, f);

@@ -136,6 +136,9 @@ export const KEYS: readonly KeyDef[] = [
   { key: 'language', env: 'NFSU2_LANGUAGE', kind: 'enum', vals: LANGUAGES.join('|'), scope: 'web' },
   // the player's horn, which the others hear too (runtime/horn.c).  Not in bundle.m's table either: NFSU2_HORN there
   { key: 'horn', env: 'NFSU2_HORN', kind: 'enum', vals: HORNS.join('|'), scope: 'web' },
+  // the menus' and HUD's textures: a texture pack in place of the game's (runtime/web/texrep_web.c; the page fetches
+  // ahead only the one picked: datacache.ts).  Not in bundle.m's table: the Mac's packs are "textures"
+  { key: 'ui_textures', env: 'NFSU2_UI_TEXTURES', kind: 'enum', vals: 'original|uhud', scope: 'web' },
 ];
 
 /** strcasecmp's and toupper's folding: ASCII letters only (String.toLowerCase would also fold the Kelvin sign to 'k') */
@@ -252,6 +255,14 @@ export const TEMPLATE = `# NFSU2 settings, read at every launch.
 # all = every car, AI racers and traffic too; off = only yours, as in the
 # original game.  [NFSU2_HEADLIGHTS]
 #other_headlights = players
+
+# The menus' and the HUD's textures: uhud = LunicAura106's Upscaled HUD
+# (nfsmods.xyz/mod/4319): the menus, the race HUD, the fonts and the car and
+# brand logos redrawn at four times their size, where this server has the
+# mod's texture pack (a language pack's own fonts stay); original = the
+# game's.  Phones start on original (their GPUs decode the larger textures
+# into four times the memory).  [NFSU2_UI_TEXTURES]
+#ui_textures = uhud
 
 # ---- Frame rate ----------------------------------------------------------
 
@@ -390,6 +401,9 @@ export const APP_DEFAULTS: Readonly<Record<string, string>> = {
   // at 60 fps) a [status] line with the guest heap, address space and frame times (runtime/autotest.c), but not
   // the sound's own status every 5 s that NFSU2_STATUS_EVERY also turns on (runtime/web/audio_web.c)
   NFSU2_FNG_LOG: '1', NFSU2_STATUS_EVERY: '3600', NFSU2_AUDIO_STATUS: '0',
+  // the player's page shows the Upscaled HUD where the server has it (phones: device.ts); the runtime's own default,
+  // which the test pages keep, is the game's textures (runtime/web/texrep_web.c)
+  NFSU2_UI_TEXTURES: 'uhud',
 };
 
 // The mounts are fixed in the browser (web/src/host/io-worker.ts), so
