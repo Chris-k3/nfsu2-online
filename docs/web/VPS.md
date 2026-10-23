@@ -667,8 +667,8 @@ paths to the VPS, so pick a VPS location between you.
     Over 85 %, the most links a player may have goes down by a quarter (32, 24, 18, 13, 9, 8 at the least), at most
     every 5 s; under 65 %, it goes back up by 2, at most every 15 s. The nearest links stay. The console says each
     change (`[roam] the server's thread was 93 % busy: at most 24 links a player (was 32)`).
-- **Free roam** draws another player's car where it is now (solid cars, the default: the newest snapshot carried on
-  by half the round trip), or with Solid cars off `roam_delay` milliseconds (100 by default) behind its newest
+- **Free roam** draws another player's car where it is now (ghost mode off, the default: the newest snapshot carried
+  on by half the round trip), or with Ghost mode on `roam_delay` milliseconds (100 by default) behind its newest
   snapshot. That delay hides the 50 ms between snapshots, jitter and the odd lost snapshot. Network delay comes on
   top of it.
   - **Measured with impairment on a local switch:** 100 ± 10 ms one way and 5 % loss.

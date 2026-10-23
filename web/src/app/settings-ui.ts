@@ -11,7 +11,8 @@ import { readText, writeFile } from './savefs';
 import { playHorn, stopHorn } from './horn-preview';
 
 type Control =
-  | { t: 'switch' }
+  /** inv: on when the key is off (Ghost mode is roam_collide = off) */
+  | { t: 'switch'; inv?: boolean }
   | { t: 'seg'; opts: [value: string, label: string][] }
   /** a choice of more than a row of buttons holds: a drop-down list; preview: a Listen button beside it plays the
    *  value chosen (the promise ends when it has played), stop ends that early */
@@ -33,8 +34,8 @@ const GROUPS: Group[] = [
       ['dual', 'Dual tone'], ['single', 'Single tone'], ['truck', 'Air horn'], ['train', 'Train horn'], ['klaxon', 'Klaxon'],
       ['cucaracha', 'La Cucaracha'], ['clown', 'Clown horn'], ['trombone', 'Sad trombone']], preview: { play: playHorn, stop: stopHorn } } },
     { key: 'roam_room', label: 'Room', help: 'Leave empty to drive with everyone. With a name, free roam shows only the players who set the same name. Not private: everyone on this server still sees your name.', c: { t: 'text', placeholder: 'everyone' } },
+    { key: 'roam_collide', label: 'Ghost mode', help: 'You drive through the other players\' cars, and they through yours. Off: you collide with them, and a car that appears on yours lets you through until you are apart.', c: { t: 'switch', inv: true } },
     { key: 'online', label: 'Online mode', help: 'The game\'s Online menu takes you straight to the Online Main Menu under your name, without the EA Login screens: lobby, chat and races with everyone playing from this server.', c: { t: 'switch' }, more: true },
-    { key: 'roam_collide', label: 'Solid cars', help: 'You collide with the other players\' cars. A car that appears on yours lets you through until you are apart. Off: you drive through them, and they through yours.', c: { t: 'switch' }, more: true },
     { key: 'roam_max_cars', label: 'Players\' cars shown', help: 'The nearest, 0 to 32.', c: { t: 'num', min: 0, max: 32, step: 1 }, more: true },
   ] },
   { title: 'Game', items: [
@@ -85,7 +86,7 @@ const READ_ONLY = 'Read only here: another tab of this browser runs the game and
 /** A value as the panel shows it: the option's label, on/off, or the value with its unit. */
 function shown(it: Item, v: string): string {
   const c = it.c;
-  if (c.t === 'switch') return v === 'on' ? 'on' : 'off';
+  if (c.t === 'switch') return (v === 'on') !== !!c.inv ? 'on' : 'off';
   if (c.t === 'seg' || c.t === 'select') return c.opts.find(([x]) => x.toLowerCase() === v.toLowerCase())?.[1] ?? v;
   if (v === '') return 'empty';
   return c.t === 'num' && c.unit ? `${v} ${c.unit}` : v;
@@ -310,12 +311,12 @@ export class SettingsPanel {
     const ctl = document.createElement('div'); ctl.className = 'set-control';
     let described: HTMLElement;                      // what aria-describedby goes on
     if (c.t === 'switch') {
-      const on = boolOn(cur || 'off');
+      const on = boolOn(cur || 'off') !== !!c.inv;
       const v = document.createElement('span'); v.className = 'val'; v.setAttribute('aria-hidden', 'true'); v.textContent = on ? 'On' : 'Off';
       const b = document.createElement('input'); b.type = 'checkbox'; b.className = 'switch'; b.id = id;
       b.setAttribute('role', 'switch');
       b.checked = on;
-      b.onchange = () => void this.put(it.key, b.checked ? 'on' : 'off');
+      b.onchange = () => void this.put(it.key, b.checked !== !!c.inv ? 'on' : 'off');
       ctl.append(v, b);
       described = b;
     } else if (c.t === 'seg') {
