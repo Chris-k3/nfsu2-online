@@ -17,7 +17,8 @@
 //   no scenario names: every runnable scenario of the table.
 //   NFSU2_SAVE_SEED=<dir> (as run_suite.sh): a save tree copied into the
 //   scenario's OPFS save directory first (outrun: a career in stage 2 or later,
-//   e.g. the Mac port's work/seed/career/s4_outrun).
+//   e.g. the Mac port's work/seed/career/s4_outrun; sponsor: one in stage 2
+//   before its sponsor, work/seed/career/s2_start).
 //
 // Pass (as run_suite.sh): exit code 0, "quit at guest frame", the scenario's
 // marker, no fault marker (FAULT IN GUEST, GUEST MEMORY FAULT, HOST SEGV), no
@@ -67,7 +68,9 @@ const TABLE = [
 // opt-in (named only): needs a career save from stage 2 on (NFSU2_SAVE_SEED on the Mac)
 const SEED = process.env.NFSU2_SAVE_SEED ?? '';
 const OPT = [{ name: 'outrun', script: 'career_outrun.txt', marker: 'player completion 6 (6 won', extra: 'NFSU2_CAREER_RACEWIN=3', alarm: 400,
-  seed: true, blocked: SEED ? undefined : 'needs a career save from stage 2 on: NFSU2_SAVE_SEED=<save tree>' }];
+  seed: true, blocked: SEED ? undefined : 'needs a career save from stage 2 on: NFSU2_SAVE_SEED=<save tree>' },
+{ name: 'sponsor', script: 'career_sponsor.txt', marker: 'waitfng UI_postrace.fng satisfied', extra: 'NFSU2_CAREER_RACEWIN=3', alarm: 400,
+  seed: true, blocked: SEED ? undefined : 'needs a career save in stage 2 before its sponsor: NFSU2_SAVE_SEED=<save tree>' }];
 
 // the environment of tests/run_suite.sh + tools/autorun.sh (DESIGN.md section 5)
 const SUITE_ENV = {
