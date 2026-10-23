@@ -31,7 +31,7 @@ const GROUPS: Group[] = [
     { key: 'horn', label: 'Your horn', help: 'N or the controller\'s left stick click, in free roam and in races with other players.', c: { t: 'select', opts: [
       ['dual', 'Dual tone'], ['single', 'Single tone'], ['truck', 'Air horn'], ['train', 'Train horn'], ['klaxon', 'Klaxon'],
       ['cucaracha', 'La Cucaracha'], ['clown', 'Clown horn'], ['trombone', 'Sad trombone']], preview: { play: playHorn, stop: stopHorn } } },
-    { key: 'roam_room', label: 'Room', help: 'Only players in the same room see each other\'s cars. A filter, not privacy: everyone on this server still sees your name and whether you play.', c: { t: 'text', placeholder: 'none' } },
+    { key: 'roam_room', label: 'Room', help: 'Leave empty to drive with everyone. With a name, free roam shows only the players who set the same name. Not private: everyone on this server still sees your name.', c: { t: 'text', placeholder: 'everyone' } },
     { key: 'online', label: 'Online mode', help: 'The game\'s Online menu takes you straight to the Online Main Menu under your name, without the EA Login screens: lobby, chat and races with everyone playing from this server.', c: { t: 'switch' }, more: true },
     { key: 'roam_collide', label: 'Solid cars', help: 'You collide with the other players\' cars. A car that appears on yours lets you through until you are apart. Off: you drive through them, and they through yours.', c: { t: 'switch' }, more: true },
     { key: 'roam_max_players', label: 'Largest group', help: 'You and the players you exchange cars with at once, 2 to 33: the server picks the nearest.', c: { t: 'num', min: 2, max: 33, step: 1 }, more: true },

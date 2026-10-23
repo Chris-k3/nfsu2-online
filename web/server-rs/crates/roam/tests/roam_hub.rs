@@ -326,6 +326,22 @@ fn in_free_roam_driving_or_paused_each_browser_once() {
     assert_eq!(k.hub.in_roam(), 1, "left the switch");
 }
 
+// /players' room: in free roam by room, for the rooms with a name (room 0, none, is not counted), each browser once
+#[test]
+fn in_free_roam_by_room() {
+    let mut k = Kit::new(RoamOptions::default());
+    let (blue, red) = (fnv1a("blue"), fnv1a("red"));
+    k.from(V(1), &hello_with(601, &HelloOpts { room: blue, ..Default::default() }));
+    k.from(V(2), &hello_with(602, &HelloOpts { room: blue, status: 5, ..Default::default() }));
+    k.from(V(3), &hello_with(603, &HelloOpts { room: blue, status: 3, ..Default::default() }));
+    k.from(V(4), &hello_with(604, &HelloOpts { room: red, ..Default::default() }));
+    k.from(V(5), &hello(605));
+    k.hub.frame(V(1), &frame_ports(V(1), &hello_with(606, &HelloOpts { room: blue, ..Default::default() }), 47211, 47210));
+    let rooms = k.hub.in_rooms();
+    assert_eq!((rooms.get(&blue), rooms.get(&red), rooms.len()), (Some(&2), Some(&1), 2), "driving or paused, a browser once: {rooms:?}");
+    assert_eq!(k.hub.in_roam(), 4);
+}
+
 // a player that comes and goes, HELLO and BYE over and over (a client may send the hub 2500 frames a second), costs the
 // hub little: a player gone is taken out of the others' links once in a while, for many at once, not with every BYE
 // (each walked every player's links: 2000 players' 64,000)

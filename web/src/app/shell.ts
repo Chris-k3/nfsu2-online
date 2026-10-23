@@ -917,12 +917,13 @@ export async function boot() {
   fps.extra = () => session?.stats() ?? {};
   settings = new SettingsPanel($('#settings'), {
     // another language counts other files as the game data (its language pack); a keyphrase sends the file
-    saveDir: SAVE, environment: ENVIRONMENT, defaults: DEVICE, onSaved: t => { const was = language(); settingsText = t; if (language() !== was) void saves.refresh(); vault?.changed(); },
+    saveDir: SAVE, environment: ENVIRONMENT, defaults: DEVICE, onSaved: t => { const was = language(); settingsText = t; if (language() !== was) void saves.refresh(); vault?.changed(); players?.now(); },
     // the tab that owns the saves is the one whose Play reads the file: another tab only looks
     readOnly: () => !instance.owner, say: pageToast,
   }, $('#online'));
-  // who plays on this server now (Online): only while no game runs here
-  players = watchPlayers(line => settings.setStatus(line), () => !session && !starting, setReach);
+  // who plays on this server now (Online): only while no game runs here; with free roam on in a room, that room too
+  players = watchPlayers(line => settings.setStatus(line), () => !session && !starting, setReach,
+    () => { const e = resolved().env; return e.NFSU2_ROAM === '1' ? e.NFSU2_ROAM_ROOM ?? '' : ''; });
   window.addEventListener('online', () => players?.now());
   window.addEventListener('resize', placeNotices);
   window.addEventListener('resize', placeLobby);

@@ -54,7 +54,16 @@ execFileSync(path.join(WASI, 'bin/clang'), ['--target=wasm32-wasip1', '-O2', '-f
   '-Iruntime', '-Wl,--no-entry', '-Wl,--export-dynamic', '-o', WASM, 'tests/roam_crowd.c', 'runtime/roam_core.c'], { cwd: REPO, stdio: 'inherit' });
 const mod = await WebAssembly.compile(fs.readFileSync(WASM));
 
-const fnv1a = s => { if (!s) return 0; let h = 0x811C9DC5; for (const c of Buffer.from(s, 'latin1')) { h ^= c; h = Math.imul(h, 0x01000193) >>> 0; } return h || 1; };
+// a room's hash as roam_core.c rc_room_hash makes it (capitals and spaces do not count)
+const roomHash = s => {
+  let h = 0x811C9DC5, kept = 0;
+  for (let c of Buffer.from(s, 'utf8')) {
+    if (c === 32 || (c >= 9 && c <= 13)) continue;
+    if (c >= 65 && c <= 90) c += 32;
+    h ^= c; h = Math.imul(h, 0x01000193) >>> 0; kept++;
+  }
+  return !kept ? 0 : h || 1;
+};
 const bhash = s => { let h = 0xFFFFFFFF; for (const c of Buffer.from(s, 'latin1')) h = (Math.imul(h, 33) + c) >>> 0; return h; };   // the game's bStringHash
 const nowUs = () => (performance.timeOrigin + performance.now()) * 1000;
 
@@ -138,7 +147,7 @@ class Bot {
           ws.send(JSON.stringify({ t: 'hello', name: this.name, deltas: 1, ...(BUNDLE ? { bundle: 1 } : {}) }));
           const io = this.x.crowd_io(), m8 = this.mem();
           const b = Buffer.from(`${this.name}\0${this.car}\0${PARTS}\0`, 'latin1'); m8.set(b, io);
-          this.x.crowd_init(this.id, fnv1a(ROOM), HUB, PORT, bhash(this.car), STATES, nowUs());
+          this.x.crowd_init(this.id, roomHash(ROOM), HUB, PORT, bhash(this.car), STATES, nowUs());
           this.ready = true;
         }
         return;

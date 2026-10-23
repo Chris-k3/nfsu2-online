@@ -526,7 +526,7 @@ impl App {
             return self.send_game_json(q, s).await;
         }
         if p == "/players" {
-            return self.send_players(q, s).await;
+            return self.send_players(q, s, &u).await;
         }
         if p == "/robots.txt" {
             return self.plain(q, s, 200, ROBOTS_TXT, &[], Cache::Revalidate, false).await;
@@ -601,8 +601,9 @@ impl App {
     /// mode (logged in, or racing an online race), null with --online off; roam: driving in free roam, or paused
     /// there, as of the hub's last tick (nfsu2-roam), null with --roam-hub off; full: a game that connects now gets
     /// "LAN full"; roamBusy: the hub gives fewer than askCap links a player, so the page does not ask the free-roam
-    /// question now (false with --roam-hub off)
-    async fn send_players(&self, q: &Request, s: &mut Response) -> Res {
+    /// question now (false with --roam-hub off).  ?room=<hash> (roam_core's rc_room_hash of a Room setting, decimal,
+    /// not 0) adds room: how many of roam are in that room (with --roam-hub on)
+    async fn send_players(&self, q: &Request, s: &mut Response, u: &url::Url) -> Res {
         let info = match &self.online {
             Some(h) => {
                 let rx = nfsu2_util::Host::info(h.as_ref());
@@ -628,6 +629,10 @@ impl App {
         m.insert("roam".into(), roam);
         m.insert("full".into(), serde_json::Value::Bool(self.lan.full()));
         m.insert("roamBusy".into(), serde_json::Value::Bool(self.roam.as_ref().is_some_and(|r| r.crowded())));
+        let room = u.param("room").and_then(|r| r.parse::<u32>().ok()).filter(|&r| r != 0);
+        if let (Some(room), Some(r)) = (room, &self.roam) {
+            m.insert("room".into(), serde_json::Value::from(r.in_room(room).min(players)));
+        }
         let body = nfsu2_util::json::stringify(&serde_json::Value::Object(m));
         let mut h = self.headers(q, Cache::Store, true);
         h.set("content-type", "application/json");

@@ -330,9 +330,9 @@ export const TEMPLATE = `# NFSU2 settings, read at every launch.
 # Other players' addresses, if the automatic search does not find them:
 # a.b.c.d or a.b.c.d:port, separated by commas.  [NFSU2_ROAM_PEERS]
 #roam_peers =
-# Only players with the same room name see each other's cars.  A filter, not
-# privacy: everyone on the server still sees your name and status.
-# [NFSU2_ROAM_ROOM]
+# Empty: you drive with everyone.  With a name, free roam shows only the
+# players who set the same name (capitals and spaces do not count).  Not
+# private: everyone on the server still sees your name.  [NFSU2_ROAM_ROOM]
 #roam_room =
 # Port, the same for every player (1024 to 65535).  [NFSU2_ROAM_PORT]
 #roam_port = 47210

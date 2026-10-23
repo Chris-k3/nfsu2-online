@@ -72,6 +72,19 @@ uint32_t rc_fnv1a(const char *s){
     for (; *s; s++){ h ^= (uint8_t)*s; h *= 0x01000193u; }
     return h ? h : 1u;
 }
+/* the Room setting's hash: rc_fnv1a of the name without its spaces and with its capitals small ("Blue Room" is
+ * "blueroom"), so friends who type it a little differently still meet; 0 (no room) for a name of spaces only.  The
+ * start page asks the server for a room's players by this hash (web/src/app/players.ts roomHash). */
+uint32_t rc_room_hash(const char *s){
+    uint32_t h = 0x811C9DC5u; int n = 0;
+    for (; s && *s; s++){
+        uint8_t b = (uint8_t)*s;
+        if (b == ' ' || (b >= '\t' && b <= '\r')) continue;
+        if (b >= 'A' && b <= 'Z') b += 'a' - 'A';
+        h ^= b; h *= 0x01000193u; n++;
+    }
+    return !n ? 0 : h ? h : 1u;
+}
 uint32_t rc_fnv1a_bytes(const uint8_t *p, uint32_t n){
     uint32_t h = 0x811C9DC5u;
     for (uint32_t i = 0; i < n; i++){ h ^= p[i]; h *= 0x01000193u; }

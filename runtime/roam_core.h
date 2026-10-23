@@ -179,7 +179,8 @@ uint32_t rc_get32(rc_r *r);
 float    rc_getf(rc_r *r);
 void     rc_getb(rc_r *r, void *dst, uint32_t n);
 uint32_t rc_crc32(const uint8_t *p, uint32_t n);
-uint32_t rc_fnv1a(const char *s);           /* room names -> room hash (0 for "") */
+uint32_t rc_fnv1a(const char *s);           /* 0 for "" */
+uint32_t rc_room_hash(const char *s);       /* room names -> room hash: capitals and spaces do not count (0: none) */
 uint32_t rc_fnv1a_bytes(const uint8_t *p, uint32_t n);
 uint32_t rc_fbits(float f);
 float    rc_bitsf(uint32_t u);
@@ -381,7 +382,7 @@ enum { RC_EV_JOIN = 1, RC_EV_LEAVE = 2, RC_EV_NOTE = 3, RC_EV_CFG = 4, RC_EV_RES
 typedef struct {
     uint32_t self_id;              /* random, nonzero, per start */
     uint16_t port;                 /* our listen port (HELLO) */
-    uint32_t room;                 /* rc_fnv1a(room name) */
+    uint32_t room;                 /* rc_room_hash(room name) */
     char     name[RC_NAME_MAX + 1];
     uint8_t  platform;
     int      discovery;            /* beacon through io.broadcast every 2 s */

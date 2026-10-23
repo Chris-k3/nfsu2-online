@@ -62,7 +62,7 @@
 #define NET_KIND_LAN_ICMP  5u   /* LAN play: an ICMP message (raw socket; echo answered by the receiver) */
 #define NET_KIND_NOTICE   16u   /* TX ring only, never on the switch: a line of UTF-8 text the page shows
                                    over the game (free roam: a friend joined, left, went into a race);
-                                   the friend's name first, ended by 0x1F */
+                                   the friend's name first, ended by 0x1F (none: a line of the game's own) */
 #define NET_KIND_LOBBY    17u   /* TX ring only, never on the switch: the free-roam race lobby's panel over
                                    the game, its state as a JSON object ("{}": none), sent when it changes
                                    (roam_game.c mp_panel) */

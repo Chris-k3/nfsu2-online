@@ -62,11 +62,11 @@ mod hub;
 mod links;
 mod wire;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
@@ -183,10 +183,11 @@ const MAX_PENDING: usize = 1 << 13;
 pub struct RoamHub {
     tx: mpsc::Sender<Cmd>,
     pending: Arc<AtomicUsize>,
-    /// the hub's `crowded()` and `in_roam()` after its last tick, for /players (which must not wait for the hub's
-    /// thread)
+    /// the hub's `crowded()`, `in_roam()` and `in_rooms()` after its last tick, for /players (which must not wait for
+    /// the hub's thread)
     crowded: Arc<AtomicBool>,
     in_roam: Arc<AtomicUsize>,
+    in_rooms: Arc<Mutex<HashMap<u32, usize>>>,
 }
 
 impl RoamHub {
@@ -212,12 +213,13 @@ impl RoamHub {
         // (made here, not on its thread: until its first tick crowded() is what the hub begins with)
         let crowded = Arc::new(AtomicBool::new(hub.crowded()));
         let in_roam = Arc::new(AtomicUsize::new(0));
-        let (busy_now, roam_now) = (crowded.clone(), in_roam.clone());
+        let in_rooms = Arc::new(Mutex::new(HashMap::new()));
+        let (busy_now, roam_now, rooms_now) = (crowded.clone(), in_roam.clone(), in_rooms.clone());
         std::thread::Builder::new()
             .name("roam-hub".into())
-            .spawn(move || run(hub, rx, &waiting, &busy_now, &roam_now))
+            .spawn(move || run(hub, rx, &waiting, &busy_now, &roam_now, &rooms_now))
             .expect("a thread for the free-roam hub");
-        Arc::new(RoamHub { tx, pending, crowded, in_roam })
+        Arc::new(RoamHub { tx, pending, crowded, in_roam, in_rooms })
     }
 
     /// the hub's `crowded()`: free roam is busy, the cap is under `ask_cap` (as of the hub's last tick)
@@ -228,6 +230,12 @@ impl RoamHub {
     /// the hub's `in_roam()`: how many browsers drive in free roam, or are paused there (as of the hub's last tick)
     pub fn in_roam(&self) -> usize {
         self.in_roam.load(Ordering::Relaxed)
+    }
+
+    /// the hub's `in_rooms()` of one room: how many browsers of the room (roam_core's rc_room_hash, not 0) drive in
+    /// free roam, or are paused there (as of the hub's last tick)
+    pub fn in_room(&self, room: u32) -> usize {
+        self.in_rooms.lock().map_or(0, |m| m.get(&room).copied().unwrap_or(0))
     }
 
     /// the switch's way to its browsers
@@ -244,7 +252,14 @@ fn guard(f: impl FnOnce()) {
 
 /// The hub's thread: what the switch posts, in order, and a tick every tick_ms (the next one a tick_ms after this
 /// one began).  It ends once the RoamHub is gone.
-fn run(mut hub: Hub, rx: mpsc::Receiver<Cmd>, pending: &AtomicUsize, crowded: &AtomicBool, in_roam: &AtomicUsize) {
+fn run(
+    mut hub: Hub,
+    rx: mpsc::Receiver<Cmd>,
+    pending: &AtomicUsize,
+    crowded: &AtomicBool,
+    in_roam: &AtomicUsize,
+    in_rooms: &Mutex<HashMap<u32, usize>>,
+) {
     let every = Duration::from_millis(hub.options().tick_ms);
     let mut next = Some(Instant::now() + every);
     loop {
@@ -255,6 +270,10 @@ fn run(mut hub: Hub, rx: mpsc::Receiver<Cmd>, pending: &AtomicUsize, crowded: &A
                     guard(|| hub.tick());
                     crowded.store(hub.crowded(), Ordering::Relaxed);
                     in_roam.store(hub.in_roam(), Ordering::Relaxed);
+                    let rooms = hub.in_rooms();
+                    if let Ok(mut m) = in_rooms.lock() {
+                        *m = rooms;
+                    }
                     next = Some(now + every);
                     continue;
                 }

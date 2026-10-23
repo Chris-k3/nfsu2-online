@@ -97,6 +97,11 @@ static void t_layout(void){
 
     /* CRC-32 check value */
     CHECK(rc_crc32((const uint8_t *)"123456789", 9) == 0xCBF43926u, "CRC-32 check value");
+    /* the room's hash: capitals and spaces do not count (the start page's roomHash has the same value) */
+    CHECK(rc_room_hash("blueroom") == 0x160FBA32u && rc_room_hash(" Blue Room\t") == 0x160FBA32u && rc_fnv1a("blueroom") == 0x160FBA32u,
+          "room hash %08x", rc_room_hash(" Blue Room\t"));
+    CHECK(rc_room_hash("") == 0 && rc_room_hash("  ") == 0 && rc_room_hash(0) == 0 && rc_room_hash("Zo\xc3\xab") != rc_room_hash("zo\xc3\x8b"),
+          "no room for spaces only; only A-Z made small");
     /* a fixed message: the exact bytes (regression of the format) */
     memset(&m, 0, sizeof m); m.h.type = RC_MSG_PING; m.h.sender = 0x01020304u; m.h.seq = 1; m.u.ping.t0 = 0x0A0B0C0Du;
     n = rc_encode(&m, b, sizeof b);

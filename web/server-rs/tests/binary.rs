@@ -126,7 +126,8 @@ impl Drop for Server {
 struct Run {
     /// the start-up lines, from "NFSU2 web server" to "  access    :"
     startup: Vec<String>,
-    /// /players: at the start, with a /lan client on, once it logged in to Online mode, once it left
+    /// /players: at the start, with a /lan client on, once it logged in to Online mode, once it left; then with a
+    /// room (?room=5) and with one that is none (?room=x)
     players: Vec<String>,
     /// what the console said after the start-up lines (sorted: the switch and the Online host print from threads of
     /// their own)
@@ -149,6 +150,8 @@ async fn scenario(cmd: Command, port: u16, state: &Path) -> Run {
     players.push(srv.players().await);
     a.close().await;
     players.push(srv.players_until(0).await);
+    players.push(srv.get("/players?room=5").await.1);
+    players.push(srv.get("/players?room=x").await.1);
     // the lines the console printed by now (the lobby session's end comes a moment after the switch's)
     sleep(300).await;
     let exit = srv.stop().await;
@@ -217,6 +220,8 @@ async fn the_binary_starts_counts_its_players_and_stops() {
     assert_eq!((p[1]["players"].as_u64(), p[1]["online"].as_u64()), (Some(1), Some(0)), "a /lan client: {}", rust.players[1]);
     assert_eq!((p[2]["players"].as_u64(), p[2]["online"].as_u64()), (Some(1), Some(1)), "an Online login: {}", rust.players[2]);
     assert_eq!(rust.players[3], r#"{"players":0,"online":0,"roam":0,"full":false,"roamBusy":false}"#);
+    assert_eq!(rust.players[4], r#"{"players":0,"online":0,"roam":0,"full":false,"roamBusy":false,"room":0}"#);
+    assert_eq!(rust.players[5], rust.players[3], "no room for one that is not a number");
     assert!(rust.console.iter().any(|l| l == "[lan] 10.77.0.2 joined (1 on the switch)"), "{:?}", rust.console);
     assert!(rust.console.iter().any(|l| l == "[lan] 10.77.0.2 \"Ann\" left (0 on the switch)"), "{:?}", rust.console);
     assert!(rust.console.iter().any(|l| l.contains("logged in as \"Ann\"")), "{:?}", rust.console);

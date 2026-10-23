@@ -259,10 +259,11 @@ static int told_once(uint32_t id){
     g_told[g_ntold++ % TOLD_IDS] = id;
     return 1;
 }
+/* (name 0: what alone, no friend's name first: the page shows it as its own lines are) */
 static void notice(const char *name, const char *what){
     if (roam_game_racing()) return;
-    char t[96];
-    int n = snprintf(t, sizeof t, "%s\x1f%s", name && *name ? name : "A player", what);
+    char t[192];
+    int n = name ? snprintf(t, sizeof t, "%s\x1f%s", *name ? name : "A player", what) : snprintf(t, sizeof t, "%s", what);
     if (n > (int)sizeof t - 1) n = (int)sizeof t - 1;
     if (MB && n > 0) tx_push(NET_KIND_NOTICE, 0, 0, (const uint8_t *)t, n);
 }

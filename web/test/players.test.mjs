@@ -65,6 +65,9 @@ test('/players: three counts, full and roamBusy, nothing else, never cached, onl
     assert.ok(r.headers['x-content-type-options'], 'the security headers of every response');
     assert.deepEqual(JSON.parse(r.body), { players: 0, online: 0, roam: 0, full: false, roamBusy: false });
     assert.deepEqual(Object.keys(JSON.parse(r.body)), ['players', 'online', 'roam', 'full', 'roamBusy'], 'nothing else in the body');
+    // a page in a room asks how many are in free roam there (the hub's count: web/server-rs/crates/roam/tests/roam_hub.rs)
+    assert.deepEqual(JSON.parse((await s.get('/players?room=370129458')).body), { players: 0, online: 0, roam: 0, full: false, roamBusy: false, room: 0 });
+    assert.deepEqual(JSON.parse((await s.get('/players?room=0')).body), { players: 0, online: 0, roam: 0, full: false, roamBusy: false }, 'room 0 is none');
     // two games on the switch, one leaves
     const a = await s.player('Alice'), b = await s.player('Bob');
     await sleep(100);
@@ -104,7 +107,20 @@ test('/players with --max-peers 1: full while one plays, and the next game gets 
 
 test('the page\'s line', async () => {
   const out = await esbuild.build({ entryPoints: [path.join(HERE, '../src/app/players.ts')], bundle: true, write: false, format: 'esm', platform: 'neutral' });
-  const { playersText } = await import('data:text/javascript;base64,' + Buffer.from(out.outputFiles[0].text).toString('base64'));
+  const { playersText, roomHash } = await import('data:text/javascript;base64,' + Buffer.from(out.outputFiles[0].text).toString('base64'));
+  // the room's hash as roam_core.c makes it (tests/roam_unit.c checks the same value): capitals and spaces do not count
+  assert.equal(roomHash('blueroom'), 0x160fba32);
+  assert.equal(roomHash(' Blue Room\t'), 0x160fba32);
+  assert.equal(roomHash(''), 0);
+  assert.equal(roomHash('   '), 0);
+  assert.notEqual(roomHash('Zoë'), roomHash('zoË'), 'only A to Z made small');
+  assert.equal(playersText({ players: 3, online: 1, roam: 2, room: 0 }, ' Blue '),
+    'On this server now: 3 players, 1 in Online mode, 2 in free roam. You are in room "Blue": nobody in free roam there.');
+  assert.equal(playersText({ players: 3, online: 1, roam: 2, room: 2 }, 'Blue'),
+    'On this server now: 3 players, 1 in Online mode, 2 in free roam. You are in room "Blue": 2 in free roam there.');
+  assert.equal(playersText({ players: 3, online: 1, roam: 2 }, 'Blue'),
+    'On this server now: 3 players, 1 in Online mode, 2 in free roam. You are in room "Blue".', 'an older server: no count');
+  assert.equal(playersText({ players: 0, online: 0, room: 0 }, 'Blue'), 'On this server now: nobody is playing.');
   assert.equal(playersText({ players: 0, online: 0 }), 'On this server now: nobody is playing.');
   assert.equal(playersText({ players: 1, online: 0 }), 'On this server now: 1 player, 0 in Online mode.');
   assert.equal(playersText({ players: 3, online: 2 }), 'On this server now: 3 players, 2 in Online mode.');

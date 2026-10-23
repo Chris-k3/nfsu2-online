@@ -4083,6 +4083,26 @@ static int g_parked;
  * each frame with the lock held; roam_web.c shows no notices then) */
 static int g_racing;
 int roam_game_racing(void){ return g_racing; }     /* with the lock held */
+#ifndef ROAM_HOST_WIN
+/* In a room (the Room setting) with nobody else in free roam there: the page says so once the player has been
+ * ROOM_ALONE_US in free roam without a friend while the server's hub answers (it links the players of a room at any
+ * distance, so no friend means nobody of the room is in free roam), and again only ROOM_AGAIN_US later.  A friend,
+ * or leaving free roam, starts the wait over.  With the lock held. */
+#define ROOM_ALONE_US 20000000
+#define ROOM_AGAIN_US 300000000
+static int64_t g_alone_since, g_alone_told;
+static void room_alone(int64_t host, uint8_t st){
+    if (!g_s.conf.room || !g_s.conf.hub_ip || g_s.hub_was != 2 || (st != RC_ST_ROAM && st != RC_ST_PAUSED) || rc_established(&g_s)){
+        g_alone_since = 0; return; }
+    if (!g_alone_since) g_alone_since = host;
+    if (st != RC_ST_ROAM || host - g_alone_since < ROOM_ALONE_US || (g_alone_told && host - g_alone_told < ROOM_AGAIN_US)) return;
+    g_alone_told = host;
+    char t[160];
+    snprintf(t, sizeof t, "Nobody else is in free roam in room \"%s\". Clear Room under Online on the start page to see everyone.", O.room);
+    roam_plat_notice(0, t);
+    rlog("[roam] f=%ld alone in room \"%s\" for %.0f s: told\n", rh_frame(), O.room, (double)(host - g_alone_since) / 1e6);
+}
+#endif
 static uint8_t local_status(int in_roam){
     uint32_t flow = rd32(G_FLOW);
     if (in_roam) return g_sync_paused > 1 || g_parked ? RC_ST_PAUSED : RC_ST_ROAM;
@@ -4134,7 +4154,7 @@ static void init_once(CPU *c){
     const char *rm = opt("NFSU2_ROAM_ROOM");
     snprintf(O.room, sizeof O.room, "%s", rm ? rm : "");
     rc_config cf; memset(&cf, 0, sizeof cf);
-    cf.self_id = roam_plat_random(); cf.port = (uint16_t)port; cf.room = rc_fnv1a(O.room);
+    cf.self_id = roam_plat_random(); cf.port = (uint16_t)port; cf.room = rc_room_hash(O.room);
     snprintf(cf.name, sizeof cf.name, "%s", O.name[0] ? O.name : "Player");
 #ifdef ROAM_HOST_WIN
     cf.platform = RC_PLAT_WIN;                             /* HELLO byte 18: the Windows plugin */
@@ -4447,6 +4467,9 @@ void roam_game_frame(CPU *c){
     uint8_t st = local_status(in_roam);
     rc_set_status(&g_s, st);
     g_racing = st == RC_ST_EVENT || (in_roam && du_racing(rd32(G_RACE)));
+#ifndef ROAM_HOST_WIN
+    room_alone(host, st);
+#endif
     if (cfgn > 0){
         uint16_t before = g_s.cfg_rev;
         rc_set_cfg(&g_s, cfgb, cfgn, host);
