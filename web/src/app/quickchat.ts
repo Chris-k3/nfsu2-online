@@ -31,6 +31,8 @@ const BURST = 3, WINDOW_MS = 6000;
 const SHOW_MS = 5000, FADE_MS = 600;
 /** the name over a friend's car is about this tall (HUD units at scale 1): the line goes above it */
 const NAME_H = 13;
+/** a line shrinks with the distance as the name under it does (to 0.5), but not below this: it stays readable */
+const LINE_MIN = 0.7;
 /** the right stick: a flick is past FLICK of its travel, and counts again once back within REST */
 const FLICK = 0.8, REST = 0.35;
 /** the stick's flicks and the keys' places, in the order of a group's phrases: up, right, down, left */
@@ -257,9 +259,9 @@ export class QuickChat {
       const show = i < n && !!v && v.w > 0 && v.h > 0;
       if (show) {
         // its bottom middle on the name's top (the game's point is the name's middle), scaled with the name
-        const u = Math.min(v.w / 640, v.h / 480), sc = m[4 * i + 3];
+        const u = Math.min(v.w / 640, v.h / 480), sc = m[4 * i + 3], ls = Math.max(sc, LINE_MIN);
         const x = v.x + m[4 * i + 1] * v.w, y = v.y + m[4 * i + 2] * v.h - (l.me ? 0 : NAME_H / 2 * u * sc);
-        l.el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) scale(${sc.toFixed(3)}) translate(-50%, -100%)`;
+        l.el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) scale(${ls.toFixed(3)}) translate(-50%, -100%)`;
       }
       if (show !== l.shown) { l.el.hidden = !show; l.shown = show; }
       if (!l.out && now >= l.until - FADE_MS) { l.out = true; l.el.classList.add('out'); }
