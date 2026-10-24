@@ -23,6 +23,7 @@ void sub_004ac9f0_orig(CPU *c){ (void)c; }
 void sub_0072d18d_orig(CPU *c){ (void)c; }
 void sub_00739320(CPU *c){ (void)c; }
 void sub_004580e0(CPU *c);
+void sub_007292bc(CPU *c);
 
 int main(void){
     static const unsigned long numbers[] = { 0, 26, 27, 0x8000, 0xffffffffUL };
@@ -42,6 +43,18 @@ int main(void){
         for (unsigned e = 0; e < RADIO_TRACKS; e++) lent += MR32(TABLE + 16u * e) != 0x1111u + e;
         CHECK(g_orig_calls == 1, "the game's own start runs once", numbers[i]);
         CHECK(lent == (numbers[i] < RADIO_TRACKS), "only a song of the table is lent", numbers[i]);
+    }
+    uint32_t ring = 0;
+    for (unsigned i = 0; i < 100; i++){
+        g_page.on = 2 * i + 1;
+        sub_007292bc(&c);
+        if (!ring) ring = g_page.rings.ring;
+        CHECK(ring && g_page.rings.ring == ring, "the rings are made once", i);
+        MR32(c.esp + 8u) = 3u;
+        sub_004580e0(&c);
+        g_page.on++;
+        sub_007292bc(&c);
+        for (unsigned e = 0; e < RADIO_TRACKS; e++) CHECK(MR32(TABLE + 16u * e) == 0x1111u + e, "the table is put back", i);
     }
     for (unsigned line = 1; line <= 3; line++) CHECK(g_mem[TEXT + line * RADIO_TAG - 1u] == 0, "a tag ends with NUL", line);
     printf("radio_unit: %d failed\n", g_fail);
