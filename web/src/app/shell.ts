@@ -31,6 +31,7 @@ import { controlsSheet, type ControlsSheet } from './controls';
 import { TouchControls } from './touch';
 import { TextField } from './textentry';
 import { PauseHint } from './pausehint';
+import { DriftPanel } from './drift';
 import type { PadPage } from '../input/gamepad';
 import type { NetQueue, NetRemoved } from '../net';
 import { checkSetting, HOST_FIXED, pageOnly, resolveEnv, settingsUpgrade, TEMPLATE, type Resolved } from './settings';
@@ -489,6 +490,7 @@ async function startGame() {
   touch.start(session);
   textField.start(session);
   pauseHint.start(session);
+  driftPanel.start(session);
   quickChat.start(session, net && r.env.NFSU2_ROAM === '1' && r.env.NFSU2_ROAM_SAY !== '0');
   fps.memory = session.proc.memory;
   const st = session;
@@ -607,11 +609,13 @@ let awake: (() => void) | null = null;   // the running game's Wake Lock (displa
 let touch: TouchControls;                // the controls on the game while a finger drives (touch.ts)
 let textField: TextField;               // the field for a phone's keyboard while the game asks for text (textentry.ts)
 let pauseHint: PauseHint;               // the line to the page's menu under the game's pause menu (pausehint.ts)
+let driftPanel: DriftPanel;             // free roam's drift mode: its score under the game's Bank panel, a note at F2 (drift.ts)
 
 function endStage() {
   touch.stop();
   textField.stop();
   pauseHint.stop();
+  driftPanel.stop();
   quickChat.stop();
   awake?.(); awake = null;
   away?.stop(); away = null;
@@ -1288,6 +1292,7 @@ export async function boot() {
     roam: () => solidCars !== null && !!session?.net?.solid,
     fullscreen: () => canFullscreen() || !fromHomeScreen(),
   });
+  driftPanel = new DriftPanel($('#stage'), { toast, wide: () => hudWide, log: logLine });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { void checkNewer(); vault.shown(); } });
   setInterval(() => { if (document.visibilityState === 'visible') void checkNewer(); }, NEWER_EVERY_MS);
 

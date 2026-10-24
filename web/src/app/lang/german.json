@@ -842,5 +842,13 @@
   "Shifter": "Schaltknüppel",
   "Sequential: push to shift up": "Sequenziell: Drücken schaltet hoch",
   "Sequential: pull to shift up": "Sequenziell: Ziehen schaltet hoch",
-  "The game shifts one gear at a time. Sequential: each move of the lever into a gear is one shift, and reverse holds the handbrake. Handbrake: any gear holds it.": "Das Spiel schaltet Gang für Gang. Sequenziell: Jedes Einlegen eines Gangs mit dem Hebel ist ein Schaltvorgang, und der Rückwärtsgang zieht die Handbremse. Handbremse: Jeder Gang zieht sie."
+  "The game shifts one gear at a time. Sequential: each move of the lever into a gear is one shift, and reverse holds the handbrake. Handbrake: any gear holds it.": "Das Spiel schaltet Gang für Gang. Sequenziell: Jedes Einlegen eines Gangs mit dem Hebel ist ein Schaltvorgang, und der Rückwärtsgang zieht die Handbremse. Handbremse: Jeder Gang zieht sie.",
+  "Drift mode (in free roam)": "Driftmodus (in der freien Fahrt)",
+  "Drift mode: on": "Driftmodus: ein",
+  "Drift mode: off": "Driftmodus: aus",
+  "Drift mode only works in free roam": "Den Driftmodus gibt es nur in der freien Fahrt",
+  "Best:": "Rekord",
+  "Total": "Gesamt",
+  "Gain {n}X with:": "Sammel X{n} mit:",
+  "DRIFT": "DRIFT"
 }

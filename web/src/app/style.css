@@ -609,6 +609,38 @@ html:has(> body > .stage:not([hidden])) { overflow: hidden; }
 .notices div { animation: notice-fade 5s linear both; }
 .notices b { font-weight: 700; color: rgba(200, 240, 136, 0.9); }    /* --lime */
 @keyframes notice-fade { 0% { opacity: 0; } 4%, 84% { opacity: 1; } 100% { opacity: 0; } }
+/* free roam's drift mode (drift.ts): the drift event's panel (HUD_Drift: Best, the multiplier and the points its next
+ * level needs, Total) under the game's Bank panel and as wide, sized with the HUD (--u, one HUD unit), its rows, type
+ * and colours as the drift event's: grey labels with their letters apart, the best in lime, the multiplier in big
+ * green italics, its points in amber, Total in green */
+.drift-panel {
+  --u: 1px;
+  position: absolute; z-index: 2; width: calc(176 * var(--u)); pointer-events: none;
+  display: flex; flex-direction: column; gap: calc(1 * var(--u));
+  font: 400 calc(11 * var(--u)) / 1 var(--font); letter-spacing: 0.08em; color: #bdbdbd; white-space: nowrap;
+}
+.drift-panel > div {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: calc(7 * var(--u)) calc(8 * var(--u)); background: rgba(0, 0, 0, 0.55);
+}
+.drift-panel > div:first-child { border-radius: calc(5 * var(--u)) calc(5 * var(--u)) 0 0; }
+.drift-panel > div:last-child { border-radius: 0 0 calc(5 * var(--u)) calc(5 * var(--u)); }
+.drift-panel b { font-weight: 400; letter-spacing: 0; color: var(--lime); font-variant-numeric: tabular-nums; }
+.drift-x { font: italic 700 calc(24 * var(--u)) / 1 var(--font); letter-spacing: 0; color: #30cd30; }
+.drift-gain { display: flex; flex-direction: column; align-items: flex-end; gap: calc(5 * var(--u)); }
+.drift-gain b { color: #d8a020; }
+.drift-total, .drift-total b { color: #30cd30; }
+/* a drift banked (drift.ts): the drift event's DRIFT popup, in lime, the label over the points in big italics, where
+ * free roam's HUD shows its own popups (right-aligned there: its left is that edge), fading out after 2 s */
+.drift-pop {
+  --u: 1px;
+  position: absolute; z-index: 2; translate: -100% 0; pointer-events: none;
+  display: flex; flex-direction: column; align-items: flex-end; gap: calc(3 * var(--u));
+  color: var(--lime); white-space: nowrap; animation: drift-pop 2.4s linear both;
+}
+.drift-pop span { font: 400 calc(13 * var(--u)) / 1 var(--font); letter-spacing: 0.08em; }
+.drift-pop b { font: italic 700 calc(26 * var(--u)) / 1 var(--font); }
+@keyframes drift-pop { 0% { opacity: 0; } 6%, 80% { opacity: 1; } 100% { opacity: 0; } }
 /* quick chat's lines in the log (shell.ts chatLine): a speech balloon first, upright and brighter than the notices,
  * as big as the race lobby card's text, for 8 s */
 .notices div.chat {
