@@ -239,15 +239,16 @@ async fn the_manifests_blocks_are_kept_unasked() {
     let kit = Kit::start_keeping(2, |root| std::fs::write(root.join("game/TRACKS/swept.bin"), data((2 << 20) + 5000, true)).unwrap()).await;
     let raw = std::fs::read(kit.path("game/TRACKS/swept.bin")).unwrap();
     let v = version(&kit, "TRACKS/swept.bin");
-    let blocks = kit.path("state/blocks");
-    // three blocks of swept.bin, one of GLOBAL/small.bin
-    let count = || {
-        std::fs::read_dir(&blocks).map(|d| d.flatten().flat_map(|s| std::fs::read_dir(s.path()).into_iter().flatten()).count()).unwrap_or(0)
-    };
+    // swept.bin's three blocks kept: a HEAD of a kept one is br (of one not kept, the head of the block as it is), and
+    // queues none.  (Counting the files in blocks/ took the half-written ones too, and the manifest's other blocks: it
+    // went on before these were all kept.)
     let t0 = std::time::Instant::now();
-    while count() < 4 {
-        assert!(t0.elapsed() < Duration::from_secs(30), "the manifest's blocks kept: {} in 30 s", count());
-        tokio::time::sleep(Duration::from_millis(50)).await;
+    for b in 0..3usize {
+        let path = format!("/data-blocks/v2/TRACKS/swept.bin?b={b}&n=1&{v}");
+        while kit.request("HEAD", &path, &[("Accept-Encoding", "br")], b"").await.header("content-encoding") != Some("br") {
+            assert!(t0.elapsed() < Duration::from_secs(30), "the manifest's block {b} kept in 30 s");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
     }
     for b in 0..3usize {
         let a = kit.get(&format!("/data-blocks/v2/TRACKS/swept.bin?b={b}&n=1&{v}"), &[("Accept-Encoding", "br")]).await;

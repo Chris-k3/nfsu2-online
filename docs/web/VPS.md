@@ -202,7 +202,12 @@ compose file's limit), 40 GB of disk and a 1 Gbit/s port with a few TB of traffi
   in 1.28 GB instead of the 1.39 GB of compressing as it is sent (the tracks 41 -> 33 % of their size, SPEED2.EXE
   50 -> 41 %, the voices 84 -> 79 %, the music 86 -> 84 %; the movies not at all), at no CPU per player. Two threads
   at the lowest priority make them after each start and each change of the game files (a manifest `?refresh`), the
-  blocks players ask for first: about half an hour for the whole folder (5600 blocks, 3100 that compress). Until a block is kept it goes out as before, compressed as it is sent, and
+  blocks players ask for first: about half an hour for the whole folder (5600 blocks, 3100 that compress). Their two
+  cores count against `nfsu2.slice`'s quota all the same, so they wait while the slice is 70 % used and go on below
+  55 % (`kept blocks: waiting while /nfsu2.slice uses ...`, then `going on`): on a busy evening the folder takes
+  longer, and free roam's busy cap never sees them. Without room (16 GB in `blocks/`, or less than 2 GB free on its
+  disk) they wait too, the room looked at again every minute. Until a block is kept it goes out as before, compressed
+  as it is sent, and
   Cloudflare keeps that answer 10 minutes only. The page asks at `/data-blocks/v2/` since, so Cloudflare's copies of
   the answers from before are not served for them (the Cache Rule covers both). `NFSU2_COMPRESS_THREADS` in the
   server's environment sets the threads (0: none, every block as before). The `[blocks]` line every 5 minutes counts

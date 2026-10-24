@@ -137,8 +137,9 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
     the manifest: `/data-blocks/v2/`): runs of up to 8 blocks as one answer, compressed with zstd, br or gzip as
     Content-Encoding, which the browser undoes itself; a run whose first 64 KB does not compress goes as it is. One
     block (all the page asks for) goes to a client that takes br as the server keeps it: compressed once at brotli's
-    best in its state folder (`web/server-rs/src/app/kept.rs`, threads of its own at the lowest priority, the blocks
-    asked for first, then the manifest's), or as it is where that found it does not compress; until it is kept, as
+    best in its state folder (`web/server-rs/src/app/kept.rs`, threads of its own at the lowest priority that wait
+    while the CPU quota is 70 % used, the blocks asked for first, then the manifest's), or as it is where that found
+    it does not compress; until it is kept, as
     above, and Cloudflare keeps that answer 10 minutes only (`EDGE_WHILE`). `v2` since: Cloudflare's copies of the
     answers from before are at the old addresses, which still answer. The address carries the file's
     mtime and size (`m`, `s`), and the server lets a shared cache (Cloudflare) keep a run for good when they are the
