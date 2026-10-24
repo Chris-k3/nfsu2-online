@@ -84,7 +84,7 @@ pub mod limits {
     pub const WS_MAX_PAYLOAD: usize = 64 << 10;
     pub const ARTIFACT_BYTES: usize = 64 << 20;
     /// each player holds at most 6 HTTP connections and a WebSocket, so with many players (a VPS with --max-peers
-    /// 5000) the port takes 8 per player
+    /// 6000) the port takes 8 per player
     pub fn max_connections(max_peers: usize) -> usize {
         1024.max(max_peers * 8)
     }

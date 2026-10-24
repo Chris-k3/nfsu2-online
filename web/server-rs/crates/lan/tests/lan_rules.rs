@@ -1,5 +1,5 @@
 //! The switch's own tests, the second half (tests/lan.rs has the first): the audit's F2 (what one client can make the
-//! switch send, and whom it can get cut), the store, the 5000 addresses, LAN play's broadcasts, a page that lets go,
+//! switch send, and whom it can get cut), the store, the 6000 addresses, LAN play's broadcasts, a page that lets go,
 //! the breakdown, bundles, a player behind on its path (lag.rs).
 
 mod harness;
@@ -419,14 +419,14 @@ async fn with_a_store_a_restart_keeps_each_players_address_for_its_token() {
     sw2.close().await;
 }
 
-// addresses: 5000 on 10.77.0.0/19, handed out round twenty of its /24s; never .0, .1 or .252 and up; full past them
+// addresses: 6000 on 10.77.0.0/19, handed out round twenty-four of its /24s; never .0, .1 or .252 and up; full past them
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn addresses_5000_round_the_twenty_24s_full_past_them() {
+async fn addresses_6000_round_the_twenty_four_24s_full_past_them() {
     let _s = serial().await;
-    let lan = LanSwitch::new(LanOptions { max_peers: 5000, ..LanOptions::default() }, "", None, None, None, None);
+    let lan = LanSwitch::new(LanOptions { max_peers: 6000, ..LanOptions::default() }, "", None, None, None, None);
     let mut got = Vec::new();
     let now = nfsu2_util::now_ms();
-    for i in 0..5000 {
+    for i in 0..6000 {
         let v = lan.allocate();
         assert!(v != 0, "address {i}");
         got.push(v);
@@ -436,9 +436,9 @@ async fn addresses_5000_round_the_twenty_24s_full_past_them() {
     let mut want: Vec<String> = (0..16).map(|b| format!("10.77.{b}.2")).collect();
     want.extend(["10.77.16.2".to_string(), "10.77.17.2".to_string()]);
     assert_eq!(first, want);
-    assert_eq!(ip_str(got[20]), "10.77.0.3");
-    assert_eq!(ip_str(got[4999]), "10.77.19.251");
-    assert_eq!(got.iter().collect::<HashSet<_>>().len(), 5000, "all distinct");
+    assert_eq!(ip_str(got[24]), "10.77.0.3");
+    assert_eq!(ip_str(got[5999]), "10.77.23.251");
+    assert_eq!(got.iter().collect::<HashSet<_>>().len(), 6000, "all distinct");
     let mut sorted = got.clone();
     sorted.sort();
     let mut all = all_vips();
