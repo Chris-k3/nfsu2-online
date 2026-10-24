@@ -674,7 +674,7 @@
   "Changed here and in another browser ({when}). Keep which?": "Ändrade här och i en annan webbläsare ({when}). Vilka ska behållas?",
   "Changed here and in another browser. Keep which?": "Ändrade här och i en annan webbläsare. Vilka ska behållas?",
   "Type or paste your keyphrase.": "Skriv eller klistra in din nyckelfras.",
-  "\"{word}\" is not a keyphrase word: check its spelling.": "\"{word}\" är inget ord i en nyckelfras: kontrollera stavningen.",
+  "\"{word}\" is not a keyphrase word. Keyphrases are made for you by Enable cloud saving: check the spelling, or make one there.": "\"{word}\" är inget ord i en nyckelfras. Nyckelfraser skapas åt dig av Slå på sparning i molnet: kontrollera stavningen, eller skapa en där.",
   "A keyphrase has {n} words after {prefix}; this has {got}.": "En nyckelfras har {n} ord efter {prefix}; den här har {got}.",
   "what the server holds for this keyphrase is not a keyphrase's saves": "det som servern har för den här nyckelfrasen är inte sparfiler från en nyckelfras",
   "these saves do not open with this keyphrase": "de här sparfilerna kan inte öppnas med den här nyckelfrasen",

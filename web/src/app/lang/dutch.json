@@ -674,7 +674,7 @@
   "Changed here and in another browser ({when}). Keep which?": "Hier en in een andere browser gewijzigd ({when}). Welke houden?",
   "Changed here and in another browser. Keep which?": "Hier en in een andere browser gewijzigd. Welke houden?",
   "Type or paste your keyphrase.": "Typ of plak je sleutelzin.",
-  "\"{word}\" is not a keyphrase word: check its spelling.": "“{word}” is geen woord van een sleutelzin: controleer de spelling.",
+  "\"{word}\" is not a keyphrase word. Keyphrases are made for you by Enable cloud saving: check the spelling, or make one there.": "“{word}” is geen woord van een sleutelzin. Sleutelzinnen worden voor je gemaakt door Opslaan in de cloud inschakelen: controleer de spelling, of maak er daar een.",
   "A keyphrase has {n} words after {prefix}; this has {got}.": "Een sleutelzin heeft {n} woorden na {prefix}; deze heeft er {got}.",
   "what the server holds for this keyphrase is not a keyphrase's saves": "wat de server voor deze sleutelzin heeft, zijn geen opgeslagen spellen van een sleutelzin",
   "these saves do not open with this keyphrase": "deze opgeslagen spellen gaan niet open met deze sleutelzin",

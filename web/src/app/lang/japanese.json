@@ -611,7 +611,7 @@
   "Changed here and in another browser ({when}). Keep which?": "ここと別のブラウザ（{when}）の両方で変更されています。どちらを残しますか？",
   "Changed here and in another browser. Keep which?": "ここと別のブラウザの両方で変更されています。どちらを残しますか？",
   "Type or paste your keyphrase.": "キーフレーズを入力するか、貼り付けてください。",
-  "\"{word}\" is not a keyphrase word: check its spelling.": "「{word}」はキーフレーズの単語ではありません。つづりを確認してください。",
+  "\"{word}\" is not a keyphrase word. Keyphrases are made for you by Enable cloud saving: check the spelling, or make one there.": "「{word}」はキーフレーズの単語ではありません。キーフレーズは「クラウドセーブを有効にする」で作られます。つづりを確認するか、そこで作ってください。",
   "A keyphrase has {n} words after {prefix}; this has {got}.": "キーフレーズは{prefix}の後に{n}語ありますが、入力されたものは{got}語です。",
   "what the server holds for this keyphrase is not a keyphrase's saves": "サーバーにあるこのキーフレーズのデータは、キーフレーズのセーブデータではありません",
   "these saves do not open with this keyphrase": "このセーブデータは、このキーフレーズでは開けません",

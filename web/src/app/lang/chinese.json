@@ -611,7 +611,7 @@
   "Changed here and in another browser ({when}). Keep which?": "此處和另一個瀏覽器（{when}）都有變更。要保留哪一邊？",
   "Changed here and in another browser. Keep which?": "此處和另一個瀏覽器都有變更。要保留哪一邊？",
   "Type or paste your keyphrase.": "請輸入或貼上你的通關密語。",
-  "\"{word}\" is not a keyphrase word: check its spelling.": "「{word}」不是通關密語中的字詞：請檢查拼字。",
+  "\"{word}\" is not a keyphrase word. Keyphrases are made for you by Enable cloud saving: check the spelling, or make one there.": "「{word}」不是通關密語中的字詞。通關密語由「啟用雲端存檔」為你產生：請檢查拼字，或在那裡產生一組。",
   "A keyphrase has {n} words after {prefix}; this has {got}.": "通關密語在 {prefix} 之後有 {n} 個字詞；這裡有 {got} 個。",
   "what the server holds for this keyphrase is not a keyphrase's saves": "伺服器為此通關密語保存的內容並不是通關密語存檔",
   "these saves do not open with this keyphrase": "這些存檔無法用此通關密語開啟",

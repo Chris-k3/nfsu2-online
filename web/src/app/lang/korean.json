@@ -611,7 +611,7 @@
   "Changed here and in another browser ({when}). Keep which?": "여기와 다른 브라우저({when}) 양쪽에서 변경됐어요. 어느 쪽을 유지할까요?",
   "Changed here and in another browser. Keep which?": "여기와 다른 브라우저 양쪽에서 변경됐어요. 어느 쪽을 유지할까요?",
   "Type or paste your keyphrase.": "키 문구를 입력하거나 붙여 넣으세요.",
-  "\"{word}\" is not a keyphrase word: check its spelling.": "키 문구에 없는 단어예요: '{word}'. 철자를 확인하세요.",
+  "\"{word}\" is not a keyphrase word. Keyphrases are made for you by Enable cloud saving: check the spelling, or make one there.": "키 문구에 없는 단어예요: '{word}'. 키 문구는 '클라우드 저장 사용'이 만들어 줘요. 철자를 확인하거나 거기서 만드세요.",
   "A keyphrase has {n} words after {prefix}; this has {got}.": "키 문구는 {prefix} 뒤에 단어 {n}개로 되어 있는데, 입력한 것은 {got}개예요.",
   "what the server holds for this keyphrase is not a keyphrase's saves": "서버에 있는 이 키 문구의 데이터가 키 문구 저장 데이터가 아님",
   "these saves do not open with this keyphrase": "이 키 문구로는 이 저장 데이터를 열 수 없음",

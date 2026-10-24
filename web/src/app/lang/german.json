@@ -674,7 +674,7 @@
   "Changed here and in another browser ({when}). Keep which?": "Hier und in einem anderen Browser geändert ({when}). Welche behalten?",
   "Changed here and in another browser. Keep which?": "Hier und in einem anderen Browser geändert. Welche behalten?",
   "Type or paste your keyphrase.": "Gib deine Schlüsselphrase ein oder füge sie ein.",
-  "\"{word}\" is not a keyphrase word: check its spelling.": "„{word}“ ist kein Wort einer Schlüsselphrase: Prüfe die Schreibweise.",
+  "\"{word}\" is not a keyphrase word. Keyphrases are made for you by Enable cloud saving: check the spelling, or make one there.": "„{word}“ ist kein Wort einer Schlüsselphrase. Schlüsselphrasen erstellt „Speichern in der Cloud einschalten“ für dich: Prüfe die Schreibweise oder erstelle dort eine.",
   "A keyphrase has {n} words after {prefix}; this has {got}.": "Eine Schlüsselphrase hat {n} Wörter nach {prefix}; diese hat {got}.",
   "what the server holds for this keyphrase is not a keyphrase's saves": "was der Server für diese Schlüsselphrase hat, sind keine Spielstände einer Schlüsselphrase",
   "these saves do not open with this keyphrase": "diese Spielstände lassen sich mit dieser Schlüsselphrase nicht öffnen",

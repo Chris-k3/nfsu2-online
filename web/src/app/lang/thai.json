@@ -611,7 +611,7 @@
   "Changed here and in another browser ({when}). Keep which?": "มีการเปลี่ยนแปลงทั้งที่นี่และในเบราว์เซอร์อื่น ({when}) จะเก็บฝั่งไหน",
   "Changed here and in another browser. Keep which?": "มีการเปลี่ยนแปลงทั้งที่นี่และในเบราว์เซอร์อื่น จะเก็บฝั่งไหน",
   "Type or paste your keyphrase.": "พิมพ์หรือวางวลีรหัสของคุณ",
-  "\"{word}\" is not a keyphrase word: check its spelling.": "“{word}” ไม่ใช่คำในวลีรหัส: ตรวจสอบการสะกด",
+  "\"{word}\" is not a keyphrase word. Keyphrases are made for you by Enable cloud saving: check the spelling, or make one there.": "“{word}” ไม่ใช่คำในวลีรหัส วลีรหัสสร้างให้โดย “เปิดใช้เซฟบนคลาวด์”: ตรวจสอบการสะกด หรือสร้างวลีรหัสที่นั่น",
   "A keyphrase has {n} words after {prefix}; this has {got}.": "วลีรหัสมี {n} คำต่อจาก {prefix} แต่ที่ใส่มามี {got} คำ",
   "what the server holds for this keyphrase is not a keyphrase's saves": "ข้อมูลที่เซิร์ฟเวอร์เก็บไว้สำหรับวลีรหัสนี้ไม่ใช่เซฟของวลีรหัส",
   "these saves do not open with this keyphrase": "วลีรหัสนี้เปิดเซฟเหล่านี้ไม่ได้",

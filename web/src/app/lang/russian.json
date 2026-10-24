@@ -716,7 +716,7 @@
   "Changed here and in another browser ({when}). Keep which?": "Изменено и здесь, и в другом браузере ({when}). Что оставить?",
   "Changed here and in another browser. Keep which?": "Изменено и здесь, и в другом браузере. Что оставить?",
   "Type or paste your keyphrase.": "Введите или вставьте свою ключевую фразу.",
-  "\"{word}\" is not a keyphrase word: check its spelling.": "«{word}» — не слово ключевой фразы: проверьте написание.",
+  "\"{word}\" is not a keyphrase word. Keyphrases are made for you by Enable cloud saving: check the spelling, or make one there.": "«{word}» — не слово ключевой фразы. Ключевые фразы создаёт для вас «Включить облачные сохранения»: проверьте написание или создайте фразу там.",
   "A keyphrase has {n} words after {prefix}; this has {got}.": "В ключевой фразе {n} слов после {prefix}; здесь — {got}.",
   "what the server holds for this keyphrase is not a keyphrase's saves": "то, что хранится на сервере для этой ключевой фразы, — не сохранения ключевой фразы",
   "these saves do not open with this keyphrase": "эти сохранения не открываются этой ключевой фразой",

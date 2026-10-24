@@ -716,7 +716,7 @@
   "Changed here and in another browser ({when}). Keep which?": "Zmieniono tutaj i w innej przeglądarce ({when}). Które zachować?",
   "Changed here and in another browser. Keep which?": "Zmieniono tutaj i w innej przeglądarce. Które zachować?",
   "Type or paste your keyphrase.": "Wpisz lub wklej swoją frazę dostępu.",
-  "\"{word}\" is not a keyphrase word: check its spelling.": "„{word}” to nie słowo frazy dostępu: sprawdź pisownię.",
+  "\"{word}\" is not a keyphrase word. Keyphrases are made for you by Enable cloud saving: check the spelling, or make one there.": "„{word}” to nie słowo frazy dostępu. Frazy dostępu tworzy dla ciebie „Włącz zapis w chmurze”: sprawdź pisownię albo utwórz tam frazę.",
   "A keyphrase has {n} words after {prefix}; this has {got}.": "Fraza dostępu ma {n} słów po {prefix}; ta ma {got}.",
   "what the server holds for this keyphrase is not a keyphrase's saves": "to, co serwer przechowuje dla tej frazy dostępu, nie jest zapisami frazy dostępu",
   "these saves do not open with this keyphrase": "tych zapisów nie da się otworzyć tą frazą dostępu",

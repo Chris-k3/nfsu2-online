@@ -674,7 +674,7 @@
   "Changed here and in another browser ({when}). Keep which?": "Ændret her og i en anden browser ({when}). Hvilke skal beholdes?",
   "Changed here and in another browser. Keep which?": "Ændret her og i en anden browser. Hvilke skal beholdes?",
   "Type or paste your keyphrase.": "Skriv eller indsæt din nøglefrase.",
-  "\"{word}\" is not a keyphrase word: check its spelling.": "\"{word}\" er ikke et ord i en nøglefrase: tjek stavningen.",
+  "\"{word}\" is not a keyphrase word. Keyphrases are made for you by Enable cloud saving: check the spelling, or make one there.": "\"{word}\" er ikke et ord i en nøglefrase. Nøglefraser laves for dig af Slå gemning i skyen til: tjek stavningen, eller lav en der.",
   "A keyphrase has {n} words after {prefix}; this has {got}.": "En nøglefrase har {n} ord efter {prefix}; denne har {got}.",
   "what the server holds for this keyphrase is not a keyphrase's saves": "det, serveren har for denne nøglefrase, er ikke gemte spil fra en nøglefrase",
   "these saves do not open with this keyphrase": "disse gemte spil kan ikke åbnes med denne nøglefrase",

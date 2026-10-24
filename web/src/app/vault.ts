@@ -58,7 +58,7 @@ export function readPhrase(text: string): { phrase: string } | { bad: string; wh
   if (w[0] === 'nfsu2' && w[1] === 'xyz') w = w.slice(2);
   if (!w.length) return bad(N('Type or paste your keyphrase.'));
   const unknown = w.find(x => !WORD_SET.has(x));
-  if (unknown) return bad(N('"{word}" is not a keyphrase word: check its spelling.'), { word: unknown });
+  if (unknown) return bad(N('"{word}" is not a keyphrase word. Keyphrases are made for you by Enable cloud saving: check the spelling, or make one there.'), { word: unknown });
   if (w.length !== PHRASE_WORDS) return bad(N('A keyphrase has {n} words after {prefix}; this has {got}.'), { n: PHRASE_WORDS, prefix: PREFIX, got: w.length });
   return { phrase: [PREFIX, ...w].join('-') };
 }
