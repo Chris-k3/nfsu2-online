@@ -8,7 +8,8 @@
 //   - publishes a display clock from requestAnimationFrame (HOST_KIND_VSYNC)
 //     that the game's frame pacer locks to;
 //   - reads frames back for the autotest "dump" command and F12 (dump()), as
-//     PNGs made in png-worker.ts.
+//     PNGs made in png-worker.ts, and textures for the game (a frame's rb_*:
+//     the DVD and magazine covers' pictures, which it waits for in LockRect).
 // Triggers: Atomics.waitAsync on the game's doorbell, every rAF, and every
 // finished GPU frame.  The main thread never blocks.
 import type { GameProcess } from '../host/process';
@@ -368,8 +369,12 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
       const sn = enc.snapshot(ce, id);
       if (sn) { log(`[gpu] dump texture ${id}: ${sn.info}`); reads.push({ name: `${dumpName}_tex${id}`, rb: copyOut(ce, sn.tex) }); }
     }
+    // a texture the game waits for (gpu_web.c metal_read_texture), drawn by this very frame
+    const rbId = U[fw + F.rbId], rbTex = rbId ? enc.readable(ce, U[fw + F.rbTex]) : null;
+    const rbRead = rbTex ? copyOut(ce, rbTex) : null;
     device.queue.submit([ce.finish()]);
     enc.afterSubmit();
+    if (rbId) readForGame(rbId, rbRead, U[fw + F.rbDst], U[fw + F.rbPitch], U[fw + F.rbRows]);
     // quick chat's places over the cars in this very frame (GwMarks in its constants, from a module that writes them)
     if (opts.onMarks) {
       const k = (U[fw + F.k] + P.K_MARKS) >>> 2;
@@ -421,6 +426,26 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
     const buf = device.createBuffer({ size: bpr * t.height, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
     ce.copyTextureToBuffer({ texture: t }, { buffer: buf, bytesPerRow: bpr }, [t.width, t.height, 1]);
     return { buf, w: t.width, h: t.height, bpr };
+  };
+
+  // The game's lock buffer gets the texture's rows once the GPU has them, unless the game stopped waiting: it then
+  // cancelled the request in rbWant, and the buffer is not the page's to write any more.  The claim, the bytes and
+  // rbDone happen in one go.
+  const readForGame = (id: number, rb: Readback | null, dst: number, pitch: number, rows: number) => {
+    const answer = (px: ArrayBuffer | null) => {
+      const I = i32();
+      if (Atomics.compareExchange(I, cw + C.rbWant, id, id | P.RB_FLAG) !== id) return;
+      if (px && rb) {
+        const m = new Uint8Array(mem.buffer), n = Math.min(pitch, rb.w * 4);
+        for (let y = 0; y < Math.min(rows, rb.h); y++) m.set(new Uint8Array(px, y * rb.bpr, n), dst + y * pitch);
+      }
+      Atomics.store(I, cw + C.rbDone, px ? id : id | P.RB_FLAG);
+      Atomics.notify(I, cw + C.rbDone);
+    };
+    if (!rb) { log(`[gpu] texture read back for the game: not there`); answer(null); return; }
+    const job = rb.buf.mapAsync(GPUMapMode.READ).then(() => { answer(rb.buf.getMappedRange()); rb.buf.unmap(); },
+      x => { log(`[gpu] texture read back for the game failed: ${x}`); answer(null); }).finally(() => rb.buf.destroy());
+    pending.add(job); job.finally(() => pending.delete(job));
   };
 
   const linear = device.createSampler({ minFilter: 'linear', magFilter: 'linear' });

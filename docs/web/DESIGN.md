@@ -248,7 +248,10 @@ The game thread keeps `com.c` (D3D9 state, shader translation) and records throu
 - The TypeScript side (`web/src/gpu/`) reads those structures **zero-copy** from the wasm memory and uploads arenas with
   one `queue.writeBuffer` each per frame. It keeps pipeline and bind-group caches and encodes the passes. It presents to
   the canvas at native resolution, aspect-fit, and reads frames back for the tests' dumps and F12 screenshots (the
-  PNGs are made in a worker, `png-worker.ts`, off the thread that draws). When the game's device size is
+  PNGs are made in a worker, `png-worker.ts`, off the thread that draws). The one readback the game waits for: a
+  render target it locks to read, the picture of a DVD or magazine cover. The frame drawn so far goes to the page
+  early with the request, and the page writes the texture's rows into the game's lock buffer
+  (`gpu_web.c` `metal_read_texture`). When the game's device size is
   the canvas's (the usual case) the frame draws its screen straight into the canvas texture: no back buffer and no
   composite pass. A frame that copies from the screen before drawing to it keeps the back buffer (it reads the
   previous frame); none of the checked scenes did. `?direct=0` on the test page turns the direct path off.

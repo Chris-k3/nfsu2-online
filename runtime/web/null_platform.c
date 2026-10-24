@@ -128,6 +128,9 @@ WEAK void metal_register_ps(int id, const char *src){ (void)id; (void)src; }
 WEAK void metal_register_vs(int id, const char *src){ (void)id; (void)src; }
 WEAK int  metal_vs_ready(int id){ (void)id; return 1; }
 WEAK void metal_blit(unsigned s, unsigned d){ (void)s; (void)d; }
+WEAK void metal_blit_rect(unsigned s, unsigned d, const int *r){ (void)s; (void)d; (void)r; }
+/* no GPU: the lock buffer keeps what it has */
+WEAK int  metal_read_texture(unsigned id, void *dst, unsigned pitch, unsigned rows){ (void)id; (void)dst; (void)pitch; (void)rows; return 0; }
 WEAK void metal_clear_target_ex(unsigned argb, unsigned flags, float z){ (void)argb; (void)flags; (void)z; }
 WEAK void metal_clear_target(unsigned argb){ metal_clear_target_ex(argb, 1u, 1.f); }
 WEAK void metal_set_blend(unsigned key, float aref){ (void)key; (void)aref; }

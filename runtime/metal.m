@@ -3896,6 +3896,12 @@ void metal_blit(unsigned src_tex, unsigned dst_tex){
     pthread_mutex_unlock(&g_qlock);
 }
 
+/* The web renderer copies only a source rectangle (gpu_web.c) and reads a
+ * lockable render target back for the game (the DVD and magazine covers);
+ * here the whole source is copied and the lock buffer keeps what it has. */
+void metal_blit_rect(unsigned src_tex, unsigned dst_tex, const int *r){ (void)r; metal_blit(src_tex, dst_tex); }
+int metal_read_texture(unsigned id, void *dst, unsigned pitch, unsigned rows){ (void)id; (void)dst; (void)pitch; (void)rows; return 0; }
+
 void metal_clear_target_ex(unsigned argb, unsigned flags, float z);
 void metal_clear_target(unsigned argb){ metal_clear_target_ex(argb, 1u, 1.f); }
 void metal_clear_target_ex(unsigned argb, unsigned flags, float z){

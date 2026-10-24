@@ -18,9 +18,10 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gwproto-'));
 const fields = {
   GwDraw: ['first', 'count', 'tex', 'target', 'kind', 'blend', 'aref', 'depth', 'tex1', 'tex2', 'tex3', 'ps', 'psci', 'vsid', 'rawoff', 'koff',
     'proj', 'smp', 'blit_src', 'bcol', 'cull', 'fogv', 'clr_argb', 'clr_flags', 'clr_z', 'ksz', 'ix_isz', 'ix_ib', 'ix_base'],
-  GwFrame: ['seq', 'dn', 'vn', 'rvn', 'kn', 'pscn', 'draws', 'tv', 'raw', 'k', 'psc', 'rq_end', 'bb_w', 'bb_h', 'clear_argb', 'pool_size', 'dump', 'dump_frame', 'dump_label'],
+  GwFrame: ['seq', 'dn', 'vn', 'rvn', 'kn', 'pscn', 'draws', 'tv', 'raw', 'k', 'psc', 'rq_end', 'bb_w', 'bb_h', 'clear_argb', 'pool_size', 'dump', 'dump_frame', 'dump_label',
+    'rb_id', 'rb_tex', 'rb_dst', 'rb_pitch', 'rb_rows'],
   GwCtl: ['magic', 'version', 'layout', 'size', 'state', 'bell', 'attached', 'rq_head', 'rq_tail', 'rq_ptr', 'rq_cap', 'frames_done', 'view_w', 'view_h',
-    'dpr1000', 'features', 'st_draws', 'st_passes', 'st_enc_us', 'st_errors', 'dumps_done', 'st_pipelines', 'frame'],
+    'dpr1000', 'features', 'st_draws', 'st_passes', 'st_enc_us', 'st_errors', 'dumps_done', 'st_pipelines', 'rb_want', 'rb_done', 'frame'],
   GwVsync: ['tick', 'seq', 'ts_ms', 'period_ms', 'hz', 'visible'],
 };
 let c = '#include <stdio.h>\n#include "gpu_proto.h"\nint main(void){\n';
@@ -28,6 +29,7 @@ for (const [s, fl] of Object.entries(fields)) {
   c += `printf("${s} sizeof %u\\n", (unsigned)sizeof(${s}));\n`;
   for (const f of fl) c += `printf("${s} ${f} %u\\n", (unsigned)offsetof(${s}, ${f}));\n`;
 }
+c += 'printf("RB_FLAG %u\\n", (unsigned)GW_RB_FLAG);\n';
 c += 'printf("LAYOUT %u\\n", (unsigned)GW_LAYOUT);\nprintf("ATTACHED %u\\n", (unsigned)GW_ATTACHED);\nprintf("DETACHED %u\\n", (unsigned)GW_DETACHED);\n';
 c += 'printf("K_HL %u\\n", (unsigned)GW_K_HL);\nprintf("HL_BYTES %u\\n", (unsigned)sizeof(GwHL));\nprintf("HL_MAX %u\\n", (unsigned)GW_HL_MAX);\nprintf("KWIN_ROWS %u\\n", (unsigned)GW_KWIN_ROWS);\n';
 c += 'printf("K_MARKS %u\\n", (unsigned)GW_K_MARKS);\nprintf("MARKS_BYTES %u\\n", (unsigned)sizeof(GwMarks));\nprintf("MARKS_MAX %u\\n", (unsigned)GW_MARKS_MAX);\nprintf("MARKS_MAGIC %u\\n", (unsigned)GW_MARKS_MAGIC);\nreturn 0; }\n';
@@ -57,6 +59,7 @@ eq('GwVsync.tick', C['GwVsync tick'] / 4, T.V.tick); eq('GwVsync.seq', C['GwVsyn
 eq('GwVsync.ts_ms', C['GwVsync ts_ms'] / 8, T.V.tsF64); eq('GwVsync.period_ms', C['GwVsync period_ms'] / 8, T.V.periodF64);
 eq('GwVsync.hz', C['GwVsync hz'] / 4, T.V.hz); eq('GwVsync.visible', C['GwVsync visible'] / 4, T.V.visible);
 eq('layout word', C['LAYOUT'], T.LAYOUT);
+eq('GW_RB_FLAG', C['RB_FLAG'], T.RB_FLAG);
 eq('GW_ATTACHED', C['ATTACHED'], T.ATTACHED); eq('GW_DETACHED', C['DETACHED'], T.DETACHED);
 eq('GW_K_HL', C['K_HL'], T.K_HL); eq('GwHL size', C['HL_BYTES'], T.HL_BYTES); eq('GW_HL_MAX', C['HL_MAX'], T.HL_MAX);
 eq('GW_KWIN_ROWS', C['KWIN_ROWS'], T.KWIN_ROWS);
