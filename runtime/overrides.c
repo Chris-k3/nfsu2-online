@@ -930,6 +930,84 @@ void sub_0061c600(CPU *c){
     sub_0061c600_orig(c);
 }
 
+/* --- sub_00631e20(list, ride, ...): a ride's texture names, cdecl -----------
+ * A ride's textures by name hash, into two lists of 69 (list +0 and +0x114,
+ * their counts at +0x228 and +0x22c): for the car loader's Load (0x63AE70,
+ * the loader's copy of the ride, entry +0x20), which takes a reference to
+ * each name on the loader's list of them (0x633C30, 0x8A32C0) and lets them
+ * go when the ride is unloaded (0x63A000), and for a car's render info
+ * (0x636840: the car's own ride, the player's that of their career).  Every
+ * add skips a name the list has; a full list's add was meant to add nothing
+ * but returns the count, so from the 70th different name on every add
+ * doubles the count (0x610530 and some thirty copies of it inline).  A ride
+ * with many different decals gets there: up to 56 (7 places of 8,
+ * DECAL_HOOD_TEX0 .. DECAL_RIGHT_QUARTER_TEX7) after its other textures (a
+ * 350Z with shop rims: 25).  With 56, the count was 69 x 2^12 = 282,624 and
+ * Load took references for that many "names" read from past the list,
+ * writing past it, and froze; with a few too many it corrupts less at once,
+ * but the references written past the list are let go twice or never, and
+ * the loader's list breaks: the 2026-10-24 report froze in a later load
+ * walking it forever (0x633CA0), in free roam after an hour of friends' cars
+ * coming and going (any player's car with more than about 44 different
+ * decals).  Here a run without the ride's decals (the 7 places' shapes, ride
+ * +0x660, off for it) counts the other textures, and the decals that would
+ * not fit are off the ride while the list is made (the first ones, place by
+ * place, stay), then back on it: the ride keeps them, its list has no names
+ * for them.  It keeps locals in its arguments' places, so they are put back
+ * for the second run.  tests/scripts/roam_crowd_decals.txt.
+ * NFSU2_TEST_TEXLIST_FULL=1 (test aid): the game's way. */
+#define TEXLIST_MAX     0x45u
+#define RIDE_DECALZONES 0x660u        /* RideInfo: the 7 decal places' shapes (DECAL_HOOD ..), a part each */
+#define RIDE_DECALS     0x714u        /* RideInfo: each place's 8 decals (+0x20 a place), a part each */
+void sub_00631e20_orig(CPU *c);
+void sub_00631e20(CPU *c){
+    static int full = -1;
+    if (full < 0){ const char *e = getenv("NFSU2_TEST_TEXLIST_FULL"); full = e && *e == '1'; }
+    uint32_t esp0 = c->esp, list = MR32(esp0 + 4u), ride = MR32(esp0 + 8u);
+    uint32_t seen[56], off[56], offp[56]; int nd = 0, noff = 0;
+    for (uint32_t z = 0; z < 7u; z++){
+        if (!MR32(ride + RIDE_DECALZONES + 4u * z)) continue;
+        for (uint32_t i = 0; i < 8u; i++){
+            uint32_t p = MR32(ride + RIDE_DECALS + 0x20u * z + 4u * i), k = 0;
+            while (p && k < (uint32_t)nd && seen[k] != p) k++;
+            if (p && k == (uint32_t)nd) seen[nd++] = p;
+        }
+    }
+    if (full || !nd){ sub_00631e20_orig(c); return; }
+    uint32_t arg[4], zone[7];
+    for (uint32_t i = 0; i < 4u; i++) arg[i] = MR32(esp0 + 4u + 4u * i);
+    for (uint32_t z = 0; z < 7u; z++){ zone[z] = MR32(ride + RIDE_DECALZONES + 4u * z); MR32(ride + RIDE_DECALZONES + 4u * z) = 0; }
+    sub_00631e20_orig(c);
+    for (uint32_t z = 0; z < 7u; z++) MR32(ride + RIDE_DECALZONES + 4u * z) = zone[z];
+    uint32_t others = MR32(list + 0x228u);
+    int room = others < TEXLIST_MAX ? (int)(TEXLIST_MAX - others) : 0, kept = 0;
+    if (nd > room){
+        for (uint32_t z = 0; z < 7u; z++){
+            if (!zone[z]) continue;
+            for (uint32_t i = 0; i < 8u; i++){
+                uint32_t a = ride + RIDE_DECALS + 0x20u * z + 4u * i, p = MR32(a), k = 0;
+                if (!p) continue;
+                while (k < (uint32_t)kept && seen[k] != p) k++;
+                if (k < (uint32_t)kept) continue;                    /* a decal already kept: no name more */
+                if (kept < room) seen[kept++] = p;
+                else { off[noff] = a; offp[noff++] = p; MR32(a) = 0; }
+            }
+        }
+        fprintf(stderr, "[textures] f=%ld a ride with %d different decals and %u other textures: %d decal(s) left out of "
+                "its texture list (it holds %u)\n", autotest_frame(), nd, others, nd - kept, TEXLIST_MAX);
+    }
+    c->esp = esp0;
+    for (uint32_t i = 0; i < 4u; i++) MR32(esp0 + 4u + 4u * i) = arg[i];
+    sub_00631e20_orig(c);
+    for (int i = 0; i < noff; i++) MR32(off[i]) = offp[i];
+    uint32_t n1 = MR32(list + 0x228u), n2 = MR32(list + 0x22cu);
+    if (n1 > TEXLIST_MAX || n2 > TEXLIST_MAX){
+        fprintf(stderr, "[textures] f=%ld a ride's texture lists still count %u and %u: cut to %u\n", autotest_frame(), n1, n2, TEXLIST_MAX);
+        if (n1 > TEXLIST_MAX) MR32(list + 0x228u) = TEXLIST_MAX;
+        if (n2 > TEXLIST_MAX) MR32(list + 0x22cu) = TEXLIST_MAX;
+    }
+}
+
 /* --- a car's shadow outline: sub_0060cee0(points, n, comparator), cdecl ----
  * 0x60D000 projects a car's shadow mesh onto the ground and keeps the convex
  * hull, in two halves per car and frame: here the CRT qsort (0x75CC70) of the
