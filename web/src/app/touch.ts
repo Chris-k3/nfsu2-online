@@ -132,7 +132,7 @@ export class TouchControls {
     this.knobEl = document.createElement('div'); this.knobEl.className = 'stick-knob';
     this.baseEl.append(this.knobEl); this.stickEl.append(this.baseEl);
     root.append(this.stickEl);
-    // inner: an icon; or text, the words on it ("\n": a second line)
+    // inner: an icon (Nitro's is a picture, style.css); or text, the words on it ("\n": a second line)
     const add = (id: string, label: string, inner: string | { text: string }, c: Partial<Ctl>, cls = '') => {
       const el = document.createElement('div');
       el.className = `tc ${cls}`.trim(); el.dataset.ctl = id;
@@ -155,7 +155,7 @@ export class TouchControls {
     add('right', N('Steer right'), path(ICONS.right), { key: 'ArrowRight', group: 'steer' }, 'big');
     add('brake', N('Brake'), { text: N('Brake') }, { key: 'ArrowDown', group: 'pedal' }, 'big');
     add('gas', N('Gas'), { text: N('Gas') }, { key: 'ArrowUp', group: 'pedal' }, 'big');
-    add('nitro', N('Nitrous'), { text: N('Nitro') }, { bit: 1 << PAD_LB }, 'round');
+    add('nitro', N('Nitrous'), '<i class="nitro" aria-hidden="true"></i>', { bit: 1 << PAD_LB }, 'round');
     add('hb', N('Handbrake'), { text: N('Hand\nbrake') }, { bit: 1 << PAD_RB }, 'round');
     add('down', N('Gear down'), path(ICONS.down), { bit: 1 << PAD_X }, 'gear');
     add('up', N('Gear up'), path(ICONS.up), { bit: 1 << PAD_A }, 'gear');

@@ -24,8 +24,8 @@ const opts = {
   },
   outdir: DIST, bundle: true, format: 'esm', target: ['chrome140', 'firefox145'], sourcemap: true, minify: !watch && !process.env.NOMINIFY,
   logLevel: 'info', write: false,
-  // registry-defaults.txt and similar seeds go into the page as strings
-  loader: { '.txt': 'text' },
+  // registry-defaults.txt and similar seeds go into the page as strings, the stylesheet's pictures as data: URLs
+  loader: { '.txt': 'text', '.png': 'dataurl' },
 };
 for (const [k, v] of Object.entries(opts.entryPoints)) if (!fs.existsSync(v)) delete opts.entryPoints[k];
 

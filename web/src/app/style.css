@@ -392,6 +392,8 @@ html:has(> body > .stage:not([hidden])) { overflow: hidden; }
 .tc.big { bottom: var(--b); border-radius: 16px; }
 .tc.big svg { width: 32px; height: 32px; }
 .tc.round { border-radius: 50%; font-size: 14px; line-height: 16px; }
+/* Nitro: the nitrous bottle of the game's performance shop (Upscaled HUD's copy, white), a mask in the control's colour */
+.tc .nitro { width: 48px; height: 17px; background: currentColor; mask: url(./nitro.png) center / contain no-repeat; }
 .tc.pill { height: 40px; padding: 0 20px; border-radius: 20px; }
 .tc[data-ctl="pause"] { left: calc(var(--l) + 56px); }
 .tc[data-ctl="camera"] { left: calc(var(--l) + 112px); }
