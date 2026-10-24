@@ -62,7 +62,22 @@ pub(crate) const TIMED_MAX: usize = 16 + 16 + 12 + 4;
 /// a free-roam ping or pong to a page that takes compact bundles: queued with the time (conn.rs `Out::Dgram`), so that
 /// its bundle can move its send time on by its wait (`waited`)
 pub(crate) fn timed(data: &[u8]) -> bool {
-    data.len() >= 40 && data.len() <= TIMED_MAX && data[1] == ROAM_OK && matches!(data[16 + 5], RC_PING | RC_PONG)
+    stamp_at(data).is_some()
+}
+
+/// where a ping's t0 or a pong's t2 is in its frame, when the frame holds it and the CRC after it: `mark` checks only
+/// a datagram's length field and CRC, so a pong of 40 bytes is marked too, and its t2 would be past its end (the fourth
+/// security audit's LAN-1: one such pong to the broadcast address panicked the writer of every compact page)
+fn stamp_at(data: &[u8]) -> Option<usize> {
+    if data.len() < 16 + 6 || data.len() > TIMED_MAX || data[1] != ROAM_OK {
+        return None;
+    }
+    let at = 16 + match data[16 + 5] {
+        RC_PING => 16,
+        RC_PONG => 24,
+        _ => return None,
+    };
+    (at + 4 + 4 <= data.len()).then_some(at)
 }
 
 /// A ping's send time (t0, which its answer brings back) or a pong's (t2) moved on by the time it waited for the bundle
@@ -72,13 +87,13 @@ pub(crate) fn timed(data: &[u8]) -> bool {
 /// car up to 40 ms ahead (roam-pair, 2026-10-24: 0.16-0.31 m off on average against 0.06-0.09 m).  The CRC is left as
 /// it was: an entry of free roam's leaves it out, and the page makes it again (`plan` gives every `timed` one F_ROAM).
 pub(crate) fn waited<'a>(data: &'a [u8], us: u32, into: &'a mut [u8; TIMED_MAX]) -> &'a [u8] {
-    if us == 0 || us >= 1_000_000 || !timed(data) {
+    let Some(at) = stamp_at(data) else { return data };
+    if us == 0 || us >= 1_000_000 {
         return data;
     }
     let m = &mut into[..data.len()];
     m.copy_from_slice(data);
-    let at = 16 + if data[16 + 5] == RC_PING { 16 } else { 24 };
-    let t = u32::from_le_bytes([m[at], m[at + 1], m[at + 2], m[at + 3]]).wrapping_add(us);
+    let t =u32::from_le_bytes([m[at], m[at + 1], m[at + 2], m[at + 3]]).wrapping_add(us);
     m[at..at + 4].copy_from_slice(&t.to_le_bytes());
     m
 }
@@ -545,6 +560,30 @@ pub(crate) mod tests {
         }
         assert_eq!(got[2], snap.to_vec().iter().enumerate().map(|(i, &x)| if i == 1 { 0 } else { x }).collect::<Vec<u8>>());
         assert_eq!(t(&got[3], 16), 1_000_000, "no wait, no change");
+    }
+
+    // a ping or pong of every length the switch marks: one too short for its time comes as it was, never read or
+    // written past its end (the fourth security audit's LAN-1: a pong of 40 bytes panicked the writer)
+    #[test]
+    fn a_ping_or_pong_too_short_for_its_time_comes_as_it_was() {
+        let (own, src) = (BASE | 0x0305, BASE | 0x0102);
+        let mut into = [0u8; TIMED_MAX];
+        for (kind, times) in [(RC_PING, 4), (RC_PONG, 12)] {
+            for n in 0..=12 {
+                let f = mark(&frame(1, src, BROADCAST, ROAM_PORT, ROAM_PORT, &roam(kind, &vec![7; n])));
+                assert_eq!(f[1], ROAM_OK, "marked: {n} bytes");
+                assert_eq!(timed(&f), n >= times, "type {kind}, {n} bytes");
+                let d = waited(&f, 2500, &mut into).to_vec();
+                if n < times {
+                    assert_eq!(d, f.to_vec(), "type {kind}, {n} bytes: as it was");
+                }
+                let mut b = vec![KIND_COMPACT, 0, 0, 0];
+                entry(&mut b, &d, src, BROADCAST, own, Some(&mut Refs::default()));
+                let got = unpack_with(&b, own, Some(&mut HashMap::new()));
+                assert_eq!(got.len(), 1);
+                assert!(roam_ok(&got[0][16..]), "type {kind}, {n} bytes: a CRC that checks out");
+            }
+        }
     }
 
     // to a page that takes car states by their fields: a friend's SNAP goes so and reaches the game rounded, everything
