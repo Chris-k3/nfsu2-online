@@ -1,10 +1,10 @@
-// Drift mode in free roam (runtime/drift.c): F2 in the game turns the game's own drift-event handling, drift camera
+// Drift mode in free roam (runtime/drift.c): X in the game turns the game's own drift-event handling, drift camera
 // and drift scoring on and off.  The free-roam HUD has no place for the score (the drift event's panel is HUD_Drift's),
 // so while drift mode is on the page shows that panel -- Best, the multiplier with the points its next level needs,
 // Total -- under the game's Bank panel and as wide, the drift event's DRIFT popup with the points of each drift banked,
 // where free roam's HUD shows its own popups (the drift event's place, the middle, is free roam's arrow's), and a note
-// at each F2: on, off, or that it is for free roam.  Not over a dialog of the page's.  It reads the game's status (runtime/web/status_web.c), as the pause hint does:
-// drift (1 chosen, 2 on now, 4 the last F2 was elsewhere), drift_key (F2 presses), drift_x, drift_gain, drift_total,
+// at each X: on, off, or that it is for free roam.  Not over a dialog of the page's.  It reads the game's status (runtime/web/status_web.c), as the pause hint does:
+// drift (1 chosen, 2 on now, 4 the last X was elsewhere), drift_key (X presses), drift_x, drift_gain, drift_total,
 // drift_best.
 import type { GameSession } from './game';
 import { t } from './i18n';
@@ -75,7 +75,7 @@ export class DriftPanel {
         const d = st.get('drift')!, k = st.get('drift_key') ?? 0;
         if (this.keys >= 0 && k !== this.keys) {
           this.deps.toast(d & 4 ? t('Drift mode only works in free roam') : d & 1 ? t('Drift mode: on') : t('Drift mode: off'), 2500);
-          this.deps.log(`[app] drift mode: F2 ${d & 4 ? 'outside free roam' : d & 1 ? 'on' : 'off'}`);
+          this.deps.log(`[app] drift mode: X ${d & 4 ? 'outside free roam' : d & 1 ? 'on' : 'off'}`);
         }
         this.keys = k;
         this.on = (d & 2) !== 0;

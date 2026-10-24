@@ -1,7 +1,7 @@
 # Drift mode in free roam (runtime/drift.c), one instance (--page app): new career -> prologue free roam, onto the
-# straight south of the start, F2 on the page: the drift-event switch and the drift camera (view 4).  A handbrake
+# straight south of the start, X on the page: the drift-event switch and the drift camera (view 4).  A handbrake
 # flick at the bend banks a drift (the log: "[drift] ... a drift of N"; the page's panel, log SHOT drift), the pause
-# menu switches the handling off and back on, and F2 off gives the view back.  The trace: the switch, the view,
+# menu switches the handling off and back on, and X off gives the view back.  The trace: the switch, the view,
 # STYLE_DRIFT (state, pending, total), the DriftCar (multiplier, its next level's points, rate) and the car's slip.
 #   node web/tools/roam-pair.mjs --solo --page app --a Drv:roam_drift.txt
 0     tapuntil RETURN MC_Background.fng 120 4000
@@ -25,7 +25,7 @@
 +300  teleport 1695.0 -845.0 24.6 0xb82e
 +120  expect i:0x890104 == 0
 +0    expect i:0x83aa74 == 3
-+0    log KEY F2
++0    log KEY KeyX
 +30   expect i:0x890104 == 1
 +0    expect i:0x83aa74 == 4
 +0    trace 5 sw=i:0x890104 view=i:0x83aa74 st=i:[[[[0x890118]+0xbd0]+0x1d4]]+0x14 pend=[[[[0x890118]+0xbd0]+0x1d4]]+0x24 tot=[[[[0x890118]+0xbd0]+0x1d4]]+0x2c lvl=i:[[[0x890118]+0xbd0]+0x1d8]+0x1c gain=i:[[[0x890118]+0xbd0]+0x1d8]+0x20 rate=[[[0x890118]+0xbd0]+0x1d8]+0x34 wt=i:0x86518c spd=[[0x8900ac]+4]+0x42c vx=[[0x8900ac]+4]+0x70 vy=[[0x8900ac]+4]+0x74 fx=[[0x8900ac]+4]+0x90 fy=[[0x8900ac]+4]+0x94
@@ -51,7 +51,7 @@
 +0    tap ESCAPE
 +60   expect i:0x890104 == 1
 +0    log SHOT back
-+0    log KEY F2
++0    log KEY KeyX
 +30   expect i:0x890104 == 0
 +0    expect i:0x83aa74 == 3
 +0    log SHOT off

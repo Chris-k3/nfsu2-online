@@ -83,7 +83,7 @@ rev in the countdown) and step aside for menus, the pause menu and free roam's c
 | R | Respawn |
 | H, J | Hydraulics, with the Hydraulics part (Car Specialties): hold H to pressurize or J to bounce, then the arrows pick the corners; under 10 mph |
 | N | Horn (free roam and races with other players) |
-| F2 | Drift mode in free roam: drift handling, the drift camera and a drift score (see below) |
+| X | Drift mode in free roam: drift handling, the drift camera and a drift score (see below) |
 | 1 to 4, then 1 to 4 | Quick chat in free roam with other players: a group, then a phrase (see section 6) |
 | M, Tab | Map, messages |
 | Esc or P | Pause; Esc also goes back in menus |
@@ -96,10 +96,10 @@ rev in the countdown) and step aside for menus, the pause menu and free roam's c
 The start page shows these keys under **Controls**, and F9, Controls shows them while you play.
 
 - **Change the keys:** in the game, Options, Controls. The horn stays on N (the game has no horn of its own).
-- **Drift mode (F2):** in free roam, the car handles as in the game's drift races (its drift tuning and the drift
+- **Drift mode (X):** in free roam, the car handles as in the game's drift races (its drift tuning and the drift
   assist), the camera is the drift races' (C still goes through all of them), and drifts score as there: the drift
   races' panel (Best, the multiplier with the points its next level needs, Total) shows under Bank, and DRIFT with
-  the points of each drift. Just for fun: the points never go into the bank or the career. F2 again turns it off and
+  the points of each drift. Just for fun: the points never go into the bank or the career. X again turns it off and
   gives your camera back. It is off in races and outruns and comes back in free roam after them.
 - **Mouse:** works in the menus; in the garage, drag with the middle button (the wheel) held to turn the car, as in
   the PC game. On the ECU and Turbo tuning graphs the wheel moves the dot of the column under the pointer, as in the

@@ -1,4 +1,4 @@
-/* drift.c -- drift mode in free roam: F2 turns on the game's own drift-event
+/* drift.c -- drift mode in free roam: X turns on the game's own drift-event
  * handling, its drift camera and its drift scoring while the player drives
  * around the city, and off again.
  *
@@ -66,14 +66,14 @@
  * the map, a message or a race card over the HUD switches the handling off
  * until it is gone (a race set up from a race card never sees it); so do an
  * outrun (kind 7) and leaving free roam, which give the camera back too.
- * Drift mode stays chosen and comes back in free roam.  F2 switches it in
+ * Drift mode stays chosen and comes back in free roam.  X switches it in
  * free roam's world (paused too: it comes on when the driving does), and
  * anywhere else does nothing but tell the page.
  *
  * The page (web/src/app/drift.ts) reads the status table (status_web.c):
  *   drift        bits: 1 drift mode chosen, 2 on now (the panel shows),
- *                4 the last F2 was outside free roam
- *   drift_key    F2 presses so far (the page's note on each)
+ *                4 the last X was outside free roam
+ *   drift_key    X presses so far (the page's note on each)
  *   drift_x      the multiplier (1-5)       drift_gain   its next level's points (0 at 5)
  *   drift_total  points banked in drift mode since the game started
  *   drift_best   the most of one drift */
@@ -90,7 +90,7 @@ long autotest_frame(void);
 __attribute__((weak)) int host_status_slot(const char *name){ (void)name; return -1; }
 __attribute__((weak)) void host_status_set_n(const int *slot, const double *value, int n){ (void)slot; (void)value; (void)n; }
 
-#define DIK_F2         0x3cu
+#define DIK_X          0x2du         /* in none of the game's key maps (its F2 is the map) */
 #define HOOK_RET       0x00581475u   /* the main-loop hook's return address, as guest calls see it */
 #define G_FLOW         0x008654a4u   /* 6: in the world */
 #define G_GAMEMODE     0x00850078u   /* 1 career, 8 Online, 0x200 LAN */
@@ -144,7 +144,7 @@ static uint32_t gcall(CPU *c, uint32_t fn, uint32_t ecx, int n, const uint32_t *
 }
 
 static struct {
-    int want, on, cam, note;          /* chosen, the switch set now, our camera, the last F2 outside free roam */
+    int want, on, cam, note;          /* chosen, the switch set now, our camera, the last X outside free roam */
     uint32_t saved;                   /* the view before the drift camera */
     uint32_t style;                   /* STYLE_DRIFT's style, and its total when last seen */
     float last;
@@ -153,8 +153,8 @@ static struct {
     int slot[6]; double val[6]; int slots;
 } D;
 
-/* F2 presses since the last frame, from the keyboard's events (a tap between frames counts) */
-static int f2_presses(void){
+/* X presses since the last frame, from the keyboard's events (a tap between frames counts) */
+static int x_presses(void){
     uint32_t head = kbd_ev_head();
     if (!D.kinit){ D.kinit = 1; D.kseq = head; return 0; }
     int n = 0;
@@ -162,7 +162,7 @@ static int f2_presses(void){
         KbdEv e;
         int r = kbd_ev_get(D.kseq, &e);
         if (r == 0) break;
-        if (r > 0 && e.dik == DIK_F2 && e.down) n++;
+        if (r > 0 && e.dik == DIK_X && e.down) n++;
     }
     return n;
 }
@@ -282,11 +282,11 @@ static void publish(void){
 
 void drift_frame(CPU *c){
     int world = roam_world(), top = world && hud_on_top(), drive = top && MR32(race()) == 4u;
-    for (int n = f2_presses(); n > 0; n--){
+    for (int n = x_presses(); n > 0; n--){
         D.keys++;
         D.note = !world;
-        if (world){ D.want = !D.want; fprintf(stderr, "[drift] f=%ld drift mode %s (F2)\n", autotest_frame(), D.want ? "on" : "off"); }
-        else fprintf(stderr, "[drift] f=%ld F2 outside free roam: nothing\n", autotest_frame());
+        if (world){ D.want = !D.want; fprintf(stderr, "[drift] f=%ld drift mode %s (X)\n", autotest_frame(), D.want ? "on" : "off"); }
+        else fprintf(stderr, "[drift] f=%ld X outside free roam: nothing\n", autotest_frame());
     }
     int on = D.want && drive;
     if (on != D.on){
