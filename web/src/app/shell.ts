@@ -24,7 +24,7 @@ import { codeOf, dateLocale, language as pageLanguage, lastLanguage, LANGUAGES, 
 import { loadGame, serverRev, type Loaded } from './loader';
 import { claimInstance } from './instance';
 import { LogRing, downloadBlob, stamp } from './logs';
-import { enterFullscreen, exitFullscreen, isFullscreen, keepScreenOn, measureRefresh, settledSize, trackCanvasSize } from './display';
+import { canFullscreen, enterFullscreen, exitFullscreen, fromHomeScreen, homeScreenInstead, isFullscreen, keepScreenOn, measureRefresh, settledSize, trackCanvasSize } from './display';
 import { deviceDefaults, markTouch, noPinchZoom, padSeen, touchFirst } from './device';
 import { markPad, padPress, pageDialog } from './padnav';
 import { controlsSheet, type ControlsSheet } from './controls';
@@ -362,9 +362,11 @@ async function startGame() {
   untrack = trackCanvasSize(canvas);
   awake = keepScreenOn(logLine);
   $('#stage-menu').hidden = !touchFirst();
-  setPhase('starting', T('Starting'), full ? T('Going full screen and starting the game.') : T('Starting the game.'));
+  setPhase('starting', T('Starting'), full && canFullscreen() ? T('Going full screen and starting the game.') : T('Starting the game.'));
   let fsNote = '';
-  if (full) {
+  // an iPhone has no full screen for the page (from the Home Screen it has no browser bars to hide)
+  if (full && homeScreenInstead()) fsNote = t(HOME_SCREEN);
+  else if (full && canFullscreen()) {
     const fs = await enterFullscreen(stage);
     if (!fs.ok) fsNote = t('Full screen was not allowed here; {menu} has it.', { menu: menuName() });
     else if (!fs.locked && !touchFirst()) fsNote = t('Esc leaves full screen in this browser (no keyboard lock).');
@@ -527,8 +529,11 @@ function stopFatal(what: string, code?: string) {
   s.terminate();
 }
 
+/** what to do on an iPhone, whose browsers have no full screen for a page */
+const HOME_SCREEN = N('On an iPhone a web page cannot go full screen: add this page to the Home Screen (in the Share menu) and play from its icon.');
 function toggleFullscreen() {
   if (isFullscreen()) exitFullscreen();
+  else if (homeScreenInstead()) toast(t(HOME_SCREEN), 8000);
   else void enterFullscreen($('#stage')).then(r => { if (!r.ok) toast(t('Full screen was not allowed.'), 4000); });
 }
 
@@ -799,7 +804,9 @@ async function screenshot() {
 function openMenu() {
   const m = $<HTMLDialogElement>('#menu');
   if (m.open) { m.close(); return; }
-  m.querySelector<HTMLButtonElement>('[data-act="fullscreen"]')!.textContent = isFullscreen() ? t('Leave full screen') : t('Full screen');
+  const fsButton = m.querySelector<HTMLButtonElement>('[data-act="fullscreen"]')!;
+  fsButton.textContent = isFullscreen() ? t('Leave full screen') : t('Full screen');
+  fsButton.hidden = !canFullscreen() && fromHomeScreen();         // from an iPhone's Home Screen: already without bars
   m.querySelector<HTMLButtonElement>('[data-act="fps"]')!.textContent = fpsLabel(fps.mode);
   const solid = m.querySelector<HTMLButtonElement>('[data-act="solid"]')!;
   solid.hidden = solidCars === null || !session?.net?.solid;

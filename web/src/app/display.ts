@@ -54,6 +54,21 @@ export function settledSize(canvas: HTMLCanvasElement, ms = 400): Promise<{ w: n
 
 export function isFullscreen(): boolean { return !!document.fullscreenElement; }
 
+/** whether this browser shows a page's element full screen (Safari on an iPhone does not: only its videos go full screen) */
+export function canFullscreen(): boolean {
+  return typeof document.documentElement.requestFullscreen === 'function' && document.fullscreenEnabled !== false;
+}
+
+/** the page started from the Home Screen (added there, or an installed web app): no browser bars around it */
+export function fromHomeScreen(): boolean {
+  return matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches || (navigator as { standalone?: boolean }).standalone === true;
+}
+
+/** an iPhone's browser: no full screen for the page, but the page added to the Home Screen opens without the browser's bars */
+export function homeScreenInstead(): boolean {
+  return /iPhone|iPod/.test(navigator.userAgent) && !canFullscreen() && !fromHomeScreen();
+}
+
 /** Full screen on `el` (needs a user gesture), then Keyboard Lock. */
 export async function enterFullscreen(el: HTMLElement): Promise<{ ok: boolean; locked: boolean; error?: string }> {
   try {
