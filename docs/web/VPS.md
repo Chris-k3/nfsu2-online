@@ -404,6 +404,33 @@ own files and keeps its layout. The mod's own installer and plugin are not used.
 A player's browser fetches the pack only with Upscaled; its blocks compress to about 5 MB ("Preload the game data"
 counts its 101 MB). Without `TEXPACKS` Upscaled plays with the game's own textures.
 
+## Smaller music
+
+The game's music, `pfdata/MusicSFx.mus`, is 510 MB: 27 of its 43 songs are 4-bit ADPCM at 382 kbit/s, and 30 of its
+73 streams are never played (copies that the game's song table does not name). `tools/musicpack.py` rebuilds it with
+those 27 songs in EALayer3, the MP3 variant the game already plays its other 16 songs in, and without the unused
+streams: 235 MB, with a `MusicSFx.mpf` that points at the songs' new places. The game plays it with its own decoder
+and no change to the port. Every song keeps its length to the sample, its first 47 and last 100 samples are the
+original's (as in EA's own EALayer3 songs), and the 16 EALayer3 songs are the same bytes. The new songs are LAME VBR
+`-V 1` (231 kbit/s on average), which the PEAQ measure rates as imperceptible against the ADPCM (-0.17 to -0.02,
+0 being no difference). Over the network the file takes 231 MB instead of 425 MB, and a song while it plays 24 %
+fewer bytes (206 instead of 271 kbit/s on average).
+
+1. `apt install lame` (LAME 3.100: the same game folder and LAME make the same bytes).
+2. `tools/musicpack.py "<your game folder>" <an empty folder>` (about a minute on 12 cores) writes `MusicSFx.mus`
+   and `MusicSFx.mpf` there. It reads the game folder and never writes to it.
+3. Copy both to the VPS next to the game folder, not into it: `rsync -t MusicSFx.mus MusicSFx.mpf
+   root@<vps>:/srv/nfsu2/music-new/`.
+4. On the VPS, keep the originals and move the new pair in with one command, so no page sees one new file and one
+   old: `cd /srv/nfsu2 && mkdir -p music-orig && cp -a game/pfdata/MusicSFx.* music-orig/ && chmod 644
+   music-new/* && mv music-new/MusicSFx.mus music-new/MusicSFx.mpf game/pfdata/`, then open
+   `https://<your site>/data-manifest?refresh`. Going back is the same `mv` from `music-orig`.
+
+A player who is in a game at that moment keeps the old song table: when their browser asks for a part of the music it
+has not kept and Cloudflare has not either, the music stops or turns to noise until they reload the page (tested: the
+game itself carries on). A quiet hour keeps that to a few players. Browsers keep the old file's blocks they already
+have (the cache names a file by its size and time) until the player deletes the game data.
+
 ## How it runs
 
 - **The VPS's own network.** Caddy and the server use the VPS's network (`network_mode: host`), as they would
