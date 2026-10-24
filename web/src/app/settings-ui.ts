@@ -131,9 +131,9 @@ export interface CrewControl {
 }
 
 /**
- * A crews control into ctl: a row of chips, one per crew in the player's order (its colour in the game, a button that
- * opens the palette under the chips; its name, how many are in free roam in it when the server says, and Leave), and
- * under them a value box with Join in it (or Enter).  Join waits for a name that can join (crews.ts checkCrew), and the note
+ * A crews control into ctl: one line of pills that wraps, a chip per crew in the player's order (its colour in the
+ * game, a button that opens the palette under the line; its name, how many are in free roam in it when the server
+ * says, and Leave), then a value box with Join in it (or Enter).  Join waits for a name that can join (crews.ts checkCrew), and the note
  * under the box says why one cannot; with 4 crews the box waits for one to be left.  A Leave keeps the others'
  * colours; a Join takes the first colour no crew has.  A line under the chips names a crew counted with more than
  * CREW_BIG players (showCrewCounts).  Returns the box's field.
@@ -158,7 +158,8 @@ export function crewControl(o: CrewControl, ctl: HTMLElement): HTMLInputElement 
     li.append(dot, text, leave);
     ul.append(li);
   });
-  /** crew i's palette, under the crews (the chips stay where they are), one open at a time: a radio group of the 8
+  const line = document.createElement('div'); line.className = 'crew-line';
+  /** crew i's palette, under the line (the chips stay where they are), one open at a time: a radio group of the 8
    *  colours, its own marked; the arrows move along it, Enter, Space or a tap picks one and closes it, Esc (or the dot
    *  again) closes it.  Esc stays here: in the menu's Crews popup it does not close the popup too. */
   const palette = (dot: HTMLButtonElement, c: Crew, i: number, what: string) => {
@@ -194,7 +195,7 @@ export function crewControl(o: CrewControl, ctl: HTMLElement): HTMLInputElement 
       } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
     };
     g.append(...sw);
-    ul.after(g);
+    line.after(g);
     sw.find(b => b.tabIndex === 0)!.focus();
   };
   const big = document.createElement('p'); big.className = 'set-note warn crews-big'; big.hidden = true;
@@ -222,7 +223,8 @@ export function crewControl(o: CrewControl, ctl: HTMLElement): HTMLInputElement 
   inp.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); add(); } };
   join.onclick = add;
   box.append(inp, join);
-  ctl.append(ul, big, box, note);
+  line.append(ul, box);
+  ctl.append(line, big, note);
   if (o.counts) showCrewCounts(ctl, o.counts);
   check();
   return inp;
@@ -233,7 +235,7 @@ export function crewControl(o: CrewControl, ctl: HTMLElement): HTMLInputElement 
  *  than CREW_BIG: the server's hub no longer links them first (in one room; the count is of every room). */
 export function showCrewCounts(root: ParentNode, counts: Map<number, number>) {
   for (const ul of root.querySelectorAll<HTMLElement>('ul.crews')) {
-    const line = ul.parentElement?.querySelector<HTMLElement>('.crews-big');
+    const line = ul.closest('.crew-line')?.parentElement?.querySelector<HTMLElement>('.crews-big');
     if (!line) continue;
     const big = [...ul.querySelectorAll<HTMLElement>('.crew[data-hash]')].filter(li => (counts.get(Number(li.dataset.hash)) ?? 0) > CREW_BIG)
       .map(li => t('{name} has more than 64 players in free roam: in a crew that big, crew-mates far away no longer always show, only the ones nearby, as with everyone else. A less common name works better.',
@@ -627,7 +629,7 @@ export class SettingsPanel {
       if (c.t === 'num' && c.unit) { const u = document.createElement('span'); u.className = 'unit'; u.textContent = c.unit; ctl.append(u); }
       described = inp;
     }
-    if (setInFile) {
+    if (setInFile && c.t !== 'crews') {               // (the Crews row has none: each crew's x leaves it)
       const r = document.createElement('button'); r.type = 'button'; r.className = 'text-btn'; r.textContent = t('Reset');
       r.setAttribute('aria-label', t('Reset {label}', { label: t(it.label) }));
       r.title = t('Back to the default ({value})', { value: shown(it, DEFAULTS.get(it.key) ?? '') });

@@ -281,16 +281,16 @@ kbd .glyph { display: inline-block; width: 14px; height: 14px; vertical-align: -
   color: var(--muted); font-size: 14px; line-height: 20px; text-decoration: underline; text-underline-offset: 4px;
 }
 .text-btn:hover:not(:disabled) { color: var(--lime); }
-/* the crews (settings-ui.ts crewControl): the row's label and help, and under them across the row a line of chips that
- * wraps, one per crew: its colour in the game (the dot, which opens the palette), its name (cut short with "…", the
- * whole of it in the chip's tooltip), how many are in free roam in it and Leave; under them the palette when open,
- * a value box with Join in it, and why a name cannot join; Reset under it all */
+/* the crews (settings-ui.ts crewControl): the row's label and help, and under them across the row one line of pills
+ * that wraps: a chip per crew, its colour in the game (the dot, which opens the palette), its name (cut short with
+ * "…", the whole of it in the chip's tooltip), how many are in free roam in it and Leave; then a value box with Join
+ * in it, a pill too.  Under the line the palette when open, and why a name cannot join.  No Reset: each chip's x */
 .set-list { grid-template-columns: minmax(0, 1fr); grid-template-areas: "label" "help" "ctl"; }
 /* one line (not the phone's wrap): a wrapping column stretches to its widest item, and a long name would widen the page */
 .set-list .set-control { flex-direction: column; flex-wrap: nowrap; align-items: stretch; justify-content: flex-start; margin-top: 8px; }
-.set-list .set-control > .text-btn { order: 1; align-self: flex-start; }
-.crews { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
-.crews:empty { display: none; }
+.crew-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* (its chips are pills of the line, the box after the last of them) */
+.crews { display: contents; list-style: none; }
 .crew {
   display: flex; align-items: center; gap: 4px; height: 40px; max-width: 100%; padding: 4px;
   border-radius: 20px; background: var(--field);
@@ -319,12 +319,12 @@ kbd .glyph { display: inline-block; width: 14px; height: 14px; vertical-align: -
 /* words for a screen reader only (a crew's count in full) */
 .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .crew-add {
-  display: flex; align-items: center; height: 40px; max-width: 360px; padding-right: 2px;
-  border: 2px solid var(--edge); border-radius: 8px; background: var(--field);
+  display: flex; align-items: center; flex: 0 1 240px; max-width: 100%; height: 40px; padding-right: 2px;
+  border: 2px solid var(--edge); border-radius: 20px; background: var(--field);
 }
 .crew-add:focus-within { border-color: var(--lime); box-shadow: 0 0 12px var(--lime-glow); }
 .set .crew-add input[type="text"], .dlg .crew-add input[type="text"] {
-  flex: 1; min-width: 0; width: auto; height: 100%; padding: 0 10px; border: 0; background: none; outline: none; box-shadow: none;
+  flex: 1; min-width: 0; width: auto; height: 100%; padding: 0 8px 0 16px; border: 0; background: none; outline: none; box-shadow: none;
 }
 .crew-add:has(input:disabled) { opacity: 0.5; }
 .crew-add input:disabled { cursor: not-allowed; }
@@ -738,7 +738,6 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.64); }
 #menu-save:empty { display: none; }
 /* the menu's Crews popup (a game in free roam): the Crews row's control under the help, Done under it */
 .crews-pop-box { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
-.crews-pop-box .crew-add { max-width: none; }
 .dlg ul.crews { margin: 0; padding: 0; color: inherit; font-size: inherit; line-height: inherit; }
 .dlg p.set-note { margin: 0; }
 
