@@ -104,10 +104,12 @@ The start page shows these keys under **Controls**, and F9, Controls shows them 
   Square (X) the handbrake, Circle and Triangle (B and Y) look back and camera, Share respawns, Options pauses, PS
   opens the page menu; the red dial and Enter work the menus. The game gets a wheel, as the PC game did with one:
   the car's wheels follow yours, with no delay. Full lock is a quarter turn of a 900° wheel (270° from lock to lock).
-  No browser knows a wheel's layout, so the page guesses it from how the wheel reports itself; if steering or a pedal
-  is wrong, or you want another full lock, open Controls, Controller and press Set up the wheel: turn it to full
-  lock, then press each pedal. That is kept in this browser. A browser cannot drive a wheel's motor: no force
-  feedback.
+  No browser maps a wheel, so the page takes the layout of a Logitech G29, G920, G923, G25, G27 or Driving Force GT
+  from what is known of that model (the G29's gas, brake and clutch are its Z, Rz and Y axes, the G920's Y, Z and
+  Rz), as Chrome, Firefox and Safari each place those axes, and guesses any other wheel's from how it reports
+  itself. If steering or a pedal is wrong, or you want another full lock, open Controls, Controller and press Set up
+  the wheel: turn it to full lock, then press each pedal. That is kept in this browser. The clutch does nothing (the
+  game has none). A browser cannot drive a wheel's motor: no force feedback.
 - **The page menu on a controller:** Home, or both sticks pressed in, opens it (where the browser passes Home on; on
   Windows the Game Bar may take it). The D-pad or left stick moves in it, A picks, B closes it; meanwhile the game
   gets no controller input. A stick pressed in alone reaches the game a moment later (0.12 s), so the shortcut never
