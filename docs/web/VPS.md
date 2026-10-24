@@ -445,10 +445,11 @@ have (the cache names a file by its size and time) until the player deletes the 
 ## Movies in AV1
 
 The game's movies are VP6 at 5 to 12 Mbit/s, the most a player downloads after the game data. Browsers that decode
-AV1 themselves (Chrome, Edge and Firefox, on computers and phones) can play them as AV1 instead, at about a fifth of
-the size and looking the same: a copy of each movie in an `AV1` folder next to it (`MOVIES/AV1`,
-`LANGPACKS/<language>/MOVIES/AV1`), which the page opens in its place (`runtime/movie.c`). Safari, and any browser
-without it, keeps playing the VP6 movies, so the game folder keeps them too.
+AV1 (Chrome, Edge and Firefox, on computers and phones; Safari on the Macs and iPhones that decode it in hardware, M3
+and iPhone 15 Pro on) can play them as AV1 instead, at about a fifth of the size and looking the same: a copy of each
+movie in an `AV1` folder next to it (`MOVIES/AV1`, `LANGPACKS/<language>/MOVIES/AV1`), which the page opens in its
+place (`runtime/movie.c`). Safari on older Macs and iPhones, and any browser without AV1, keeps playing the VP6
+movies, so the game folder keeps them too.
 
 1. `sudo apt install ffmpeg` (the encoder is its libaom), then from the repository:
    `tools/movies_av1.py "<your game folder>" <out>`. The AV1 files land in `<out>`, at their places in the game
