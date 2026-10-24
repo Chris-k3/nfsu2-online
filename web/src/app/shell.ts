@@ -221,6 +221,8 @@ async function loadSettings(): Promise<string | null> {
     if (up) { text = up.text; await writeFile(SAVE, 'settings.ini', text); log.add(`[app] settings: added the new options ${up.added.join(', ')} to /save/settings.ini (commented out, defaults unchanged)`); }
   }
   settingsText = text;
+  // who plays on this server, asked again with this file's room and crews (the first question went without them)
+  players?.now();
   return text;
 }
 /** this device's own defaults (a phone's: device.ts), below settings.ini and the page address */
@@ -1186,10 +1188,10 @@ export async function boot() {
   pick.replaceChildren(...LANGUAGES.map(l => Object.assign(document.createElement('option'), { value: l, textContent: NATIVE[l], lang: LOCALE[l] })));
   pick.onchange = () => void settings.set('language', pick.value);
   // who plays on this server now (Online): only while no game runs here; with free roam on in a room, that room too,
-  // and in crews, how many are in each (on the Crews row's lines)
+  // and in crews (free roam on or not: the row shows them either way), how many are in each (on the Crews row's lines)
   players = watchPlayers((line, crews) => { settings.setStatus(line); settings.setCrewCounts(crews); }, () => !session && !starting, setReach,
     () => { const e = resolved().env; return e.NFSU2_ROAM === '1' ? e.NFSU2_ROAM_ROOM ?? '' : ''; },
-    () => { const e = resolved().env; return e.NFSU2_ROAM === '1' ? crewList(e.NFSU2_ROAM_CREW ?? '').map(roomHash) : []; });
+    () => crewList(resolved().env.NFSU2_ROAM_CREW ?? '').map(roomHash));
   window.addEventListener('online', () => players?.now());
   window.addEventListener('resize', placeNotices);
   window.addEventListener('resize', placeLobby);

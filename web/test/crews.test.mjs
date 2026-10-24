@@ -6,7 +6,8 @@
 //   characters refusing the line, an older file getting the option's paragraph
 // - what the panel's box lets join: nothing typed, a comma, # or ;, too long, a repeat by hash, a fifth
 // - Reset all settings keeps the crews, as it keeps the name
-// - /players?crews=: the hashes in the player's order (beside room=), the counts by hash, none from an older server
+// - /players?crews=: the hashes in the player's order (beside room=), the counts by hash, none from an older server,
+//   and a late answer to an earlier question not shown over a later one
 // The modules are bundled from web/src with esbuild, as web/test/settings-reset.test.mjs does.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -191,5 +192,30 @@ test('/players?crews=: asked in the player\'s order, the counts by hash', async 
   w.now(); await wait();
   assert.equal(asked[2], '/players', 'no crews, no room: as before');
   assert.equal(shown[2].counts.size, 0);
+  delete globalThis.window; delete globalThis.document; globalThis.fetch = fetch0;
+});
+
+test('/players: an answer that comes after a later question\'s is not shown (the page\'s first, before settings.ini)', async () => {
+  const blue = P.roomHash('Blue Room'), fetch0 = globalThis.fetch;
+  globalThis.window = { setInterval: () => 0 };
+  globalThis.document = { visibilityState: 'visible', addEventListener() {} };
+  // the first question (no crews yet) waits until the second (with them) is answered
+  const held = [];
+  globalThis.fetch = async url => {
+    const answer = url.includes('crews=') ? { players: 3, online: 0, roam: 2, crews: [2] } : { players: 3, online: 0, roam: 2 };
+    const r = { status: 200, ok: true, json: async () => answer };
+    return url.includes('crews=') ? r : new Promise(res => held.push(() => res(r)));
+  };
+  let crews = [];
+  const shown = [];
+  const w = P.watchPlayers((line, counts) => shown.push(counts), () => true, undefined, () => '', () => crews);
+  await new Promise(r => setTimeout(r, 0));
+  crews = [blue];
+  const fresh = await w.fresh(1000);
+  assert.deepEqual(shown.map(c => [...c]), [[[blue, 2]]], 'the second answer, with the crew');
+  held.forEach(f => f()); await new Promise(r => setTimeout(r, 0));
+  assert.deepEqual(shown.map(c => [...c]), [[[blue, 2]]], 'the first, late, left out');
+  assert.deepEqual(w.last(), fresh, 'and the newest answer is still the second');
+  assert.deepEqual(w.last().crews, [2]);
   delete globalThis.window; delete globalThis.document; globalThis.fetch = fetch0;
 });
