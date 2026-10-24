@@ -21,18 +21,24 @@ fn client(w: &mut World, vip: &str) -> u32 {
 
 /// the game's race report (rank RESU), version 3: players (index, place, time)
 fn resu(kind: u8, track: u16, players: &[(u8, u8, f32)]) -> String {
+    resu_full(kind, track, &players.iter().map(|&(i, p, t)| (i, p, t, 0, false)).collect::<Vec<_>>())
+}
+
+/// the same with each player's drift score and whether it dropped out: (index, place, time, score, dropped)
+fn resu_full(kind: u8, track: u16, players: &[(u8, u8, f32, i32, bool)]) -> String {
     let mut b = vec![0u8; 8 + 55 * players.len()];
     b[0] = 3;
     b[1] = players.len() as u8;
     b[2] = kind;
     b[4..6].copy_from_slice(&track.to_be_bytes());
     b[7] = 2;
-    for (i, (index, place, time)) in players.iter().enumerate() {
+    for (i, (index, place, time, score, dropped)) in players.iter().enumerate() {
         let o = 8 + 55 * i;
         b[o] = *index;
         b[o + 1] = *place;
-        b[o + 2] = 1;
+        b[o + 2] = if *dropped { 0x0c } else { 1 };
         b[o + 8..o + 12].copy_from_slice(&time.to_be_bytes());
+        b[o + 44..o + 48].copy_from_slice(&score.to_be_bytes());
     }
     use base64::Engine;
     base64::engine::general_purpose::STANDARD.encode(b)
@@ -460,6 +466,65 @@ fn race_types() {
     assert!(!w.logged("not taken"), "{}", w.text().join("\n"));
     assert_eq!(boards(&mut w), [0, 0, 2, 2, 0, 0]);
     assert_eq!(w.core.lobby.games.len(), 0, "every race is over");
+}
+
+// a ranked race's table on its players' results screens: whose reports came ($rup) until the result stands, then
+// places, times or drift scores and points in hex ($rfn) to every reporter, and to a later one; unranked: none
+#[test]
+fn ranked_table() {
+    let mut w = world();
+    let ranked = fields![("SYSFLAGS", 1 << 18)];
+    let names = ["Ann", "Bob", "Cat"];
+    let gs: Vec<u32> = (0..3).map(|i| client(&mut w, &format!("10.77.0.{}", i + 2))).collect();
+    // logged in (again: after a race the game's results screen logs in and reports)
+    let login_all = |w: &mut World| -> Vec<C> { (0..3).map(|i| login(w, gs[i], names[i])).collect() };
+    let rep = |w: &mut World, c: C, auth: &str, kind: u8, players: &[(u8, u8, f32, i32, bool)]| {
+        let f = fields![("AUTH", auth), ("RESU", resu_full(kind, 4014, players)), ("NAME0", "Ann"), ("NAME1", "Bob"), ("NAME2", "Cat")];
+        w.send(c, "rank", f);
+    };
+    let row = |m: &super::world::M, i: usize| format!("{} {}", m.g(&format!("OPPO{i}")), m.g(&format!("DATA{i}")));
+    // a circuit: Bob first in 186.5 s, Ann second in 190.25 s, Cat dropped out after 60 s
+    let s = login_all(&mut w);
+    let auth = race(&mut w, "c", &s, ranked.clone()).unwrap();
+    w.advance(200_000.0);
+    let s = login_all(&mut w);
+    let circuit = [(0, 2, 190.25, 0, false), (1, 1, 186.5, 0, false), (2, 3, 60.0, 0, true)];
+    rep(&mut w, s[1], &auth, 0, &circuit);
+    let up = w.c(s[1]).l("$rup");
+    let stat: Vec<String> = (0..3).map(|i| format!("{} {}", up.g(&format!("OPPO{i}")), up.g(&format!("STAT{i}")))).collect();
+    assert_eq!(stat, ["Ann 0", "Bob 1", "Cat 0"]);
+    assert_eq!(up.g("TIME"), "60000");
+    assert_eq!(w.c(s[1]).count("$rfn"), 0, "one report decides nothing");
+    rep(&mut w, s[0], &auth, 0, &circuit);
+    for c in [s[0], s[1]] {
+        let t = w.c(c).l("$rfn");
+        assert_eq!((0..3).map(|i| row(t, i)).collect::<Vec<_>>(), ["Ann 2e72a,2,0,0,32", "Bob 2d884,1,0,0,64", "Cat ea60,-2,0,0,0"]);
+    }
+    assert_eq!(w.c(s[0]).count("$rup"), 0, "the result stood with Ann's report");
+    assert_eq!(board(&mut w, 0), ["Ann:50:0:1", "Bob:100:1:0", "Cat:0:0:1"], "the table's points are the rankings'");
+    // a later report: the table to it alone
+    rep(&mut w, s[2], &auth, 0, &circuit);
+    assert_eq!(row(w.c(s[2]).l("$rfn"), 2), "Cat ea60,-2,0,0,0");
+    assert_eq!((w.c(s[0]).count("$rfn"), w.c(s[1]).count("$rfn")), (1, 1));
+    // drift: the score in place of the time
+    let auth = race(&mut w, "d", &s, ranked).unwrap();
+    w.advance(200_000.0);
+    let s = login_all(&mut w);
+    let drift = [(0, 1, 150.0, 41_250, false), (1, 3, 150.0, 9_800, false), (2, 2, 150.0, 22_001, false)];
+    for c in [s[2], s[0]] {
+        rep(&mut w, c, &auth, 3, &drift);
+    }
+    let t = w.c(s[0]).l("$rfn");
+    assert_eq!((0..3).map(|i| row(t, i)).collect::<Vec<_>>(), ["Ann a122,1,0,0,64", "Bob 2648,3,0,0,0", "Cat 55f1,2,0,0,32"]);
+    // unranked: the game's own results screen, no table
+    let auth = race(&mut w, "u", &s, vec![]).unwrap();
+    w.advance(200_000.0);
+    let s = login_all(&mut w);
+    for c in &s {
+        rep(&mut w, *c, &auth, 0, &circuit);
+    }
+    assert!(w.logged("\"u\" (circuit, unranked)"), "{}", w.text().join("\n"));
+    assert_eq!(s.iter().map(|c| w.c(*c).count("$rup") + w.c(*c).count("$rfn")).sum::<usize>(), 0);
 }
 
 // ONL-7: the results store: the rankings built once for many asks (the store's other parts: stats.rs)

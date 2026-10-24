@@ -251,7 +251,8 @@ impl Stats {
         self.p.len()
     }
 
-    /// One race's result: each player's counts and points (overall and for the month), best time, month seen.
+    /// One race's result: each player's counts and points (overall and for the month, `race_points`), best time,
+    /// month seen.
     pub fn add_race(&mut self, race: &Race) {
         let n = race.players.len();
         if n < 2 || race.kind as usize >= RACE_TYPES.len() {
@@ -269,7 +270,7 @@ impl Stats {
             let r = self.p.get_mut(&k).expect("just made");
             r.seen = m.clone();
             let won = pl.place == 1;
-            let pts = if race.ranked && pl.place != 0 { jsx::round((n as f64 - pl.place as f64) * 100.0 / (n as f64 - 1.0)) } else { 0.0 };
+            let pts = race_points(race.ranked, n, pl.place);
             for table in [&mut r.all, &mut r.month] {
                 let c = table[t].get_or_insert_with(blank);
                 c.races += 1.0;
@@ -601,13 +602,20 @@ fn clean(r: &Value, name: &str) -> Record {
     Record { name: name.to_string(), seen, all, month_key: key, month: counts(mt), best }
 }
 
+/// a player's rating points for one race of `n` players (place 1..n, 0 = did not finish): (n - place) * 100 / (n - 1),
+/// so the winner gets 100 and the last 0, ranked races only
+pub fn race_points(ranked: bool, n: usize, place: u32) -> f64 {
+    if ranked && n >= 2 && place != 0 { jsx::round((n as f64 - place as f64) * 100.0 / (n as f64 - 1.0)) } else { 0.0 }
+}
+
 /// The game's race report (rank RESU, base64), version 3 as SPEED2.EXE writes it:
 ///   [0] version 3, [1] players, [2] race type, [3] the reporter's index, [4..5] track (big-endian), [6] direction,
 ///   [7] laps; then per player 55 bytes: [0] index into the report's NAME list, [1] place, [2] 0x01 finished / 0x0c
 ///   dropped out, [3] the car, [8..11] the total time in seconds (float, big-endian; a dropped player's: until it
 ///   left), [12..15] the best lap, more floats (speeds and other figures, not read), [32..35] -1.0 for a dropped
-///   player (the research says [44..47]: both are taken), [53] a bit mask, each set bit adding 2 bytes after the
-///   record (one byte here: UNVERIFIED)
+///   player (the research says [44..47]: both are taken), [44..47] the drift score (an integer, big-endian: the
+///   racer's points after its last lap, what the game's own results show for drift; SPEED2.EXE 0x5fec5d), [53] a bit
+///   mask, each set bit adding 2 bytes after the record (one byte here: UNVERIFIED)
 /// (from the reports of real races here and the research's notes; the fields not used are UNVERIFIED).
 #[derive(Clone, Debug)]
 #[allow(dead_code)] // decoded whole (the report as the game wrote it), read in part
@@ -627,6 +635,7 @@ pub struct ReportPlayer {
     pub place: u8,
     pub car: u8,
     pub time: f64,
+    pub score: i32,
     pub dropped: bool,
 }
 
@@ -657,6 +666,7 @@ pub fn decode_result(b64: &str) -> Option<RaceReport> {
             place: b[o + 1],
             car: b[o + 3],
             time: if time.is_finite() { time } else { 0.0 },
+            score: i32::from_be_bytes([b[o + 44], b[o + 45], b[o + 46], b[o + 47]]),
             dropped,
         });
         o += 55 + extra;

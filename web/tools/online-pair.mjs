@@ -183,9 +183,11 @@ function raceFlow(w, host, race, raceMs, inst) {
     w(`+200  dump track${x}`);
     w('+0    tap RETURN');
     w('+0    waitfng UI_QRModeOptions.fng 900');
-    // Laps as they come (2, runtime/netrace.c); --ranked: Game Type (three rows down) Unranked -> Ranked, once (the
-    // screen keeps the last game's options)
-    if (RANKED && race === 1) { w('+200  tap DOWN'); w('+40   tap DOWN'); w('+40   tap DOWN'); w('+40   tap RIGHT'); }
+    // Laps as they come (2, runtime/netrace.c); --ranked: Game Type (three rows down, drift two: it has no Track
+    // Direction) Unranked -> Ranked, once (the screen keeps the last game's options)
+    if (RANKED && race === 1) {
+      w('+200  tap DOWN'); w('+40   tap DOWN'); if (MODE !== 'drift') w('+40   tap DOWN'); w('+40   tap RIGHT');
+    }
     w(`+200  dump options${x}`);
     w('+0    tap RETURN');
     w(`+300  dump enter_room${x}`);
@@ -199,12 +201,15 @@ function raceFlow(w, host, race, raceMs, inst) {
   } else {
     w(`+${race > 1 ? JOIN_WAIT + 15000 : JOIN_WAIT}ms dump lobby${x}`);
     if (RANKED && race === 1) {
-      // the Filter asks for ranked games (the lobby lists them first): Filter (the 4th button), Game Type (two rows
-      // down) -> Ranked; leaving the Filter searches again, with the focus back on Create Game
+      // the Filter asks for ranked games of the race's mode (the lobby lists them first): Filter (the 4th button),
+      // Game Mode (Create Game's order), Game Type (two rows down) -> Ranked; leaving the Filter searches again, with
+      // the focus back on Create Game
       w('+0    log filter-ranked');
       w('+0    tap RIGHT'); w('+40   tap RIGHT'); w('+40   tap RIGHT');
       w('+60   tap RETURN');
-      w('+300  tap DOWN'); w('+40   tap DOWN'); w('+40   tap RIGHT');
+      w('+300  log filter-mode');
+      for (let k = 0; k < (MODES[MODE] ?? 0); k++) w('+40   tap RIGHT');
+      w('+40   tap DOWN'); w('+40   tap DOWN'); w('+40   tap RIGHT');
       w(`+60   dump filter${x}`);
       w('+0    tap RETURN');
       w(`+3000ms dump filtered${x}`);
@@ -262,7 +267,14 @@ function raceFlow(w, host, race, raceMs, inst) {
   w('+0    untrace');
   w(`+180  dump results${x}`);
   w(`+3000ms dump results_2${x}`);
-  w('+300  tap RETURN');                     // Continue: the game logs in again, reports the result, the lobby
+  if (RANKED) {
+    // the ranked table: the server's $rfn, once two reports agree, sets the race handler's "final" byte (SPEED2.EXE
+    // 0x58e05d); the screen reported on its own when it opened
+    w('+0    waitexpr b:0x0086a6c0 == 1 6000');
+    w(`+0    log results-table${x}`);
+    w(`+60   dump results_table${x}`);
+  }
+  w('+300  tap RETURN');                     // Continue (unranked: the game logs in again, reports), the lobby
   w('+0    waitfng PC_OL_Lobby.fng 1800');
   w(`+3000ms dump after_results${x}`);
   return true;

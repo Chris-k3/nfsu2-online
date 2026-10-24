@@ -433,7 +433,10 @@ Good to know:
   Filter its own settings (the original game does that), and the list is the whole one again until you next set it.
   In the original game the Filter always hid all others, so a game made with Collision Detection off was seen by no
   one. A game with **Private Room** on is not listed, as in the original game.
-- **Ranked games** need three players at least. Ranked wins give ranking points.
+- **Ranked games** need three players at least. Ranked wins give ranking points. After a ranked race the results
+  screen lists whose results came in (received or waiting), then, once two players' games sent the same result,
+  Official Race Results: each player's place, time (drift: score) and the ranking points the race gave (100 for the
+  winner down to 0 for the last; 0 for a player who left the race, shown as Disconnected).
 - **A race counts** in Rankings once two of its players' games sent the same result (every game sends its own at
   the results screen), so a race that only one player finished does not count. Each player races from their own
   browser.
@@ -444,7 +447,6 @@ Good to know:
   message to a friend who is away waits for them (7 days), and shows with an envelope when they are back; a message
   to anyone else reaches them only while they are online. Players you block stay blocked: nothing of theirs reaches
   you.
-- **Not yet:** the points table after a ranked race stays empty (the race still counts in Rankings).
 - **Who is on:** Online on the start page shows how many play on this server now, and how many of them are in Online
   mode (in its menus or racing). Only the two numbers: no names.
 - Turning it off: Online, Online mode on the start page (the game then cannot connect).

@@ -21,7 +21,7 @@
 //! - ~png -> the server pings every `ping_ms` and drops a session that says nothing for `idle_ms`
 //! - user/onln -> a persona's record (user: the online career, STAT, from stats.rs)
 //! - rank -> a player's report of a finished race (once per player and race, only for a race this server started,
-//!   checked): the results
+//!   checked): the results; a ranked race's table on its players' results screens ($rup, $rfn)
 //! - snap -> a ranking (the overall boards per race type) or one row of it
 //!
 //! At the race start the game closes its lobby link (as with server.dll in LAN play) and opens a new one afterwards
@@ -61,7 +61,7 @@ use sha2::{Digest, Sha256};
 use crate::aries::{FieldMap, Fields, FrameReader, MAX_FRAME, V, encode_fields, encode_frame, is_secret};
 use crate::core::Core;
 use crate::jsx::{self, clean_text, day, lower, valid_name};
-use crate::stats::{RACE_TYPES, Race, RacePlayer, decode_result};
+use crate::stats::{RACE_TYPES, Race, RacePlayer, RaceReport, decode_result, race_points};
 use crate::timers::{Action, TimerId};
 use crate::vhost::{ConnId, Svc};
 use crate::{PORT_BUDDY, PORT_LOBBY};
@@ -211,6 +211,10 @@ const REPORT_TYPES: [&str; 7] = ["circuit", "sprint", "drag", "drift", "streetx"
 /// the shortest race of each type (REPORT_TYPES order) a result may come from, in seconds: well under the game's own
 /// shortest (one lap of the shortest track; a quarter-mile drag)
 const MIN_RACE_S: [f64; 7] = [20.0, 20.0, 5.0, 20.0, 20.0, 20.0, 20.0];
+/// what a ranked race's results screen counts down from until its table comes, in ms ("Waiting 60 seconds for
+/// results", then "Waiting for final server results"; SPEED2.EXE 0x4e9210): a guess at how long the others take to
+/// finish and report, no limit (the table comes once the result stands)
+const RESULTS_WAIT_MS: f64 = 60_000.0;
 
 /// A token bucket: `rate` a second, at most `burst`, full at the start (on the lobby's clock)
 #[derive(Clone, Copy, Debug)]
@@ -264,7 +268,8 @@ pub struct Session {
 }
 
 /// one player of a game.  `s`: its session, or None once a started race went on without its lobby link (the player
-/// counts as gone; its name, address and report stay)
+/// counts as gone; its name, address and report stay).  `results`: the session its race report came from (its
+/// game's results screen, where a ranked race's table goes)
 #[derive(Clone, Debug)]
 pub struct Player {
     pub s: Option<SessId>,
@@ -275,6 +280,7 @@ pub struct Player {
     pub flags: u32,
     pub back: bool,
     pub reported: bool,
+    pub results: Option<SessId>,
 }
 
 #[derive(Clone, Debug)]
@@ -298,6 +304,8 @@ pub struct Game {
     pub auth: String,
     reports: Vec<(u32, String)>,
     result: Option<String>,
+    /// a ranked race's table once its result stands ($rfn, encoded once)
+    table: Option<Vec<u8>>,
     pub ranked: bool,
 }
 
@@ -1373,7 +1381,7 @@ impl Core {
     /// going).  The race's result is the first report that another player, in another browser, sent too (the same
     /// places): one player alone cannot decide it; later reports are compared with it.  A ranked race of fewer than
     /// three players (the game's own minimum) counts as unranked.  The game is told "Unranked" either way (what the
-    /// game shows after the race).
+    /// game shows after the race); a ranked game's players see its table on their results screens (`results_table`).
     fn rank(&mut self, s: SessId, f: &FieldMap) {
         let reply = |core: &mut Core| {
             let time = (core.now() / 1000.0).floor() % 100_000.0;
@@ -1389,8 +1397,10 @@ impl Core {
         };
         let gm = self.lobby.game_mut(g).expect("held");
         gm.players[me].back = true;
+        gm.players[me].results = Some(s);
         if gm.players[me].reported {
-            return reply(self);
+            reply(self);
+            return self.results_table(g, Some(s));
         }
         let r = decode_result(f.get("RESU").unwrap_or("undefined"));
         let mut names = Vec::new();
@@ -1405,6 +1415,7 @@ impl Core {
         if !why.is_empty() {
             self.llog(&format!("[online] \"{gname}\": {spers}'s race report not taken: {why}"), s);
             reply(self);
+            self.results_table(g, Some(s));
             return self.end_if_back(g);
         }
         let r = r.expect("checked");
@@ -1433,14 +1444,20 @@ impl Core {
             .join(", ");
         let svip = self.lobby.s(s).vip;
         let gm = self.lobby.game(g).expect("held");
+        // the ranked table goes to this player's results screen alone once the result stands, else to every reporter's
+        let mut to = None;
         if let Some(result) = &gm.result {
+            to = Some(s);
             if key != *result {
                 self.llog(&format!("[online] \"{gname}\": {spers}'s report differs ({line}); the result stands"), s);
             }
         } else if gm.reports.iter().any(|(v, k)| *k == key && *v != svip) {
             let ranked = gm.ranked && gm.players.len() >= 3;
             let was_ranked = gm.ranked;
-            self.lobby.game_mut(g).expect("held").result = Some(key);
+            let table = gm.ranked.then(|| self.table_frame(g, &r, &names, ranked && (r.kind as usize) < RACE_TYPES.len()));
+            let gm = self.lobby.game_mut(g).expect("held");
+            gm.result = Some(key);
+            gm.table = table;
             self.stats.add_race(&Race { kind: r.kind as u32, ranked, track: r.track as i64, players: order });
             let tail = if r.kind as usize >= RACE_TYPES.len() {
                 " (no stats for this race type)"
@@ -1461,7 +1478,60 @@ impl Core {
         // the game asked for its career (user) at the login, before this report: once more, with the race in it
         let pers = self.lobby.s(s).persona.clone().unwrap_or_default();
         self.user_info(s, &pers);
+        self.results_table(g, to);
         self.end_if_back(g);
+    }
+
+    /// A ranked race's table on its players' results screens (UI_PostRace_TournResults.fng), to one session or (None)
+    /// to every player's that reported: the table once the result stands ($rfn), until then which players' reports
+    /// were taken ($rup: OPPOn the name, STATn 1 "received" or 0 "waiting", TIME the countdown in ms).  The game
+    /// hands a lobby message whose kind starts with '$' to its race handler (SPEED2.EXE 0x7470b2, 0x58dab0), which
+    /// fills the screen's table (0x4c0430); without one the table stayed empty.  Unranked races show the game's own
+    /// results.
+    fn results_table(&mut self, g: GameId, to: Option<SessId>) {
+        let Some(gm) = self.lobby.game(g) else { return };
+        if !gm.ranked {
+            return;
+        }
+        let frame = match &gm.table {
+            Some(t) => t.clone(),
+            None => {
+                let mut f: Fields = Vec::new();
+                for (i, p) in gm.players.iter().take(6).enumerate() {
+                    f.extend(fields![(format!("OPPO{i}"), p.name.as_str()), (format!("STAT{i}"), u32::from(p.reported))]);
+                }
+                f.extend(fields![("TIME", RESULTS_WAIT_MS)]);
+                encode_frame("$rup", "", &f).expect("the lobby's own fields")
+            }
+        };
+        let sessions: Vec<SessId> = match to {
+            Some(s) => vec![s],
+            None => gm.players.iter().filter_map(|p| p.results).collect(),
+        };
+        for s in sessions {
+            self.lsend_frame(s, &frame);
+        }
+    }
+
+    /// The ranked table ($rfn) from the report that decided the result: per player of the game (OPPOn, at most the
+    /// table's 6) DATAn, a list in hex (SPEED2.EXE 0x58df4f, 0x7425d0 "l*"): the time in ms (drift: the score), the
+    /// place (-2 "Disconnected": dropped out), two numbers the screen does not show (0), the rating points (0 when the
+    /// race gives none)
+    fn table_frame(&self, g: GameId, r: &RaceReport, names: &[String], points: bool) -> Vec<u8> {
+        let hex = |x: i64| if x < 0 { format!("-{:x}", -x) } else { format!("{x:x}") };
+        let n = r.players.len();
+        let mut f: Fields = Vec::new();
+        for (i, pl) in self.lobby.game(g).expect("held").players.iter().take(6).enumerate() {
+            let want = lower(&pl.name);
+            let Some(p) = r.players.iter().find(|p| lower(&names[p.index as usize]) == want) else { continue };
+            let place = if p.dropped { 0 } else { p.place as u32 };
+            let first =
+                if REPORT_TYPES[r.kind as usize] == "drift" { p.score as i64 } else { (p.time * 1000.0).round().clamp(0.0, 1e9) as i64 };
+            let pts = race_points(points, n, place) as i64;
+            let data = format!("{},{},0,0,{}", hex(first), hex(if place == 0 { -2 } else { place as i64 }), hex(pts));
+            f.extend(fields![(format!("OPPO{i}"), pl.name.as_str()), (format!("DATA{i}"), data)]);
+        }
+        encode_frame("$rfn", "", &f).expect("the lobby's own fields")
     }
 
     /// why a decoded race report cannot be the result of game g ('' = it can)
@@ -1795,6 +1865,7 @@ impl Core {
             auth: String::new(),
             reports: Vec::new(),
             result: None,
+            table: None,
             ranked: sys_flags & RANKED != 0,
         };
         self.lobby.games.insert(id, g);
@@ -1823,6 +1894,7 @@ impl Core {
             flags: 0,
             back: false,
             reported: false,
+            results: None,
         }
     }
 
