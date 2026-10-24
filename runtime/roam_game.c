@@ -109,6 +109,8 @@
 #define G_WORLDDT       0x00865154u   /* float: this frame's world dt (s) */
 #define G_PROFILE_NAME  0x0083a9e0u   /* 16 bytes */
 #define G_CARTYPES      0x008a1cccu   /* CarTypeInfo[]: 0x890 bytes, +0 name, +0xD0 name hash */
+#define TYPE_TRAFFIC    31            /* CarTypeInfo 0..30 are the player cars, 31..45 traffic (TAXI .. BUS, HATCHBACK02), */
+#define TYPE_STOCK      46            /* ...and Unlimiter adds car types after them */
 #define G_PARTOWNERS    0x008a1cb8u   /* CarPart byte +7 -> owner (car type) hash table */
 #define G_CARPARTDB     0x008a2b68u
 #define G_CARLOADER     0x008a3288u   /* entries on +0x58, handle at entry +0x123C */
@@ -859,8 +861,12 @@ static void ghost_all(void){ for (int k = 0; k < NSLOT; k++) g_sl[k].ghost = 1; 
  * spot after hits by others (there or on its way there: hits shove it) lets
  * every car through it as well until it leaves that spot (stay_update,
  * block_hit; only its own game sees all its hits, so it says so with
- * RC_BIT_PASS). */
-enum { SOFT_PAUSED = 1, SOFT_IDLE = 2, SOFT_DOOR = 4, SOFT_SPAWN = 8, SOFT_EVENT = 16, SOFT_SAYS = 32, SOFT_BLOCK = 64 };
+ * RC_BIT_PASS).  A car of a traffic type (a bus or a fire truck across the
+ * airport's way out: a profile a save editor changed makes one the player's)
+ * is passable whoever sees it: its own game says so, and every other game
+ * sees its type, so a game that does not say so cannot keep it solid. */
+enum { SOFT_PAUSED = 1, SOFT_IDLE = 2, SOFT_DOOR = 4, SOFT_SPAWN = 8, SOFT_EVENT = 16, SOFT_SAYS = 32, SOFT_BLOCK = 64,
+       SOFT_TRAFFIC = 128 };
 /* an open event: its trigger's box, and what it leads to (FN_MARKER_WHAT's
  * out[kind]: 1 a race, 2 a shop, 3 a showcase (a cover shoot), 4 another
  * (the table at 0x838424: STAGE_2_SHOW_1, STAGE_3_PERF_1, ...)) */
@@ -875,6 +881,7 @@ static struct {
     float    stay[3];
     int64_t  stay_since;                      /* (0: none: a new one from the next frame in free roam) */
     int      blocking;                        /* in the way there (SOFT_BLOCK) */
+    int      traffic;                         /* the player's car is of a traffic type (SOFT_TRAFFIC) */
     struct { uint32_t id; int64_t t; } hit[BLOCK_Q];   /* the friend (peer id) and when; a ring */
     int      hit_at, hit_n;
     /* the player's open events (events_read), and how many of the career's
@@ -985,6 +992,15 @@ static void stay_update(int64_t host, const float *at){
     memcpy(g_pass.stay, at, sizeof g_pass.stay);
     g_pass.stay_since = host; g_pass.blocking = 0;
 }
+/* a car of a traffic type (TYPE_TRAFFIC): its type's name in name, or 0 */
+static int traffic_car(uint32_t car, char *name, int len){
+    uint32_t types = rd32(G_CARTYPES), ti = ok(car, 0x10) ? rd32(car + 0xcu) : 0;
+    if (!types || ti < types || (ti - types) % 0x890u) return 0;
+    uint32_t t = (ti - types) / 0x890u;
+    if (t < TYPE_TRAFFIC || t >= TYPE_STOCK) return 0;
+    if (name) cstr(ti, name, len);
+    return 1;
+}
 /* the player's car's hits with friends' cars in the last BLOCK_WIN_US, and
  * from how many of them (*cars) */
 static int block_hits(int64_t host, int *cars){
@@ -1002,8 +1018,8 @@ static int block_hits(int64_t host, int *cars){
 }
 /* the player's own reasons, once a frame: paused (a second, as a friend's
  * pause counts), standing, near a door or one of their open events, at the
- * new career's start, standing in others' way; any of them, or ghost cars,
- * goes out in the snapshots (local_state: RC_BIT_PASS) */
+ * new career's start, standing in others' way, a traffic car; any of them,
+ * or ghost cars, goes out in the snapshots (local_state: RC_BIT_PASS) */
 static void soft_me(CPU *c, int64_t host, uint8_t status){
     doors_read();
     events_read(c, host);
@@ -1016,6 +1032,13 @@ static void soft_me(CPU *c, int64_t host, uint8_t status){
     float at[3] = { 0.f, 0.f, 0.f };
     if (ok(me, 0x70)){ rd3(me + 0x60u, at); stay_update(host, at); }
     else g_pass.stay_since = g_pass.blocking = 0;
+    char tn[20];
+    int traffic = ok(me, 0x70) && traffic_car(me, tn, sizeof tn);
+    if (traffic != g_pass.traffic && ok(me, 0x70)){
+        if (traffic) rlog("[roam] f=%ld my car is a traffic car (%s): every car drives through it\n", rh_frame(), tn);
+        else rlog("[roam] f=%ld my car is no traffic car any more: friends' cars touch it again\n", rh_frame());
+        g_pass.traffic = traffic;
+    }
     if (!g_pass.blocking && g_pass.stay_since && host - g_pass.stay_since >= BLOCK_US){
         int cars = 0, n = block_hits(host, &cars);
         if (n >= BLOCK_HITS && cars >= BLOCK_CARS){
@@ -1029,16 +1052,17 @@ static void soft_me(CPU *c, int64_t host, uint8_t status){
                  (ok(me, 0x70) && near_door(at[0], at[1]) ? SOFT_DOOR : 0) |
                  (ok(me, 0x70) && near_event(at[0], at[1]) ? SOFT_EVENT : 0) |
                  (ok(me, 0x70) && at_spawn(at) ? SOFT_SPAWN : 0) |
-                 (g_pass.blocking ? SOFT_BLOCK : 0);
+                 (g_pass.blocking ? SOFT_BLOCK : 0) | (g_pass.traffic ? SOFT_TRAFFIC : 0);
 }
 /* a shown friend's car's reasons, the player's added; leaving them makes it
  * a ghost.  The friend's own (RC_BIT_PASS): near one of their open events,
- * their cars ghosts, or what we see too */
+ * their cars ghosts, or what we see too; and a traffic car, said or not */
 static void soft_update(Slot *s, const rc_pose *pose, int64_t host){
     if (!s->paused && __builtin_fabsf(pose->speed) >= IDLE_MPS) s->idle_since = 0;
     else if (!s->idle_since) s->idle_since = host;
     int soft = g_pass.me | (s->paused ? SOFT_PAUSED : 0) | (s->idle_since && host - s->idle_since >= IDLE_US ? SOFT_IDLE : 0) |
-               (near_door(pose->p[0], pose->p[1]) ? SOFT_DOOR : 0) | (pose->bits & RC_BIT_PASS ? SOFT_SAYS : 0);
+               (near_door(pose->p[0], pose->p[1]) ? SOFT_DOOR : 0) | (pose->bits & RC_BIT_PASS ? SOFT_SAYS : 0) |
+               (traffic_car(s->car, 0, 0) ? SOFT_TRAFFIC : 0);
     if (s->soft && !soft) s->ghost = 1;
     s->soft = soft;
 }
@@ -1599,6 +1623,7 @@ static int finish_load(CPU *c, int k){
     }
     if (!s->activated){ gcall0(c, FN_CAR_ACTIVATE, car); s->activated = 1; }
     gcall1(c, FN_CAR_SETRIDE, car, s->ride_new);
+    if (traffic_car(car, 0, 0)) rlog("[roam] f=%ld slot %d: %s's car is a traffic car (%s): it drives through every car\n", rh_frame(), k, s->name, s->carname);
     eng_files(c, s);
     make_inert(c, car);
     body_set(c, car, 0); s->ghost = 1;
@@ -5353,11 +5378,11 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
                     car ? MR32(car + 0x24u) : 0, car ? MR32(car + 0x28u) : 0, car ? MR32(car + 0x554u) : 0, car ? (int16_t)MR16(car + 8u) : -1,
                     car ? (double)MRF32(car + 0x50u) : 0, car ? (double)MRF32(car + 0x54u) : 0, car ? (double)MRF32(car + 0x58u) : 0);
             uint32_t body = car ? rd32(car + 0x3cu) : 0;
-            if (car) rlog("[roam]     %s%s%s%s%s%s%s%s%s; collision body %s%s; %u hit(s) with my car (at most %.1f m/s)\n", !O.collide ? "solid cars off" : g_sl[k].soft ? "passable:" : g_sl[k].ghost ? "a ghost" : "solid",
+            if (car) rlog("[roam]     %s%s%s%s%s%s%s%s%s%s; collision body %s%s; %u hit(s) with my car (at most %.1f m/s)\n", !O.collide ? "solid cars off" : g_sl[k].soft ? "passable:" : g_sl[k].ghost ? "a ghost" : "solid",
                           g_sl[k].soft & SOFT_PAUSED ? " paused" : "", g_sl[k].soft & SOFT_IDLE ? " standing" : "",
                           g_sl[k].soft & SOFT_DOOR ? " near a door" : "", g_sl[k].soft & SOFT_SPAWN ? " at the start" : "",
                           g_sl[k].soft & SOFT_EVENT ? " near my event" : "", g_sl[k].soft & SOFT_BLOCK ? " my car in the way" : "",
-                          g_sl[k].soft & SOFT_SAYS ? " says so" : "",
+                          g_sl[k].soft & SOFT_SAYS ? " says so" : "", g_sl[k].soft & SOFT_TRAFFIC ? " a traffic car" : "",
                           g_sl[k].soft && g_sl[k].ghost ? " (then a ghost)" : "",
                           !ok(body, 0x20) ? "none" : MR8(body + 0x17u) ? "off" : "on", DUELS && du_busy(k) ? "; takes no outrun now" : "",
                           g_sl[k].hits, (double)g_sl[k].hit_max);
@@ -5376,13 +5401,13 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
         float mx = me ? MRF32(me + 0x60u) : 0, my = me ? MRF32(me + 0x64u) : 0;
         int64_t now = roam_plat_now_us();
         int cars = 0, hits = block_hits(now, &cars);
-        rlog("[roam] f=%ld mp %s: %d doors, %d open events of %d; the player at %.1f %.1f is%s%s%s%s%s%s%s; sends%s%s; "
+        rlog("[roam] f=%ld mp %s: %d doors, %d open events of %d; the player at %.1f %.1f is%s%s%s%s%s%s%s%s; sends%s%s; "
                 "on its spot for %.0f s, %d hit(s) from %d players' cars in %.0f s\n", f, sub, g_pass.n,
                 g_pass.nev, g_pass.evall, (double)mx, (double)my,
                 g_pass.me ? "" : " not passable", g_pass.me & SOFT_PAUSED ? " paused" : "", g_pass.me & SOFT_IDLE ? " standing" : "",
                 g_pass.me & SOFT_DOOR ? " near a door" : "", g_pass.me & SOFT_EVENT ? " near an event" : "",
                 g_pass.me & SOFT_SPAWN ? " at the start" : "", g_pass.me & SOFT_BLOCK ? " in the way" : "",
-                !O.collide || g_pass.me ? " passable" : "", g_du.busy ? " no outruns" : (!O.collide || g_pass.me ? "" : " nothing"),
+                g_pass.me & SOFT_TRAFFIC ? " a traffic car" : "", !O.collide || g_pass.me ? " passable" : "", g_du.busy ? " no outruns" : (!O.collide || g_pass.me ? "" : " nothing"),
                 g_pass.stay_since ? (double)(now - g_pass.stay_since) / 1e6 : 0.0, hits, cars, (double)BLOCK_WIN_US / 1e6);
         if (ev) rlog("[roam]   the last sweep of the event triggers: %.0f us in %d frames, at most %.0f us a frame\n",
                      (double)g_pass.ev_cost[0] / 1e3, (int)g_pass.ev_cost[2], (double)g_pass.ev_cost[1] / 1e3);
