@@ -339,6 +339,12 @@ int rc_encode(const rc_msg *m, uint8_t *out, int cap){
             rc_put8(&w, ip >> 24); rc_put8(&w, ip >> 16); rc_put8(&w, ip >> 8); rc_put8(&w, ip);
             rc_put16(&w, m->u.peers.e[i].port); rc_put32(&w, m->u.peers.e[i].id);
         }
+        if (m->h.flags & RC_HF_CREW){                                  /* the hub's crew marks */
+            if (m->u.peers.n_mine > RC_CREW_MAX) return -1;
+            rc_put8(&w, m->u.peers.n_mine);
+            for (int i = 0; i < m->u.peers.n_mine; i++){ if (!m->u.peers.mine[i]) return -1; rc_put32(&w, m->u.peers.mine[i]); }
+            for (int i = 0; i < m->u.peers.n; i++) rc_put8(&w, m->u.peers.crew[i]);
+        }
         break;
     case RC_MSG_SNAP:
         if (m->u.snap.n < 1 || m->u.snap.n > RC_SNAP_STATES) return -1;
@@ -452,6 +458,15 @@ int rc_decode(const uint8_t *buf, int len, rc_msg *m){
             m->u.peers.e[i].ip = a << 24 | b << 16 | c << 8 | d;
             m->u.peers.e[i].port = (uint16_t)rc_get16(&r); m->u.peers.e[i].id = rc_get32(&r);
             if (!r.err && (!m->u.peers.e[i].port || !m->u.peers.e[i].id)) return RC_E_FIELD;
+        }
+        if ((m->h.flags & RC_HF_CREW) && !r.err && r.n < r.len){       /* the hub's crew marks */
+            m->u.peers.n_mine = (uint8_t)rc_get8(&r);
+            if (!r.err && m->u.peers.n_mine > RC_CREW_MAX) return RC_E_FIELD;
+            for (int i = 0; i < m->u.peers.n_mine; i++) m->u.peers.mine[i] = rc_get32(&r);
+            for (int i = 0; i < m->u.peers.n; i++) m->u.peers.crew[i] = (uint8_t)rc_get8(&r);
+            if (r.err) return RC_E_SHORT;
+            for (int i = 0; i < m->u.peers.n_mine; i++) if (!m->u.peers.mine[i]) return RC_E_FIELD;
+            r.n = r.len;                                              /* (a newer hub's additions) */
         }
         break;
     case RC_MSG_SNAP: {
@@ -975,16 +990,20 @@ void rc_set_crews(rc_session *s, const uint32_t *crews, int n){
         if (!dup) s->conf.crews[s->conf.n_crews++] = crews[i];
     }
     for (int k = s->conf.n_crews; k < RC_CREW_MAX; k++) s->conf.crews[k] = 0;
-    /* HELLOs due at the next tick: the hub links us by them, a peer colours us by them */
+    /* HELLOs due at the next tick: the hub links us by them (and marks us
+     * for our crew-mates); without a hub, a peer colours us by them */
     s->hub_hello_tx = INT64_MIN / 4;
-    for (int i = 0; i < RC_TABLE; i++) if (s->peer[i].state != RC_PS_FREE) s->peer[i].last_hello_tx = INT64_MIN / 4;
+    if (!s->conf.hub_ip) for (int i = 0; i < RC_TABLE; i++) if (s->peer[i].state != RC_PS_FREE) s->peer[i].last_hello_tx = INT64_MIN / 4;
 }
 int rc_peer_crew(const rc_session *s, int i){
     if (i < 0 || i >= RC_TABLE) return -1;
     const rc_peer *p = &s->peer[i];
-    for (int c = 0; c < s->conf.n_crews && c < RC_CREW_MAX; c++)
+    for (int c = 0; c < s->conf.n_crews && c < RC_CREW_MAX; c++){
         for (int k = 0; k < p->n_crews && k < RC_CREW_MAX; k++)
             if (s->conf.crews[c] && p->crews[k] == s->conf.crews[c]) return c;
+        for (int k = 0; k < p->n_hub_crews && k < RC_CREW_MAX; k++)
+            if (s->conf.crews[c] && p->hub_crews[k] == s->conf.crews[c]) return c;
+    }
     return -1;
 }
 static int group_count(const rc_session *s){
@@ -1043,11 +1062,13 @@ int rc_add_peer(rc_session *s, uint32_t ip, uint16_t port, int configured, int64
     return i;
 }
 /* `to`: the peer it goes to (none for the beacon and the hub); crews: with
- * our crews (the hub, a peer that reads them) */
+ * our crews (the hub; a peer that reads them, but only without a hub: with
+ * one, the hub marks our crew-mates on their lists, and no peer learns our
+ * crews) */
 static void fill_hello(rc_session *s, rc_msg *m, const rc_peer *to, int crews){
     hdr(s, m, RC_MSG_HELLO);
-    m->h.flags = RC_HF_STATEX | RC_HF_CREW;
-    if (crews){
+    m->h.flags = RC_HF_STATEX | RC_HF_CREW | RC_HF_HUBCREW;
+    if (crews && (!to || !s->conf.hub_ip)){
         int n = s->conf.n_crews < 0 ? 0 : s->conf.n_crews > RC_CREW_MAX ? RC_CREW_MAX : s->conf.n_crews;
         for (int i = 0; i < n; i++) if (s->conf.crews[i]) m->u.hello.crews[m->u.hello.n_crews++] = s->conf.crews[i];
     }
@@ -1161,6 +1182,7 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
         if (m.h.type == RC_MSG_LOBBIES){ lobbies_from_hub(s, &m); return; }
         if (m.h.type != RC_MSG_PEERS) return;
         s->hub_heard_us = now; s->hub_lists++;
+        int marks = (m.h.flags & RC_HF_CREW) != 0;
         for (int k = 0; k < m.u.peers.n; k++){
             uint32_t id = m.u.peers.e[k].id;
             if (id == s->conf.self_id) continue;
@@ -1170,7 +1192,12 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
                 j = rc_add_peer(s, m.u.peers.e[k].ip, m.u.peers.e[k].port, 0, now);
                 if (j < 0) continue;
             }
-            s->peer[j].hub_listed_us = now;
+            rc_peer *q = &s->peer[j];
+            q->hub_listed_us = now;
+            /* the crews of ours it is in, as the hub marks them (none: a list without marks) */
+            q->n_hub_crews = 0;
+            for (int c = 0; marks && c < m.u.peers.n_mine; c++)
+                if (m.u.peers.crew[k] >> c & 1u) q->hub_crews[q->n_hub_crews++] = m.u.peers.mine[c];
         }
         return;
     }
@@ -1257,8 +1284,8 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
                 note(s, RC_EV_LEAVE, i, p->name, " left: ", "no longer hears us");
             }
         }
-        /* it reads crews now: ours at once (the HELLOs before had none) */
-        if (!was && p->reads_crews && s->conf.n_crews && p->state != RC_PS_CANDIDATE && now - p->last_hello_tx > 100000)
+        /* it reads crews now: ours at once (the HELLOs before had none); with a hub, it hears of them from the hub */
+        if (!was && p->reads_crews && s->conf.n_crews && !s->conf.hub_ip && p->state != RC_PS_CANDIDATE && now - p->last_hello_tx > 100000)
             send_hello(s, p, now);
         want_cfg(s, p, p->cfg_rev_seen, now);
         break; }

@@ -401,9 +401,12 @@ Good to know:
   their cars at any distance, with the distance past 100 m ("Sam (1.2 km)"), in front of other names, and their
   minimap arrows and world-map markers (with their names beside them) are in the crew's colour. You can be in up to 4
   crews; each has its own colour (cyan, magenta, violet, red unless you tap its dot to pick another), and the crew
-  list shows how many of each are in free roam now. Capitals and spaces don't count ("Blue Room" is "blueroom").
-  Everyone else is still there, unlike a Room. Not private: anyone who types the same name joins. A player on an
-  older version is in no crew.
+  list shows how many of each are in free roam now (in the page menu, you count too once you drive). A crew of more
+  than 64 players in one room is too big to pair first: they see each other only nearby, and the list says so (pick a
+  less common name). Capitals and spaces don't count ("Blue Room" is "blueroom"); a name that reads as a slur is no
+  crew. Everyone else is still there, unlike a Room. Not private: anyone who types the same name joins, but other
+  players never learn your crews: the server tells each game which players near it share one. A player on an older
+  version is in no crew.
 - **Rooms:** set the same "Room" to see only some of the players' cars. A room is a filter between players, not
   privacy: every browser on the server still sees your name ("Your name", or the profile name), whether you are in
   the menus or driving, and the room, and someone with their own tools could join it. Play on a server only with

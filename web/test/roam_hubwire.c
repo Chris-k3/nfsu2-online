@@ -11,7 +11,9 @@
  *                                 these datagrams; then "lobbies <gen> <n> x,y,race,n,max,state ..."
  *   roam_hubwire racerep          a race's report to the hub, as roam_core encodes it, in hex
  *   roam_hubwire hellocrew        a session's HELLO to the hub, in hex: its crews "Blue Room" and "Night Owls"
- *                                 (rc_room_hash) after the ids of the two players the hub listed, who said hello */
+ *                                 (rc_room_hash) after the ids of the two players the hub listed, who said hello
+ *   roam_hubwire hubcrew <hex>    a session in those two crews takes this list from the hub; then each player
+ *                                 listed as "a.b.c.d:port:crew" (rc_peer_crew: 0 or 1, -1 for none) */
 #include "roam_core.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -73,6 +75,28 @@ int main(int argc, char **argv){
         rc_tick(&S, t += 1500000);
         if (!hub_hello_n){ printf("none\n"); return 1; }
         for (int i = 0; i < hub_hello_n; i++) printf("%02x", hub_hello[i]);
+        printf("\n");
+        return 0;
+    }
+    if (!strcmp(argv[1], "hubcrew")){
+        rc_config c; memset(&c, 0, sizeof c);
+        c.self_id = 0x1234ABCDu; c.port = 47210; c.max_players = RC_MAX_PLAYERS; c.rate_hz = 20;
+        c.hub_ip = 0x0A4D00FDu; c.hub_port = 47210;
+        c.crews[0] = rc_room_hash("Blue Room"); c.crews[1] = rc_room_hash("Night Owls"); c.n_crews = 2;
+        rc_io io; memset(&io, 0, sizeof io);
+        rc_session_init(&S, &c, &io);
+        int64_t t = 1000000;
+        rc_tick(&S, t);
+        unhex(argc > 2 ? argv[2] : "", b, &n);
+        if (rc_decode(b, n, &m) != RC_OK || m.h.type != RC_MSG_PEERS){ printf("err\n"); return 0; }
+        rc_receive(&S, 0x0A4D00FDu, 47210, b, n, t += 1000);
+        printf("ok");
+        for (int k = 0; k < m.u.peers.n; k++){
+            uint32_t ip = m.u.peers.e[k].ip; int crew = -2;
+            for (int i = 0; i < RC_TABLE; i++)
+                if (S.peer[i].state != RC_PS_FREE && S.peer[i].ip == ip && S.peer[i].port == m.u.peers.e[k].port) crew = rc_peer_crew(&S, i);
+            printf(" %u.%u.%u.%u:%u:%d", ip >> 24, (ip >> 16) & 255u, (ip >> 8) & 255u, ip & 255u, m.u.peers.e[k].port, crew);
+        }
         printf("\n");
         return 0;
     }

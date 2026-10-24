@@ -11,7 +11,8 @@
 //!   its car is), a BYE when it stops.
 //! - hub -> player: twice a second (`tick_ms`) a PEERS message: the players linked to it, { virtual address, port, id }, at most
 //!   `degree` (32: roam_core's group of 33 with itself), or 7 for a player whose HELLO says core version 1 (its group
-//!   was 8, and it drops a longer list); an empty one says the hub is there.
+//!   was 8, and it drops a longer list); an empty one says the hub is there.  To a player in a crew whose HELLO says
+//!   it reads them (core 8), the list ends in crew marks: its own crews, then which of them each listed player is in.
 //! - player -> hub -> player: when its world map opens, a MAPREQ; the hub answers with MAP datagrams (at most three
 //!   of 230): the other players of its room in free roam, past its links, nearest first, map_max (512) of them at
 //!   most, each its place (x, y in whole metres) and heading (a byte), which the game marks on the map.
@@ -52,7 +53,10 @@
 //! distance alone a friend 300 m off in a crowd was never linked (32 nearer players were, 8 under the busy cap): his
 //! car, name and map arrow never showed.  A crew of more than 64 players in one room gets no links first (its pairs
 //! grow as the square of its players): they link by distance as everyone does.  /players counts each crew's players
-//! for the start page (`in_crews()`).
+//! for the start page (`in_crews()`).  A player learns which of its peers share a crew from the hub's marks on its
+//! list, never from the peers: a crew's hash in a stranger's hands is all it takes to be linked with that player
+//! anywhere on the map, and a short crew name is quickly found from its hash (a core before 8 still sends its crews to
+//! the peers that read them, and colours a crew-mate of core 8 no more).
 //!
 //! A busy server gives every player fewer links: each link is two players' snapshots to each other, 20 a second each
 //! way (fewer for far ones), so a crowd costs its players times their links, all through the switch; a switch that
@@ -97,7 +101,7 @@ use nfsu2_util::{FrameCtx, Host, SwitchSend};
 use tokio::sync::oneshot;
 
 pub use hub::Hub;
-pub use wire::{decode_roam, encode_peers};
+pub use wire::{decode_roam, encode_peers, encode_peers_crews};
 
 /// 10.77.0.253, runtime/web/net_proto.h NET_ROAM_HUB
 pub const ROAM_HUB_VIP: u32 = 0x0A4D_00FD;
