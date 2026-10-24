@@ -4,11 +4,14 @@
 //
 // navigator.getGamepads() exists on the page's main thread only, so the page
 // polls it every frame and publishes the pad into the HostMailbox under a
-// seqlock; the guest reads it when the game polls its device.  The first
-// connected controller with the standard mapping, or a steering wheel
-// (wheel.ts: the wheel, its pedals and buttons made the pad's, and the game
-// offered a driving device), drives the pad (one that connects later takes
-// over only when it goes away), as gamepad.m does; without either the first
+// seqlock; the guest reads it when the game polls its device.  Of the
+// controllers with the standard mapping and the steering wheels (wheel.ts:
+// the wheel, its pedals and buttons made the pad's, and the game offered a
+// driving device), the one the player last pressed a button on drives the
+// pad, so a controller next to a wheel takes over with a press and the wheel
+// takes it back with one of its own.  Before any press, and when that one
+// goes away, the first connected of them drives (one that connects later
+// waits for a press), as gamepad.m does; without either the first
 // controller is read as if it had the standard mapping, but for an axis
 // resting at an end when it showed up (a pedal, a throttle, a trigger),
 // which is no stick.  Chrome exposes a controller only after a button press
@@ -88,6 +91,18 @@ export function mapWheel(g: Gamepad, m: WheelMap, hat: number): PadSnapshot {
   return { connected: true, buttons, axes, family, name, index: g.index, wheel: true };
 }
 
+/** the controller driving the game's pad (null: no game, or no controller); PAD_DRIVER_EVENT on the window when
+ *  another one does (the Controls sheet shows that one) */
+let driver: { index: number; id: string } | null = null;
+export const PAD_DRIVER_EVENT = 'nfsu2-pad-driver';
+/** whether a controller may drive the pad while others are connected: the standard mapping, or a steering wheel */
+export const mayDrive = (g: Gamepad | null) => !!g && (g.mapping === 'standard' || !!wheelOf(g.id));
+export function drivingPad(): Gamepad | null {
+  if (!driver) return null;
+  try { const g = navigator.getGamepads?.()[driver.index]; return g?.connected && g.id === driver.id ? g : null; }
+  catch { return null; }
+}
+
 /** what the poller knows of the controller driving the pad: its axes when it showed up, and if it is a wheel, the
  *  model, how it makes the pad and the axis of its D-pad */
 interface Seen { index: number; id: string; axes0: number[]; ends: Set<number>; wheel: WheelInfo | null; map: WheelMap | null; hat: number }
@@ -152,6 +167,10 @@ export class PadPoller {
   private buzzAt = 0;
   // the controller driving the pad as it showed up (a wheel's layout comes from it)
   private seen: Seen | null = null;
+  // each controller's buttons as last polled, and the one a button was last pressed on (choose)
+  private down = new Map<number, { id: string; on: boolean[] }>();
+  private chosen: { index: number; id: string } | null = null;
+  private polled = false;
   /** performance.now() of a real controller's last button press (0: none yet) */
   lastPress = 0;
   // views of the game's memory: dropped by dispose(), so nothing keeps an ended
@@ -190,6 +209,7 @@ export class PadPoller {
     removeEventListener(WHEEL_MAP_EVENT, this.onWheelMap);
     this.rumble(null);
     this.h = null; this.u8 = null;
+    if (driver) { driver = null; dispatchEvent(new Event(PAD_DRIVER_EVENT)); }
   }
 
   /** the controller driving the pad, or null */
@@ -205,9 +225,17 @@ export class PadPoller {
     for (const g of pads) if (g && g.connected) { live.add(g.index); if (!this.order.includes(g.index)) this.order.push(g.index); }
     this.order = this.order.filter(i => live.has(i));
     const byIndex = (i: number) => pads[i] ?? null;
-    let pick = this.order.find(i => { const p = byIndex(i); return !!p && (p.mapping === 'standard' || !!wheelOf(p.id)); });
+    this.choose(pads);
+    const c = this.chosen, cg = c && byIndex(c.index);
+    let pick = cg?.connected && cg.id === c!.id ? c!.index : undefined;
+    if (pick === undefined) { this.chosen = null; pick = this.order.find(i => mayDrive(byIndex(i))); }
     if (pick === undefined) pick = this.order[0];
     const g = pick === undefined ? null : byIndex(pick);
+    if (g?.index !== driver?.index || g?.id !== driver?.id) {
+      if (g && driver) this.log(`[pad] ${g.id} drives now${this.chosen ? ' (a button pressed on it)' : ''}`);
+      driver = g && { index: g.index, id: g.id };
+      dispatchEvent(new Event(PAD_DRIVER_EVENT));
+    }
     const s: PadSnapshot = g ? this.read(g) : { connected: false, buttons: 0, axes: [0, 0, 0, 0, 0, 0], family: PADF_GENERIC, name: '', index: -1 };
     this.rumble(g);
     const pressed = s.buttons & ~this.pressedBefore;
@@ -220,6 +248,23 @@ export class PadPoller {
     if (this.same(out)) return;
     this.publish(out, !this.last || this.last.connected !== out.connected || this.last.index !== out.index || this.last.name !== out.name);
     this.last = out;
+  }
+
+  /** A button pressed on a controller that may drive the pad makes it the one that does (chosen).  One that shows up
+   *  with a button held was pressed (Chrome shows a controller on a press), but not one there at the first poll (a
+   *  wheel's shifter left in a gear). */
+  private choose(pads: readonly (Gamepad | null)[]) {
+    const down = new Map<number, { id: string; on: boolean[] }>();
+    for (const g of pads) {
+      if (!g?.connected) continue;
+      const on = g.buttons.map(b => !!b && (b.pressed || b.value > 0.5));
+      const was = this.down.get(g.index);
+      const before = was?.id === g.id ? was.on : this.polled ? [] : on;
+      if (mayDrive(g) && on.some((v, i) => v && !before[i])) this.chosen = { index: g.index, id: g.id };
+      down.set(g.index, { id: g.id, on });
+    }
+    this.down = down;
+    this.polled = true;
   }
 
   /** the controller driving the pad as the pad: a wheel through its layout (the player's, or the guess from how it

@@ -683,6 +683,7 @@
   "Set up the wheel": "Ställ in ratten",
   "Set up in this browser.": "Inställd i den här webbläsaren.",
   "How it steers and brakes is a guess from how the browser reports it. Wrong? Set it up.": "Hur den styr och bromsar är en gissning utifrån hur webbläsaren rapporterar den. Fel? Ställ in ratten.",
+  "With a controller connected too, the game uses whichever you last pressed a button on.": "Är en handkontroll också ansluten använder spelet den du senast tryckte på en knapp på.",
   "Set up again": "Ställ in igen",
   "The wheel went away before its set-up was done.": "Ratten försvann innan inställningen var klar.",
   "The server is full: playing with others waits for a free place": "Servern är full: spel med andra får vänta på en ledig plats",

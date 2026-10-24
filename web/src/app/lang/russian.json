@@ -725,6 +725,7 @@
   "Set up the wheel": "Настроить руль",
   "Set up in this browser.": "Настроен в этом браузере.",
   "How it steers and brakes is a guess from how the browser reports it. Wrong? Set it up.": "Руление и торможение определены автоматически — по тому, как браузер сообщает о руле. Неправильно? Настройте его.",
+  "With a controller connected too, the game uses whichever you last pressed a button on.": "Если подключён ещё и геймпад, игра использует то устройство, на котором последний раз нажали кнопку.",
   "Set up again": "Настроить заново",
   "The wheel went away before its set-up was done.": "Руль отключился до завершения настройки.",
   "The server is full: playing with others waits for a free place": "Сервер заполнен: игра с другими начнётся, когда освободится место",

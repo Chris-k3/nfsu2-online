@@ -620,6 +620,7 @@
   "Set up the wheel": "핸들 설정",
   "Set up in this browser.": "이 브라우저에서 설정됨.",
   "How it steers and brakes is a guess from how the browser reports it. Wrong? Set it up.": "조향과 제동 방식은 브라우저가 알려 주는 정보로 추정한 거예요. 맞지 않나요? 직접 설정하세요.",
+  "With a controller connected too, the game uses whichever you last pressed a button on.": "컨트롤러도 연결되어 있으면 마지막으로 버튼을 누른 쪽을 게임이 사용해요.",
   "Set up again": "다시 설정",
   "The wheel went away before its set-up was done.": "설정이 끝나기 전에 핸들 연결이 끊어졌어요.",
   "The server is full: playing with others waits for a free place": "서버가 가득 찼어요: 자리가 날 때까지 다른 플레이어와의 플레이는 대기해요",

@@ -725,6 +725,7 @@
   "Set up the wheel": "Skonfiguruj kierownicę",
   "Set up in this browser.": "Skonfigurowana w tej przeglądarce.",
   "How it steers and brakes is a guess from how the browser reports it. Wrong? Set it up.": "Sterowanie i hamowanie ustawiono automatycznie na podstawie tego, jak przeglądarka zgłasza kierownicę. Źle działa? Skonfiguruj ją.",
+  "With a controller connected too, the game uses whichever you last pressed a button on.": "Gdy podłączony jest też kontroler, gra używa tego urządzenia, na którym ostatnio naciśnięto przycisk.",
   "Set up again": "Skonfiguruj ponownie",
   "The wheel went away before its set-up was done.": "Kierownica odłączyła się przed końcem konfiguracji.",
   "The server is full: playing with others waits for a free place": "Serwer jest pełny: gra z innymi zacznie się, gdy zwolni się miejsce",

@@ -620,6 +620,7 @@
   "Set up the wheel": "ตั้งค่าพวงมาลัย",
   "Set up in this browser.": "ตั้งค่าไว้ในเบราว์เซอร์นี้แล้ว",
   "How it steers and brakes is a guess from how the browser reports it. Wrong? Set it up.": "การเลี้ยวและการเบรกเป็นค่าที่คาดเดาจากข้อมูลที่เบราว์เซอร์รายงาน หากไม่ถูกต้อง ตั้งค่าเองได้เลย",
+  "With a controller connected too, the game uses whichever you last pressed a button on.": "หากเชื่อมต่อคอนโทรลเลอร์ไว้ด้วย เกมจะใช้อุปกรณ์ที่คุณกดปุ่มล่าสุด",
   "Set up again": "ตั้งค่าใหม่",
   "The wheel went away before its set-up was done.": "พวงมาลัยหลุดการเชื่อมต่อก่อนตั้งค่าเสร็จ",
   "The server is full: playing with others waits for a free place": "เซิร์ฟเวอร์เต็ม: ต้องรอที่ว่างก่อนจึงจะเล่นกับผู้อื่นได้",

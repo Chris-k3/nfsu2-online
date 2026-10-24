@@ -683,6 +683,7 @@
   "Set up the wheel": "Lenkrad einrichten",
   "Set up in this browser.": "In diesem Browser eingerichtet.",
   "How it steers and brakes is a guess from how the browser reports it. Wrong? Set it up.": "Lenkung und Bremse sind geschätzt, anhand dessen, wie der Browser das Lenkrad meldet. Falsch? Richte es ein.",
+  "With a controller connected too, the game uses whichever you last pressed a button on.": "Ist auch ein Controller angeschlossen, nutzt das Spiel das Gerät, auf dem du zuletzt eine Taste gedrückt hast.",
   "Set up again": "Neu einrichten",
   "The wheel went away before its set-up was done.": "Das Lenkrad war weg, bevor die Einrichtung fertig war.",
   "The server is full: playing with others waits for a free place": "Der Server ist voll: Das Spielen mit anderen wartet auf einen freien Platz",

@@ -1,9 +1,11 @@
 // The Controls sheet's steering wheel (controls.ts, the Controller tab): while a wheel is connected, what its controls
 // do in the game (runtime/dinput_pad.c g_prof_wheel, the buttons as web/src/input/wheel.ts puts them), and its
 // set-up, for a wheel the page reads wrong: let go, turn the wheel to full lock, press each pedal (WheelLearn).  The
-// set-up is kept in this browser for that model, and the game's controller follows it at once (gamepad.ts).
+// set-up is kept in this browser for that model, and the game's controller follows it at once (gamepad.ts).  While a
+// game runs, the sheet is the wheel's only while the wheel drives (a controller takes over with a button pressed on it,
+// gamepad.ts), and a line says so while one is connected too.
 
-import { familyOf } from '../input/gamepad';
+import { drivingPad, familyOf, mayDrive, PAD_DRIVER_EVENT } from '../input/gamepad';
 import { guessMap, loadMap, saveMap, WheelLearn, wheelOf, type LearnStep } from '../input/wheel';
 import { N, t } from './i18n';
 
@@ -15,10 +17,21 @@ const STEPS: Record<LearnStep, string> = {
   done: N('Done: the wheel is set up in this browser.'),
 };
 
-/** the wheel the sheet is about: the first connected one the browser has no standard mapping for, or null */
+/** the wheel the sheet is about, one the browser has no standard mapping for: the one driving the game's controller
+ *  while a game runs, else the first connected one; or null */
 function connectedWheel(): Gamepad | null {
-  try { return navigator.getGamepads?.().find(g => !!g?.connected && g.mapping !== 'standard' && !!wheelOf(g.id)) ?? null; }
-  catch { return null; }
+  const wheel = (g: Gamepad | null) => !!g?.connected && g.mapping !== 'standard' && !!wheelOf(g.id);
+  try {
+    const d = drivingPad();
+    if (d) return wheel(d) ? d : null;
+    return navigator.getGamepads?.().find(wheel) ?? null;
+  } catch { return null; }
+}
+
+/** whether a controller besides the wheel at index is connected that could drive instead (gamepad.ts) */
+function otherPad(index: number): boolean {
+  try { return navigator.getGamepads?.().some(g => !!g?.connected && g.index !== index && mayDrive(g)) ?? false; }
+  catch { return false; }
 }
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -48,6 +61,7 @@ export function wheelSection(pad: HTMLElement, cap: (xb: string, ps: string) => 
       ${row(`${cap('view', 'Share')} ${cap('menu', 'Options')}`, N('Respawn, pause'))}
       ${row(`${cap('up', 'up')} ${cap('left', 'left')} ${cap('right', 'right')}`, N('Start event, map, messages'))}
     </dl>
+    <p class="hint wheel-other" hidden>${esc(t('With a controller connected too, the game uses whichever you last pressed a button on.'))}</p>
     <div class="pad-foot">
       <p class="hint wheel-state"></p>
       <div class="row">
@@ -79,6 +93,7 @@ export function wheelSection(pad: HTMLElement, cap: (xb: string, ps: string) => 
     for (const el of pad.children) if (el !== box) (el as HTMLElement | SVGElement).style.display = g ? 'none' : '';
     if (!g) return;
     $('.wheel-name').textContent = familyOf(g.id).name;
+    $('.wheel-other').hidden = !otherPad(g.index);
     const kept = !!loadMap(g.id);
     $('.wheel-state').textContent = stateText ? t(stateText) : kept ? t('Set up in this browser.')
       : t('How it steers and brakes is a guess from how the browser reports it. Wrong? Set it up.');
@@ -129,6 +144,7 @@ export function wheelSection(pad: HTMLElement, cap: (xb: string, ps: string) => 
   draw();
   addEventListener('gamepadconnected', () => { stateText = ''; refresh(); });
   addEventListener('gamepaddisconnected', () => { stateText = ''; refresh(); });
+  addEventListener(PAD_DRIVER_EVENT, () => refresh());
   refresh();
   return { box, refresh, relabel() { draw(); refresh(); } };
 }

@@ -195,6 +195,7 @@ kbd .glyph { display: inline-block; width: 14px; height: 14px; vertical-align: -
 /* a steering wheel instead (wheel-setup.ts): its name, what its controls do, its set-up's step and the hold's bar */
 .wheel-name { font-size: 16px; line-height: 24px; margin-bottom: 4px; }
 .wheel .pad-foot .hint { flex: 1 1 240px; }
+.wheel > .keys + .hint { margin: 16px 0 0; }
 .wheel-learn { margin-top: 16px; }
 .wheel-learn .bar { margin: 8px 0 4px; }
 .wheel-learn .bar-fill { transition: none; }

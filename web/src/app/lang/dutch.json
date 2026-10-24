@@ -683,6 +683,7 @@
   "Set up the wheel": "Stuur instellen",
   "Set up in this browser.": "Ingesteld in deze browser.",
   "How it steers and brakes is a guess from how the browser reports it. Wrong? Set it up.": "Hoe het stuurt en remt, is een schatting op basis van hoe de browser het doorgeeft. Klopt het niet? Stel het in.",
+  "With a controller connected too, the game uses whichever you last pressed a button on.": "Is er ook een controller aangesloten, dan gebruikt het spel degene waarop je het laatst een knop indrukte.",
   "Set up again": "Opnieuw instellen",
   "The wheel went away before its set-up was done.": "Het stuur viel weg voordat het instellen klaar was.",
   "The server is full: playing with others waits for a free place": "De server is vol: spelen met anderen wacht op een vrije plek",

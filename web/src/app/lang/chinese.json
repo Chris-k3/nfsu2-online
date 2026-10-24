@@ -620,6 +620,7 @@
   "Set up the wheel": "設定方向盤",
   "Set up in this browser.": "已在此瀏覽器中設定。",
   "How it steers and brakes is a guess from how the browser reports it. Wrong? Set it up.": "轉向與煞車方式是根據瀏覽器回報的資訊推測而來。不對嗎？請進行設定。",
+  "With a controller connected too, the game uses whichever you last pressed a button on.": "同時連接控制器時，遊戲會使用你最後按下按鈕的那一個。",
   "Set up again": "重新設定",
   "The wheel went away before its set-up was done.": "方向盤在設定完成前就中斷連線了。",
   "The server is full: playing with others waits for a free place": "伺服器已滿：要等有空位時才能與他人同玩",

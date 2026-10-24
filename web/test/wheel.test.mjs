@@ -1,6 +1,6 @@
 // Steering wheels through the Gamepad API (web/src/input/wheel.ts, gamepad.ts): which controllers are wheels, a known
 // model's layout as each browser places its axes, the layout guessed from where a wheel's axes sat when it showed
-// up, the pad they make, and the set-up's steps.
+// up, the pad they make, the set-up's steps, and which of a wheel and a controller drives the pad.
 //   node --test web/test/wheel.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -198,4 +198,54 @@ test('a controller without the standard mapping: an axis that rested at an end i
   assert.deepEqual(s.axes, [0, 0, 0, 0, 0, 0]);
   assert.equal(s.buttons, 0);
   assert.deepEqual(G.mapStandard(g).axes.slice(0, 4), [0, 1, 0, -1]);    // as before, without
+});
+
+test('a wheel and a controller: the one a button was last pressed on drives the pad', () => {
+  const nav = Object.getOwnPropertyDescriptor(globalThis, 'navigator'), et = new EventTarget(), pads = [];
+  Object.defineProperty(globalThis, 'navigator', { value: { getGamepads: () => pads }, configurable: true });
+  const ev = { addEventListener: globalThis.addEventListener, removeEventListener: globalThis.removeEventListener, dispatchEvent: globalThis.dispatchEvent };
+  Object.assign(globalThis, { addEventListener: et.addEventListener.bind(et), removeEventListener: et.removeEventListener.bind(et),
+    dispatchEvent: et.dispatchEvent.bind(et) });
+  try {
+    const buf = new SharedArrayBuffer(4096), h = new Int32Array(buf), u8 = new Uint8Array(buf), logs = [];
+    const pad = (id, index, mapping, axes, n) => ({ id, index, mapping, connected: true, axes: [...axes],
+      buttons: Array.from({ length: n }, () => ({ pressed: false, value: 0 })) });
+    const press = (g, i, on = true) => { g.buttons[i] = { pressed: on, value: on ? 1 : 0 }; };
+    const name = () => String.fromCharCode(...u8.subarray(P.IM_OFF_PAD_NAME, P.IM_OFF_PAD_NAME + 64)).replace(/\0+$/, '');
+    const wheel = pad(G29, 0, '', G29_REST, 25);
+    const ds = pad('DualSense Wireless Controller (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)', 1, 'standard', [0, 0, 0, 0], 17);
+    let changes = 0;
+    et.addEventListener(G.PAD_DRIVER_EVENT, () => changes++);
+    pads.push(wheel, ds);
+    let p = new G.PadPoller(h, u8, 0, () => {}, s => logs.push(s));
+    p.poll();
+    assert.equal(h[P.IM_PAD_WHEEL], 1);                             // the first connected, before any press
+    assert.equal(G.drivingPad(), wheel);
+    press(ds, 0); p.poll();                                         // Cross on the controller: it takes over, Cross too
+    assert.deepEqual([h[P.IM_PAD_WHEEL], name(), h[P.IM_PAD_BUTTONS]], [0, 'DualSense Wireless Controller', bit(P.PAD_A)]);
+    assert.equal(G.drivingPad(), ds);
+    assert.match(logs.at(-1), /DualSense.* drives now \(a button pressed on it\)/);
+    press(ds, 0, false); wheel.axes[0] = -1; p.poll();              // the wheel turned: no press, the controller stays
+    assert.equal(h[P.IM_PAD_WHEEL], 0);
+    press(wheel, 3); p.poll();                                      // a button on the wheel takes it back
+    assert.equal(h[P.IM_PAD_WHEEL], 1);
+    press(wheel, 3, false); press(ds, 7); p.poll();                 // the controller's trigger is a press too
+    assert.equal(h[P.IM_PAD_WHEEL], 0);
+    pads[1] = null; p.poll();                                       // the controller off: the wheel again
+    assert.equal(h[P.IM_PAD_WHEEL], 1);
+    pads[1] = ds; p.poll();                                         // back, its trigger still held (Chrome shows it on a press)
+    assert.equal(h[P.IM_PAD_WHEEL], 0);
+    assert.equal(changes, 6);
+    p.dispose();
+    assert.equal(G.drivingPad(), null);
+    p = new G.PadPoller(h, u8, 0, () => {}, () => {});              // a button held at the first poll is no press
+    p.poll();
+    assert.equal(h[P.IM_PAD_WHEEL], 1);
+    press(ds, 7, false); p.poll(); press(ds, 1); p.poll();
+    assert.equal(h[P.IM_PAD_WHEEL], 0);
+    p.dispose();
+  } finally {
+    if (nav) Object.defineProperty(globalThis, 'navigator', nav); else delete globalThis.navigator;
+    Object.assign(globalThis, ev);
+  }
 });

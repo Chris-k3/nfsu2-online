@@ -704,6 +704,7 @@
   "Set up the wheel": "Configura il volante",
   "Set up in this browser.": "Configurato in questo browser.",
   "How it steers and brakes is a guess from how the browser reports it. Wrong? Set it up.": "Come sterza e frena è una stima basata su ciò che riporta il browser. Non va bene? Configuralo.",
+  "With a controller connected too, the game uses whichever you last pressed a button on.": "Se è collegato anche un controller, il gioco usa quello su cui hai premuto un tasto per ultimo.",
   "Set up again": "Configura di nuovo",
   "The wheel went away before its set-up was done.": "Il volante si è scollegato prima della fine della configurazione.",
   "The server is full: playing with others waits for a free place": "Il server è pieno: per giocare con gli altri bisogna aspettare un posto libero",

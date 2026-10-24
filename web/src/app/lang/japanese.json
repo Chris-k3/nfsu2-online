@@ -620,6 +620,7 @@
   "Set up the wheel": "ハンドルを設定",
   "Set up in this browser.": "このブラウザで設定済みです。",
   "How it steers and brakes is a guess from how the browser reports it. Wrong? Set it up.": "ハンドルとブレーキの動きは、ブラウザから得た情報をもとにした推測です。合わない場合は、設定してください。",
+  "With a controller connected too, the game uses whichever you last pressed a button on.": "コントローラーも接続している場合は、最後にボタンを押したほうをゲームが使います。",
   "Set up again": "再設定",
   "The wheel went away before its set-up was done.": "設定が終わる前に、ハンドルが切断されました。",
   "The server is full: playing with others waits for a free place": "サーバーが満員です。空きが出るまで、他のプレイヤーとのプレイは待機になります",
