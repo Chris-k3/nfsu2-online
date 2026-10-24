@@ -18,15 +18,24 @@
 //! manifest's mtime and size, so a changed file is a new address) and it is as small as it gets (compressed, or a run
 //! that does not compress; not one sent as it is because the compressors were taken).  The movies too.  At about 110
 //! players the 1 Gbit uplink was full without it.
+//!
+//! One block (n=1, all the page asks for) to a client that takes br is better still: the block as kept.rs keeps it,
+//! compressed once at brotli's best (or as it is, kept.rs having found it does not compress), with its length.  A
+//! block not kept yet is answered as above and queued to be kept; a shared cache may keep that answer EDGE_WHILE
+//! only, then asks again and keeps the kept one for good.  The manifest names these at /data-blocks/v2/ (the same
+//! files): the shared cache's copies of the answers from before they were kept are at the old addresses, which still
+//! answer.
 
 use std::io::{self, Write};
 use std::os::unix::fs::{FileExt, MetadataExt};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use nfsu2_headers::{Cache, EDGE_KEEP, pick_encoding};
 use nfsu2_http::{Request, Response};
 
 use super::files::{self, stream_range};
+use super::kept::{self, Kept};
 use super::manifest::{BLOCK, BLOCKS_MAX};
 use super::url::Url;
 use super::{App, Fail, Res, Share, etag, finish, send};
@@ -40,10 +49,40 @@ pub const COMPRESSORS_TOTAL: usize = 128;
 pub const ENCODERS: [&str; 3] = ["zstd", "br", "gzip"];
 /// what one job reads and compresses
 const CHUNK: usize = 128 << 10;
+/// a block answered before it is kept (compressed as it is sent, or as it is): a shared cache keeps it 10 minutes
+pub const EDGE_WHILE: &str = "public, max-age=600";
+/// the addresses' own folder since blocks are kept (the manifest's "blocks")
+pub const V2: &str = "/v2";
 
-/// A compressor's state, which moves with its run's jobs from chunk to chunk.  Fast settings: within a few percent
-/// of the best ratio for this data, at a fraction of the CPU (zstd 3: about 260 MB/s on one core; br 3, window 2^21;
-/// gzip 4).
+/// The answers of /data-blocks/ since the last look: kept blocks, runs compressed as they are sent (by encoding:
+/// zstd, br, gzip), as they are.  The 5-minute line (run.rs) shows whether a CDN in front asks for br (Cloudflare
+/// does, from servers that give it): without it no kept block goes out.
+#[derive(Default)]
+pub struct Sent {
+    kept: AtomicU64,
+    compressed: [AtomicU64; 3],
+    as_is: AtomicU64,
+}
+
+impl Sent {
+    fn count(c: &AtomicU64) {
+        c.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// the counts since the last look ("" when there were none), set back to 0
+    pub fn take(&self) -> String {
+        let t = |c: &AtomicU64| c.swap(0, Ordering::Relaxed);
+        let (kept, z, as_is) = (t(&self.kept), self.compressed.each_ref().map(t), t(&self.as_is));
+        if kept + z.iter().sum::<u64>() + as_is == 0 {
+            return String::new();
+        }
+        format!("{kept} kept, compressed as sent {} zstd {} br {} gzip, {as_is} as they are", z[0], z[1], z[2])
+    }
+}
+
+/// A compressor's state, which moves with its run's jobs from chunk to chunk.  Fast settings, at a fraction of the
+/// CPU of the best (zstd 3: about 260 MB/s on one core; br 3, window 2^21; gzip 4): brotli's best is about 8 %
+/// smaller for the game data, a fifth for the tracks, which is why kept.rs keeps the blocks that way.
 pub enum Encoder {
     Zstd(zstd::stream::write::Encoder<'static, Vec<u8>>),
     Br(Box<brotli::CompressorWriter<Vec<u8>>>),
@@ -87,7 +126,7 @@ impl Encoder {
 }
 
 /// buf filled from the file at off, as far as the file goes
-fn read_full_at(f: &std::fs::File, buf: &mut [u8], off: u64) -> io::Result<usize> {
+pub fn read_full_at(f: &std::fs::File, buf: &mut [u8], off: u64) -> io::Result<usize> {
     let mut got = 0;
     while got < buf.len() {
         match f.read_at(&mut buf[got..], off + got as u64) {
@@ -147,7 +186,8 @@ impl App {
                 let (roots, state, root) = (self.real_roots.clone(), self.real_state.clone(), self.o.data.clone());
                 tokio::task::spawn_blocking(move || {
                     let f = files::locate_sync(&roots, &state, &root, &file)?;
-                    files::open_found(&f.real).ok()
+                    let (file, md) = files::open_found(&f.real).ok()?;
+                    Some((file, md, f.real))
                 })
                 .await
                 .ok()
@@ -155,7 +195,7 @@ impl App {
             }
             None => None,
         };
-        let Some((file, md)) = opened else { return self.not_found(q, s).await };
+        let Some((file, md, real)) = opened else { return self.not_found(q, s).await };
         let (b, n) = (u.param("b").unwrap_or_default(), u.param("n").unwrap_or_default());
         let digits = |x: &str, max: usize| !x.is_empty() && x.len() <= max && x.bytes().all(|c| c.is_ascii_digit());
         if !digits(&b, 7) || !digits(&n, 2) {
@@ -171,36 +211,73 @@ impl App {
         if start >= size {
             return self.plain(q, s, 416, "Range not satisfiable", &[], Cache::Store, true).await;
         }
+        // the version: m and s (a page of before names no size)
+        let size_s = etag::num(size as f64);
+        let named = u.param("m").as_deref() == Some(etag::num(etag::mtime_s(&md)).as_str())
+            && u.param("s").unwrap_or_else(|| size_s.clone()) == size_s;
+        let accept = q.headers.get("accept-encoding");
+        // one block to a client that takes br: as kept.rs keeps it, if it does yet
+        let kept = match &self.kept {
+            Some(k) if n == 1 && pick_encoding(accept, &["br"]).is_some() => Some(k.clone()),
+            _ => None,
+        };
+        let found = match &kept {
+            Some(k) => {
+                let (k, key) = (k.clone(), kept::key(&real, &md, b));
+                tokio::task::spawn_blocking(move || k.lookup(&key)).await.unwrap_or(Kept::No)
+            }
+            None => Kept::No,
+        };
+        let found = match found {
+            Kept::Br(f, len) => return self.send_kept(q, s, f, len, named).await,
+            other => other,
+        };
         let (_, key, site) = self.client(q);
-        let enc = pick_encoding(q.headers.get("accept-encoding"), &ENCODERS);
+        let enc = pick_encoding(accept, &ENCODERS);
         let mut held = match enc {
-            Some(_) if q.method != "HEAD" => Share::take(&self.compressors, &key, &site),
+            Some(_) if q.method != "HEAD" && !matches!(found, Kept::AsIs) => Share::take(&self.compressors, &key, &site),
             _ => None,
         };
         // a run whose probe failed is compressed: never kept as it is
-        let as_is = held.is_some() && {
-            let f = file.clone();
-            !self.pool.submit(move || compresses(&f, start, end).unwrap_or(true)).await.unwrap_or(true)
-        };
+        let as_is = matches!(found, Kept::AsIs)
+            || held.is_some() && {
+                let f = file.clone();
+                !self.pool.submit(move || compresses(&f, start, end).unwrap_or(true)).await.unwrap_or(true)
+            };
         if as_is {
             held = None;
         }
         let z = held.is_some();
-        // the version: m and s (a page of before names no size)
-        let size_s = etag::num(size as f64);
-        let keep = (z || as_is)
-            && u.param("m").as_deref() == Some(etag::num(etag::mtime_s(&md)).as_str())
-            && u.param("s").unwrap_or_else(|| size_s.clone()) == size_s;
+        // a block that is not kept yet: queued, and its answer now (compressed as it is sent, or as it is where the
+        // probe says so) kept by a shared cache for a while only
+        let mut kept_soon = false;
+        if let Some(k) = &kept
+            && matches!(found, Kept::No)
+            && k.keeping()
+        {
+            kept_soon = true;
+            if q.method != "HEAD" {
+                k.queue(&real, &md, b);
+            }
+        }
+        let keep = (z || as_is) && named;
         let mut h = self.headers(q, Cache::Store, true);
         h.set("content-type", "application/octet-stream");
         h.set("vary", "accept-encoding");
         if keep {
-            h.set("cdn-cache-control", EDGE_KEEP);
-            h.set("cloudflare-cdn-cache-control", EDGE_KEEP);
+            let v = if kept_soon { EDGE_WHILE } else { EDGE_KEEP };
+            h.set("cdn-cache-control", v);
+            h.set("cloudflare-cdn-cache-control", v);
         }
         match enc {
-            Some(e) if z => h.set("content-encoding", e),
-            _ => h.set("content-length", (end - start).to_string()),
+            Some(e) if z => {
+                h.set("content-encoding", e);
+                Sent::count(&self.sent.compressed[ENCODERS.iter().position(|x| *x == e).unwrap_or(0)]);
+            }
+            _ => {
+                h.set("content-length", (end - start).to_string());
+                Sent::count(&self.sent.as_is);
+            }
         }
         s.head(200, h.0);
         if q.method == "HEAD" {
@@ -214,6 +291,26 @@ impl App {
         let r = finish(s).await;
         drop(held);
         r
+    }
+
+    /// a kept block: its brotli stream as it is on the disk, with its length (kept for good by a shared cache when
+    /// the address names this version)
+    async fn send_kept(&self, q: &Request, s: &mut Response, f: std::fs::File, len: u64, named: bool) -> Res {
+        let mut h = self.headers(q, Cache::Store, true);
+        h.set("content-type", "application/octet-stream");
+        h.set("vary", "accept-encoding");
+        if named {
+            h.set("cdn-cache-control", EDGE_KEEP);
+            h.set("cloudflare-cdn-cache-control", EDGE_KEEP);
+        }
+        h.set("content-encoding", "br");
+        h.set("content-length", len.to_string());
+        Sent::count(&self.sent.kept);
+        s.head(200, h.0);
+        if q.method != "HEAD" {
+            stream_range(s, Arc::new(f), 0, len).await?;
+        }
+        finish(s).await
     }
 
     /// the run compressed chunk by chunk on the pool (the encoder made there too), the next chunk compressing while

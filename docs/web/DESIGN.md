@@ -134,8 +134,13 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
   written straight into wasm memory. Mounts:
   - `/data`: the install folder. Manifest from the server, case-insensitive lookup, 1 MiB blocks, memory LRU,
     persistent OPFS block cache (`web/src/host/datacache.ts`). Blocks come from the server's `/data-blocks/` (named by
-    the manifest): runs of up to 8 blocks as one answer, compressed with zstd, br or gzip as Content-Encoding, which
-    the browser undoes itself; a run whose first 64 KB does not compress goes as it is. The address carries the file's
+    the manifest: `/data-blocks/v2/`): runs of up to 8 blocks as one answer, compressed with zstd, br or gzip as
+    Content-Encoding, which the browser undoes itself; a run whose first 64 KB does not compress goes as it is. One
+    block (all the page asks for) goes to a client that takes br as the server keeps it: compressed once at brotli's
+    best in its state folder (`web/server-rs/src/app/kept.rs`, threads of its own at the lowest priority, the blocks
+    asked for first, then the manifest's), or as it is where that found it does not compress; until it is kept, as
+    above, and Cloudflare keeps that answer 10 minutes only (`EDGE_WHILE`). `v2` since: Cloudflare's copies of the
+    answers from before are at the old addresses, which still answer. The address carries the file's
     mtime and size (`m`, `s`), and the server lets a shared cache (Cloudflare) keep a run for good when they are the
     file's (read from the one open file it answers from), the run is compressed or does not compress, the movies too
     (`EDGE_KEEP`). A run whose probe read fails is compressed, never kept as it is. An older server: byte ranges
@@ -145,7 +150,7 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
     in Cloudflare's cache, uncompressed). A block the OPFS cache has no room for (a full disk) ends the keeping for
     that game, not the read. The log's `[data]` lines name each block that waited 5 s or needed another try, and a
     cache that filled up (`NFSU2_DATA_FAULT` tests it, the web suite's `datafault`). The data but the movies crosses
-    the network in 69 % of its size (1.37 of 1.98 GB; tracks about 40 %).
+    the network in 61 % of its size (1.28 of 2.09 GB, kept; 1.39 GB compressed as it is sent; tracks about a third).
     "Preload the game data" (Game data on this PC, at the bottom of the start page) fills the cache with all but the
     movies ahead of play from its own worker (`predownload-worker.ts`, 4 blocks at once, each at the address the game's
     own reads use, so one copy in Cloudflare's cache serves both). It runs only while no game
@@ -276,7 +281,7 @@ struct VOut { @builtin(position) pos: vec4f; @location(0) col0: vec4f; @location
     deployment, the security and privacy audit's regressions: `audit.test.mjs`, `page-audit.test.mjs`). They build their wasm programs with wasi-sdk from `deps/`.
 - `node web/tools/predownload-test.mjs` checks "Preload the game data" in Chrome against its own server and a
   made-up game folder: byte-exact cache, no movies, zstd where the bytes compress, stop and resume, retries, a refused
-  file, Play pausing it, a second tab. `web/test/data-blocks.test.mjs` checks the server's `/data-blocks/`,
+  file, Play pausing it, a second tab. `web/test/data-blocks.test.mjs` checks the server's `/data-blocks/` (and its kept blocks),
   `web/test/module.test.mjs` the module's address (`/game.wasm?v=`) and what caches may keep.
 - `node web/tools/offline-test.mjs` checks offline mode with the real game folder and a server it starts and stops:
   the copies kept, Play to the title screen with the server gone, behind a proxy answering 502, and with a server

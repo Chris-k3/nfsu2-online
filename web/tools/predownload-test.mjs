@@ -6,7 +6,8 @@
 // Steps (each prints PASS/FAIL with evidence):
 //   fresh     the page offers the folder but the movies (the game's files only) and says nothing is here yet
 //   full      the download ends with every file but the movies in the cache, byte for byte, and the page says
-//             so; it came in compressed blocks, zstd where the bytes compress, as they are where not
+//             so; it came in compressed blocks, zstd (or br, as the server keeps them) where the bytes compress,
+//             as they are where not
 //   resume    with slow answers: Stop keeps what came, a reload offers the rest, and the rest completes
 //   retry     busy answers (503) and bodies cut short are tried again, and the result is still exact
 //   fail      a server that refuses one file (404): the download stops and says why, keeping the files before it
@@ -111,7 +112,7 @@ const wire = [];
 pc.on('response', r => {
   const u = new URL(r.url());
   if (u.pathname.startsWith('/data-blocks/') && r.status() === 200)
-    wire.push({ url: u.pathname + u.search, path: decodeURIComponent(u.pathname.slice(13)), b: +u.searchParams.get('b'), n: +u.searchParams.get('n'),
+    wire.push({ url: u.pathname + u.search, path: decodeURIComponent(u.pathname.replace(/^\/data-blocks\/(v2\/)?/, '')), b: +u.searchParams.get('b'), n: +u.searchParams.get('n'),
       enc: r.headers()['content-encoding'] ?? 'none' });
 });
 const onWire = async () => {
@@ -191,7 +192,7 @@ try {
     // last byte of TRACKS/RUNPLUSONE.BIN does not), and the whole took fewer bytes
     const packed = p => /^(GLOBAL|TRACKS)\//.test(p) || /^CARS\/CAR(\d\d)\//.test(p) && +/CAR(\d\d)/.exec(p)[1] % 2 === 0;
     const runBytes = w => Math.min(fs.statSync(path.join(DATA, w.path)).size, (w.b + w.n) * M) - w.b * M;
-    const wrongEnc = wire.filter(w => (w.enc === 'zstd') !== (packed(w.path) && runBytes(w) > 16)).map(w => `${w.path}#${w.b}:${w.enc}`);
+    const wrongEnc = wire.filter(w => (w.enc === 'zstd' || w.enc === 'br') !== (packed(w.path) && runBytes(w) > 16)).map(w => `${w.path}#${w.b}:${w.enc}`);
     const bytesOnWire = await onWire();
     report('full', s.state === 'done' && s.have === TOTAL && s.total === TOTAL && c.ok && await page.locator('#fetch-all').isHidden() && /^The game data \(/.test(info) &&
       !ranges.length && wire.length > 0 && !wrongEnc.length && bytesOnWire < TOTAL * 0.8,
@@ -247,7 +248,7 @@ try {
   // ------------------------------------------------------------- fail --
   {
     await clearData();
-    await pc.route('**/data-blocks/SOUND/**', r => r.fulfill({ status: 404, body: 'no' }));
+    await pc.route('**/data-blocks/v2/SOUND/**', r => r.fulfill({ status: 404, body: 'no' }));
     await page.click('#fetch-all');
     const s = await until(s => s.state === 'done' || s.state === 'error');
     await unroute();

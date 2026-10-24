@@ -54,6 +54,15 @@ impl Kit {
 
     /// `start`, with the engine's limits given (max_connections: the port's count)
     pub async fn start_with(args: &[&str], limits: Limits, files: impl FnOnce(&std::path::Path)) -> Kit {
+        Kit::start_full(args, limits, 0, files).await
+    }
+
+    /// `start`, with threads that keep the game data's blocks at brotli's best (kept.rs; none in the others)
+    pub async fn start_keeping(threads: usize, files: impl FnOnce(&std::path::Path)) -> Kit {
+        Kit::start_full(&[], Limits::default(), threads, files).await
+    }
+
+    async fn start_full(args: &[&str], limits: Limits, compress_threads: usize, files: impl FnOnce(&std::path::Path)) -> Kit {
         let dir = tempfile::tempdir().expect("a temporary folder");
         let root = std::fs::canonicalize(dir.path()).expect("its real path");
         let p = |r: &str| root.join(r);
@@ -77,7 +86,7 @@ impl Kit {
             Arc::new(nfsu2_vault::Vault::open(opts).expect("the vault"))
         });
         let bans = Arc::new(nfsu2_bans::Bans::open(std::path::Path::new(&o.state)).expect("the bans"));
-        let app = Arc::new(App::new(o, real_state, key, lan, None, None, vault, bans, 2, 0));
+        let app = Arc::new(App::new(o, real_state, key, lan, None, None, vault, bans, 2, 0, compress_threads));
         app.refresh_manifest().await.expect("the manifest");
         let (listener, _) = nfsu2_http::bind("127.0.0.1", 0, None).await.expect("a port");
         let addr = listener.local_addr().expect("its address");

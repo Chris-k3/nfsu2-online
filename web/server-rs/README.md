@@ -31,6 +31,7 @@ ports; give each its own `--state`.  Knobs for measurements, from the environmen
 | `NFSU2_BUNDLE_JITTER` | each tick is the tick give or take this many percent of it, at random (default 40; nfsu2-lan conn.rs `Clock` says why) |
 | `NFSU2_BUNDLE_MAX_MS`, `NFSU2_BUNDLE_BUDGET` | longer than `NFSU2_BUNDLE_MS`: the tick follows the crowd up to it, aiming at the budget's bundles a second in all (125,000) |
 | `NFSU2_LAN_SNDBUF` | SO_SNDBUF of /lan connections (default 32 KiB, which Linux doubles; 0: the kernel's own, which grows to 4 MB) |
+| `NFSU2_COMPRESS_THREADS` | the threads that compress the game data's blocks once at brotli's best into the state folder's `blocks/` (src/app/kept.rs; default 2, at the lowest priority; 0: none, every block compressed as it is sent) |
 | `NFSU2_REPO` | where the defaults are (web/dist, out/web/nfsu2.wasm, the state in out/web/server): the repo it was built from |
 
 ## The container image

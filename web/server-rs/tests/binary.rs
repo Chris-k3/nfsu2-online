@@ -243,6 +243,17 @@ async fn the_binary_starts_counts_its_players_and_stops() {
         Some(0o700),
         "the keyphrases' folder is private"
     );
+    // the kept blocks: their folder, private too
+    assert!(
+        rust.startup.contains(&"  blocks    : kept at brotli's best in <state>/blocks, 2 threads (NFSU2_COMPRESS_THREADS)".to_string()),
+        "{:?}",
+        rust.startup
+    );
+    assert_eq!(
+        std::fs::metadata(state.join("blocks")).map(|m| m.permissions().mode() & 0o777).ok(),
+        Some(0o700),
+        "the kept blocks' folder is private"
+    );
 }
 
 /// a header of an answer's head (its name in any case)

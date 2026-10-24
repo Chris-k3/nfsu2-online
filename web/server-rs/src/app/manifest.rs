@@ -21,6 +21,7 @@ use sha2::{Digest, Sha256};
 
 use nfsu2_util::json::write_str;
 
+use super::blocks::V2;
 use super::etag;
 use crate::options::within;
 
@@ -64,6 +65,8 @@ pub struct Manifest {
     pub count: usize,
     /// when it was made (ms since the epoch)
     pub at: i64,
+    /// the files' paths in the folder (kept.rs keeps their blocks)
+    pub files: Vec<String>,
 }
 
 /// one entry of the walk, in the order Node's readdir gives them (libuv's scandir: sorted by byte)
@@ -79,7 +82,7 @@ fn entries(dir: &str) -> io::Result<Vec<(String, std::fs::FileType)>> {
     Ok(v.into_iter().map(|(_, n, t)| (n, t)).collect())
 }
 
-fn walk(dir: &str, rel: &str, real_state: &str, out: &mut String, count: &mut usize) -> io::Result<()> {
+fn walk(dir: &str, rel: &str, real_state: &str, out: &mut String, count: &mut usize, files: &mut Vec<String>) -> io::Result<()> {
     for (name, t) in entries(dir)? {
         if name.starts_with('.') || (rel.is_empty() && !game_entry(&name)) {
             continue;
@@ -98,7 +101,7 @@ fn walk(dir: &str, rel: &str, real_state: &str, out: &mut String, count: &mut us
             write_str(out, &r);
             out.push_str(",\"d\":1}");
             *count += 1;
-            walk(&abs, &r, real_state, out, count)?;
+            walk(&abs, &r, real_state, out, count, files)?;
         } else if t.is_file() {
             let md = std::fs::metadata(&abs)?;
             if *count > 0 {
@@ -112,6 +115,7 @@ fn walk(dir: &str, rel: &str, real_state: &str, out: &mut String, count: &mut us
             out.push_str(&etag::num(etag::mtime_s(&md)));
             out.push('}');
             *count += 1;
+            files.push(r);
         }
     }
     Ok(())
@@ -127,9 +131,18 @@ type Walk = Shared<BoxFuture<'static, Result<Arc<Manifest>, String>>>;
 pub struct ManifestCell {
     cur: Mutex<Option<Arc<Manifest>>>,
     walk: Mutex<Option<Walk>>,
+    /// told of each manifest a walk makes (the kept blocks' sweep)
+    on_new: Mutex<Option<OnNew>>,
 }
 
+type OnNew = Arc<dyn Fn(&Manifest) + Send + Sync>;
+
 impl ManifestCell {
+    /// f told of each manifest a walk makes from now on
+    pub fn on_new(&self, f: OnNew) {
+        *self.on_new.lock() = Some(f);
+    }
+
     pub fn current(&self) -> Option<Arc<Manifest>> {
         self.cur.lock().clone()
     }
@@ -149,6 +162,10 @@ impl ManifestCell {
             };
             if let Ok(m) = &r {
                 *cell.cur.lock() = Some(m.clone());
+                let f = cell.on_new.lock().clone();
+                if let Some(f) = f {
+                    f(m);
+                }
             }
             // (after the manifest is in place: a request that comes between finds the new one, or joins this walk)
             *cell.walk.lock() = None;
@@ -163,9 +180,9 @@ impl ManifestCell {
 /// the manifest of the install folder (blocking: on a blocking thread)
 pub fn build(data: &str, real_state: &str, key: &[u8]) -> io::Result<Manifest> {
     let mut body = String::from("{\"v\":1,\"files\":[");
-    let mut count = 0;
-    walk(data, "", real_state, &mut body, &mut count)?;
-    body.push_str(&format!("],\"blocks\":{{\"url\":\"/data-blocks/\",\"size\":{BLOCK},\"max\":{BLOCKS_MAX}}}}}"));
+    let (mut count, mut files) = (0, Vec::new());
+    walk(data, "", real_state, &mut body, &mut count, &mut files)?;
+    body.push_str(&format!("],\"blocks\":{{\"url\":\"/data-blocks{V2}/\",\"size\":{BLOCK},\"max\":{BLOCKS_MAX}}}}}"));
     let mut gz = flate2::GzBuilder::new().operating_system(3).write(Vec::new(), flate2::Compression::default());
     gz.write_all(body.as_bytes())?;
     let gz = gz.finish()?;
@@ -176,6 +193,7 @@ pub fn build(data: &str, real_state: &str, key: &[u8]) -> io::Result<Manifest> {
         gz: Bytes::from(gz),
         count,
         at: nfsu2_util::now_ms(),
+        files,
     })
 }
 
@@ -240,7 +258,7 @@ mod tests {
         );
         assert_eq!(m.count, ps.len());
         assert_eq!(v["files"][9], serde_json::json!({ "p": "SPEED2.EXE", "s": 7, "m": 1_700_000_001u64 }));
-        assert_eq!(v["blocks"], serde_json::json!({ "url": "/data-blocks/", "size": 1048576, "max": 8 }));
+        assert_eq!(v["blocks"], serde_json::json!({ "url": "/data-blocks/v2/", "size": 1048576, "max": 8 }));
         let mut un = Vec::new();
         io::Read::read_to_end(&mut flate2::read::GzDecoder::new(&m.gz[..]), &mut un).unwrap();
         assert_eq!(un, m.body);
@@ -249,7 +267,8 @@ mod tests {
         assert!(!String::from_utf8_lossy(&m2.body).contains("TRACKS"));
     }
 
-    // the same folder walked by the Node server's own buildManifest (copied here as it was): the same bytes
+    // the same folder walked by the Node server's own buildManifest (copied here as it was, but for the blocks' address
+    // of now, /v2/): the same bytes
     #[test]
     fn the_same_body_as_the_node_servers() {
         let d = folder();
@@ -274,7 +293,7 @@ async function walk(dir, rel) {
   }
 }
 await walk(DATA, '');
-process.stdout.write(JSON.stringify({ v: 1, files, blocks: { url: '/data-blocks/', size: BLOCK, max: BLOCKS_MAX } }));
+process.stdout.write(JSON.stringify({ v: 1, files, blocks: { url: '/data-blocks/v2/', size: BLOCK, max: BLOCKS_MAX } }));
 "#;
         let out = std::process::Command::new("node").args(["--input-type=module", "-e", script]).env("NFSU2_TEST_DATA", &root).output();
         match out {

@@ -156,6 +156,107 @@ async fn runs_come_back_exact() {
     assert_eq!(kit.app.compressors.count(), 0);
 }
 
+/// a game file's m and s, as the manifest names them
+fn version(kit: &Kit, rel: &str) -> String {
+    let md = std::fs::metadata(kit.path(&format!("game/{rel}"))).unwrap();
+    format!("m={}&s={}", super::etag::num(super::etag::mtime_s(&md)), md.len())
+}
+
+// One block to a client that takes br: compressed as it is sent and kept by a shared cache for a while only, until
+// its block is kept at brotli's best; then that, with its length, kept for good.  Noise is sent as it is, a run of
+// more blocks and a client without br as before.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_block_goes_out_as_kept_once_it_is() {
+    let kit = Kit::start_keeping(1, |_| {}).await;
+    // a file the manifest does not have yet: only the answers queue its blocks
+    let mut raw = data(1 << 20, false);
+    raw.extend(data((1 << 20) + 777, true));
+    std::fs::write(kit.path("game/TRACKS/late.bin"), &raw).unwrap();
+    let v = version(&kit, "TRACKS/late.bin");
+    let block = |b: usize| raw[b << 20..raw.len().min((b + 1) << 20)].to_vec();
+    let all = [("Accept-Encoding", "zstd, br, gzip")];
+    let a = kit.get(&format!("/data-blocks/v2/TRACKS/late.bin?b=1&n=1&{v}"), &all).await;
+    assert_eq!(a.status, 200);
+    assert_eq!(a.header("content-encoding"), Some("zstd"), "compressed as it is sent");
+    assert_eq!(a.header("cloudflare-cdn-cache-control"), Some(super::blocks::EDGE_WHILE));
+    assert_eq!(decoded("zstd", &a.body), block(1));
+    let mut kept = None;
+    let t0 = std::time::Instant::now();
+    while kept.is_none() {
+        assert!(t0.elapsed() < Duration::from_secs(20), "block 1 kept");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let a = kit.get(&format!("/data-blocks/v2/TRACKS/late.bin?b=1&n=1&{v}"), &all).await;
+        if a.header("content-encoding") == Some("br") {
+            kept = Some(a);
+        }
+    }
+    let a = kept.unwrap();
+    assert_eq!(a.header("content-length"), Some(a.body.len().to_string().as_str()));
+    assert_eq!(a.header("cloudflare-cdn-cache-control"), Some(nfsu2_headers::EDGE_KEEP));
+    assert_eq!(a.header("cdn-cache-control"), Some(nfsu2_headers::EDGE_KEEP));
+    assert_eq!(decoded("br", &a.body), block(1));
+    // the old address, the same bytes; one that names no version: never kept by a shared cache
+    let old = kit.get(&format!("/data-blocks/TRACKS/late.bin?b=1&n=1&{v}"), &all).await;
+    assert_eq!((old.header("content-encoding"), &old.body), (Some("br"), &a.body));
+    let bare = kit.get("/data-blocks/v2/TRACKS/late.bin?b=1&n=1", &all).await;
+    assert_eq!(bare.header("cloudflare-cdn-cache-control"), Some("no-store"));
+    // a HEAD: the kept block's head
+    let head = kit.request("HEAD", &format!("/data-blocks/v2/TRACKS/late.bin?b=1&n=1&{v}"), &all, b"").await;
+    assert_eq!((head.header("content-encoding"), head.header("content-length")), (Some("br"), a.header("content-length")));
+    // noise: as it is, a while, then for good once kept as one sent as it is
+    let a = kit.get(&format!("/data-blocks/v2/TRACKS/late.bin?b=0&n=1&{v}"), &all).await;
+    assert_eq!((a.header("content-encoding"), a.header("cloudflare-cdn-cache-control")), (None, Some(super::blocks::EDGE_WHILE)));
+    assert_eq!(a.body, block(0));
+    let t0 = std::time::Instant::now();
+    loop {
+        let a = kit.get(&format!("/data-blocks/v2/TRACKS/late.bin?b=0&n=1&{v}"), &all).await;
+        assert_eq!((a.header("content-encoding"), &a.body), (None, &block(0)));
+        if a.header("cloudflare-cdn-cache-control") == Some(nfsu2_headers::EDGE_KEEP) {
+            break;
+        }
+        assert!(t0.elapsed() < Duration::from_secs(20), "block 0 kept as it is");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    // a client without br, and a run of two: compressed as they are sent, kept for good as before
+    let a = kit.get(&format!("/data-blocks/v2/TRACKS/late.bin?b=1&n=1&{v}"), &[("Accept-Encoding", "gzip")]).await;
+    assert_eq!((a.header("content-encoding"), a.header("cloudflare-cdn-cache-control")), (Some("gzip"), Some(nfsu2_headers::EDGE_KEEP)));
+    assert_eq!(decoded("gzip", &a.body), block(1));
+    let a = kit.get(&format!("/data-blocks/v2/TRACKS/late.bin?b=0&n=2&{v}"), &all).await;
+    assert_eq!(a.header("cloudflare-cdn-cache-control"), Some(nfsu2_headers::EDGE_KEEP));
+    assert_eq!(decoded(a.header("content-encoding").unwrap_or(""), &a.body), raw[..2 << 20]);
+    // the 5-minute line's counts, then none
+    let line = kit.app.sent.take();
+    assert!(
+        line.starts_with(|c: char| c.is_ascii_digit() && c != '0') && line.contains(" kept, ") && line.contains(" as they are"),
+        "{line}"
+    );
+    assert_eq!(kit.app.sent.take(), "");
+}
+
+// The manifest's files: every block kept without being asked for (the sweep at the start)
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_manifests_blocks_are_kept_unasked() {
+    let kit = Kit::start_keeping(2, |root| std::fs::write(root.join("game/TRACKS/swept.bin"), data((2 << 20) + 5000, true)).unwrap()).await;
+    let raw = std::fs::read(kit.path("game/TRACKS/swept.bin")).unwrap();
+    let v = version(&kit, "TRACKS/swept.bin");
+    let blocks = kit.path("state/blocks");
+    // three blocks of swept.bin, one of GLOBAL/small.bin
+    let count = || {
+        std::fs::read_dir(&blocks).map(|d| d.flatten().flat_map(|s| std::fs::read_dir(s.path()).into_iter().flatten()).count()).unwrap_or(0)
+    };
+    let t0 = std::time::Instant::now();
+    while count() < 4 {
+        assert!(t0.elapsed() < Duration::from_secs(30), "the manifest's blocks kept: {} in 30 s", count());
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    for b in 0..3usize {
+        let a = kit.get(&format!("/data-blocks/v2/TRACKS/swept.bin?b={b}&n=1&{v}"), &[("Accept-Encoding", "br")]).await;
+        assert_eq!(a.header("content-encoding"), Some("br"), "block {b}");
+        assert!(a.header("content-length").is_some());
+        assert_eq!(decoded("br", &a.body), raw[b << 20..raw.len().min((b + 1) << 20)], "block {b}");
+    }
+}
+
 // A file put in place while it is asked for (a build or a deploy renames the new version over the old one): every
 // answer is one version, with that version's length and ETag.  (The size and ETag came from a look at the path, the
 // bytes from an open after it: an answer with one version's length and the other's bytes, cut short or cut off.)

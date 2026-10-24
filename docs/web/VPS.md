@@ -188,8 +188,8 @@ compose file's limit), 40 GB of disk and a 1 Gbit/s port with a few TB of traffi
 - The game folder takes about 3 GB of disk.
 - Each new player downloads the 7 MB module (again after each new build; with the Cache Rule below from Cloudflare,
   which takes it from the server once) and then the game data they play (about 70 MB for a quick race, up to
-  the whole 3 GB over a career), once: the browser keeps it. The data is compressed on the way (zstd, or br through
-  Cloudflare): all but the movies is 1.37 GB on the network for 1.98 GB, the tracks about 40 %; the movies' video
+  the whole 3 GB over a career), once: the browser keeps it. The data is compressed on the way (br, kept at its best,
+  below): all but the movies is 1.28 GB on the network for 2.09 GB, the tracks about a third; the movies' video
   does not compress and goes as it is. "Preload the game data" on the start page fetches all but the movies at
   once, 4 requests at a time, so a player on a slow line never waits on a loading screen. It asks for one block a
   request at the addresses the game's own reads use, so with the Cache Rule below Cloudflare serves both.
@@ -197,6 +197,17 @@ compose file's limit), 40 GB of disk and a 1 Gbit/s port with a few TB of traffi
   that). At most 128 answers are compressed at once (8 per player, about 200 MB of memory); past that they go as
   they are, never held up. The compressing runs on threads of its own (half the cores, at least two) at a lower
   priority than the switch, so a burst of downloads takes only what the players' traffic leaves.
+- The server also compresses each 1 MiB block of the game data once at brotli's best and keeps it in the state
+  volume (`blocks/`, 1.5 GB for a game folder with every language pack). All but the movies then crosses the network
+  in 1.28 GB instead of the 1.39 GB of compressing as it is sent (the tracks 41 -> 33 % of their size, SPEED2.EXE
+  50 -> 41 %, the voices 84 -> 79 %, the music 86 -> 84 %; the movies not at all), at no CPU per player. Two threads
+  at the lowest priority make them after each start and each change of the game files (a manifest `?refresh`), the
+  blocks players ask for first: about half an hour for the whole folder (5600 blocks, 3100 that compress). Until a block is kept it goes out as before, compressed as it is sent, and
+  Cloudflare keeps that answer 10 minutes only. The page asks at `/data-blocks/v2/` since, so Cloudflare's copies of
+  the answers from before are not served for them (the Cache Rule covers both). `NFSU2_COMPRESS_THREADS` in the
+  server's environment sets the threads (0: none, every block as before). The `[blocks]` line every 5 minutes counts
+  the answers: kept blocks, compressed as sent (zstd, br, gzip), as they are. Through Cloudflare nearly all should be
+  kept ones once the blocks are made; none at all would mean Cloudflare asks the server for gzip only.
 - Free roam is at most about 25 KB/s each way per player: the server's free-roam hub pairs each player with the 7
   nearest, and snapshots go between those only. 2000 players roaming at once are about 400 Mbit/s each way through
   the VPS, 4000 about 800 Mbit/s. Measured with 62 simulated players and 2 real pages on one server
@@ -248,7 +259,7 @@ VPS.
   |---|---|---|---|
   | `/game` | your game folder | `/srv/nfsu2/game` | read-only |
   | `/module` | `nfsu2.wasm` and `nfsu2.json` | `/srv/nfsu2/module` | read-only |
-  | `/state` | the server's keys, the Online mode's records, the keyphrase saves | the volume `nfsu2-web_state` | |
+  | `/state` | the server's keys, the Online mode's records, the keyphrase saves, the kept blocks | the volume `nfsu2-web_state` | |
 
 - **From GitHub's registry:** `.github/workflows/image-rs.yml` builds `ghcr.io/th0mk/nfsu2-web-rs` for amd64 and
   arm64 on every push: `latest` from `main`, `sha-<commit>` from every push, and `<version>` and `<major>.<minor>`
@@ -424,8 +435,9 @@ counts its 101 MB). Without `TEXPACKS` Upscaled plays with the game's own textur
   At the memory limit the kernel stops the server and Docker starts it again.
 - **Keep the state volume.** It holds the ETag key (a new key makes every player's browser download the game data
   again), the switch's addresses (`lan-addresses.json`: a player who reconnects gets the same one back), the
-  Online mode's records (`online/`), the players' keyphrase saves (`vault/`) and your [bans](#kick-and-ban)
-  (`bans.json`, `bans.key`). `docker compose down` keeps it; `down -v` deletes it.
+  Online mode's records (`online/`), the players' keyphrase saves (`vault/`), your [bans](#kick-and-ban)
+  (`bans.json`, `bans.key`) and the kept blocks (`blocks/`: made again when lost, half an hour of two threads).
+  `docker compose down` keeps it; `down -v` deletes it.
 - **In every mode the server:**
   - answers only `GET` and `HEAD` (and `PUT` and `DELETE` at `/vault`, the keyphrase saves, from its own pages), and
     only for its own names (any other `Host` gets 421);

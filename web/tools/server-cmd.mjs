@@ -20,7 +20,8 @@ if (WIN) {
   // NFSU2_<OPTION> of the options with a value (/p: a path, translated), and the server's knobs
   const paths = ['REPO', 'DATA', 'DIST', 'WASM', 'STATE', 'TLS_CERT', 'TLS_KEY', 'ARTIFACTS', 'ONLINE_TRACE'];
   const plain = ['PORT', 'HTTP_PORT', 'BIND', 'TRUSTED_PROXIES', 'REAL_IP_HEADER', 'MAX_PEERS', 'LAN_IMPAIR', 'HOST',
-    'ONLINE', 'ROAM_HUB', 'THREADS', 'BUNDLE_MS', 'BUNDLE_MAX_MS', 'BUNDLE_BUDGET', 'LAN_SNDBUF', 'SESSIONS'];
+    'ONLINE', 'ROAM_HUB', 'THREADS', 'BUNDLE_MS', 'BUNDLE_MAX_MS', 'BUNDLE_BUDGET', 'LAN_SNDBUF', 'SESSIONS',
+    'COMPRESS_THREADS'];
   const have = (process.env.WSLENV || '').split(':').filter(Boolean);
   process.env.WSLENV = [...new Set([...have, ...paths.map(n => `NFSU2_${n}/p`), ...plain.map(n => `NFSU2_${n}`)])].join(':');
 }

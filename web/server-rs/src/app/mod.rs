@@ -14,6 +14,7 @@ mod blocks;
 pub mod control;
 mod etag;
 mod files;
+mod kept;
 mod lan;
 mod manifest;
 mod pool;
@@ -213,6 +214,10 @@ pub struct App {
     wasm: wasm::WasmCell,
     real_roots: Arc<Mutex<HashMap<String, String>>>,
     pool: Arc<pool::CpuPool>,
+    /// the game data's blocks at brotli's best (kept.rs), none with NFSU2_COMPRESS_THREADS=0
+    kept: Option<Arc<kept::KeptBlocks>>,
+    /// the /data-blocks/ answers since the 5-minute line
+    sent: blocks::Sent,
     pub lan: Arc<LanSwitch>,
     pub online: Option<Arc<OnlineHost>>,
     /// free roam's hub (its `crowded()` and `in_roam()` for /players), none with --roam-hub off
@@ -247,8 +252,32 @@ impl App {
         bans: Arc<nfsu2_bans::Bans>,
         pool_threads: usize,
         lan_sndbuf: usize,
+        compress_threads: usize,
     ) -> App {
         let host_check = HostCheck::new(&o.hosts);
+        let real_roots: Arc<Mutex<HashMap<String, String>>> = Arc::default();
+        let manifest: Arc<manifest::ManifestCell> = Arc::default();
+        // the kept blocks: in the state folder, swept again for each new manifest
+        let kept = (compress_threads > 0)
+            .then(|| match kept::KeptBlocks::open(std::path::Path::new(&real_state).join("blocks"), compress_threads) {
+                Ok(k) => Some(k),
+                Err(e) => {
+                    log::error(&format!("kept blocks: none ({e})"));
+                    None
+                }
+            })
+            .flatten();
+        if let Some(k) = &kept {
+            let (k, data, roots, state) = (k.clone(), o.data.clone(), real_roots.clone(), real_state.clone());
+            manifest.on_new(Arc::new(move |m: &manifest::Manifest| {
+                let (data, roots, state) = (data.clone(), roots.clone(), state.clone());
+                k.sweep(&m.etag, m.files.clone(), move |rel| {
+                    let file = files::resolve_game(&data, &format!("/{rel}"))?;
+                    let f = files::locate_sync(&roots, &state, &data, &file)?;
+                    Some((f.real, f.md))
+                });
+            }));
+        }
         let mut base = Vec::new();
         for hsts in [false, true] {
             for noindex in [false, true] {
@@ -294,10 +323,12 @@ impl App {
                 blocks::COMPRESSORS_TOTAL,
                 0.0,
             )),
-            manifest: Arc::default(),
+            manifest,
             wasm: wasm::WasmCell::default(),
-            real_roots: Arc::new(Mutex::new(HashMap::new())),
+            real_roots,
             pool: Arc::new(pool::CpuPool::new(pool_threads, "nfsu2-blocks")),
+            kept,
+            sent: blocks::Sent::default(),
             lan,
             online,
             roam,
@@ -521,6 +552,8 @@ impl App {
         if let Some(rest) = p.strip_prefix("/data-blocks")
             && rest.starts_with('/')
         {
+            // (the manifest's addresses since blocks are kept: the same files)
+            let rest = rest.strip_prefix(blocks::V2).filter(|r| r.starts_with('/')).unwrap_or(rest);
             let file = files::resolve_game(&self.o.data, rest);
             return self.send_blocks(q, s, file, &u).await;
         }

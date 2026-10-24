@@ -30,6 +30,10 @@ const BREAKDOWN_EVERY: Duration = Duration::from_secs(5 * 60);
 /// does not take waits in the switch's own queue then, where its rules see it (roam_queue), not in the kernel's,
 /// which Linux grows to 4 MB (nfsu2.xyz, 2026-10-22: up to 4 MB waiting there for one player, seconds of free roam)
 const LAN_SNDBUF: u64 = 32 << 10;
+/// the threads that compress the game data's blocks at brotli's best, once, at the lowest priority
+/// (NFSU2_COMPRESS_THREADS; kept.rs): a game folder with every language pack (5600 blocks, 3100 that compress) in
+/// about half an hour
+const COMPRESS_THREADS: u64 = 2;
 /// keyphrase saves: counted at the start, then swept (the unused removed) and counted again every day
 const VAULT_SWEEP_EVERY: Duration = Duration::from_secs(24 * 3600);
 
@@ -171,6 +175,8 @@ pub async fn run(o: Options, cores: usize) {
         bans,
         (cores / 2).max(2),
         lan_sndbuf,
+        // the threads that keep the game data's blocks at brotli's best (kept.rs; 0: none)
+        env_num("NFSU2_COMPRESS_THREADS", COMPRESS_THREADS) as usize,
     ));
     let o = &app.o;
     let control = super::control::listen(app.clone());
@@ -237,6 +243,20 @@ pub async fn run(o: Options, cores: usize) {
                 ));
                 thinned = b.thinned;
                 was = b;
+            }
+        });
+    }
+    // the game data's answers, every 5 minutes while there were any (blocks.rs Sent)
+    {
+        let app = app.clone();
+        tokio::spawn(async move {
+            let mut every = interval_at(Instant::now() + BREAKDOWN_EVERY, BREAKDOWN_EVERY);
+            loop {
+                every.tick().await;
+                let sent = app.sent.take();
+                if !sent.is_empty() {
+                    log::line(&format!("[blocks] in the last 5 minutes: {sent}"));
+                }
             }
         });
     }
@@ -440,6 +460,10 @@ pub async fn run(o: Options, cores: usize) {
             }
             None => "no keyphrase saves (--vault-gb 0)".into(),
         }
+    ));
+    lines.push(format!(
+        "  blocks    : {}",
+        app.kept.as_ref().map_or_else(|| "compressed as they are sent (NFSU2_COMPRESS_THREADS=0)".into(), |k| k.summary())
     ));
     let bans = app.bans.list(nfsu2_util::now_ms()).len();
     lines.push(if control {
