@@ -115,6 +115,9 @@ export interface PadPage {
   dialog(): boolean;
   /** a button went down while dialog() (a PAD_* number; the left stick's directions come as the D-pad's) */
   press(button: number): void;
+  /** the right stick (x, y: -1..1, +y down) each time the controller is read while no dialog is open (quick chat's
+   *  picker); true: the page uses it now, the game gets it at rest */
+  stick?(x: number, y: number): boolean;
 }
 
 /** the touch controls' share of the pad (web/src/app/touch.ts): PAD_* button bits and the left stick's x */
@@ -323,6 +326,8 @@ export class PadPoller {
     if (!page.dialog()) {
       this.held &= s.buttons;
       const buttons = (s.buttons & ~this.held & ~wait) | tap;
+      const rs = s.connected && !!page.stick?.(s.axes[PAD_AXIS_RX], s.axes[PAD_AXIS_RY]);
+      if (rs) { const axes = [...s.axes]; axes[PAD_AXIS_RX] = axes[PAD_AXIS_RY] = 0; return { ...s, buttons, axes }; }
       return buttons === s.buttons ? s : { ...s, buttons };
     }
     this.held = s.buttons;

@@ -1989,6 +1989,34 @@ static int hud_on_top(uint32_t pkg){
     cstr(top ? rd32(top + 0xcu) : 0, a, sizeof a); cstr(pkg, b, sizeof b);
     return a[0] && !strcasecmp(a, b);
 }
+/* Quick chat (the rest after the race lobbies, say_*): players say one of the page's fixed phrases
+ * (web/src/app/quickchat.ts), a number on the wire, so each player reads it in their own language and nobody types
+ * anything.  The page shows a line over the car of each player who said something lately, where the name over it
+ * is: tags_update tells it where, with every frame (roam_plat_say_marks).  Not in the Windows plugin (no page). */
+#ifdef ROAM_HOST_WIN
+#define SAYS            0
+#else
+#define SAYS            1
+#endif
+#define SAY_PHRASES     16            /* the page's phrases: a number past them (a newer game's) is not shown */
+#define SAY_NEAR_M      250.f         /* heard from as far as a horn is (horn.c FAR_M), and from anyone in our race lobby */
+#define SAY_SHOW_US     5000000       /* the line over the car: as long as the page shows it */
+#define SAY_BURST       3             /* at most this many from one player in SAY_WINDOW_US (the page keeps the player's
+                                         own to that): more from a friend are not shown */
+#define SAY_WINDOW_US   6000000
+#define SAY_AGAIN_US    2000000       /* the same phrase from one friend again within this: not shown */
+#define SAY_MARKS       32
+/* a friend's: the last phrases shown (when), the last shown (when, until when over the car), the last heard */
+typedef struct { uint32_t id; int64_t t[SAY_BURST], at, until; uint8_t seq, phrase, heard; } SayWho;
+static struct {
+    SayWho   who[RC_TABLE];                               /* by session peer */
+    int64_t  mine[SAY_BURST], mine_until; uint8_t seq;
+    int      test_pick;                                   /* a script's "mp say N" (-1: none) */
+    uint32_t said, heard, dropped;                        /* statistics */
+} g_say = { .test_pick = -1 };
+static int say_live(int peer, uint32_t id, int64_t now){
+    return SAYS && peer >= 0 && peer < RC_TABLE && g_say.who[peer].id == id && g_say.who[peer].until > now;
+}
 static void tags_update(CPU *c){
     uint32_t pl = rd32(G_PLAYER1), hud = pl && ok(pl, PL_HUD + 4u) ? rd32(pl + PL_HUD) : 0;
     uint32_t pkg = hud && ok(hud, 0x14) ? rd32(hud + 0x10u) : 0;
@@ -2043,6 +2071,35 @@ static void tags_update(CPU *c){
         gcall1(c, FN_FE_SHOW, 0, obj);
         g_tag.shown[i] = 1;
     }
+#if SAYS
+    /* quick chat: where the names of those who said something lately are (the page's lines go over them), and the
+     * player's own line over their car, which has no name: just over its roof (1.2 m up; a friend's name is at 1.7),
+     * unless the camera is in or right behind the car */
+    int64_t now = roam_plat_now_us();
+    uint32_t mid[SAY_MARKS]; float mxy[3 * SAY_MARKS]; int nm = 0;
+    for (int i = 0; i < n && i < TAG_N && nm < SAY_MARKS; i++){
+        const Slot *s = &g_sl[t[i].k];
+        if (!say_live(s->peer, s->peer_id, now)) continue;
+        float sc = 25.f / rc_sqrtf(t[i].d2);
+        mid[nm] = s->peer_id; mxy[3 * nm] = t[i].hx / 640.f; mxy[3 * nm + 1] = t[i].hy / 480.f;
+        mxy[3 * nm + 2] = sc < 0.5f ? 0.5f : sc > 1.f ? 1.f : sc; nm++;
+    }
+    uint32_t me = player_car();
+    if (on && g_say.mine_until > now && nm < SAY_MARKS && ok(me, 0xc0)){
+        float p[3], u[3], d[3];
+        rd3(me + 0x60u, p); rd3(me + 0xb0u, u);
+        for (int i = 0; i < 3; i++) d[i] = p[i] - MRF32(cam + 0x40u + 4u * (uint32_t)i);
+        float ahead = d[0] * MRF32(cam + 0x50u) + d[1] * MRF32(cam + 0x54u) + d[2] * MRF32(cam + 0x58u);
+        uint32_t in = gvec(g_gmem + TAG_SCR, u[0] * 1.2f + p[0], u[1] * 1.2f + p[1], u[2] * 1.2f + p[2]);
+        uint32_t out = g_gmem + TAG_SCR + 0x10u, av[2] = { out, in };
+        if (ahead > 2.f) rh_call(c, FN_VIEW_SCREEN, G_VIEW1, 0, 2, av);
+        float x = MRF32(out), y = MRF32(out + 4u), z = MRF32(out + 8u);
+        float w = (float)(int32_t)MR32(G_VIEW_W), h = (float)(int32_t)MR32(G_VIEW_H);
+        if (ahead > 2.f && z > 0.f && x >= 0.f && x <= w && y >= 0.f && y <= h){
+            mid[nm] = g_s.conf.self_id; mxy[3 * nm] = x / w; mxy[3 * nm + 1] = y / h; mxy[3 * nm + 2] = 1.f; nm++; }
+    }
+    if (nm) roam_plat_say_marks(mid, mxy, nm);
+#endif
 }
 
 /* ---- minimap arrows --------------------------------------------------------------------------------- */
@@ -4252,6 +4309,84 @@ static void room_alone(int64_t host, uint8_t st){
     rlog("[roam] f=%ld alone in room \"%s\" for %.0f s: told\n", rh_frame(), O.room, (double)(host - g_alone_since) / 1e6);
 }
 #endif
+#if SAYS
+/* ---- quick chat: what the player says, what friends say (the state: before tags_update) -------------------------
+ * The player picks a phrase on the page (keys 1-4 twice, the right stick, the touch button: quickchat.ts); while
+ * driving in free roam it goes to every friend (rc_send_say) and back to the page as said by the player.  A friend's
+ * is shown when their car was within SAY_NEAR_M of ours when last seen, or they are in our race lobby, while we are
+ * in free roam and not racing; not past SAY_BURST in SAY_WINDOW_US from one friend, nor the same phrase again within
+ * SAY_AGAIN_US.  To the page as {"id","name","p"} (+ "me" for the player's own, "lobby" for a lobby's).  With the
+ * lock held. */
+static int say_burst(const int64_t *t, int64_t host){
+    int k = 0;
+    for (int i = 0; i < SAY_BURST; i++) k += t[i] && host - t[i] < SAY_WINDOW_US;
+    return k >= SAY_BURST;
+}
+static void say_stamp(int64_t *t, int64_t host){
+    int o = 0;
+    for (int i = 1; i < SAY_BURST; i++) if (t[i] < t[o]) o = i;   /* the oldest goes */
+    t[o] = host;
+}
+static void say_page(uint32_t id, const char *name, int phrase, int me, int lobby){
+    char buf[128], ids[16]; MpJs j = { buf, 0, sizeof buf };
+    snprintf(ids, sizeof ids, "%u", id);
+    js_raw(&j, "{"); js_key(&j, "id"); js_raw(&j, ids); js_str(&j, "name", name); js_int(&j, "p", phrase);
+    if (me) js_int(&j, "me", 1);
+    if (lobby) js_int(&j, "lobby", 1);
+    js_raw(&j, "}");
+    if (roam_plat_said(buf) < 0) rlog("[roam] f=%ld quick chat: the page's ring is full, a line lost\n", rh_frame());
+}
+static int say_in_lobby(uint32_t id){
+#if MPRACES
+    return (g_mp.st == MP_HOST || g_mp.st == MP_IN || g_mp.st == MP_COUNT) && mp_in(&g_mp.l, id) && mp_in(&g_mp.l, g_s.conf.self_id);
+#else
+    (void)id; return 0;
+#endif
+}
+static void say_send(int phrase, int64_t host, int can){
+    if (!can){ rlog("[roam] f=%ld quick chat: phrase %d not said (not driving in free roam)\n", rh_frame(), phrase); return; }
+    if (phrase >= SAY_PHRASES){ rlog("[roam] f=%ld quick chat: no phrase %d\n", rh_frame(), phrase); return; }
+    if (say_burst(g_say.mine, host)){ rlog("[roam] f=%ld quick chat: phrase %d not said (too many at once)\n", rh_frame(), phrase); return; }
+    say_stamp(g_say.mine, host);
+    int to = rc_send_say(&g_s, (uint8_t)phrase, ++g_say.seq);
+    g_say.said++; g_say.mine_until = host + SAY_SHOW_US;
+    say_page(g_s.conf.self_id, g_s.conf.name, phrase, 1, 0);
+    rlog("[roam] f=%ld quick chat: said phrase %d to %d player(s)\n", rh_frame(), phrase, to);
+}
+static void say_recv(uint32_t from, int phrase, uint8_t seq, int64_t host, int can){
+    int i = -1;
+    for (int k = 0; k < RC_TABLE; k++) if (g_s.peer[k].state == RC_PS_EST && g_s.peer[k].id == from){ i = k; break; }
+    if (i < 0) return;
+    const rc_peer *p = &g_s.peer[i];
+    SayWho *w = &g_say.who[i];
+    if (w->id != from){ memset(w, 0, sizeof *w); w->id = from; }
+    const char *why = 0;
+    int lobby = say_in_lobby(from);
+    float d = 1e9f;
+    if (g_lp_ok && p->mo.n){ const float *b = p->mo.s[p->mo.n - 1].p; float dx = g_lp[0] - b[0], dy = g_lp[1] - b[1]; d = rc_sqrtf(dx * dx + dy * dy); }
+    if (w->heard && seq == w->seq) why = "again";                                   /* the same one twice */
+    else if (!can) why = "not in free roam";
+    else if (phrase >= SAY_PHRASES) why = "a phrase this game does not have";
+    else if (!lobby && !(d <= SAY_NEAR_M)) why = "too far";
+    else if (say_burst(w->t, host)) why = "too many at once";
+    else if (w->at && phrase == w->phrase && host - w->at < SAY_AGAIN_US) why = "the same again";
+    w->seq = seq; w->heard = 1;
+    if (why){ g_say.dropped++; rlog("[roam] f=%ld quick chat: %s's phrase %d not shown (%s, %.0f m)\n", rh_frame(), p->name, phrase, why, (double)d); return; }
+    say_stamp(w->t, host);
+    w->phrase = (uint8_t)phrase; w->at = host; w->until = host + SAY_SHOW_US;
+    g_say.heard++;
+    say_page(from, p->name, phrase, 0, lobby);
+    rlog("[roam] f=%ld quick chat: %s said phrase %d (%.0f m%s)\n", rh_frame(), p->name, phrase, (double)d, lobby ? ", our lobby" : "");
+}
+static void say_frame(int64_t host, int in_roam, uint8_t st){
+    if (!g_s.conf.say) return;
+    int pick = roam_plat_say_pick();
+    if (g_say.test_pick >= 0){ pick = g_say.test_pick; g_say.test_pick = -1; }
+    if (pick >= 0) say_send(pick, host, in_roam && st == RC_ST_ROAM && !g_racing);
+    uint32_t from; uint8_t ph, sq;
+    while (rc_take_say(&g_s, &from, &ph, &sq)) say_recv(from, ph, sq, host, in_roam && !g_racing);
+}
+#endif
 static uint8_t local_status(int in_roam){
     uint32_t flow = rd32(G_FLOW);
     if (in_roam) return g_sync_paused > 1 || g_parked ? RC_ST_PAUSED : RC_ST_ROAM;
@@ -4319,6 +4454,9 @@ static void init_once(CPU *c){
     cf.platform = RC_PLAT_MAC;
 #endif
     cf.test_mode = O.test; cf.max_players = maxp; cf.rate_hz = O.rate; cf.duels = DUELS; cf.lobbies = MPRACES;
+    /* quick chat: where there is a page to pick and show phrases (settings.ini quick_chat = off: neither, and the
+     * HELLO tells the others to send none) */
+    cf.say = SAYS && roam_plat_quickchat() && env_int("NFSU2_ROAM_SAY", 1, 0, 1);
     cf.discovery = disc && !O.test;
     rc_io io = { 0, 0, 0, 0 };
     rc_session_init(&g_s, &cf, &io);
@@ -4341,8 +4479,9 @@ static void init_once(CPU *c){
     g_frame0 = rh_frame();
     char ids[16];
     rlog("[roam] free-roam multiplayer ON: id %08x, port %d, %d configured peer(s), room \"%s\", up to %d players, "
-                    "%d remote cars, %d Hz, %s, none shown within %d m of the new career's start%s\n", cf.self_id, port, np, O.room, maxp,
-            O.max_cars, O.rate, O.collide ? "solid cars" : "ghost cars", O.spawn_m, O.test ? ", test harness (loopback only)" : "");
+                    "%d remote cars, %d Hz, %s, none shown within %d m of the new career's start, quick chat %s%s\n", cf.self_id, port, np,
+            O.room, maxp, O.max_cars, O.rate, O.collide ? "solid cars" : "ghost cars", O.spawn_m, cf.say ? "on" : "off",
+            O.test ? ", test harness (loopback only)" : "");
     (void)ids;
 }
 
@@ -4688,6 +4827,9 @@ void roam_game_frame(CPU *c){
     uint32_t mpfrom[RC_LOBBY_INBOX]; rc_lobby mpin[RC_LOBBY_INBOX]; int nmpin = 0;
     while (nmpin < RC_LOBBY_INBOX && rc_take_lobby(&g_s, &mpfrom[nmpin], &mpin[nmpin])) nmpin++;
 #endif
+#if SAYS
+    say_frame(host, in_roam, st);                   /* quick chat: the player's pick out, friends' phrases to the page */
+#endif
     /* what the slots need from the session */
     g_npv = 0;
     if (in_roam){
@@ -4903,6 +5045,8 @@ void roam_game_report(void){
             (unsigned long long)ps.send_err, (unsigned long long)ps.impair_drop, (unsigned long long)ps.impair_dup);
     if (g_du.offers || g_du.races) rlog("  [roam] outruns with friends: %u challenge(s) made, %u raced, %u won, %u lost\n",
                                         g_du.offers, g_du.races, g_du.wins, g_du.losses);
+    if (g_say.said || g_say.heard || g_say.dropped) rlog("  [roam] quick chat: %u said, %u heard, %u not shown, %u lost (inbox full)\n",
+                                                         g_say.said, g_say.heard, g_say.dropped, g_s.say_dropped);
     rlog("  [roam] game-thread cost per frame: mean %.1f us, max %.1f us over %llu frames\n",
             g_cost_n ? g_cost_sum / 1000.0 / (double)g_cost_n : 0.0, g_cost_max / 1000.0, (unsigned long long)g_cost_n);
     if (g_poselog){ rh_fflush(g_poselog); }
@@ -5158,6 +5302,24 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
         if (have >= (want ? want : 1)){ rlog("[roam] f=%ld mp waitlobby %d satisfied after %ld frames (%s)\n", f, want, f - *wait_start, mp_st[g_mp.st]);
                                         *wait_start = -1; return 1; }
         if (tmo && f - *wait_start >= tmo){ rlog("[roam] f=%ld mp waitlobby %d TIMEOUT (%s, %d)\n", f, want, mp_st[g_mp.st], have); *wait_start = -1; return 1; }
+        return 0;
+    }
+#endif
+#if SAYS
+    if (!strcasecmp(sub, "say")){
+        /* "mp say N": quick chat, the player says phrase N, as if picked on the page */
+        g_say.test_pick = atoi(a1);
+        rlog("[roam] f=%ld mp say %d (quick chat %s)\n", f, g_say.test_pick, g_s.conf.say ? "on" : "off");
+        return 1;
+    }
+    if (!strcasecmp(sub, "waitsaid")){
+        /* "mp waitsaid N [tmo]": N friends' phrases shown (quick chat) */
+        int want = atoi(a1); long tmo = a2[0] ? atol(a2) : 0;
+        if (*wait_start < 0) *wait_start = f;
+        if ((int)g_say.heard >= want){ rlog("[roam] f=%ld mp waitsaid %d satisfied after %ld frames (%u not shown)\n", f, want, f - *wait_start,
+                                            g_say.dropped); *wait_start = -1; return 1; }
+        if (tmo && f - *wait_start >= tmo){ rlog("[roam] f=%ld mp waitsaid %d TIMEOUT (have %u, %u not shown)\n", f, want, g_say.heard, g_say.dropped);
+                                            *wait_start = -1; return 1; }
         return 0;
     }
 #endif

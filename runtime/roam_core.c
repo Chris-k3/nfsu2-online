@@ -389,6 +389,7 @@ int rc_encode(const rc_msg *m, uint8_t *out, int cap){
         for (int i = 0; i < RC_RACEREP_NAME && r->name[i]; i++) nm[i] = (uint8_t)r->name[i];
         rc_putb(&w, nm, RC_RACEREP_NAME);
         break; }
+    case RC_MSG_SAY: rc_put8(&w, m->u.say.phrase); rc_put8(&w, m->u.say.seq); rc_put8(&w, 0); rc_put8(&w, 0); break;
     default: return -1;
     }
     if (w.err || w.n + RC_CRC > w.cap) return -1;
@@ -517,6 +518,10 @@ int rc_decode(const uint8_t *buf, int len, rc_msg *m){
         if (r.err) return RC_E_SHORT;
         if (!racerep_ok(q)) return RC_E_FIELD;
         break; }
+    case RC_MSG_SAY:
+        /* the phrase as it came: a newer game may have more of them (the game side ignores one it does not know) */
+        m->u.say.phrase = (uint8_t)rc_get8(&r); m->u.say.seq = (uint8_t)rc_get8(&r); (void)rc_get8(&r); (void)rc_get8(&r);
+        break;
     default: return RC_E_TYPE;
     }
     if (r.err) return RC_E_SHORT;
@@ -876,6 +881,27 @@ int rc_take_lobby(rc_session *s, uint32_t *from, rc_lobby *l){
     s->n_lobby_in--;
     return 1;
 }
+int rc_send_say(rc_session *s, uint8_t phrase, uint8_t seq){
+    if (s->closed || !s->conf.say) return 0;
+    int n = 0;
+    for (int i = 0; i < RC_TABLE; i++){
+        rc_peer *p = &s->peer[i];
+        if (p->state != RC_PS_EST || !p->say) continue;
+        rc_msg m; hdr(s, &m, RC_MSG_SAY);
+        m.u.say.phrase = phrase; m.u.say.seq = seq;
+        uint32_t before = s->tx;
+        tx(s, p, &m);
+        n += s->tx != before;
+    }
+    return n;
+}
+int rc_take_say(rc_session *s, uint32_t *from, uint8_t *phrase, uint8_t *seq){
+    if (!s->n_say_in) return 0;
+    *from = s->say_in[0].from; *phrase = s->say_in[0].phrase; *seq = s->say_in[0].seq;
+    for (int k = 1; k < s->n_say_in; k++) s->say_in[k - 1] = s->say_in[k];
+    s->n_say_in--;
+    return 1;
+}
 /* the hub's open lobbies, with the answer to our last map question */
 static void lobbies_from_hub(rc_session *s, const rc_msg *m){
     /* (the MAP before it has answered the question already: map_asked_us is 0 by now) */
@@ -989,6 +1015,7 @@ static void fill_hello(rc_session *s, rc_msg *m, const rc_peer *to){
     m->h.flags = RC_HF_STATEX;
     if (s->conf.duels) m->h.flags |= RC_HF_DUELS;
     if (s->conf.lobbies) m->h.flags |= RC_HF_LOBBY;
+    if (s->conf.say) m->h.flags |= RC_HF_SAY;
     if (!to) m->h.flags |= RC_HF_ALL;
     m->u.hello.core_ver = RC_CORE_VER; m->u.hello.platform = s->conf.platform; m->u.hello.status = s->status;
     m->u.hello.listen_port = s->conf.port; m->u.hello.cfg_rev = s->cfg_rev; m->u.hello.room = s->conf.room;
@@ -1159,6 +1186,7 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
         p->core_ver = m.u.hello.core_ver; p->duels = (m.h.flags & RC_HF_DUELS) != 0;
         p->lobbies = (m.h.flags & RC_HF_LOBBY) != 0;
         p->statex = (m.h.flags & RC_HF_STATEX) != 0;
+        p->say = (m.h.flags & RC_HF_SAY) != 0;
         int heard = 0;
         for (int k = 0; k < m.u.hello.n_seen; k++) if (m.u.hello.seen[k] == s->conf.self_id) heard = 1;
         /* the beacon of a group past 8: a full list without our id (RC_HF_ALL) */
@@ -1263,6 +1291,13 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
         if (s->n_lobby_in == RC_LOBBY_INBOX){ s->lobby_dropped++; return; }
         s->lobby_in[s->n_lobby_in].from = m.h.sender; s->lobby_in[s->n_lobby_in].l = m.u.lobby;
         s->n_lobby_in++;
+        break;
+    case RC_MSG_SAY:
+        if (p->state != RC_PS_EST || !s->conf.say) return;
+        if (s->n_say_in == RC_SAY_INBOX){ s->say_dropped++; return; }
+        s->say_in[s->n_say_in].from = m.h.sender; s->say_in[s->n_say_in].phrase = m.u.say.phrase;
+        s->say_in[s->n_say_in].seq = m.u.say.seq;
+        s->n_say_in++;
         break;
     case RC_MSG_BYE: {
         int k = 0;

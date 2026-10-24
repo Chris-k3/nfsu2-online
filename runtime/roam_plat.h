@@ -60,6 +60,19 @@ int      roam_plat_lobby(const char *json);
 /* solid cars as the player switched them while the game runs (the page's
  * menu, web): 1 on, 0 off, -1 not switched (NFSU2_ROAM_COLLIDE holds) */
 int      roam_plat_solid(void);
+/* quick chat (roam_game.c say_*): whether this platform has it (the page's
+ * picker and lines: web; elsewhere the HELLO does not offer it), the phrase
+ * the player picked since the last call (-1: none), and a phrase said (by a
+ * friend, or by the player) as a JSON object for the page (1 sent, -1 the
+ * ring is full).  With the session lock held */
+int      roam_plat_quickchat(void);
+int      roam_plat_say_pick(void);
+int      roam_plat_said(const char *json);
+/* where the names of the players who said something lately are this frame:
+ * ids[i] at xys[3i], xys[3i + 1] (parts of the picture from its top left
+ * corner) with the name's scale xys[3i + 2]; n = 0: none.  The page's lines
+ * follow them in the same picture.  On the game thread, without the lock */
+void     roam_plat_say_marks(const uint32_t *ids, const float *xys, int n);
 const char *roam_ip_str(uint32_t ip, char *buf);   /* buf >= 16 */
 
 #endif

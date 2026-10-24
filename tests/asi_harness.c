@@ -406,6 +406,11 @@ uint32_t roam_plat_random(void){ return TEST_ID; }
 int roam_plat_guard(int t, uint32_t ip, int bc){ return !t || (!bc && (ip >> 24) == 127); }
 void roam_plat_get_stats(roam_plat_stats *o){ memset(o, 0, sizeof *o); }
 int roam_plat_solid(void){ return -1; }
+/* quick chat: none, as in the plugin (its HELLO flags stay the plugin's) */
+int roam_plat_quickchat(void){ return 0; }
+int roam_plat_say_pick(void){ return -1; }
+int roam_plat_said(const char *json){ (void)json; return 1; }
+void roam_plat_say_marks(const uint32_t *ids, const float *xys, int n){ (void)ids; (void)xys; (void)n; }
 const char *roam_ip_str(uint32_t ip, char *b){ snprintf(b, 16, "%u.%u.%u.%u", ip >> 24, (ip >> 16) & 255u, (ip >> 8) & 255u, ip & 255u); return b; }
 int roam_bcast_targets(const roam_if *ifs, int n, uint32_t *out, int max){ (void)ifs; (void)n; if (max) out[0] = 0xFFFFFFFFu; return max ? 1 : 0; }
 int roam_plat_parse_peers(const char *list, int test_mode, uint16_t defport, uint32_t *ip, uint16_t *port, int max){

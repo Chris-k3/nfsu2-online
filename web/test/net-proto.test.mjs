@@ -18,7 +18,7 @@ const val = (e) => Function(...Object.keys(num), `return (${e.replace(/(\d+|0x[0
 for (const m of H.matchAll(/^#define\s+(NET_\w+)\s+(.+?)\s*(?:\/\*.*)?$/gm)) num[m[1]] = val(m[2]) >>> 0;
 
 test('constants', () => {
-  assert.equal(Object.keys(num).length, 37, 'header parsed');
+  assert.equal(Object.keys(num).length, 38, 'header parsed');
   for (const [k, v] of Object.entries(num)) {
     if (!(k in P)) continue;
     assert.equal(P[k] >>> 0, v, k);
@@ -26,7 +26,7 @@ test('constants', () => {
   for (const k of ['NET_MAGIC', 'NET_VERSION', 'NET_HDR_BYTES', 'NET_SLOT_BYTES', 'NET_SLOT_HDR', 'NET_MAX_PAYLOAD', 'NET_TX_SLOTS',
     'NET_RX_SLOTS', 'NET_MAILBOX_BYTES', 'NET_KIND_UDP', 'NET_KIND_UDP_LOOP', 'NET_BROADCAST', 'NET_MODE_CLOSED', 'NET_MODE_VLAN',
     'NET_MODE_LOOP', 'NET_PAGE_NONE', 'NET_PAGE_CONNECTING', 'NET_PAGE_ONLINE', 'NET_PAGE_OFFLINE', 'NET_KIND_LAN_UDP',
-    'NET_KIND_LAN_TCP', 'NET_KIND_LAN_ICMP', 'NET_KIND_NOTICE', 'NET_KIND_LOBBY', 'NET_LAN_HDR', 'NET_LAN_TCP_SYN', 'NET_LAN_TCP_RST', 'NET_LAN_TCP_GONE', 'NET_MODE_LAN', 'NET_ROAM_HUB',
+    'NET_KIND_LAN_TCP', 'NET_KIND_LAN_ICMP', 'NET_KIND_NOTICE', 'NET_KIND_LOBBY', 'NET_KIND_SAY', 'NET_LAN_HDR', 'NET_LAN_TCP_SYN', 'NET_LAN_TCP_RST', 'NET_LAN_TCP_GONE', 'NET_MODE_LAN', 'NET_ROAM_HUB',
     'NET_PAGE_IDLE', 'NET_PEER_BITS'])
     assert.ok(k in P && k in num, `${k} on both sides`);
 });
@@ -52,7 +52,7 @@ test('offsets', () => {
     tx_bell: P.W_TX_BELL, rx_tail: P.W_RX_TAIL, c_alive: P.W_C_ALIVE, want: P.W_WANT, page_state: P.W_PAGE_STATE, vip: P.W_VIP, netmask: P.W_NETMASK,
     generation: P.W_GENERATION, tx_tail: P.W_TX_TAIL, rx_head: P.W_RX_HEAD, rx_bell: P.W_RX_BELL, rx_full_drop: P.W_RX_FULL_DROP,
     tx_offline_drop: P.W_TX_OFFLINE_DROP, rx_oversize: P.W_RX_OVERSIZE, switch_peers: P.W_SWITCH_PEERS, solid: P.W_SOLID, tx_wait_n: P.W_TX_WAIT_N,
-    peer_bits: P.W_PEER_BITS };
+    say: P.W_SAY, peer_bits: P.W_PEER_BITS };
   for (const [f, w] of Object.entries(words)) assert.equal(off[f], w * 4, f);
   const dbl = { switch_rtt_ms: P.D_SWITCH_RTT_MS, tx_wait_ms_sum: P.D_TX_WAIT_MS_SUM, tx_wait_ms_max: P.D_TX_WAIT_MS_MAX };
   for (const [f, d] of Object.entries(dbl)) assert.equal(off[f], d * 8, f);

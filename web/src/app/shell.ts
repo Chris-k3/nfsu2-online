@@ -42,6 +42,7 @@ import { saveScreenshot } from './shots';
 import { forgetLink, VaultPanel } from './vault-ui';
 import { FpsOverlay, FPS_MODES, type FpsMode } from './overlay';
 import { LobbyPanel } from './lobby';
+import { ICON as CHAT_ICON, QuickChat } from './quickchat';
 import { GameSession } from './game';
 import { AwayCheck, AWAY_LIMITS, type AwayLimits } from './away';
 import { pageId } from './page-id';
@@ -101,6 +102,7 @@ let starting = false;                    // Play pressed, the session not there 
 let fatal: { what: string; code?: string } | null = null;   // why the running game had to be stopped (English, for t())
 let fps: FpsOverlay;
 let lobbyPanel: LobbyPanel;
+let quickChat: QuickChat;                // free roam's fixed phrases (quickchat.ts)
 let settings: SettingsPanel;
 let players: { now(): void; last(): PlayerCounts | null; fresh(ms: number): Promise<PlayerCounts | null> } | null = null;
 let saves: SavesPanel;
@@ -448,7 +450,8 @@ async function startGame() {
     // longer than the game), and a closure from this function would keep its
     // scope, and with it this game, reachable
     session = await GameSession.start({
-      module: loaded!.module, info: loaded!.info, saveDir: SAVE, env: r.env, canvas, stage, audio, displayHz, netName, notice, lobby, netBack, netQueue, onSaved,
+      module: loaded!.module, info: loaded!.info, saveDir: SAVE, env: r.env, canvas, stage, audio, displayHz, netName, notice, lobby, say, marks,
+      netBack, netQueue, onSaved,
       netId: net ? pageId() : undefined, netRemoved,
       artifacts: q.get('artifacts') ?? undefined, dumpScale: q.get('dumpscale') ? +q.get('dumpscale')! : undefined,
       toggleFullscreen, padPage: PAD_PAGE, log: logLine, onFatal: stopFatal,
@@ -469,6 +472,7 @@ async function startGame() {
   if (r.source.NFSU2_RENDER === 'device') renderCheck = new RenderCheck(session, r.env.NFSU2_RENDER, renderCheckTimes(), logLine);
   touch.start(session);
   textField.start(session);
+  quickChat.start(session, net && r.env.NFSU2_ROAM === '1' && r.env.NFSU2_ROAM_SAY !== '0');
   fps.memory = session.proc.memory;
   const st = session;
   const waitStatus = setInterval(() => { if (st.status) { fps.reader = st.status; clearInterval(waitStatus); } }, 100);
@@ -579,6 +583,7 @@ const PAD_PAGE: PadPage = {
   },
   dialog: () => !!pageDialog(),
   press: padPress,
+  stick: (x, y) => quickChat.stick(x, y),
 };
 
 let awake: (() => void) | null = null;   // the running game's Wake Lock (display.ts keepScreenOn)
@@ -588,6 +593,7 @@ let textField: TextField;               // the field for a phone's keyboard whil
 function endStage() {
   touch.stop();
   textField.stop();
+  quickChat.stop();
   awake?.(); awake = null;
   away?.stop(); away = null;
   hideRemoved();
@@ -701,6 +707,23 @@ function notice(text: string, who?: string) {
   while (box.childElementCount > 4) box.firstElementChild!.remove();
   setTimeout(() => line.remove(), 5000);
 }
+/** free roam: quick chat (quickchat.ts), a phrase said, from the game; and the lines over the cars in each frame */
+function say(json: string) {
+  placeNotices();
+  quickChat.said(json);
+}
+function marks(n: number, m: Float32Array, ids: Uint32Array) { quickChat.marks(n, m, ids); }
+/** quick chat's line in the log: a speech balloon, the name, the phrase; in the notices' box, for 8 s */
+function chatLine(name: string, text: string, me: boolean) {
+  const box = $('#notices'), line = document.createElement('div'), b = document.createElement('b');
+  line.className = 'chat' + (me ? ' me' : '');
+  line.innerHTML = CHAT_ICON;
+  b.textContent = name;
+  line.append(b, ` ${text}`);
+  box.append(line);
+  while (box.childElementCount > 4) box.firstElementChild!.remove();
+  setTimeout(() => line.remove(), 8000);
+}
 /** free roam: the race lobby's panel, or the cover over the trip to the race and back (lobby.ts) */
 function lobby(json: string) {
   placeLobby();
@@ -720,10 +743,11 @@ function placeNotices() {
   if (!v || !v.w || !v.h) return;
   const u = Math.min(v.w / 640, v.h / 480), e169 = 320 * (16 / 9 * 0.75 - 1);
   const out = hudWide ? Math.min(Math.max(320 * (v.w / v.h * 0.75 - 1), 0), e169) * 109 / e169 : 0;
-  const s = $('#notices').style;
-  s.left = `${v.x + v.w / 2 - (301 + out) * u}px`;
-  s.top = `${v.y + v.h / 2 - 72 * u}px`;
+  const s = $('#notices').style, left = v.x + v.w / 2 - (301 + out) * u, top = v.y + v.h / 2 - 72 * u;
+  s.left = `${left}px`;
+  s.top = `${top}px`;
   s.setProperty('--u', `${u}px`);
+  quickChat.place(left, top, u);               // its picker opens there
 }
 
 /** a full server: the game's place in line for one, over the game until it is in (null: not in line); the page menu
@@ -1163,7 +1187,8 @@ export async function boot() {
   stageMenu.onpointerdown = e => e.preventDefault();     // the canvas keeps the focus (and with it the keyboard)
   stageMenu.onclick = () => { if (session) openMenu(); };
   $('#stage').addEventListener('pointerdown', e => { if (e.pointerType === 'touch') stageMenu.hidden = false; }, { capture: true });
-  touch = new TouchControls($('#stage'), { toast, log: logLine });
+  quickChat = new QuickChat($('#stage'), { line: chatLine, lobby: (name, text) => lobbyPanel.say(name, text), place: placeNotices, log: logLine });
+  touch = new TouchControls($('#stage'), { toast, log: logLine, chat: () => quickChat.toggle() });
   textField = new TextField($('#stage'), { log: logLine });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { void checkNewer(); vault.shown(); } });
   setInterval(() => { if (document.visibilityState === 'visible') void checkNewer(); }, NEWER_EVERY_MS);
@@ -1196,6 +1221,7 @@ export async function boot() {
     get phase() { return phase; }, get lastExit() { return lastExit; }, get fps() { return { game: fps.gameFps, page: fps.pageFps, source: $('#fps').dataset.source }; },
     get session() { return session; }, log, save: SAVE, download: () => download.status, offline: () => offline, displayHz: () => displayHz, retryModule: () => loadModule(),
     newer: () => newer, tried: () => tried, touch: () => touch.state(), textField: () => textField.state(), renderCheck: () => renderCheck?.state() ?? null,
+    quickChat: () => quickChat.state(), quickChatStick: (x: number, y: number) => quickChat.stick(x, y),
     env: () => resolved().env, settingsText: () => settingsText, checks: () => [...checks.values()],
     fpsMode: (m?: FpsMode) => { if (m && FPS_MODES.includes(m)) fps.set(m); return fps.mode; },
     quitTimes: { forcedCloseMaxMs: FORCED_CLOSE_MAX_MS, stopAfterMs: STOP_AFTER_MS },

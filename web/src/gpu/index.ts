@@ -52,6 +52,9 @@ export interface RendererOptions {
   /** the GPU device was lost (the graphics driver reset, the browser's graphics process crashed): nothing
    *  is drawn from then on, and only a new game process can show the game again (see detach) */
   onLost?: () => void;
+  /** every frame drawn, in the same task: quick chat's places over the cars in it (gpu_proto.h GwMarks): n marks of
+   *  4 numbers in m (id, x, y as parts of the game's picture, scale; reused, read it at once) */
+  onMarks?: (n: number, m: Float32Array, ids: Uint32Array) => void;
   log?: (s: string) => void;
 }
 
@@ -203,6 +206,8 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
   }, 5000);
   const maxInFlight = opts.maxInFlight ?? 2;
   let imgRect: { x: number; y: number; w: number; h: number } | null = null;
+  // quick chat's places of the frame being drawn (onMarks): id, x, y, scale each, the same words as two views
+  const markF = new Float32Array(4 * P.MARKS_MAX), markI = new Uint32Array(markF.buffer);
   let inFlight = 0, alive = true, pumping = false;
   let frames = 0, encMsTotal = 0, encMsLast = 0, drawsLast = 0, passesLast = 0, directFrames = 0;
   // the benchmark window (Renderer.window): per-frame samples, bounded
@@ -365,6 +370,13 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
     }
     device.queue.submit([ce.finish()]);
     enc.afterSubmit();
+    // quick chat's places over the cars in this very frame (GwMarks in its constants, from a module that writes them)
+    if (opts.onMarks) {
+      const k = (U[fw + F.k] + P.K_MARKS) >>> 2;
+      const n = U[k] === P.MARKS_MAGIC ? Math.min(U[k + 1], P.MARKS_MAX) : 0;
+      if (n) markI.set(U.subarray(k + 4, k + 4 + 4 * n));
+      opts.onMarks(n, markF, markI);
+    }
     if (slot >= 0) {
       qBusy[slot] = true;
       qRead[slot].mapAsync(GPUMapMode.READ).then(() => {

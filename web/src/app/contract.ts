@@ -28,6 +28,9 @@ export interface RendererOptions extends CommonOptions {
   /** the GPU device was lost while the game ran (a graphics driver reset, the browser's graphics process
    *  crashed): nothing is drawn from then on */
   onLost?(): void;
+  /** every frame drawn, in the same task: quick chat's places over the cars in it, n of { id, x, y, scale } (ids in
+   *  ids[4i], the rest in m[4i + 1..3]; x, y parts of the game's image; the arrays are reused: read them at once) */
+  onMarks?(n: number, m: Float32Array, ids: Uint32Array): void;
 }
 
 export interface AudioOptions extends CommonOptions {
@@ -57,6 +60,8 @@ export interface NetOptions extends CommonOptions {
   notice?: (text: string, who?: string) => void;
   /** free roam: the race lobby's panel, its state as JSON from the game ("{}": none) */
   lobby?: (json: string) => void;
+  /** free roam: quick chat, a phrase said (by a friend or the player), as JSON from the game */
+  say?: (json: string) => void;
   /** the server's LAN took this page back after the link was lost (a server restart, as for a deploy) */
   back?: () => void;
   /** the server is full: this page's place in line for one (null: not in line) */
@@ -127,6 +132,8 @@ export interface NetSubsystem extends Subsystem {
   offline?(): void;
   /** free roam's solid cars, switched while the game runs (the page menu) */
   solid?(on: boolean): void;
+  /** quick chat: the player says phrase p (quickchat.ts); false: the game has no free roam */
+  say?(p: number): boolean;
 }
 
 export type AttachRenderer = (proc: GameProcess, canvas: HTMLCanvasElement, opts: RendererOptions) => RendererSubsystem | Promise<RendererSubsystem>;

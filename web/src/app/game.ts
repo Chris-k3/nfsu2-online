@@ -31,6 +31,10 @@ export interface SessionOptions {
   notice?(text: string, who?: string): void;
   /** free roam: the race lobby's panel, its state as JSON from the game ("{}": none) */
   lobby?(json: string): void;
+  /** free roam: quick chat, a phrase said (by a friend or the player), as JSON from the game */
+  say?(json: string): void;
+  /** every frame drawn: quick chat's places over the cars in it (contract.ts RendererOptions.onMarks) */
+  marks?(n: number, m: Float32Array, ids: Uint32Array): void;
   /** the server's LAN took the game back after the link was lost (a server restart, as for a deploy) */
   netBack?(): void;
   /** the server is full: the game's place in line for one (null: not in line) */
@@ -99,6 +103,7 @@ export class GameSession {
       ...common, width: o.canvas.width, height: o.canvas.height, displayHz: o.displayHz, artifacts: o.artifacts, dumpScale: o.dumpScale,
       // a frozen picture otherwise: the game stops and the page says why
       onLost: () => { if (!s.detached) o.onFatal(N('the graphics stopped working'), 'GPU-LOST'); },
+      onMarks: o.marks,
     })).then(r => {
       s.renderer = r;
       // without a picture there is no game to play: say so instead of a black screen
@@ -114,7 +119,7 @@ export class GameSession {
     })).then(i => { s.input = i; });
     if (o.netName !== null)
       void attach('network', () => attachNet(s.proc, {
-        ...common, name: o.netName!, id: o.netId, notice: o.notice, lobby: o.lobby, back: o.netBack, queue: o.netQueue, removed: o.netRemoved,
+        ...common, name: o.netName!, id: o.netId, notice: o.notice, lobby: o.lobby, say: o.say, back: o.netBack, queue: o.netQueue, removed: o.netRemoved,
       })).then(n => { s.net = n; });
     return s;
   }

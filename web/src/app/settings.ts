@@ -107,6 +107,9 @@ export const KEYS: readonly KeyDef[] = [
   { key: 'roam_max_players', env: 'NFSU2_ROAM_MAX_PLAYERS', kind: 'int', vals: '2..33', ic: true, scope: 'web' },
   { key: 'roam_max_cars', env: 'NFSU2_ROAM_MAX_CARS', kind: 'int', vals: '0..32', ic: true, scope: 'web' },
   { key: 'roam_collide', env: 'NFSU2_ROAM_COLLIDE', kind: 'bool', ic: true, scope: 'web' },
+  // quick chat's fixed phrases (web/src/app/quickchat.ts, runtime/roam_game.c say_*): the page has the picker, so not in
+  // bundle.m's table
+  { key: 'quick_chat', env: 'NFSU2_ROAM_SAY', kind: 'bool', ic: true, scope: 'web' },
   { key: 'roam_rate', env: 'NFSU2_ROAM_RATE', kind: 'int', vals: '10..30', ic: true, scope: 'web' },
   { key: 'roam_delay', env: 'NFSU2_ROAM_DELAY', kind: 'int', vals: '0..1000', ic: true, scope: 'web' },
   { key: 'roam_extrap', env: 'NFSU2_ROAM_EXTRAP', kind: 'int', vals: '0..1000', ic: true, scope: 'web' },
@@ -361,6 +364,11 @@ export const TEMPLATE = `# NFSU2 settings, read at every launch.
 # off = Ghost mode: you drive through them, and they through yours.
 # [NFSU2_ROAM_COLLIDE]
 #roam_collide = on
+# Quick chat: say one of sixteen set phrases to the players near you (1 to
+# 4, then 1 to 4; a controller's right stick twice; the chat button on a
+# touch screen), and see theirs over their cars.  off = neither, and the
+# others send you none.  [NFSU2_ROAM_SAY]
+#quick_chat = on
 # Snapshots per second (10 to 30), the delay ghost cars are shown with in
 # ms (0 to 1000) and the longest cars are extrapolated in ms (0 to 1000).
 # [NFSU2_ROAM_RATE, NFSU2_ROAM_DELAY, NFSU2_ROAM_EXTRAP]

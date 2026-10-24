@@ -21,8 +21,9 @@
 #include <stddef.h>
 
 #define RC_PROTO_VER     1          /* header byte 4; a different value is ignored */
-#define RC_CORE_VER      5          /* HELLO: implementation revision (2: lists of up to RC_MAX_PEERS; 3: RC_MSG_DUEL;
-                                       4: state extensions, RC_HF_STATEX; 5: race lobbies, RC_HF_LOBBY) */
+#define RC_CORE_VER      6          /* HELLO: implementation revision (2: lists of up to RC_MAX_PEERS; 3: RC_MSG_DUEL;
+                                       4: state extensions, RC_HF_STATEX; 5: race lobbies, RC_HF_LOBBY; 6: quick chat,
+                                       RC_HF_SAY) */
 #define RC_MAGIC0        0x4E       /* "N2FR" */
 #define RC_MAGIC1        0x32
 #define RC_MAGIC2        0x46
@@ -67,6 +68,7 @@
                                        flags, type, class (u8), 3 bytes 0; rating, field, factor, kW, kg, km/h, time (f32);
                                        the name (16 bytes, NUL padded) */
 #define RC_RACEREP_NAME  16         /* its car type's name */
+#define RC_SAY_INBOX     16         /* SAY messages held for the game side */
 
 /* message types (header byte 5) */
 enum { RC_MSG_HELLO = 1, RC_MSG_PEERS = 2, RC_MSG_SNAP = 3, RC_MSG_CFG = 4, RC_MSG_CFG_REQ = 5,
@@ -89,7 +91,12 @@ enum { RC_MSG_HELLO = 1, RC_MSG_PEERS = 2, RC_MSG_SNAP = 3, RC_MSG_CFG = 4, RC_M
        /* a player's report of a multiplayer race it raced (rc_racerep), only
         * to the hub, once back in free roam: the server logs it.  A hub before
         * it ignores the type, and no player is sent one */
-       RC_MSG_RACEREP = 14 };
+       RC_MSG_RACEREP = 14,
+       /* quick chat (roam_game.c say_*): one of the fixed phrases (a number:
+        * each player reads it in their own language, nobody types), to every
+        * established peer whose HELLO carries RC_HF_SAY; seq tells a repeat
+        * from a new one.  Two more bytes, 0 for now */
+       RC_MSG_SAY = 15 };
 /* RACEREP flags */
 #define RC_RR_HOST       0x01       /* the reporter hosted the race */
 #define RC_RR_QUIT       0x02       /* ...left it with its pause menu's Quit */
@@ -159,6 +166,9 @@ enum { RC_PLAT_MAC = 1, RC_PLAT_WIN = 2, RC_PLAT_TOOL = 3 };
  * after the engine of the longest form, and is skipped.  Only to a peer
  * whose HELLO carries the flag: an older core counts the longer SNAP as bad */
 #define RC_HF_STATEX     0x0040
+/* header flags (HELLO): this player takes quick chat (RC_MSG_SAY); an older
+ * core sends none and counts the type as bad */
+#define RC_HF_SAY        0x0100
 /* decoder results */
 enum { RC_OK = 0, RC_E_SHORT = -1, RC_E_MAGIC = -2, RC_E_VERSION = -3, RC_E_LENGTH = -4,
        RC_E_CRC = -5, RC_E_TYPE = -6, RC_E_FIELD = -7, RC_E_TRAIL = -8, RC_E_RANGE = -9 };
@@ -272,6 +282,7 @@ typedef struct {
         rc_lobby lobby;
         struct { uint16_t req; uint8_t n; const uint8_t *data; } lobbies;   /* data: n entries */
         rc_racerep racerep;
+        struct { uint8_t phrase, seq; } say;
     } u;
 } rc_msg;
 
@@ -404,6 +415,7 @@ typedef struct {
     uint16_t hub_port;
     int      duels;                /* we take outrun challenges (HELLO says so: RC_HF_DUELS) */
     int      lobbies;              /* we take race lobbies (HELLO says so: RC_HF_LOBBY) */
+    int      say;                  /* we take quick chat (HELLO says so: RC_HF_SAY) */
 } rc_config;
 
 enum { RC_PS_FREE = 0, RC_PS_CANDIDATE = 1, RC_PS_HEARD = 2, RC_PS_EST = 3 };
@@ -422,6 +434,7 @@ typedef struct {
     uint8_t  duels;                /* its HELLO says it takes outrun challenges (RC_HF_DUELS) */
     uint8_t  lobbies;              /* its HELLO says it takes race lobbies (RC_HF_LOBBY) */
     uint8_t  statex;              /* its HELLO says it reads state extensions (RC_HF_STATEX) */
+    uint8_t  say;                  /* its HELLO says it takes quick chat (RC_HF_SAY) */
     uint16_t cfg_rev_seen;         /* what the peer announces */
     int      hears_us, lost;
     int      hears_miss;           /* with the hub: one HELLO without our id forgiven (hub mode only) */
@@ -491,6 +504,11 @@ typedef struct {
      * question (lobbies_gen +1 for each) */
     uint32_t  lobbies_gen;  int lobbies_n;  uint16_t lobbies_req;   /* (the question they answered) */
     struct { int16_t x, y; uint32_t race; uint8_t n, max, state; } lobbies_e[RC_LOBBIES_MAX];
+    /* SAY messages from established peers, oldest first, until the game
+     * side takes them (rc_take_say) */
+    struct { uint32_t from; uint8_t phrase, seq; } say_in[RC_SAY_INBOX];
+    int       n_say_in;
+    uint32_t  say_dropped;         /* the inbox was full */
 } rc_session;
 
 void rc_session_init(rc_session *s, const rc_config *cfg, const rc_io *io);
@@ -527,6 +545,11 @@ int  rc_send_lobby(rc_session *s, const rc_lobby *l);
 int  rc_take_lobby(rc_session *s, uint32_t *from, rc_lobby *l);
 /* a race report to the hub (RC_MSG_RACEREP), while it answers; 1 when sent */
 int  rc_send_racerep(rc_session *s, const rc_racerep *r);
+/* a quick-chat phrase to every established peer whose HELLO said it takes
+ * them; how many it went to */
+int  rc_send_say(rc_session *s, uint8_t phrase, uint8_t seq);
+/* the oldest SAY not taken yet; 1 when there was one */
+int  rc_take_say(rc_session *s, uint32_t *from, uint8_t *phrase, uint8_t *seq);
 const char *rc_status_name(int st);
 
 #endif

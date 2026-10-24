@@ -66,6 +66,8 @@
 #define NET_KIND_LOBBY    17u   /* TX ring only, never on the switch: the free-roam race lobby's panel over
                                    the game, its state as a JSON object ("{}": none), sent when it changes
                                    (roam_game.c mp_panel) */
+#define NET_KIND_SAY      18u   /* TX ring only, never on the switch: quick chat, a phrase said (by a friend near,
+                                   one in our race lobby, or the player), as a JSON object (roam_game.c say_*) */
 #define NET_BROADCAST      0xFFFFFFFFu
 #define NET_ROAM_HUB       0x0A4D00FDu  /* 10.77.0.253: the server's free-roam hub (web/server-rs/crates/roam),
                                    an address the switch never hands out */
@@ -120,7 +122,9 @@ typedef struct {
                                                                   1 off, 2 on; roam_plat_solid) */
     double   switch_rtt_ms;                                    /* 112: last ping to the switch */
     double   tx_wait_ms_sum, tx_wait_ms_max;                   /* 120: C queued -> page sent */
-    uint32_t tx_wait_n, page_pad1;                             /* 136 */
+    uint32_t tx_wait_n, say;                                   /* 136: say: quick chat, the phrase the player
+                                                                  picked (bits 0-7) and a count (bits 8-31) that
+                                                                  changes with each pick (roam_plat_say_pick) */
     uint32_t peer_bits[NET_PEER_BITS / 32];                    /* 144: page: bit h set = the host h of our
                                                                   network (vip & ~netmask) is on the switch (us too) */
     uint32_t pad[28];                                          /* 400 .. 511 */

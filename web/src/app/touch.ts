@@ -10,7 +10,8 @@
 //             Brake and the handbrake go under the left thumb.
 //   gears     with a manual gearbox, gear down and up above the left thumb: the controller's X and A, as on a pad
 //             (Ctrl and Shift on the keyboard would be modifiers too)
-//   small     pause, camera, look back, reset; in free roam also the map, messages, horn and start an event
+//   small     pause, camera, look back, reset; in free roam also the map, messages, horn, quick chat (quickchat.ts) and
+//             start an event
 //   horizon   while tilt steers, the game's 3D view turns against the phone's tilt from straight ahead, so the road's
 //             horizon stays level with the real one (the HUD stays on the phone; runtime/overrides.c sub_005c7ec0).
 //             Not in a cutscene (a race's start); faded in and out.  A switch in the Controls sheet's touch tab.
@@ -98,6 +99,7 @@ const ICONS = {
   map: '<path d="M4 6l5-2 6 2 5-2v14l-5 2-6-2-5 2z"/><path d="M9 4v14M15 6v14"/>',
   msgs: '<path d="M4 6h16v12H4z"/><path d="M4 7l8 6 8-6"/>',
   horn: '<path d="M4 10v4h3l6 4V6l-6 4z"/><path d="M17 9a4 4 0 0 1 0 6"/>',
+  chat: '<path d="M5 5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-7l-4 3v-3H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/>',
   center: '<circle cx="12" cy="12" r="6"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>',
   buttons: '<path d="M10 7l-5 5 5 5M14 7l5 5-5 5"/>',
   stick: '<circle cx="12" cy="12" r="8"/><circle class="fill" cx="12" cy="12" r="3"/>',
@@ -122,6 +124,8 @@ export function rollOf(beta: number, gamma: number, screenAngle: number): number
 export interface TouchDeps {
   toast(msg: string, ms: number): void;
   log(s: string): void;
+  /** the chat button: quick chat's phrases (quickchat.ts) */
+  chat?(): void;
 }
 
 export class TouchControls {
@@ -186,6 +190,7 @@ export class TouchControls {
     add('map', N('Map'), path(ICONS.map), { keys: ['KeyM'] }, 'small roam');
     add('msgs', N('Messages'), path(ICONS.msgs), { keys: ['Tab'] }, 'small roam');
     add('horn', N('Horn'), path(ICONS.horn), { keys: ['KeyN'] }, 'small roam');
+    add('chat', N('Quick chat'), path(ICONS.chat), { act: () => this.deps.chat?.() }, 'small roam');
     add('mode', N('Steering'), path(ICONS[this.steering]), { act: () => this.nextSteering() }, 'small');
     add('center', N('Straight ahead'), path(ICONS.center), { act: () => this.recenter() }, 'small');
     add('start', N('Start an event'), { text: N('Start') }, { keys: ['Enter'] }, 'pill roam');

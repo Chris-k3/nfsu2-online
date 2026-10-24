@@ -407,6 +407,7 @@ html:has(> body > .stage:not([hidden])) { overflow: hidden; }
 .tc[data-ctl="map"] { left: calc(var(--l) + 280px); }
 .tc[data-ctl="msgs"] { left: calc(var(--l) + 336px); }
 .tc[data-ctl="horn"] { left: calc(var(--l) + 392px); }
+.tc[data-ctl="chat"] { left: calc(var(--l) + 448px); }
 .tc[data-ctl="mode"] { right: var(--r); }
 .tc[data-ctl="center"] { right: calc(var(--r) + 56px); }
 .tc[data-ctl="start"] { left: var(--l); bottom: calc(var(--b) + 128px); }
@@ -484,6 +485,7 @@ html:has(> body > .stage:not([hidden])) { overflow: hidden; }
   html[data-touch] .tc[data-ctl="map"] { left: var(--l); top: calc(var(--t) + 56px); }
   html[data-touch] .tc[data-ctl="msgs"] { left: calc(var(--l) + 56px); top: calc(var(--t) + 56px); }
   html[data-touch] .tc[data-ctl="horn"] { left: calc(var(--l) + 112px); top: calc(var(--t) + 56px); }
+  html[data-touch] .tc[data-ctl="chat"] { left: calc(var(--l) + 168px); top: calc(var(--t) + 56px); }
   html[data-touch] .stick { top: calc(var(--pic-h) + 64px); height: auto; width: 50%; }
   /* below the picture, on black: a light backing, and room for bigger pedals and steering */
   html[data-touch] :is(.tc, .stage-menu) { background: rgba(255, 255, 255, 0.1); }
@@ -539,6 +541,56 @@ html:has(> body > .stage:not([hidden])) { overflow: hidden; }
 .notices div { animation: notice-fade 5s linear both; }
 .notices b { font-weight: 700; color: rgba(200, 240, 136, 0.9); }    /* --lime */
 @keyframes notice-fade { 0% { opacity: 0; } 4%, 84% { opacity: 1; } 100% { opacity: 0; } }
+/* quick chat's lines in the log (shell.ts chatLine): a speech balloon first, upright and brighter than the notices,
+ * for 8 s */
+.notices div.chat {
+  display: flex; align-items: center; gap: calc(2 * var(--u)); animation-duration: 8s;
+  font-style: normal; font-size: max(12px, calc(7.5 * var(--u))); color: rgba(255, 255, 255, 0.9);
+}
+.notices div.chat svg { width: 0.9em; height: 0.9em; flex: none; fill: rgba(200, 240, 136, 0.9); }
+/* free roam: quick chat over the cars (quickchat.ts): the phrase in lime after a speech balloon, over the name the
+ * game draws, sized with the HUD (--u) and scaled with the name by the line's transform, which follows the game's
+ * marks every frame; it pops up, and fades out at its end */
+.qc-lines { --u: 1px; position: absolute; inset: 0; z-index: 3; overflow: hidden; pointer-events: none; }
+.qc-line { position: absolute; left: 0; top: 0; transform-origin: 0 0; white-space: nowrap; transition: opacity 0.6s linear; }
+.qc-line.out { opacity: 0; }
+.qc-b {
+  display: flex; align-items: center; gap: calc(2.5 * var(--u)); transform-origin: 50% 100%; animation: qc-pop 0.22s ease-out both;
+  font: italic 700 max(12px, calc(10 * var(--u))) / 1 var(--font); color: var(--lime);
+  text-shadow: 0 0 2px #000, 0 1px 3px #000, 0 0 calc(5 * var(--u)) rgba(0, 0, 0, 0.6);
+}
+.qc-b svg { width: 0.95em; height: 0.95em; flex: none; fill: currentColor; filter: drop-shadow(0 1px 2px #000); }
+@keyframes qc-pop { 0% { opacity: 0; transform: translateY(30%) scale(0.6); } 70% { opacity: 1; transform: scale(1.06); } 100% { transform: none; } }
+/* quick chat's picker: on the left in the notices' place (they step aside while it is open), dressed as the race
+ * lobby's card; on a touch screen all sixteen at the top, big enough to tap */
+.qc-picker {
+  --u: 1px;
+  position: absolute; left: 16px; top: 40%; z-index: 4; min-width: calc(112 * var(--u)); pointer-events: none;
+  padding: calc(6 * var(--u)) calc(9 * var(--u)); border-left: 3px solid var(--lime); border-radius: 4px; background: rgba(13, 13, 13, 0.82);
+  font: 400 max(13px, calc(8.5 * var(--u))) / 1.3 var(--font); color: var(--text);
+}
+.stage:has(> .qc-picker:not([hidden]):not([data-mode="touch"])) > .notices { visibility: hidden; }
+.qc-title { margin-bottom: 0.2em; font-weight: 700; font-style: italic; text-transform: uppercase; letter-spacing: 0.03em; color: var(--lime); }
+.qc-row { display: flex; gap: 0.6em; align-items: center; padding: 0.12em 0; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.qc-row kbd {
+  min-width: 1.6em; padding: 0 0.35em; text-align: center; border: 1px solid var(--edge); border-radius: 3px; background: var(--field);
+  font: 700 0.8em/1.5 var(--font); color: var(--text);
+}
+.qc-text { font-weight: 700; font-style: italic; }
+.qc-foot { margin-top: 0.3em; font-size: 0.8em; color: var(--muted); }
+.qc-wait { color: var(--muted); }
+.qc-picker[data-mode="touch"] {
+  left: 50% !important; top: calc(max(12px, env(safe-area-inset-top)) + 60px) !important; transform: translateX(-50%); z-index: 5;
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; width: min(640px, calc(100% - 32px));
+  padding: 10px; border-left: 0; border-radius: 10px; font-size: 14px; pointer-events: auto;
+}
+@media (max-width: 520px) { .qc-picker[data-mode="touch"] { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.qc-group { display: grid; gap: 6px; align-content: start; min-width: 0; }
+.qc-say {
+  min-height: 40px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--field); color: var(--text);
+  font: italic 700 14px/1.2 var(--font); text-align: left; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+}
+.qc-say:active { border-color: var(--lime); color: var(--lime); }
 /* free roam: the race lobby (lobby.ts): a card on the right under the game's Bank box, a little wider than it and its
  * text about the size of the HUD's (--u: one HUD unit), and over the trip to the race and back a cover of the whole
  * picture with the lobby in the middle, in the same step */
@@ -559,6 +611,8 @@ html:has(> body > .stage:not([hidden])) { overflow: hidden; }
 .lobby-n { width: 1em; text-align: right; color: var(--muted); }
 .lobby-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lobby-tag { font-size: 0.75em; text-transform: uppercase; color: var(--lime); }
+/* quick chat: what a player of the lobby said lately, beside their name (lobby.ts say) */
+.lobby-said { max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em; font-weight: 700; font-style: italic; color: var(--lime); }
 .lobby-act { display: flex; gap: 0.5em; align-items: center; margin-top: 0.6em; }
 .lobby-act kbd {
   padding: 0 0.4em; border: 1px solid var(--edge); border-radius: 3px; background: var(--field);

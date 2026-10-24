@@ -158,6 +158,21 @@ typedef struct { uint32_t n; float s, o, pad; GwHLight l[GW_HL_MAX]; } GwHL;
 #define GW_K_HL     256u
 #define GW_HL_BYTES 656u
 
+/* Quick chat's places over the cars (roam_game.c say_marks): every frame's VS
+ * constant arena holds this block at GW_K_MARKS, which the page reads with
+ * the frame it encodes, so a line said moves with its car in that very
+ * picture.  magic: GW_MARKS_MAGIC (where a module without the block has the
+ * draws' constants); n marks: the player's id, where the name over their car
+ * is (x, y: parts of the back buffer from its top left corner, 0 .. 1) and
+ * its scale (the game's, 0.5 .. 1 with the distance).  n = 0: none this
+ * frame.  The page binds none of it. */
+#define GW_MARKS_MAX   32
+#define GW_MARKS_MAGIC 0x4B52414Du        /* "MARK" */
+typedef struct { uint32_t id; float x, y, s; } GwMark;
+typedef struct { uint32_t magic, n, pad[2]; GwMark m[GW_MARKS_MAX]; } GwMarks;
+#define GW_K_MARKS     1024u
+#define GW_MARKS_BYTES 528u
+
 /* The page binds the VS constant arena (K) in windows of GW_KWIN_ROWS rows of
  * 16 bytes: 64 KB, the default maxUniformBufferBindingSize.  A draw's block
  * (16-byte header + c[0..255]) starts at row firstInstance of its window, so
@@ -185,4 +200,6 @@ _Static_assert(sizeof(GwCtl) == 96 + 2 * 136, "GwCtl");
 _Static_assert(sizeof(GwVsync) == 32 && offsetof(GwVsync, ts_ms) == 8 && offsetof(GwVsync, hz) == 24, "GwVsync");
 _Static_assert(sizeof(GwCmd) == GW_CMD_HDR, "GwCmd");
 _Static_assert(sizeof(GwHLight) == 80 && sizeof(GwHL) == GW_HL_BYTES && offsetof(GwHL, l) == 16, "GwHL");
+_Static_assert(sizeof(GwMark) == 16 && sizeof(GwMarks) == GW_MARKS_BYTES && offsetof(GwMarks, m) == 16, "GwMarks");
+_Static_assert(GW_K_MARKS >= GW_K_HL + GW_HL_BYTES, "GwMarks after GwHL");
 #endif

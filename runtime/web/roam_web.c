@@ -61,6 +61,7 @@
 #include "roam_plat.h"
 #include "host_abi.h"
 #include "net_proto.h"
+#include "gpu_proto.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -279,6 +280,30 @@ int roam_plat_lobby(const char *json){
 int roam_plat_solid(void){
     uint32_t v = MB ? ld(&MB->solid) : 0;
     return v == 1 ? 0 : v == 2 ? 1 : -1;
+}
+/* quick chat: the page picks (net_proto.h say: the phrase, under a count that changes with each pick), the game
+ * tells it what was said (NET_KIND_SAY) and, every frame, where the names of those who spoke are (the renderer's
+ * frame, gpu_web.c gw_marks) */
+void gw_marks(const GwMark *m, int n);
+static uint32_t g_say_seen;
+int roam_plat_quickchat(void){ return 1; }
+int roam_plat_say_pick(void){
+    uint32_t v = MB ? ld(&MB->say) : 0;
+    if (v == g_say_seen) return -1;
+    g_say_seen = v;
+    return (int)(v & 0xffu);
+}
+int roam_plat_said(const char *json){
+    int n = (int)strlen(json);
+    if (!MB) return -1;
+    if (n <= 0 || n > (int)NET_MAX_PAYLOAD) return 1;
+    return tx_push(NET_KIND_SAY, 0, 0, (const uint8_t *)json, n) ? 1 : -1;
+}
+void roam_plat_say_marks(const uint32_t *ids, const float *xys, int n){
+    GwMark m[GW_MARKS_MAX];
+    if (n > GW_MARKS_MAX) n = GW_MARKS_MAX;
+    for (int i = 0; i < n; i++){ m[i].id = ids[i]; m[i].x = xys[3 * i]; m[i].y = xys[3 * i + 1]; m[i].s = xys[3 * i + 2]; }
+    gw_marks(m, n);
 }
 static uint8_t place(const rc_peer *p){ return p->status == RC_ST_PAUSED ? RC_ST_ROAM : p->status; }
 /* we are in free roam and the friend's car was within NEAR_M of ours (on the

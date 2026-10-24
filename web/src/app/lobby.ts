@@ -50,6 +50,9 @@ function noteText(s: string): string {
   return game(s) + engine;
 }
 
+/** quick chat: a phrase stays beside its player's name this long (ms) */
+const SAID_MS = 6000;
+
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string) => {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -82,6 +85,14 @@ export class LobbyPanel {
   /** the same state again, in the page's language */
   redraw() { const j = this.last; this.last = ''; this.show(j || '{}'); }
 
+  /** quick chat (quickchat.ts): what a player said, beside their name for SAID_MS (by name, as the lobby has them) */
+  private said = new Map<string, { text: string; until: number }>();
+  say(name: string, text: string) {
+    this.said.set(name, { text, until: performance.now() + SAID_MS });
+    if (this.last.includes('"names"')) this.redraw();
+    setTimeout(() => { if (this.last.includes('"names"')) this.redraw(); }, SAID_MS + 50);
+  }
+
   /** the panel's place: under the game's Bank box, its right edge on the box's (x 299, y -198 to -168 in the HUD's
    *  units from the middle of the picture; one unit is u px), out to the edge of a wide HUD with hud = wide, as the
    *  radar's side (shell.ts placeNotices); v: the game's picture on the page */
@@ -105,12 +116,15 @@ export class LobbyPanel {
   /** the lobby's places: its players (the host marked, ours "you"), the rest open */
   private places(s: LobbyState, dim = false) {
     const ol = el('ol', 'lobby-places' + (dim ? ' dim' : ''));
-    const names = s.names ?? [], n = Math.max(2, Math.min(6, s.max ?? 6));
+    const names = s.names ?? [], n = Math.max(2, Math.min(6, s.max ?? 6)), now = performance.now();
+    for (const [k, w] of this.said) if (w.until <= now) this.said.delete(k);
     for (let i = 0; i < n; i++) {
       const li = el('li', i < names.length ? 'taken' : 'open');
       li.append(el('span', 'lobby-n', String(i + 1)));
       li.append(el('span', 'lobby-name', i < names.length ? names[i] : t('open')));
       if (i < names.length && (i === 0 || i === s.me)) li.append(el('span', 'lobby-tag', i === 0 ? t('host') : t('you')));
+      const w = i < names.length ? this.said.get(names[i]) : undefined;
+      if (w) li.append(el('span', 'lobby-said', w.text));
       ol.append(li);
     }
     return ol;

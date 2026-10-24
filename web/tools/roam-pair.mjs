@@ -17,7 +17,12 @@
 //                    1600x900 (--size), and a script line `log SHOT <name>` saves the page as the player sees it
 //                    (the game and the page's own overlays) as <out>/<instance>-<name>.png; `log SHOT clean_<name>`
 //                    without the race lobby's panel (tests/scripts/mprace_shots_a/b.txt); `log MENU <item>` opens
-//                    the page menu (F9), clicks that item (its data-act, e.g. solid) and goes back to the game
+//                    the page menu (F9), clicks that item (its data-act, e.g. solid) and goes back to the game;
+//                    `log KEY <code> ...` presses those keys on the page as the player does (KeyboardEvent.code: the
+//                    script's own keys reach only the game, never the page) and `log STICK <x> <y>` moves the right
+//                    stick there for the page (quick chat's picker: tests/scripts/roam_say_view_a.txt); with
+//                    --touch the pages take taps (the touch controls show), and `log TAP <selector>` taps there
+//                    (tests/scripts/roam_say_touch.txt)
 //        [--page play [--size 960x540] [--play-only Bob]]   the renderer's test page (test/play.html, WebGPU)
 //                    instead: frame dumps go to the server's /artifacts/ as <name>-*.png (a server of our own
 //                    gets --artifacts <out>); --play-only: only that instance renders, the others run hostcheck
@@ -88,6 +93,7 @@ const SEED_FOR = new Map(opts('seed-for').map(s => [s.slice(0, s.indexOf(':')), 
 const seedOf = name => SEED_FOR.get(name) || (FRESH.includes(name) ? '' : SEED);
 const seeded = name => !!seedOf(name);
 const HIDE = opts('hide').map(x => { const [n, at, dur] = x.split(':'); return { name: n, at: +at * 1000, dur: +(dur ?? 8) * 1000 }; });
+const TOUCH = argv.includes('--touch');      // the pages take taps (`log TAP <selector>`): the touch controls show
 fs.mkdirSync(OUT, { recursive: true });
 
 const COMMON = {
@@ -158,7 +164,8 @@ const browser = await chromium.launch({ channel: 'chrome', headless: !argv.inclu
 const t0 = Date.now();
 const inst = [];
 async function start(i, name, script, own) {
-  const ctx = await browser.newContext({ ...(HTTPS ? { ignoreHTTPSErrors: true } : {}), ...(APP ? { viewport: { width: SIZE[0], height: SIZE[1] } } : {}) });
+  const ctx = await browser.newContext({ ...(HTTPS ? { ignoreHTTPSErrors: true } : {}), ...(APP ? { viewport: { width: SIZE[0], height: SIZE[1] } } : {}),
+    ...(TOUCH ? { hasTouch: true } : {}) });
   const page = await ctx.newPage();
   const log = fs.createWriteStream(path.join(OUT, `${name}.log`));
   const w = (s) => log.write(`${((Date.now() - t0) / 1000).toFixed(3)} ${s}\n`);
@@ -175,6 +182,17 @@ async function start(i, name, script, own) {
     if (mk) void page.keyboard.press('F9').then(() => page.click(`#menu [data-act="${mk[1]}"]`, { timeout: 5000 }))
       .then(() => page.click('#menu [data-act="resume"]'))
       .then(() => w(`[menu] ${mk[1]}`), e => w(`[menu] ${mk[1]} failed: ${e}`));
+    // keys pressed on the page, and the right stick as the page reads it, at a script's `log KEY <code> ...` and
+    // `log STICK <x> <y>`
+    const kk = APP && /LOG KEY ([\w ]+)/.exec(m.text());
+    if (kk) void kk[1].trim().split(/\s+/).reduce((p, c) => p.then(() => page.keyboard.press(c)), Promise.resolve())
+      .then(() => w(`[key] ${kk[1].trim()}`), e => w(`[key] ${kk[1]} failed: ${e}`));
+    const sk = APP && /LOG STICK (-?[\d.]+) (-?[\d.]+)/.exec(m.text());
+    if (sk) void page.evaluate(([x, y]) => window.__nfsu2.quickChatStick(x, y), [+sk[1], +sk[2]])
+      .then(r => w(`[stick] ${sk[1]} ${sk[2]}: ${r ? 'the picker' : 'not used'}`), e => w(`[stick] failed: ${e}`));
+    // a finger's tap on the page (--touch), at a script's `log TAP <selector>`
+    const tk = APP && TOUCH && /LOG TAP (.+)$/.exec(m.text());
+    if (tk) void page.tap(tk[1].trim(), { timeout: 5000 }).then(() => w(`[tap] ${tk[1].trim()}`), e => w(`[tap] ${tk[1]} failed: ${e}`));
   });
   page.on('pageerror', e => w('PAGEERROR ' + e));
   const u = url(i, name, script, own);

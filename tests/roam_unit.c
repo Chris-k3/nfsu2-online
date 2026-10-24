@@ -21,6 +21,7 @@ static int g_fail, g_pass;
 static int g_ev[8];
 void roam_game_event(int ev, int peer, const char *text){ (void)peer; (void)text; if (ev >= 0 && ev < 8) g_ev[ev]++; }
 int roam_game_racing(void){ return 0; }      /* roam_web.c (the wasm build of these tests) */
+void gw_marks(const void *m, int n){ (void)m; (void)n; }      /* roam_web.c: the renderer's frame (gpu_web.c) */
 
 static uint32_t rng = 12345;
 static uint32_t rnd(void){ rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return rng; }
@@ -213,6 +214,14 @@ static void t_roundtrip(void){
       CHECK(n == RC_HDR + 3 + 2 * RC_LOBBIES_ENTRY + RC_CRC && rc_decode(b, n, &d) == RC_OK && d.u.lobbies.req == 99 && d.u.lobbies.n == 2 &&
             !memcmp(d.u.lobbies.data, le, sizeof le), "LOBBIES round trip (%d bytes)", n);
       m.u.lobbies.n = RC_LOBBIES_MAX + 1; CHECK(rc_encode(&m, b, sizeof b) < 0, "LOBBIES of too many not encoded"); }
+    /* SAY: 4 bytes (phrase, seq, two zero); any phrase number goes through (a newer game may have more) */
+    memset(&m, 0, sizeof m); m.h.type = RC_MSG_SAY; m.h.sender = 7; m.u.say.phrase = 13; m.u.say.seq = 200;
+    { int n = rc_encode(&m, b, sizeof b);
+      CHECK(n == RC_HDR + 4 + RC_CRC && b[RC_HDR] == 13 && b[RC_HDR + 1] == 200 && !b[RC_HDR + 2] && !b[RC_HDR + 3] &&
+            rc_decode(b, n, &d) == RC_OK && d.u.say.phrase == 13 && d.u.say.seq == 200, "SAY round trip (%d bytes)", n);
+      m.u.say.phrase = 250; n = rc_encode(&m, b, sizeof b);
+      CHECK(rc_decode(b, n, &d) == RC_OK && d.u.say.phrase == 250, "SAY with a phrase this game does not have still decodes");
+      CHECK(rc_decode(b, n - 1, &d) != RC_OK, "SAY cut short refused"); }
     /* RACEREP: RC_RACEREP_BYTES; no lobby, no race, no cars, a place past them, an unknown flag, a class past 3, a
        number out of range or not one, an unprintable name refused */
     memset(&m, 0, sizeof m); m.h.type = RC_MSG_RACEREP; m.h.sender = 7;
@@ -278,10 +287,10 @@ static void t_roundtrip(void){
 
 /* ---- 3. hostile datagrams ----------------------------------------------------------------- */
 static void t_fuzz(long iters){
-    uint8_t b[1600], base[14][RC_MAX_DGRAM]; int bn[14];
+    uint8_t b[1600], base[15][RC_MAX_DGRAM]; int bn[15];
     rc_msg m;
     /* one valid datagram of each type, to mutate */
-    for (int t = 1; t <= 14; t++){
+    for (int t = 1; t <= 15; t++){
         memset(&m, 0, sizeof m); m.h.type = (uint8_t)t; m.h.sender = 9;
         if (t == RC_MSG_HELLO){ strcpy(m.u.hello.name, "abc"); m.u.hello.n_seen = 2; }
         if (t == RC_MSG_PEERS){ m.u.peers.n = 2; m.u.peers.e[0].ip = 0x7f000001u; m.u.peers.e[0].port = 1; m.u.peers.e[0].id = 1; m.u.peers.e[1] = m.u.peers.e[0]; }
@@ -295,10 +304,11 @@ static void t_fuzz(long iters){
         if (t == RC_MSG_LOBBIES){ m.u.lobbies.n = 1; m.u.lobbies.data = le; }
         if (t == RC_MSG_RACEREP){ m.u.racerep.lobby = 5; m.u.racerep.race = 6; m.u.racerep.players = 2; m.u.racerep.place = 1;
                                   m.u.racerep.factor = 1.f; strcpy(m.u.racerep.name, "350Z"); }
+        if (t == RC_MSG_SAY){ m.u.say.phrase = 3; m.u.say.seq = 1; }
         bn[t - 1] = rc_encode(&m, base[t - 1], RC_MAX_DGRAM);
     }
     rc_session s; rc_config cf; memset(&cf, 0, sizeof cf); cf.self_id = 1; cf.port = 1; cf.max_players = 8; cf.rate_hz = 20; cf.test_mode = 1;
-    cf.duels = 1; cf.lobbies = 1;
+    cf.duels = 1; cf.lobbies = 1; cf.say = 1;
     rc_io io = { 0, 0, 0, 0 };
     rc_session_init(&s, &cf, &io);
     long accepted = 0, refused = 0, bad = 0;
@@ -307,7 +317,7 @@ static void t_fuzz(long iters){
         int kind = (int)(rnd() % 4);
         if (kind == 0){ len = (int)(rnd() % 1300); for (int i = 0; i < len; i++) b[i] = (uint8_t)rnd(); }
         else {
-            int t = (int)(rnd() % 14); len = bn[t]; memcpy(b, base[t], (size_t)len);
+            int t = (int)(rnd() % 15); len = bn[t]; memcpy(b, base[t], (size_t)len);
             int nm = 1 + (int)(rnd() % 6);
             for (int k = 0; k < nm; k++) b[rnd() % (uint32_t)len] = (uint8_t)rnd();
             if (kind == 2) len = (int)(rnd() % (uint32_t)(len + 1));
@@ -341,6 +351,7 @@ static void t_fuzz(long iters){
     CHECK(bad == 0, "fuzz: %ld accepted datagrams break invariants", bad);
     CHECK(s.n_duel_in == 0, "fuzz: no DUEL from a stranger reaches the game (%d)", s.n_duel_in);
     CHECK(s.n_lobby_in == 0 && s.lobbies_gen == 0, "fuzz: no LOBBY from a stranger, no LOBBIES from a non-hub (%d, %u)", s.n_lobby_in, s.lobbies_gen);
+    CHECK(s.n_say_in == 0, "fuzz: no SAY from a stranger reaches the game (%d)", s.n_say_in);
     printf("  fuzz: %ld datagrams, %ld accepted, %ld refused, session rx %u bad %u policy %u\n", iters, accepted, refused, s.rx, s.rx_bad, s.rx_policy);
 }
 
@@ -1286,6 +1297,38 @@ static void t_lobby(void){
           "the hub's lobbies are read, a bad entry skipped (%d of 3)", g_n[0].lobbies_n);
     g_hub_on = 0; for (int i = 0; i < 3; i++) g_n[i].conf.hub_ip = 0;
 }
+/* ---- 4f. quick chat: SAY to every peer that takes it, never to an older game; the inbox -------- */
+static void t_say(void){
+    mesh(3, 8);
+    g_n[0].conf.say = 1; g_n[1].conf.say = 1;                  /* node 2: an older game */
+    for (int i = 1; i < 3; i++){ rc_add_peer(&g_n[0], node_ip(i), node_port(i), 1, g_now); rc_add_peer(&g_n[i], node_ip(0), node_port(0), 1, g_now); }
+    drive(3, g_now + 3000000);
+    int p1 = peer_of(0, 0x501), p2 = peer_of(0, 0x502);
+    CHECK(est(0) == 2 && p1 >= 0 && p2 >= 0 && g_n[0].peer[p1].say && !g_n[0].peer[p2].say,
+          "the HELLO's flag says who takes quick chat (%d %d)", p1 >= 0 && g_n[0].peer[p1].say, p2 >= 0 && g_n[0].peer[p2].say);
+    uint32_t bad2 = g_n[2].rx_bad;
+    CHECK(rc_send_say(&g_n[0], 7, 1) == 1, "SAY goes to the one peer that takes it");
+    net_run(g_now + 20000, 3);
+    uint32_t from = 0; uint8_t ph = 0, sq = 0;
+    CHECK(rc_take_say(&g_n[1], &from, &ph, &sq) == 1 && from == 0x500 && ph == 7 && sq == 1 && !rc_take_say(&g_n[1], &from, &ph, &sq),
+          "the phrase arrives once (from %x, phrase %d, seq %d)", from, ph, sq);
+    CHECK(g_n[2].rx_bad == bad2 && !g_n[2].n_say_in, "the older game hears nothing it cannot read");
+    /* one that reaches a game taking none (sent by hand): kept from the game side */
+    rc_msg m; memset(&m, 0, sizeof m); m.h.type = RC_MSG_SAY; m.h.sender = 0x500; m.u.say.phrase = 2; m.u.say.seq = 9;
+    uint8_t b[RC_MAX_DGRAM]; int n = rc_encode(&m, b, sizeof b);
+    rc_receive(&g_n[2], node_ip(0), node_port(0), b, n, g_now);
+    CHECK(!g_n[2].n_say_in, "a game that takes no quick chat keeps none");
+    g_n[0].conf.say = 0;
+    CHECK(rc_send_say(&g_n[0], 7, 2) == 0, "a game that takes no quick chat sends none");
+    g_n[0].conf.say = 1;
+    /* the inbox holds RC_SAY_INBOX, oldest first */
+    for (int k = 0; k < RC_SAY_INBOX + 4; k++) rc_send_say(&g_n[0], (uint8_t)(k & 15), (uint8_t)(10 + k));
+    net_run(g_now + 20000, 3);
+    int kept = g_n[1].n_say_in, taken = 0; uint32_t seen = 0;
+    while (rc_take_say(&g_n[1], &from, &ph, &sq)) if (sq >= 10 && sq < 10 + RC_SAY_INBOX + 4){ taken++; seen |= 1u << (sq - 10); }
+    CHECK(kept == RC_SAY_INBOX && g_n[1].say_dropped == 4 && taken == RC_SAY_INBOX && __builtin_popcount(seen) == RC_SAY_INBOX,
+          "say inbox: %d kept, %u dropped, %d taken", kept, g_n[1].say_dropped, taken);
+}
 
 int main(int argc, char **argv){
     long fuzz = argc > 1 ? atol(argv[1]) : 200000;
@@ -1298,6 +1341,7 @@ int main(int argc, char **argv){
     t_hub();
     t_duel();
     t_lobby();
+    t_say();
     t_statex();
     t_snapstates();
     t_bigmesh();

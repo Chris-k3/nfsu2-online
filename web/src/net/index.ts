@@ -76,6 +76,8 @@ export interface NetOptions {
   onNotice?: (text: string, who?: string) => void;
   /** the free-roam race lobby's panel from the game (NET_KIND_LOBBY): its state as JSON, "{}" for none */
   onLobby?: (json: string) => void;
+  /** quick chat from the game (NET_KIND_SAY): a phrase said, by a friend or the player, as JSON */
+  onSay?: (json: string) => void;
   /** the switch welcomed this page again after the link was lost (a server restart, as for a deploy) */
   onBack?: () => void;
   /** the server is full and this page waits in line for a place: where it is, as the switch last said; null: not
@@ -135,6 +137,8 @@ export interface NetLink {
   goOffline(): void;
   /** free roam's solid cars, switched while the game runs (the page menu; runtime/roam_game.c solid_follow) */
   setSolid(on: boolean): void;
+  /** quick chat: the player says phrase p (runtime/roam_game.c say_frame sends it); false: no free roam */
+  say(p: number): boolean;
   close(): void;
 }
 
@@ -319,6 +323,8 @@ class Link implements NetLink {
   private removal: NetRemoved | null = null;
   /** the roam mailbox's solid word (setSolid): 0 not switched, 1 off, 2 on */
   private solid = 0;
+  /** quick chat's picks so far (say): the count in the roam mailbox's say word */
+  private picks = 0;
   /** the switch's peer list (the online host on it too), as its last whole list and the changes since made it */
   private peerMap = new Map<number, { name: string; server: boolean }>();
   private peerVips = new Set<number>();
@@ -458,6 +464,13 @@ class Link implements NetLink {
     this.solid = on ? 2 : 1;
     if (this.roam) Atomics.store(this.roam.i32, P.W_SOLID, this.solid);
     this.log(`solid cars ${on ? 'on' : 'off'} (the page menu)`);
+  }
+  /** quick chat: the player says phrase p (the game sends it while they drive in free roam); false: no free roam */
+  say(p: number): boolean {
+    if (!this.roam) return false;
+    this.picks = (this.picks + 1) & 0xffffff;
+    Atomics.store(this.roam.i32, P.W_SAY, (this.picks << 8 | (p & 0xff)) | 0);
+    return true;
   }
   private connect() {
     if (this.closed) return;
@@ -657,6 +670,9 @@ class Link implements NetLink {
       } else if (dv.getUint32(s + P.S_KIND, true) === P.NET_KIND_LOBBY) {
         // the same: for this page only
         if (len <= P.NET_MAX_PAYLOAD) this.o.onLobby?.(new TextDecoder().decode(ep.u8.slice(s + P.S_DATA, s + P.S_DATA + len)));
+      } else if (dv.getUint32(s + P.S_KIND, true) === P.NET_KIND_SAY) {
+        // quick chat: the same
+        if (len <= P.NET_MAX_PAYLOAD) this.o.onSay?.(new TextDecoder().decode(ep.u8.slice(s + P.S_DATA, s + P.S_DATA + len)));
       } else if (open && len <= P.NET_MAX_PAYLOAD) {
         const f = new Uint8Array(P.F_DATA + len), fv = new DataView(f.buffer), dst = dv.getUint32(s + P.S_DST_IP, true);
         f[P.F_KIND] = dv.getUint32(s + P.S_KIND, true);

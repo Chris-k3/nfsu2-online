@@ -68,6 +68,7 @@ const RIGHT: Row[] = [
   { y: 90, xb: 'X', ps: 'square', does: N('Shift down') },
   { y: 104, xb: 'Y', ps: 'triangle', does: N('Camera') },
   { y: 118, xb: 'B', ps: 'circle', does: N('Look back') },
+  { y: 140, xb: 'RS', ps: 'R3', does: N('Quick chat'), to: [162, 94] },
 ];
 /** over the middle: View and Menu, their lines straight down */
 const MIDDLE: (Row & { x: number })[] = [
@@ -102,7 +103,7 @@ function drawing(): string {
     used(`<rect x="30" y="-14" width="40" height="18" rx="7" ${n}/>`) + used(`<rect x="190" y="-14" width="40" height="18" rx="7" ${n}/>`) +
     BUMPERS.map(d => `<path class="pad-bumper on" d="${d}"/><path class="pad-bumper-in" d="${d}"/>`).join('') +
     `<path class="pad-body" d="${BODY}" ${n}/>` +
-    ring(64, 54, true) + ring(162, 94, false) + used(`<path d="${DPAD}" ${n}/>`) +
+    ring(64, 54, true) + ring(162, 94, true) + used(`<path d="${DPAD}" ${n}/>`) +
     button(112, 54, 5.5) + button(148, 54, 5.5) + `<circle cx="130" cy="31" r="8" ${n}/>` +
     button(196, 40, 7) + button(210, 54, 7) + button(196, 68, 7) + button(182, 54, 7) +
     '</g>';

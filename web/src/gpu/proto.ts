@@ -8,6 +8,9 @@ export const GW_VERSION = 4;
 export const GW_NBUF = 2;
 // GwHL: the other cars' headlights at this byte offset of every frame's VS constant arena (group 0 binding 3)
 export const K_HL = 256, HL_BYTES = 656, HL_MAX = 8;
+// GwMarks: quick chat's places over the cars at this byte offset of every frame's VS constant arena (not bound): magic,
+// n, 2 words, then n of { id, x, y, scale } (x, y: parts of the back buffer from its top left corner)
+export const K_MARKS = 1024, MARKS_BYTES = 528, MARKS_MAX = 32, MARKS_MAGIC = 0x4B52414D;
 // the VS constant arena is bound in windows of this many 16-byte rows (GW_KWIN_ROWS)
 export const KWIN_ROWS = 4096;
 
