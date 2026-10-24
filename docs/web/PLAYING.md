@@ -159,6 +159,12 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
   screen. The game's layout stays as it is. Your browser fetches the pack only with Upscaled (about 5 MB to
   download). A language with fonts of its own (Russian, Polish, Chinese, Japanese, Thai) keeps them. Most phones
   decode the larger textures into four times the memory.
+- **Radio:** the menu (F9) has a Radio line. It plays the music files of a folder on your device in place of the
+  game's EA Trax songs. The folder icon picks the folder. A new song starts with the next file, and the game's plaque
+  shows its artist, title and album (the file name, else the folder's name). A file that cannot be read is skipped.
+  The files stay on your device. The folder and the switch are remembered; after a reload the browser may ask for
+  access to the folder again, then click the Radio line. Firefox and Safari pick the folder too, but cannot remember
+  it: pick it again after a reload. Radio off leaves the game's EA Trax as it is.
 - **More settings:** each group's "More … settings" has the less common ones, and says how many of them you
   changed. **Reset** next to a changed setting puts its default back.
 - **Edit the file:** "Edit settings.ini as text" opens the file itself. A line the game would ignore is shown with

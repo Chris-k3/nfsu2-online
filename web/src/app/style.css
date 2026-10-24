@@ -734,6 +734,13 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.64); }
 .dlg-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 .dlg-head h2 { margin: 0; }
 .menu-actions { display: grid; gap: 8px; }
+.menu-radio { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); }
+.menu-radio .btn { padding: 0 48px 0 16px; overflow: hidden; }
+.menu-radio .btn span { min-width: 0; overflow: hidden; text-overflow: ellipsis; padding-inline-end: 0.2em; }
+.menu-radio .icon { position: absolute; top: 6px; width: 28px; height: 28px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 8px; background: none; color: inherit; }
+.menu-radio .icon:hover { color: var(--lime); }
+.menu-radio [data-act="radio-folder"] { right: 8px; }
+.menu-radio svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 #menu-save { margin-top: -12px; }
 #menu-save:empty { display: none; }
 /* the menu's Crews popup (a game in free roam): the Crews row's control under the help, Done under it */
