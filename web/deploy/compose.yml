@@ -57,6 +57,10 @@ services:
     ulimits: { nofile: 65536 }
     # the game's share of the VPS's CPU, with Caddy's (or cloudflared's): web/deploy/nfsu2.slice
     cgroup_parent: ${NFSU2_SLICE:-nfsu2.slice}
+    # the VPS's cgroup tree (read only), not one of its own, so that the server sees what the whole slice uses: over
+    # 85 % of its quota free roam gives players fewer friends (the console's "CPU quota" line at the start says the
+    # quota it found, the [players] lines what the slice used)
+    cgroup: host
     # the console, kept by Docker in files it rotates (5 of 20 MB), so the log never fills the VPS's disk
     logging: { driver: local }
 configs:

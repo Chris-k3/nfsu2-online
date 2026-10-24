@@ -209,8 +209,13 @@ The compose files put every container of theirs (the server, Caddy, or cloudflar
 slice `nfsu2.slice` (`cgroup_parent`, `NFSU2_SLICE` to name another), and `web/deploy/nfsu2.slice` gives that slice at
 most 14 of a 16-vCPU VPS (`CPUQuota=1400%`; for another size, its vCPUs less what the rest needs, times 100), so the
 rest of the VPS keeps at least 2 cores whatever the players do. The server and cloudflared share the 14 as their load
-goes. At the limit they are slowed down, never the rest: the server's workers count the time they wait as busy (wall
-time), so the free-roam hub's busy cap gives players fewer friends, as it does on a busy server.
+goes. The server sees what the whole slice uses (`cgroup: host` in `compose.yml`: the VPS's cgroup tree, read only),
+and over 85 % of the quota the free-roam hub's busy cap gives players fewer friends, as it does when the server's own
+workers are busy: fewer car states to send costs cloudflared less too (bytes, not messages: each player still gets a
+bundle every 50 ms). At the limit they are slowed down, never the rest. The server's console says the quota it found
+at the start (`CPU quota : 14 cores for /nfsu2.slice`; "none seen" in a container without `cgroup: host`), and every
+5 minutes what the slice used (`[players] CPU in the last 5 minutes: the server 1.09 cores, its switch's workers 13 %
+busy; /nfsu2.slice 4.51 of its 14 cores (32 %)`).
 
     cp web/deploy/nfsu2.slice /etc/systemd/system/ && systemctl daemon-reload
     docker compose up -d --force-recreate
@@ -707,8 +712,9 @@ paths to the VPS, so pick a VPS location between you.
   - **Its own cost:** in a Room of more than 256 players the hub finds each player's nearest through a grid of the
     map instead of weighing every pair, with the same links. Measured on a Ryzen 9 5900X: 1000 players in one Room
     took about 30 ms a second (every pair took 0.5 s), 2000 about 70 ms, spread over the city or all in one spot.
-  - **A busy server gives every player fewer links:** each second the hub looks at how busy the server's thread was.
-    Over 85 %, the most links a player may have goes down by a quarter (32, 24, 18, 13, 9, 8 at the least), at most
+  - **A busy server gives every player fewer links:** at each tick the hub looks at how busy the server's workers
+    were, and at the share of the CPU quota the game's containers used together (nfsu2.slice, where the server sees
+    it), the higher of the two. Over 85 %, the most links a player may have goes down by a quarter (32, 24, 18, 13, 9, 8 at the least), at most
     every 5 s; under 65 %, it goes back up by 2, at most every 15 s. The nearest links stay. The console says each
     change (`[roam] the server's thread was 93 % busy: at most 24 links a player (was 32)`).
 - **Free roam** draws another player's car where it is now (ghost mode off, the default: the newest snapshot carried

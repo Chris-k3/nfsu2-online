@@ -15,6 +15,7 @@ use nfsu2_http::{Limits, bind, serve};
 use nfsu2_lan::{LanOptions, LanSwitch};
 use nfsu2_online::{LobbyTrace, OnlineHost, OnlineOptions};
 use nfsu2_roam::{RoamHub, RoamOptions};
+use nfsu2_util::cpu::{QuotaBusy, WorkersBusy, process_cpu_seconds};
 use nfsu2_util::{Host, log};
 use nfsu2_vault::{Sweep, Vault, VaultOptions};
 
@@ -181,9 +182,17 @@ pub async fn run(o: Options, cores: usize) {
             let mut shown = false;
             let mut thinned = 0;
             let mut was = nfsu2_lan::Breakdown::default();
+            let (mut cpu_was, mut workers, mut quota) =
+                (process_cpu_seconds(), WorkersBusy::new(&tokio::runtime::Handle::current()), QuotaBusy::find());
             let mut every = interval_at(Instant::now() + BREAKDOWN_EVERY, BREAKDOWN_EVERY);
             loop {
                 every.tick().await;
+                // the CPU of the last 5 minutes: the server's, its workers' busy time, and the fullest quota's (the
+                // game's containers' together: nfsu2.slice)
+                let cpu = process_cpu_seconds();
+                let server = (cpu - cpu_was) / BREAKDOWN_EVERY.as_secs_f64();
+                let (busy, slice) = (workers.sample(), quota.as_mut().and_then(QuotaBusy::sample_use));
+                cpu_was = cpu;
                 let b = lan.breakdown().await;
                 if b.players == 0 && !shown {
                     continue;
@@ -219,6 +228,13 @@ pub async fn run(o: Options, cores: usize) {
                         ob as f64 / 1e6
                     ));
                 }
+                let slice = slice.map_or(String::new(), |q| {
+                    format!("; {} {:.2} of its {} cores ({:.0} %)", q.group, q.used, q.cores, q.share() * 100.0)
+                });
+                log::line(&format!(
+                    "[players] CPU in the last 5 minutes: the server {server:.2} cores, its switch's workers {:.0} % busy{slice}",
+                    busy * 100.0
+                ));
                 thinned = b.thinned;
                 was = b;
             }
@@ -385,6 +401,18 @@ pub async fn run(o: Options, cores: usize) {
             "no hub (--roam-hub off): players find each other by broadcast, groups of 33"
         }
     ));
+    if o.roam_hub {
+        // the quota the hub's busy cap reads besides the workers (nfsu2_util::cpu::QuotaBusy)
+        let quotas = QuotaBusy::find().map(|q| q.quotas()).unwrap_or_default();
+        lines.push(match quotas.iter().min_by(|a, b| a.1.total_cmp(&b.1)) {
+            Some((group, cores)) => {
+                format!("  CPU quota : {cores} cores for {group}; over 85 % of them in use, free roam gives fewer friends")
+            }
+            None => {
+                "  CPU quota : none seen (a container sees its slice's with cgroup: host); free roam's busy cap reads the workers".into()
+            }
+        });
+    }
     lines.push(format!(
         "  online    : {}",
         if o.online {

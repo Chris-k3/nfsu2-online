@@ -186,7 +186,8 @@ behind, the switch dropped their snapshots; the server stayed at 1.5 cores): 400
   left out.
 - **The Online host and the free-roam hub** (nfsu2-online, nfsu2-roam): single-threaded, each on a thread of its
   own; the switch posts them their frames in order.  Past 4096 frames waiting at the Online host, a reader that feeds
-  it waits (TCP backpressure); the hub's busy cap reads the runtime's workers' busy time.
+  it waits (TCP backpressure); the hub's busy cap reads the runtime's workers' busy time, or the share of a CPU quota
+  the server shares (nfsu2.slice: cloudflared's CPU too) where that is higher.
 - **Compression** of the game data's runs on a pool of its own at a lower priority, so a burst of downloads never
   queues in front of the switch (Cloudflare serves the runs on nfsu2.xyz: this is the origin's cold start).
 
@@ -244,7 +245,8 @@ players.
   only the order differs.
 - The Online host's sends are charged to a sender's budgets on the host's thread, a moment after the frame was routed
   (the Node server did it at once).
-- The hub's busy cap reads the workers' busy time; `[roam] the server's thread was N % busy` keeps its words.
+- The hub's busy cap reads the workers' busy time, or a CPU quota's share (nfsu2_util::cpu::QuotaBusy) where that is
+  higher; `[roam] the server's thread was N % busy` keeps its words.
 - A ping every second besides the keepalive's (lag.rs), and a pong to any of the switch's pings queued since the
   keepalive's last tick says the client is there; `[players]` has a clause more.
 - JSON a client sends: a lone surrogate escape reads as U+FFFD; a number beyond the doubles or nesting deeper than

@@ -68,7 +68,9 @@
 //!   order, it ticks every `tick_ms`, and sends its lists through the switch.  Its "busy" is the share of their time
 //!   the runtime's workers, which run the switch, spent working (nfsu2_util::cpu::WorkersBusy): Node read its one
 //!   thread's event-loop use.  (The process's CPU time over every core, which it was, never passed `busy_high` once
-//!   the workers were half the cores: all of them busy was 50 %.)
+//!   the workers were half the cores: all of them busy was 50 %.)  Or, where it is higher, the share of a CPU quota
+//!   the server shares used (nfsu2_util::cpu::QuotaBusy): the game's containers share nfsu2.slice's, and cloudflared
+//!   pays for every snapshot too, so a slice near its limit gets fewer links before its players get them late.
 
 mod hub;
 mod links;
@@ -82,7 +84,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use nfsu2_util::cpu::{Busy, WorkersBusy};
+use nfsu2_util::cpu::{Busy, QuotaBusy, WorkersBusy};
 use nfsu2_util::{FrameCtx, Host, SwitchSend};
 use tokio::sync::oneshot;
 
@@ -214,14 +216,16 @@ pub struct RoamHub {
 
 impl RoamHub {
     /// starts its thread; `log`: a console line (the cap's changes).  Called within the server's runtime, its busy
-    /// measure is the runtime's workers' (the switch's); outside one (tests), the process's over every core.
+    /// measure is the runtime's workers' (the switch's) or a CPU quota's, the higher; outside one (tests), the
+    /// process's over every core.
     pub fn spawn(o: RoamOptions, log: Arc<dyn Fn(&str) + Send + Sync>) -> Arc<RoamHub> {
         let (tx, rx) = mpsc::channel();
         let pending = Arc::new(AtomicUsize::new(0));
         let busy: Box<dyn FnMut() -> f64 + Send> = match tokio::runtime::Handle::try_current() {
             Ok(rt) => {
                 let mut b = WorkersBusy::new(&rt);
-                Box::new(move || b.sample())
+                let mut q = QuotaBusy::find();
+                Box::new(move || b.sample().max(q.as_mut().map_or(0.0, QuotaBusy::sample)))
             }
             Err(_) => {
                 let mut b = Busy::new(std::thread::available_parallelism().map_or(1, |n| n.get()));

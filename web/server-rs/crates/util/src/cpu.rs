@@ -1,8 +1,10 @@
 //! How busy the server is, 0 to 1.  Node read its one thread's event-loop use.  Here the switch's work is spread over
 //! the runtime's worker threads, which are only some of the cores (half of them, 2 to 8), so the measure that says
 //! whether the switch keeps up is theirs: [`WorkersBusy`], the share of the workers' time they spent running tasks.
-//! [`Busy`], the process's CPU time over a number of cores, is for a hub with no runtime (the tests).
+//! [`Busy`], the process's CPU time over a number of cores, is for a hub with no runtime (the tests).  [`QuotaBusy`]:
+//! the share of a CPU quota the server shares with others (the game's containers in nfsu2.slice) they used together.
 
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 /// CPU seconds (user + system) the process has used.
@@ -90,6 +92,109 @@ impl WorkersBusy {
     }
 }
 
+/// The CPU quotas of the process's cgroups (cgroup v2): its own group's and every parent's `cpu.max`, with the CPU
+/// time each group used (`cpu.stat`'s usage_usec).  A quota is for a group's processes together: the game's containers
+/// share nfsu2.slice's 14 cores (web/deploy/nfsu2.slice), and at 2,001 players cloudflared took three quarters of the
+/// 4.5 they used while the switch's workers were 13 % busy (nfsu2.xyz, 2026-10-24): the workers' measure alone never
+/// sees the slice fill up.  A container sees its parents only in the VPS's cgroup namespace (compose.yml's `cgroup:
+/// host`); in one of its own it sees itself alone.  Each sample reads the quotas again: `systemctl set-property`
+/// changes one while the server runs.
+pub struct QuotaBusy {
+    /// each group's folder, its path in the cgroup tree, and its usage_usec at the last sample
+    groups: Vec<(PathBuf, String, u64)>,
+    at: Instant,
+}
+
+/// What the group with the fullest quota used between two samples.
+#[derive(Clone, Debug, PartialEq)]
+pub struct QuotaUse {
+    /// its path in the cgroup tree ("/nfsu2.slice")
+    pub group: String,
+    /// its quota and the CPU it used, in cores
+    pub cores: f64,
+    pub used: f64,
+}
+
+impl QuotaUse {
+    /// 0 to 1
+    pub fn share(&self) -> f64 {
+        (self.used / self.cores).clamp(0.0, 1.0)
+    }
+}
+
+impl QuotaBusy {
+    /// This process's groups and their parents (Linux, cgroup v2); None where there are none to read.
+    pub fn find() -> Option<Self> {
+        let own = std::fs::read_to_string("/proc/self/cgroup").ok()?;
+        Self::of(Path::new("/sys/fs/cgroup"), &own)
+    }
+
+    /// `root`: where the cgroup tree is mounted; `own`: /proc/self/cgroup (cgroup v2's line: "0::/its/path")
+    fn of(root: &Path, own: &str) -> Option<Self> {
+        let mut p = Path::new(own.lines().find_map(|l| l.strip_prefix("0::"))?.trim());
+        let mut groups = Vec::new();
+        loop {
+            let dir = root.join(p.strip_prefix("/").unwrap_or(p));
+            if dir.join("cpu.stat").exists() {
+                let used = usage_usec(&dir);
+                groups.push((dir, p.to_string_lossy().into_owned(), used));
+            }
+            let Some(up) = p.parent() else { break };
+            p = up;
+        }
+        (!groups.is_empty()).then(|| QuotaBusy { groups, at: Instant::now() })
+    }
+
+    /// the groups with a quota now, and its cores
+    pub fn quotas(&self) -> Vec<(String, f64)> {
+        self.groups.iter().filter_map(|(dir, name, _)| Some((name.clone(), quota_cores(dir)?))).collect()
+    }
+
+    /// the group with the fullest quota since the last call; None while no group has one
+    pub fn sample_use(&mut self) -> Option<QuotaUse> {
+        self.sample_use_at(Instant::now())
+    }
+
+    fn sample_use_at(&mut self, now: Instant) -> Option<QuotaUse> {
+        let wall = now.duration_since(self.at).as_secs_f64();
+        self.at = now;
+        let mut fullest: Option<QuotaUse> = None;
+        for (dir, name, was) in &mut self.groups {
+            let used = usage_usec(dir);
+            let since = used.saturating_sub(*was) as f64 / 1e6;
+            *was = used;
+            let Some(cores) = quota_cores(dir) else { continue };
+            if wall <= 0.0 {
+                continue;
+            }
+            let u = QuotaUse { group: name.clone(), cores, used: since / wall };
+            if fullest.as_ref().is_none_or(|f| u.share() > f.share()) {
+                fullest = Some(u);
+            }
+        }
+        fullest
+    }
+
+    /// 0 to 1 since the last call: the fullest quota's share (0 while no group has one)
+    pub fn sample(&mut self) -> f64 {
+        self.sample_use().map_or(0.0, |u| u.share())
+    }
+}
+
+/// a group's CPU time in microseconds (0 where it cannot be read)
+fn usage_usec(dir: &Path) -> u64 {
+    let Ok(s) = std::fs::read_to_string(dir.join("cpu.stat")) else { return 0 };
+    s.lines().find_map(|l| l.strip_prefix("usage_usec ")?.trim().parse().ok()).unwrap_or(0)
+}
+
+/// a group's quota in cores ("1400000 100000": 14), None for none ("max 100000", or no cpu.max)
+fn quota_cores(dir: &Path) -> Option<f64> {
+    let s = std::fs::read_to_string(dir.join("cpu.max")).ok()?;
+    let mut it = s.split_whitespace();
+    let (quota, period): (f64, f64) = (it.next()?.parse().ok()?, it.next()?.parse().ok()?);
+    (quota > 0.0 && period > 0.0).then_some(quota / period)
+}
+
 /// This thread runs at a lower priority (Linux: a nice value of its own, `by` above the one it had, 19 at most;
 /// elsewhere nothing): background work that must never keep the switch's workers off a core, such as compressing the
 /// game data's runs.  From where it is, not a fixed value: in a server started under `nice` a fixed 10 was refused
@@ -149,6 +254,48 @@ mod tests {
         let busy = b.sample();
         stop.store(true, std::sync::atomic::Ordering::Relaxed);
         assert!(busy > 0.85, "two busy workers: {busy}");
+    }
+
+    // the fullest quota of the process's group and its parents, read again at each sample; none without one
+    #[test]
+    fn quota_busy_is_the_fullest_quota_of_the_groups_and_their_parents() {
+        let root = std::env::temp_dir().join(format!("nfsu2-cgroup-{}", std::process::id()));
+        let slice = root.join("nfsu2.slice");
+        let own = slice.join("docker-1.scope");
+        std::fs::create_dir_all(&own).unwrap();
+        let put = |dir: &Path, max: &str, usec: u64| {
+            std::fs::write(dir.join("cpu.max"), max).unwrap();
+            std::fs::write(dir.join("cpu.stat"), format!("usage_usec {usec}\nuser_usec 0\nsystem_usec 0\n")).unwrap();
+        };
+        // the tree's root has no cpu.max
+        std::fs::write(root.join("cpu.stat"), "usage_usec 5\n").unwrap();
+        put(&slice, "max 100000\n", 1_000_000);
+        put(&own, "max 100000\n", 400_000);
+        let mut q = QuotaBusy::of(&root, "0::/nfsu2.slice/docker-1.scope\n").expect("its groups");
+        let t0 = q.at;
+        put(&slice, "max 100000\n", 2_000_000);
+        assert_eq!(q.sample_use_at(t0 + Duration::from_secs(1)), None, "no quota anywhere");
+        assert!(q.quotas().is_empty());
+        // systemctl set-property: the slice gets 14 cores, and uses 10.5 of them the next second
+        put(&slice, "1400000 100000\n", 12_500_000);
+        let u = q.sample_use_at(t0 + Duration::from_secs(2)).expect("a quota");
+        assert_eq!(u, QuotaUse { group: "/nfsu2.slice".into(), cores: 14.0, used: 10.5 });
+        assert_eq!(u.share(), 0.75);
+        assert_eq!(q.quotas(), vec![("/nfsu2.slice".to_string(), 14.0)]);
+        // a container of its own 1 core, 0.9 of it used in 2 s (1.8 s): fuller than the slice's 1 core of 14
+        put(&own, "100000 100000\n", 2_200_000);
+        put(&slice, "1400000 100000\n", 14_500_000);
+        let u = q.sample_use_at(t0 + Duration::from_secs(4)).unwrap();
+        assert_eq!((u.group.as_str(), u.cores), ("/nfsu2.slice/docker-1.scope", 1.0));
+        assert!((u.share() - 0.9).abs() < 1e-9, "{u:?}");
+        // a container in a cgroup namespace of its own: its own group alone, as the tree's root
+        let mut alone = QuotaBusy::of(&own, "0::/\n").expect("its own group");
+        assert_eq!(alone.quotas(), vec![("/".to_string(), 1.0)]);
+        assert!(alone.sample_use_at(alone.at + Duration::from_secs(1)).is_some_and(|u| u.used == 0.0));
+        // cgroup v1, or no tree: none
+        assert!(QuotaBusy::of(&root, "12:cpu,cpuacct:/x\n").is_none());
+        assert!(QuotaBusy::of(&root.join("none"), "0::/\n").is_none());
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     /// this thread's nice value
