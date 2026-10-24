@@ -133,6 +133,7 @@
   "{n} players": "ผู้เล่น {n} คน",
   "{n} in Online mode": "{n} คนในโหมดออนไลน์",
   "{n} in free roam": "{n} คนกำลังขับอิสระ",
+  "{name} has more than 64 players in free roam: in a crew that big, crew-mates far away no longer always show, only the ones nearby, as with everyone else. A less common name works better.": "{name} มีผู้เล่นที่กำลังขับอิสระเกิน 64 คน: ในทีมที่ใหญ่ขนาดนี้ สมาชิกที่อยู่ไกลจะไม่แสดงเสมอไป แสดงแค่คนที่อยู่ใกล้ เหมือนกับคนอื่น ๆ ชื่อที่ไม่ค่อยมีคนใช้จะได้ผลดีกว่า",
   "You are in room \"{room}\".": "คุณอยู่ในห้อง “{room}”",
   "You are in room \"{room}\": nobody in free roam there.": "คุณอยู่ในห้อง “{room}”: ไม่มีใครขับอิสระในห้องนั้น",
   "You are in room \"{room}\": {n} in free roam there.": "คุณอยู่ในห้อง “{room}”: มี {n} คนกำลังขับอิสระในห้องนั้น",

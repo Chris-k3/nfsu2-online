@@ -11,7 +11,7 @@
 import { checkSetting, DEFAULTS, keyDef, resolveEnv, settingsPut, TEMPLATE, type Resolved } from './settings';
 import { readText, writeFile } from './savefs';
 import { playHorn, stopHorn } from './horn-preview';
-import { checkCrew, CREW_COLOUR_NAMES, CREW_MAX, CREW_PALETTE, crewsOf, crewsValue, freeColour, rgbsValue, type Crew } from './crews';
+import { checkCrew, CREW_BIG, CREW_COLOUR_NAMES, CREW_MAX, CREW_PALETTE, crewsOf, crewsValue, freeColour, rgbsValue, type Crew } from './crews';
 import { roomHash } from './players';
 import { LANGUAGES, live, N, NATIVE, t, tn, tvars, type Language, type Msg } from './i18n';
 
@@ -135,7 +135,8 @@ export interface CrewControl {
  * opens the palette under the chips; its name, how many are in free roam in it when the server says, and Leave), and
  * under them a value box with Join in it (or Enter).  Join waits for a name that can join (crews.ts checkCrew), and the note
  * under the box says why one cannot; with 4 crews the box waits for one to be left.  A Leave keeps the others'
- * colours; a Join takes the first colour no crew has.  Returns the box's field.
+ * colours; a Join takes the first colour no crew has.  A line under the chips names a crew counted with more than
+ * CREW_BIG players (showCrewCounts).  Returns the box's field.
  */
 export function crewControl(o: CrewControl, ctl: HTMLElement): HTMLInputElement {
   const list = o.list;
@@ -196,7 +197,7 @@ export function crewControl(o: CrewControl, ctl: HTMLElement): HTMLInputElement 
     ul.after(g);
     sw.find(b => b.tabIndex === 0)!.focus();
   };
-  if (o.counts) showCrewCounts(ul, o.counts);
+  const big = document.createElement('p'); big.className = 'set-note warn crews-big'; big.hidden = true;
   const box = document.createElement('div'); box.className = 'crew-add';
   const inp = document.createElement('input'); inp.type = 'text'; inp.id = o.id; inp.placeholder = t(o.placeholder);
   inp.autocomplete = 'off'; inp.spellcheck = false; inp.enterKeyHint = 'done';
@@ -221,14 +222,24 @@ export function crewControl(o: CrewControl, ctl: HTMLElement): HTMLInputElement 
   inp.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); add(); } };
   join.onclick = add;
   box.append(inp, join);
-  ctl.append(ul, box, note);
+  ctl.append(ul, big, box, note);
+  if (o.counts) showCrewCounts(ctl, o.counts);
   check();
   return inp;
 }
 
 /** the counts on a crews control's chips: a figure by a person's outline (a screen reader gets "{n} in free roam"), the
- *  chip's tooltip its name and that; nothing for a crew counts lacks */
+ *  chip's tooltip its name and that; nothing for a crew counts lacks.  Under the chips, the crews counted with more
+ *  than CREW_BIG: the server's hub no longer links them first (in one room; the count is of every room). */
 export function showCrewCounts(root: ParentNode, counts: Map<number, number>) {
+  for (const ul of root.querySelectorAll<HTMLElement>('ul.crews')) {
+    const line = ul.parentElement?.querySelector<HTMLElement>('.crews-big');
+    if (!line) continue;
+    const big = [...ul.querySelectorAll<HTMLElement>('.crew[data-hash]')].filter(li => (counts.get(Number(li.dataset.hash)) ?? 0) > CREW_BIG)
+      .map(li => t('{name} has more than 64 players in free roam: in a crew that big, crew-mates far away no longer always show, only the ones nearby, as with everyone else. A less common name works better.',
+        { name: li.querySelector('.crew-name')?.textContent ?? '' }));
+    line.textContent = big.join(' '); line.hidden = !big.length;
+  }
   for (const li of root.querySelectorAll<HTMLElement>('.crew[data-hash]')) {
     const n = counts.get(Number(li.dataset.hash)), el = li.querySelector('.crew-count')!, name = li.querySelector('.crew-name')!.textContent ?? '';
     if (n === undefined) { el.replaceChildren(); li.title = name; continue; }

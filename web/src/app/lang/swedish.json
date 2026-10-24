@@ -139,6 +139,7 @@
   },
   "{n} in Online mode": "{n} i Online-läget",
   "{n} in free roam": "{n} i läget Utforska",
+  "{name} has more than 64 players in free roam: in a crew that big, crew-mates far away no longer always show, only the ones nearby, as with everyone else. A less common name works better.": "{name} har fler än 64 spelare i läget Utforska: i ett så stort crew syns crewmedlemmar långt bort inte alltid längre, bara de som är nära, som med alla andra. Ett mindre vanligt namn fungerar bättre.",
   "You are in room \"{room}\".": "Du är i rummet \"{room}\".",
   "You are in room \"{room}\": nobody in free roam there.": "Du är i rummet \"{room}\": ingen i läget Utforska där.",
   "You are in room \"{room}\": {n} in free roam there.": "Du är i rummet \"{room}\": {n} i läget Utforska där.",

@@ -139,6 +139,7 @@
   },
   "{n} in Online mode": "{n} im Online-Modus",
   "{n} in free roam": "{n} in der freien Fahrt",
+  "{name} has more than 64 players in free roam: in a crew that big, crew-mates far away no longer always show, only the ones nearby, as with everyone else. A less common name works better.": "{name} hat mehr als 64 Spieler in der freien Fahrt: In einer so großen Crew erscheinen weit entfernte Crew-Mitglieder nicht mehr immer, nur die in der Nähe, wie bei allen anderen. Ein weniger gängiger Name funktioniert besser.",
   "You are in room \"{room}\".": "Du bist im Raum „{room}“.",
   "You are in room \"{room}\": nobody in free roam there.": "Du bist im Raum „{room}“: Dort ist niemand in der freien Fahrt.",
   "You are in room \"{room}\": {n} in free roam there.": "Du bist im Raum „{room}“: {n} dort in der freien Fahrt.",

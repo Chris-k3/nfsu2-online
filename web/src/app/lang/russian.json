@@ -143,6 +143,7 @@
   },
   "{n} in Online mode": "{n} — в игре через Интернет",
   "{n} in free roam": "{n} — в свободной езде",
+  "{name} has more than 64 players in free roam: in a crew that big, crew-mates far away no longer always show, only the ones nearby, as with everyone else. A less common name works better.": "{name}: больше 64 игроков в свободной езде. В такой большой команде далёкие участники видны не всегда, только те, кто рядом, как и все остальные. Лучше выбрать менее распространённое название.",
   "You are in room \"{room}\".": "Вы в комнате «{room}».",
   "You are in room \"{room}\": nobody in free roam there.": "Вы в комнате «{room}»: там никого нет в свободной езде.",
   "You are in room \"{room}\": {n} in free roam there.": "Вы в комнате «{room}»: игроков в свободной езде там — {n}.",

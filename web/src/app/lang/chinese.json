@@ -133,6 +133,7 @@
   "{n} players": "{n} 名玩家",
   "{n} in Online mode": "{n} 人在線上模式",
   "{n} in free roam": "{n} 人在自由漫遊",
+  "{name} has more than 64 players in free roam: in a crew that big, crew-mates far away no longer always show, only the ones nearby, as with everyone else. A less common name works better.": "{name} 有超過 64 人在自由漫遊：車隊這麼大時，遠處的隊友不一定會顯示，只會顯示附近的，和其他人一樣。換個比較少見的名稱會更好。",
   "You are in room \"{room}\".": "你在房間「{room}」。",
   "You are in room \"{room}\": nobody in free roam there.": "你在房間「{room}」：該房間沒有人在自由漫遊。",
   "You are in room \"{room}\": {n} in free roam there.": "你在房間「{room}」：該房間有 {n} 人在自由漫遊。",

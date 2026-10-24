@@ -133,6 +133,7 @@
   "{n} players": "플레이어 {n}명",
   "{n} in Online mode": "온라인 모드 {n}명",
   "{n} in free roam": "자유 주행 {n}명",
+  "{name} has more than 64 players in free roam: in a crew that big, crew-mates far away no longer always show, only the ones nearby, as with everyone else. A less common name works better.": "{name}에 자유 주행 중인 플레이어가 64명을 넘어요: 이렇게 큰 크루에서는 멀리 있는 크루원이 항상 보이지는 않고, 다른 사람들처럼 가까이 있는 크루원만 보여요. 덜 흔한 이름이 더 좋아요.",
   "You are in room \"{room}\".": "'{room}' 방에 있어요.",
   "You are in room \"{room}\": nobody in free roam there.": "'{room}' 방에 있어요. 이 방의 자유 주행에는 아무도 없어요.",
   "You are in room \"{room}\": {n} in free roam there.": "'{room}' 방에 있어요. 이 방의 자유 주행에 {n}명이 있어요.",

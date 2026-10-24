@@ -79,6 +79,19 @@ export function crewCounts(c: PlayerCounts, asked: readonly number[]): Map<numbe
   return m;
 }
 
+/** How many are in free roam in each of these crews now (crewCounts), asked once, whatever the page does, and
+ *  without watchPlayers' line or its say on whether the server answers: the page menu's Crews while a game runs.  The
+ *  player counts there too, once its game is in free roam in that crew (the server's hub heard its HELLO).  null: no
+ *  answer within ms. */
+export async function askCrews(hashes: readonly number[], ms: number): Promise<Map<number, number> | null> {
+  const mine = hashes.slice(0, 4);
+  if (!mine.length) return new Map();
+  try {
+    const r = await fetch(`/players?crews=${mine.join(',')}`, { cache: 'no-store', signal: AbortSignal.timeout(ms) });
+    return r.ok ? crewCounts(await r.json() as PlayerCounts, mine) : null;
+  } catch { return null; }
+}
+
 /** show(line, crews) at once and every 15 s while idle() and the page is visible (crews: crewCounts); reached(whether
  *  the server answered); room(): the Room setting while free roam is on ('' for none); crews(): the Crews setting's
  *  hashes ([] for none, at most 4); last(): the newest answer (null before the first, or from a server without

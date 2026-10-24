@@ -133,6 +133,7 @@
   "{n} players": "プレイヤー{n}人",
   "{n} in Online mode": "オンラインモード{n}人",
   "{n} in free roam": "フリーローム{n}人",
+  "{name} has more than 64 players in free roam: in a crew that big, crew-mates far away no longer always show, only the ones nearby, as with everyone else. A less common name works better.": "{name} はフリーロームに64人を超えています。これほど大きなクルーでは、遠くのメンバーが常に表示されるとは限らず、ほかのプレイヤーと同じく近くのメンバーだけが表示されます。あまり使われない名前のほうがうまくいきます。",
   "You are in room \"{room}\".": "ルーム「{room}」にいます。",
   "You are in room \"{room}\": nobody in free roam there.": "ルーム「{room}」にいます。このルームのフリーロームには誰もいません。",
   "You are in room \"{room}\": {n} in free roam there.": "ルーム「{room}」にいます。このルームのフリーロームには{n}人います。",

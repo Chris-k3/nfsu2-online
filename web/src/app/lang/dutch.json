@@ -139,6 +139,7 @@
   },
   "{n} in Online mode": "{n} in onlinemodus",
   "{n} in free roam": "{n} in Verkennen",
+  "{name} has more than 64 players in free roam: in a crew that big, crew-mates far away no longer always show, only the ones nearby, as with everyone else. A less common name works better.": "{name} heeft meer dan 64 spelers in Verkennen: in een crew die zo groot is, zie je crewleden ver weg niet altijd meer, alleen die dichtbij, net als bij iedereen. Een minder gewone naam werkt beter.",
   "You are in room \"{room}\".": "Je zit in kamer “{room}”.",
   "You are in room \"{room}\": nobody in free roam there.": "Je zit in kamer “{room}”: daar is niemand in Verkennen.",
   "You are in room \"{room}\": {n} in free roam there.": "Je zit in kamer “{room}”: {n} daar in Verkennen.",

@@ -9,6 +9,9 @@ import { roomHash } from './players';
 /** most crews a player is in (roam_core.h RC_CREW_MAX), and the longest name, in characters (the texts say 4 and 24) */
 export const CREW_MAX = 4;
 export const CREW_LEN = 24;
+/** a crew of more players than this in one room is not linked first by the server's hub (hub.rs CREW_GROUP_MAX): its
+ *  players see each other only nearby, as everyone else, and the control says so by its count */
+export const CREW_BIG = 64;
 /** the colours a player picks a crew's from (its name over the car, its map arrow), rrggbb: no green or orange, the
  *  game's own arrow's and the opponents'.  The first 4 are the defaults by the crew's place in the list, and must
  *  match runtime/roam_game.c's CREW_RGB. */

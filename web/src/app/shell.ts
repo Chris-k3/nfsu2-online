@@ -36,8 +36,8 @@ import type { NetQueue, NetRemoved } from '../net';
 import { checkSetting, HOST_FIXED, pageOnly, resolveEnv, settingsUpgrade, TEMPLATE, type Resolved } from './settings';
 import { exists, filesOf, listProfiles, PROFILES_DIR, readText, removeSaveDir, writeFile } from './savefs';
 import { turnOnAutosave } from './profile';
-import { crewControl, putKey, SettingsPanel } from './settings-ui';
-import { queueText, roomHash, serverAnswers, watchPlayers, type PlayerCounts } from './players';
+import { crewControl, putKey, SettingsPanel, showCrewCounts } from './settings-ui';
+import { askCrews, queueText, roomHash, serverAnswers, watchPlayers, type PlayerCounts } from './players';
 import { crewList, crewsOf, crewsValue, rgbsValue, rgbWords, type Crew } from './crews';
 import { SavesPanel } from './saves-ui';
 import { saveScreenshot } from './shots';
@@ -97,6 +97,8 @@ let hudWide = true;                      // the running game's HUD is edge-ancho
 let solidCars: boolean | null = null;    // the running game's free roam has solid cars (null: no free roam)
 let roamCrews: Crew[] | null = null;     // the running game's crews: as it started, then as the menu changed them (null: no free roam)
 let crewDraft = '';                      // the crew name being typed in the menu
+let popCounts = new Map<number, number>();   // how many are in free roam in each of those crews, by hash (askPopCounts)
+let popAsk = 0;                          // the popup's questions so far: only the newest one's answer shows
 let away: AwayCheck | null = null;
 let renderCheck: RenderCheck | null = null;
 let lastExit: { code: number; seconds: number } | null = null;
@@ -451,7 +453,7 @@ async function startGame() {
   hudWide = !/^(43|4:3)$/i.test(r.env.NFSU2_HUD?.trim() ?? '');
   solidCars = net && r.env.NFSU2_ROAM === '1' ? r.env.NFSU2_ROAM_COLLIDE !== '0' : null;
   roamCrews = net && r.env.NFSU2_ROAM === '1' ? crewsOf(r.env.NFSU2_ROAM_CREW ?? '', r.env.NFSU2_ROAM_CREW_RGB ?? '') : null;
-  crewDraft = '';
+  crewDraft = ''; popCounts = new Map();
   fatal = null;
   quitAt = null;
   saved = null;
@@ -878,13 +880,26 @@ function openCrews() {
   drawPopCrews();
   pop.showModal();
   ($('#crews-pop-box').querySelector<HTMLElement>('input:enabled') ?? $('#crews-pop-box').querySelector<HTMLElement>('.crew-dot'))?.focus();
+  void askPopCounts();
+}
+/** The popup's counts, asked of the server once (the page does not ask while a game runs), after ms: a Join reaches
+ *  the server's hub with the game's next HELLO.  As the server counts them: the player too, once in free roam in that
+ *  crew.  Shown while the popup is open; the newest question's only. */
+async function askPopCounts(ms = 0) {
+  const n = ++popAsk;
+  if (ms) await new Promise(r => setTimeout(r, ms));
+  if (n !== popAsk || offline || !roamCrews?.length) return;
+  const counts = await askCrews(roamCrews.map(c => roomHash(c.name)), 5000);
+  if (!counts || n !== popAsk) return;
+  popCounts = counts;
+  if ($<HTMLDialogElement>('#crews-pop').open) showCrewCounts($('#crews-pop-box'), counts);
 }
 /** the popup's control, drawn again after each change; focus: where the keyboard (or controller) goes then, if it was
  *  in there */
 function drawPopCrews(focus?: (root: HTMLElement) => Element | null | undefined) {
   const box = $('#crews-pop-box'), had = box.contains(document.activeElement);
   box.replaceChildren();
-  crewControl({ list: roamCrews ?? [], id: 'crews-pop-input', labelId: 'crews-pop-title', placeholder: N('Crew name'), draft: crewDraft,
+  crewControl({ list: roamCrews ?? [], id: 'crews-pop-input', labelId: 'crews-pop-title', placeholder: N('Crew name'), counts: popCounts, draft: crewDraft,
     onDraft: v => { crewDraft = v; }, change: (list, f) => void menuCrews(list, f) }, box).setAttribute('aria-labelledby', 'crews-pop-title');
   if (had && focus) ((focus(box) ?? box.querySelector('input:enabled')) as HTMLElement | null)?.focus({ focusVisible: true } as FocusOptions);
 }
@@ -895,6 +910,7 @@ async function menuCrews(list: Crew[], focus: (root: HTMLElement) => Element | n
   roamCrews = list;
   session.net.crews(list.map(c => roomHash(c.name)), rgbWords(list));
   drawPopCrews(focus);
+  void askPopCounts(1500);
   $('#menu [data-act="crews"]').textContent = crewsLabel();
   let text = putKey(settingsText ?? TEMPLATE, 'roam_crew', list.length ? crewsValue(list.map(c => c.name)) : null).text;
   text = putKey(text, 'roam_crew_colours', list.length ? rgbsValue(list) : null).text;
