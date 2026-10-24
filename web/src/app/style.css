@@ -597,7 +597,9 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.64); }
 /* ---------------------------------------------------------------- narrow */
 @media (max-width: 959px) {
   .app { grid-template-columns: minmax(0, 1fr); padding: 16px 16px 48px; gap: 16px; }
-  .side, .content { gap: 16px; }
+  /* one column of panels: Saves and Online right under Play, then Controls and the rest */
+  .side, .content { display: contents; }
+  .top, .hero, #saves, #online { order: -1; }
 }
 @media (max-width: 559px) {
   .top, .panel { padding: 16px; }
