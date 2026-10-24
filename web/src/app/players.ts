@@ -79,23 +79,41 @@ export function crewCounts(c: PlayerCounts, asked: readonly number[]): Map<numbe
   return m;
 }
 
+/** How many are in free roam in each of these crews now (crewCounts), asked once, whatever the page does, and
+ *  without watchPlayers' line or its say on whether the server answers: the page menu's Crews while a game runs.  The
+ *  player counts there too, once its game is in free roam in that crew (the server's hub heard its HELLO).  null: no
+ *  answer within ms. */
+export async function askCrews(hashes: readonly number[], ms: number): Promise<Map<number, number> | null> {
+  const mine = hashes.slice(0, 4);
+  if (!mine.length) return new Map();
+  try {
+    const r = await fetch(`/players?crews=${mine.join(',')}`, { cache: 'no-store', signal: AbortSignal.timeout(ms) });
+    return r.ok ? crewCounts(await r.json() as PlayerCounts, mine) : null;
+  } catch { return null; }
+}
+
 /** show(line, crews) at once and every 15 s while idle() and the page is visible (crews: crewCounts); reached(whether
  *  the server answered); room(): the Room setting while free roam is on ('' for none); crews(): the Crews setting's
- *  hashes then ([] for none, at most 4); last(): the newest answer (null before the first, or from a server without
+ *  hashes ([] for none, at most 4); last(): the newest answer (null before the first, or from a server without
  *  the route); fresh(ms): asked now, whatever the page does (Play: whether the server is full), within ms, then the
- *  newest answer */
+ *  newest answer.  An answer that comes after a later question's is not shown: it was asked with the settings of
+ *  before (the page's first question goes before settings.ini is read, the next one at once after it). */
 export function watchPlayers(show: (line: Msg, crews: Map<number, number>) => void, idle: () => boolean, reached?: (ok: boolean) => void,
                              room: () => string = () => '', crews: () => number[] = () => []) {
-  let gone = false, last: PlayerCounts | null = null;
+  let gone = false, last: PlayerCounts | null = null, asked = 0;
   const get = async (ms: number) => {
     if (gone) return;
+    const n = ++asked;
     try {
       const name = room(), hash = roomHash(name), mine = crews().slice(0, 4);
       const q = [hash ? `room=${hash}` : '', mine.length ? `crews=${mine.join(',')}` : ''].filter(Boolean).join('&');
       const r = await fetch(q ? `/players?${q}` : '/players', { cache: 'no-store', signal: AbortSignal.timeout(ms) });
       reached?.(r.status < 500);
       if (r.status === 404) { gone = true; last = null; show(() => '', new Map()); return; }
-      if (r.ok) { const c = last = await r.json() as PlayerCounts, inRoom = hash ? name : ''; show(() => playersText(c, inRoom), crewCounts(c, mine)); }
+      if (!r.ok) return;
+      const c = await r.json() as PlayerCounts, inRoom = hash ? name : '';
+      if (n !== asked) return;
+      last = c; show(() => playersText(c, inRoom), crewCounts(c, mine));
     } catch { reached?.(false); }
   };
   const ask = async () => { if (document.visibilityState === 'visible' && idle()) await get(5000); };

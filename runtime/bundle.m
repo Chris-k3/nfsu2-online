@@ -155,7 +155,8 @@ void app_local_network_notice(void){
  * "Team#1" stays Team#1), the rule the free-roam options follow in the
  * runtime and in the Windows plugin's .ini.
  * K_PATH: a folder (absolute, ~/..., or a name), printable, under 1024
- * bytes.  K_TEXT: printable text (UTF-8 allowed), 1 to 63 bytes.  K_CREWS:
+ * bytes.  K_TEXT: printable text (UTF-8 allowed), 1 to 63 bytes.  K_ROOM:
+ * K_TEXT that does not read as a slur (names.h, as K_NAME).  K_CREWS:
  * crew names joined by commas, printable (UTF-8 allowed), under 1024 bytes,
  * each name at most 24 characters without the blanks round it (the page's
  * crews.ts; the game takes the first 4).  K_RGBS: at most 4 colours joined
@@ -168,7 +169,7 @@ void app_local_network_notice(void){
  * pack's parts.  K_DUMP: on/off or a folder (as K_PATH).  Every key of the
  * table has a kind that checks its value: K_RAW is not used. */
 enum { K_RAW, K_BOOL, K_BOOL_INV, K_ENUM, K_NUM, K_ID, K_TOKEN, K_INT, K_NAME, K_PEERS,
-       K_PATH, K_TEXT, K_CREWS, K_RGBS, K_WXH, K_FIXES, K_IFNAME, K_IPV4, K_MAC, K_HOST, K_PARTS, K_DUMP };
+       K_PATH, K_TEXT, K_ROOM, K_CREWS, K_RGBS, K_WXH, K_FIXES, K_IFNAME, K_IPV4, K_MAC, K_HOST, K_PARTS, K_DUMP };
 #define K_IC 0x100
 static const struct { const char *key, *env; int kind; const char *vals; } g_keys[] = {
     /* app */
@@ -220,7 +221,7 @@ static const struct { const char *key, *env; int kind; const char *vals; } g_key
     { "roam_port",                "NFSU2_ROAM_PORT",            K_INT   | K_IC, "1024..65535" },
     { "roam_peers",               "NFSU2_ROAM_PEERS",           K_PEERS | K_IC },
     { "roam_discovery",           "NFSU2_ROAM_DISCOVERY",       K_BOOL  | K_IC },
-    { "roam_room",                "NFSU2_ROAM_ROOM",            K_TEXT  | K_IC },
+    { "roam_room",                "NFSU2_ROAM_ROOM",            K_ROOM  | K_IC },
     { "roam_crew",                "NFSU2_ROAM_CREW",            K_CREWS | K_IC },
     { "roam_crew_colours",        "NFSU2_ROAM_CREW_RGB",        K_RGBS  | K_IC },
     { "roam_max_players",         "NFSU2_ROAM_MAX_PLAYERS",     K_INT   | K_IC, "2..33" },
@@ -615,7 +616,7 @@ static int list_ok(const char *v, const char *const *words, int minus){   /* com
 static int value_ok(int kind, const char *v){
     switch (kind){
     case K_PATH: return printable_ok(v, 1023);
-    case K_TEXT: return printable_ok(v, 63);
+    case K_TEXT: case K_ROOM: return printable_ok(v, 63);
     case K_CREWS: { if (!printable_ok(v, 1023)) return 0;
                     for (const char *p = v; *p; p += *p == ','){
                         const char *e = p; while (*e && *e != ',') e++;
@@ -666,7 +667,7 @@ static int value_ok(int kind, const char *v){
 static const char *kind_text(int kind){
     switch (kind){
     case K_PATH: return "a folder (printable, under 1024 bytes)";
-    case K_TEXT: return "text of 1 to 63 bytes without control characters";
+    case K_TEXT: case K_ROOM: return "text of 1 to 63 bytes without control characters";
     case K_CREWS: return "crew names (at most 24 characters each) joined by commas";
     case K_RGBS: return "at most 4 colours of 6 hex digits (no #) joined by commas";
     case K_WXH: return "<width>x<height> (320 to 16384 each)";
@@ -732,6 +733,8 @@ static void apply_setting(const char *key, const char *val, int line){
     } else if (kind >= K_PATH){
         if (!value_ok(kind, val)){
             set_note("settings.ini:%d: %s = \"%s\" is not %s, ignored\n", line, key, val, kind_text(kind)); return; }
+        if (kind == K_ROOM && name_blocked(val)){
+            set_note("settings.ini:%d: %s = \"%s\" is not a room name (it reads as a slur), ignored\n", line, key, val); return; }
         if (kind == K_DUMP && (truthy(val) || falsy(val))) out = truthy(val) ? "on" : "off";
     } else if (kind == K_ID || kind == K_TOKEN){
         size_t n = strlen(val); int ok = kind == K_ID ? n < 32 : n < 300;

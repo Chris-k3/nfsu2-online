@@ -11,7 +11,7 @@
 import { checkSetting, DEFAULTS, keyDef, resolveEnv, settingsPut, TEMPLATE, type Resolved } from './settings';
 import { readText, writeFile } from './savefs';
 import { playHorn, stopHorn } from './horn-preview';
-import { checkCrew, CREW_COLOUR_NAMES, CREW_MAX, CREW_PALETTE, crewsOf, crewsValue, freeColour, rgbsValue, type Crew } from './crews';
+import { checkCrew, CREW_BIG, CREW_COLOUR_NAMES, CREW_MAX, CREW_PALETTE, crewsOf, crewsValue, freeColour, rgbsValue, type Crew } from './crews';
 import { roomHash } from './players';
 import { LANGUAGES, live, N, NATIVE, t, tn, tvars, type Language, type Msg } from './i18n';
 
@@ -59,6 +59,7 @@ const GROUPS: Group[] = [
   { title: N('Game'), more: N('More game settings'), items: [
     { key: 'language', label: N('Language'), help: N('The game\'s menus and subtitles, the voices in languages with a dub, and this page.'), c: { t: 'select', opts: LANGUAGE_OPTS } },
     { key: 'movies', label: N('Movies'), help: N('Intro, story and FMV movies.'), c: { t: 'switch' } },
+    { key: 'subtitles', label: N('Subtitles'), help: N('The movies\' lines as text. English\'s are VileStuff\'s English Subtitles Fixed, with who says each line.'), link: { text: N('English Subtitles Fixed'), href: 'https://nfsmods.xyz/mod/5286' }, c: { t: 'switch' } },
     { key: 'autosave', label: N('Autosave'), help: N('Sets each profile\'s Save option in the game to Autosave once, so races, purchases and changes are saved without asking. Prompt or Off chosen afterwards in the game\'s Options, Gameplay stays.'), c: { t: 'switch' } },
     { key: 'intro', label: N('Startup movies'), help: N('The EA and THX logos, the PSA and the intro. Skippable: Enter, Esc, Space, a left click, or A, B or Start ends each one. Original: as in the game, where only the intro ends early.'), c: { t: 'seg', opts: [['skippable', N('Skippable')], ['original', N('Original')], ['off', N('Off')]] }, more: true },
     { key: 'sound', label: N('Sound'), help: N('All sound output.'), c: { t: 'switch' }, more: true },
@@ -130,11 +131,12 @@ export interface CrewControl {
 }
 
 /**
- * A crews control into ctl: a row of chips, one per crew in the player's order (its colour in the game, a button that
- * opens the palette under the chips; its name, how many are in free roam in it when the server says, and Leave), and
- * under them a value box with Join in it (or Enter).  Join waits for a name that can join (crews.ts checkCrew), and the note
+ * A crews control into ctl: one line of pills that wraps, a chip per crew in the player's order (its colour in the
+ * game, a button that opens the palette under the line; its name, how many are in free roam in it when the server
+ * says, and Leave), then a value box with Join in it (or Enter).  Join waits for a name that can join (crews.ts checkCrew), and the note
  * under the box says why one cannot; with 4 crews the box waits for one to be left.  A Leave keeps the others'
- * colours; a Join takes the first colour no crew has.  Returns the box's field.
+ * colours; a Join takes the first colour no crew has.  A line under the chips names a crew counted with more than
+ * CREW_BIG players (showCrewCounts).  Returns the box's field.
  */
 export function crewControl(o: CrewControl, ctl: HTMLElement): HTMLInputElement {
   const list = o.list;
@@ -156,7 +158,8 @@ export function crewControl(o: CrewControl, ctl: HTMLElement): HTMLInputElement 
     li.append(dot, text, leave);
     ul.append(li);
   });
-  /** crew i's palette, under the crews (the chips stay where they are), one open at a time: a radio group of the 8
+  const line = document.createElement('div'); line.className = 'crew-line';
+  /** crew i's palette, under the line (the chips stay where they are), one open at a time: a radio group of the 8
    *  colours, its own marked; the arrows move along it, Enter, Space or a tap picks one and closes it, Esc (or the dot
    *  again) closes it.  Esc stays here: in the menu's Crews popup it does not close the popup too. */
   const palette = (dot: HTMLButtonElement, c: Crew, i: number, what: string) => {
@@ -192,10 +195,10 @@ export function crewControl(o: CrewControl, ctl: HTMLElement): HTMLInputElement 
       } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
     };
     g.append(...sw);
-    ul.after(g);
+    line.after(g);
     sw.find(b => b.tabIndex === 0)!.focus();
   };
-  if (o.counts) showCrewCounts(ul, o.counts);
+  const big = document.createElement('p'); big.className = 'set-note warn crews-big'; big.hidden = true;
   const box = document.createElement('div'); box.className = 'crew-add';
   const inp = document.createElement('input'); inp.type = 'text'; inp.id = o.id; inp.placeholder = t(o.placeholder);
   inp.autocomplete = 'off'; inp.spellcheck = false; inp.enterKeyHint = 'done';
@@ -220,14 +223,25 @@ export function crewControl(o: CrewControl, ctl: HTMLElement): HTMLInputElement 
   inp.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); add(); } };
   join.onclick = add;
   box.append(inp, join);
-  ctl.append(ul, box, note);
+  line.append(ul, box);
+  ctl.append(line, big, note);
+  if (o.counts) showCrewCounts(ctl, o.counts);
   check();
   return inp;
 }
 
 /** the counts on a crews control's chips: a figure by a person's outline (a screen reader gets "{n} in free roam"), the
- *  chip's tooltip its name and that; nothing for a crew counts lacks */
+ *  chip's tooltip its name and that; nothing for a crew counts lacks.  Under the chips, the crews counted with more
+ *  than CREW_BIG: the server's hub no longer links them first (in one room; the count is of every room). */
 export function showCrewCounts(root: ParentNode, counts: Map<number, number>) {
+  for (const ul of root.querySelectorAll<HTMLElement>('ul.crews')) {
+    const line = ul.closest('.crew-line')?.parentElement?.querySelector<HTMLElement>('.crews-big');
+    if (!line) continue;
+    const big = [...ul.querySelectorAll<HTMLElement>('.crew[data-hash]')].filter(li => (counts.get(Number(li.dataset.hash)) ?? 0) > CREW_BIG)
+      .map(li => t('{name} has more than 64 players in free roam: in a crew that big, crew-mates far away no longer always show, only the ones nearby, as with everyone else. A less common name works better.',
+        { name: li.querySelector('.crew-name')?.textContent ?? '' }));
+    line.textContent = big.join(' '); line.hidden = !big.length;
+  }
   for (const li of root.querySelectorAll<HTMLElement>('.crew[data-hash]')) {
     const n = counts.get(Number(li.dataset.hash)), el = li.querySelector('.crew-count')!, name = li.querySelector('.crew-name')!.textContent ?? '';
     if (n === undefined) { el.replaceChildren(); li.title = name; continue; }
@@ -615,7 +629,7 @@ export class SettingsPanel {
       if (c.t === 'num' && c.unit) { const u = document.createElement('span'); u.className = 'unit'; u.textContent = c.unit; ctl.append(u); }
       described = inp;
     }
-    if (setInFile) {
+    if (setInFile && c.t !== 'crews') {               // (the Crews row has none: each crew's x leaves it)
       const r = document.createElement('button'); r.type = 'button'; r.className = 'text-btn'; r.textContent = t('Reset');
       r.setAttribute('aria-label', t('Reset {label}', { label: t(it.label) }));
       r.title = t('Back to the default ({value})', { value: shown(it, DEFAULTS.get(it.key) ?? '') });

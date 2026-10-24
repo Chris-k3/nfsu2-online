@@ -31,13 +31,14 @@ import { controlsSheet, type ControlsSheet } from './controls';
 import { TouchControls } from './touch';
 import { TextField } from './textentry';
 import { PauseHint } from './pausehint';
+import { DriftPanel } from './drift';
 import type { PadPage } from '../input/gamepad';
 import type { NetQueue, NetRemoved } from '../net';
 import { checkSetting, HOST_FIXED, pageOnly, resolveEnv, settingsUpgrade, TEMPLATE, type Resolved } from './settings';
 import { exists, filesOf, listProfiles, PROFILES_DIR, readText, removeSaveDir, writeFile } from './savefs';
 import { turnOnAutosave } from './profile';
-import { crewControl, putKey, SettingsPanel } from './settings-ui';
-import { queueText, roomHash, serverAnswers, watchPlayers, type PlayerCounts } from './players';
+import { crewControl, putKey, SettingsPanel, showCrewCounts } from './settings-ui';
+import { askCrews, queueText, roomHash, serverAnswers, watchPlayers, type PlayerCounts } from './players';
 import { crewList, crewsOf, crewsValue, rgbsValue, rgbWords, type Crew } from './crews';
 import { SavesPanel } from './saves-ui';
 import { saveScreenshot } from './shots';
@@ -100,6 +101,8 @@ let hudWide = true;                      // the running game's HUD is edge-ancho
 let solidCars: boolean | null = null;    // the running game's free roam has solid cars (null: no free roam)
 let roamCrews: Crew[] | null = null;     // the running game's crews: as it started, then as the menu changed them (null: no free roam)
 let crewDraft = '';                      // the crew name being typed in the menu
+let popCounts = new Map<number, number>();   // how many are in free roam in each of those crews, by hash (askPopCounts)
+let popAsk = 0;                          // the popup's questions so far: only the newest one's answer shows
 let away: AwayCheck | null = null;
 let renderCheck: RenderCheck | null = null;
 let lastExit: { code: number; seconds: number } | null = null;
@@ -108,6 +111,8 @@ let instance: ReturnType<typeof claimInstance>;
 let settingsText: string | null = null;
 let starting = false;                    // Play pressed, the session not there yet
 let fatal: { what: string; code?: string } | null = null;   // why the running game had to be stopped (English, for t())
+// the last game lost its graphics (GPU-LOST): Safari's WebGPU gives this page no adapter any more, so Play reloads it
+let gpuGone = false;
 let fps: FpsOverlay;
 let statusAt: { memory: WebAssembly.Memory; ptr: number } | null = null;   // the running game's status block
 let radioLink: RadioLink | null = null;  // the radio's words of the running game, once the game says it has them
@@ -229,6 +234,8 @@ async function loadSettings(): Promise<string | null> {
     if (up) { text = up.text; await writeFile(SAVE, 'settings.ini', text); log.add(`[app] settings: added the new options ${up.added.join(', ')} to /save/settings.ini (commented out, defaults unchanged)`); }
   }
   settingsText = text;
+  // who plays on this server, asked again with this file's room and crews (the first question went without them)
+  players?.now();
   return text;
 }
 /** this device's own defaults (a phone's: device.ts), below settings.ini and the page address */
@@ -333,6 +340,7 @@ async function askFull(c: PlayerCounts | null): Promise<boolean> {
 async function play() {
   if ($<HTMLButtonElement>('#play').disabled || session || starting) return;
   if (byPlay()) { await reloadFor(newer!, 'Play', false); return; }
+  if (gpuGone) { log.add('[app] the last game lost its graphics: reloading the page (Play)'); await reload(); return; }
   if (updated) { updated = false; showNewer(); }
   starting = true; updatePlay();
   try { await startGame(); } finally { starting = false; updatePlay(); }
@@ -457,7 +465,7 @@ async function startGame() {
   hudWide = !/^(43|4:3)$/i.test(r.env.NFSU2_HUD?.trim() ?? '');
   solidCars = net && r.env.NFSU2_ROAM === '1' ? r.env.NFSU2_ROAM_COLLIDE !== '0' : null;
   roamCrews = net && r.env.NFSU2_ROAM === '1' ? crewsOf(r.env.NFSU2_ROAM_CREW ?? '', r.env.NFSU2_ROAM_CREW_RGB ?? '') : null;
-  crewDraft = '';
+  crewDraft = ''; popCounts = new Map();
   fatal = null;
   quitAt = null;
   saved = null;
@@ -490,6 +498,7 @@ async function startGame() {
   touch.start(session);
   textField.start(session);
   pauseHint.start(session);
+  driftPanel.start(session);
   quickChat.start(session, net && r.env.NFSU2_ROAM === '1' && r.env.NFSU2_ROAM_SAY !== '0');
   fps.memory = session.proc.memory;
   const st = session;
@@ -617,11 +626,13 @@ let awake: (() => void) | null = null;   // the running game's Wake Lock (displa
 let touch: TouchControls;                // the controls on the game while a finger drives (touch.ts)
 let textField: TextField;               // the field for a phone's keyboard while the game asks for text (textentry.ts)
 let pauseHint: PauseHint;               // the line to the page's menu under the game's pause menu (pausehint.ts)
+let driftPanel: DriftPanel;             // free roam's drift mode: its score under the game's Bank panel, a note at F2 (drift.ts)
 
 function endStage() {
   touch.stop();
   textField.stop();
   pauseHint.stop();
+  driftPanel.stop();
   quickChat.stop();
   awake?.(); awake = null;
   away?.stop(); away = null;
@@ -659,8 +670,12 @@ function onExit(s: GameSession, code: number) {
   $('#report').hidden = !fatal && (code === 0 || code === -1);
   const mins = () => seconds >= 120 ? t('{n} min', { n: Math.floor(seconds / 60) }) : t('{n} s', { n: seconds.toFixed(0) });
   const f = fatal;
+  gpuGone = f?.code === 'GPU-LOST';
+  // the graphics lost on the way: a reload starts them again (Safari: only a reload), at Play
+  if (gpuGone) setPhase('exited', T('Stopped'), () => t('The game was stopped: {what}. Play reloads this page, which starts the graphics again; then press Play once more. Your saves and settings stay.',
+    { what: t(f!.what) }) + ' ' + t('Download the log first if you want to keep it: the reload clears it.'), f!.code);
   // the graphics: a restart of the browser, then a newer driver (where to send the log is under it)
-  if (f) setPhase('exited', s.renderer ? T('Stopped') : T('Did not start'), () => t('The game was stopped: {what}. Restart {browser}, then press Play. If it happens again, update the graphics driver.',
+  else if (f) setPhase('exited', s.renderer ? T('Stopped') : T('Did not start'), () => t('The game was stopped: {what}. Restart {browser}, then press Play. If it happens again, update the graphics driver.',
     { what: t(f.what), browser: t(browserName()) }), f.code);
   else {
     const base = () => code === 0 ? t('The game closed normally after {time}.', { time: mins() }) : code === -1 ? t('The game was stopped after {time}.', { time: mins() })
@@ -896,13 +911,26 @@ function openCrews() {
   drawPopCrews();
   pop.showModal();
   ($('#crews-pop-box').querySelector<HTMLElement>('input:enabled') ?? $('#crews-pop-box').querySelector<HTMLElement>('.crew-dot'))?.focus();
+  void askPopCounts();
+}
+/** The popup's counts, asked of the server once (the page does not ask while a game runs), after ms: a Join reaches
+ *  the server's hub with the game's next HELLO.  As the server counts them: the player too, once in free roam in that
+ *  crew.  Shown while the popup is open; the newest question's only. */
+async function askPopCounts(ms = 0) {
+  const n = ++popAsk;
+  if (ms) await new Promise(r => setTimeout(r, ms));
+  if (n !== popAsk || offline || !roamCrews?.length) return;
+  const counts = await askCrews(roamCrews.map(c => roomHash(c.name)), 5000);
+  if (!counts || n !== popAsk) return;
+  popCounts = counts;
+  if ($<HTMLDialogElement>('#crews-pop').open) showCrewCounts($('#crews-pop-box'), counts);
 }
 /** the popup's control, drawn again after each change; focus: where the keyboard (or controller) goes then, if it was
  *  in there */
 function drawPopCrews(focus?: (root: HTMLElement) => Element | null | undefined) {
   const box = $('#crews-pop-box'), had = box.contains(document.activeElement);
   box.replaceChildren();
-  crewControl({ list: roamCrews ?? [], id: 'crews-pop-input', labelId: 'crews-pop-title', placeholder: N('Crew name'), draft: crewDraft,
+  crewControl({ list: roamCrews ?? [], id: 'crews-pop-input', labelId: 'crews-pop-title', placeholder: N('Crew name'), counts: popCounts, draft: crewDraft,
     onDraft: v => { crewDraft = v; }, change: (list, f) => void menuCrews(list, f) }, box).setAttribute('aria-labelledby', 'crews-pop-title');
   if (had && focus) ((focus(box) ?? box.querySelector('input:enabled')) as HTMLElement | null)?.focus({ focusVisible: true } as FocusOptions);
 }
@@ -913,6 +941,7 @@ async function menuCrews(list: Crew[], focus: (root: HTMLElement) => Element | n
   roamCrews = list;
   session.net.crews(list.map(c => roomHash(c.name)), rgbWords(list));
   drawPopCrews(focus);
+  void askPopCounts(1500);
   $('#menu [data-act="crews"]').textContent = crewsLabel();
   let text = putKey(settingsText ?? TEMPLATE, 'roam_crew', list.length ? crewsValue(list.map(c => c.name)) : null).text;
   text = putKey(text, 'roam_crew_colours', list.length ? rgbsValue(list) : null).text;
@@ -1252,10 +1281,10 @@ export async function boot() {
   pick.replaceChildren(...LANGUAGES.map(l => Object.assign(document.createElement('option'), { value: l, textContent: NATIVE[l], lang: LOCALE[l] })));
   pick.onchange = () => void settings.set('language', pick.value);
   // who plays on this server now (Online): only while no game runs here; with free roam on in a room, that room too,
-  // and in crews, how many are in each (on the Crews row's lines)
+  // and in crews (free roam on or not: the row shows them either way), how many are in each (on the Crews row's lines)
   players = watchPlayers((line, crews) => { settings.setStatus(line); settings.setCrewCounts(crews); }, () => !session && !starting, setReach,
     () => { const e = resolved().env; return e.NFSU2_ROAM === '1' ? e.NFSU2_ROAM_ROOM ?? '' : ''; },
-    () => { const e = resolved().env; return e.NFSU2_ROAM === '1' ? crewList(e.NFSU2_ROAM_CREW ?? '').map(roomHash) : []; });
+    () => crewList(resolved().env.NFSU2_ROAM_CREW ?? '').map(roomHash));
   window.addEventListener('online', () => players?.now());
   window.addEventListener('resize', placeNotices);
   window.addEventListener('resize', placeLobby);
@@ -1330,6 +1359,7 @@ export async function boot() {
     roam: () => solidCars !== null && !!session?.net?.solid,
     fullscreen: () => canFullscreen() || !fromHomeScreen(),
   });
+  driftPanel = new DriftPanel($('#stage'), { toast, wide: () => hudWide, log: logLine });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { void checkNewer(); vault.shown(); } });
   setInterval(() => { if (document.visibilityState === 'visible') void checkNewer(); }, NEWER_EVERY_MS);
 

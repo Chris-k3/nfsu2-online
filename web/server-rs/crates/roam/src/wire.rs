@@ -29,6 +29,9 @@ pub(crate) const HF_LOBBY: u16 = 0x0080;
 pub(crate) const HF_CREW: u16 = 0x0200;
 /// the most crews a player is in (roam_core.h RC_CREW_MAX: the start page's four words)
 pub(crate) const CREWS: usize = 4;
+/// HELLO's flag: this player reads the crew marks of the hub's PEERS (roam_core.h RC_HF_HUBCREW, core 8): HF_CREW on a
+/// PEERS says the list ends in them (`write_peers`).  A core before it counts the longer list as bad, so it gets none.
+pub(crate) const HF_HUBCREW: u16 = 0x0400;
 /// the most ids a HELLO names (roam_core.h RC_MAX_PEERS: its decoder takes no more)
 const SEEN_MAX: usize = 32;
 /// a LOBBY's ops (roam_core.h RC_LOBBY_*) the hub keeps: the host's advert and its end, and a player's ask to join
@@ -59,6 +62,8 @@ pub(crate) enum Msg<'a> {
         name: &'a [u8],
         /// its flags say it takes race lobbies (HF_LOBBY)
         lobbies: bool,
+        /// its flags say it reads the crew marks of the hub's PEERS (HF_HUBCREW)
+        marks: bool,
         /// its crews as it sent them (HF_CREW), 0 after them: none for a HELLO without the flag, or with the flag
         /// and nothing after its ids
         crews: [u32; CREWS],
@@ -256,7 +261,7 @@ pub(crate) fn decode(d: &[u8]) -> Option<(u8, u32, Msg<'_>)> {
                     }
                 }
             }
-            Msg::Hello { sender, core, status, room, name, lobbies: flags & HF_LOBBY != 0, crews }
+            Msg::Hello { sender, core, status, room, name, lobbies: flags & HF_LOBBY != 0, marks: flags & HF_HUBCREW != 0, crews }
         }
         MSG_SNAP => {
             if end < 22 + 52 {
@@ -324,24 +329,50 @@ pub(crate) fn peers_len(n: usize) -> usize {
     HDR + 1 + 10 * n + CRC
 }
 
-/// Writes a PEERS datagram into `b` (exactly `peers_len(n)` bytes long): list = [{ vip, port, id }] (at most 32:
-/// roam_core's RC_MAX_PEERS; 7 for a core of version 1).
-pub(crate) fn write_peers(b: &mut [u8], sender: u32, seq: u16, list: impl ExactSizeIterator<Item = PeerEntry>) {
+/// the length of a PEERS datagram of n entries that ends in crew marks for a player of k crews (`write_peers`)
+pub(crate) fn peers_crew_len(n: usize, k: usize) -> usize {
+    peers_len(n) + 1 + 4 * k + n
+}
+
+/// Writes a PEERS datagram into `b` (exactly `peers_len(n)` bytes long, or `peers_crew_len(n, mine.len())` with crews):
+/// list = [{ vip, port, id }] (at most 32: roam_core's RC_MAX_PEERS; 7 for a core of version 1).  With `mine` (the
+/// receiver's crews, at most CREWS, none 0) the list ends in its crew marks (HF_CREW on it): `mine`, then a byte per
+/// entry, `marks[i]` bit c: entry i is in crew `mine[c]` too.  So a player learns which of its peers are in its crews
+/// without anyone's crews but its own going out.
+pub(crate) fn write_peers(
+    b: &mut [u8],
+    sender: u32,
+    seq: u16,
+    list: impl ExactSizeIterator<Item = PeerEntry>,
+    mine: &[u32],
+    marks: &[u8],
+) {
     let len = b.len();
+    let n = list.len();
     b[..4].copy_from_slice(b"N2FR");
     b[4] = 1;
     b[5] = MSG_PEERS;
     b[6..8].copy_from_slice(&(len as u16).to_le_bytes());
     b[8..12].copy_from_slice(&sender.to_le_bytes());
     b[12..14].copy_from_slice(&seq.to_le_bytes());
-    b[14..16].copy_from_slice(&[0, 0]);
+    b[14..16].copy_from_slice(&if mine.is_empty() { 0 } else { HF_CREW }.to_le_bytes());
     // the count's low byte: one byte holds every count roam_core reads (RC_MAX_PEERS at most, as above)
-    b[16] = list.len() as u8;
+    b[16] = n as u8;
     for (i, e) in list.enumerate() {
         let o = 17 + 10 * i;
         b[o..o + 4].copy_from_slice(&e.vip.to_be_bytes());
         b[o + 4..o + 6].copy_from_slice(&e.port.to_le_bytes());
         b[o + 6..o + 10].copy_from_slice(&e.id.to_le_bytes());
+    }
+    if !mine.is_empty() {
+        let mut o = 17 + 10 * n;
+        b[o] = mine.len() as u8;
+        o += 1;
+        for c in mine {
+            b[o..o + 4].copy_from_slice(&c.to_le_bytes());
+            o += 4;
+        }
+        b[o..o + n].copy_from_slice(&marks[..n]);
     }
     let crc = crc32fast::hash(&b[..len - CRC]);
     b[len - CRC..].copy_from_slice(&crc.to_le_bytes());
@@ -349,8 +380,13 @@ pub(crate) fn write_peers(b: &mut [u8], sender: u32, seq: u16, list: impl ExactS
 
 /// A PEERS datagram: `write_peers` into a buffer of its own
 pub fn encode_peers(sender: u32, seq: u16, list: &[PeerEntry]) -> Vec<u8> {
-    let mut b = vec![0u8; peers_len(list.len())];
-    write_peers(&mut b, sender, seq, list.iter().copied());
+    encode_peers_crews(sender, seq, list, &[], &[])
+}
+
+/// A PEERS datagram with crew marks (`write_peers`; none with `mine` empty)
+pub fn encode_peers_crews(sender: u32, seq: u16, list: &[PeerEntry], mine: &[u32], marks: &[u8]) -> Vec<u8> {
+    let mut b = vec![0u8; if mine.is_empty() { peers_len(list.len()) } else { peers_crew_len(list.len(), mine.len()) }];
+    write_peers(&mut b, sender, seq, list.iter().copied(), mine, marks);
     b
 }
 

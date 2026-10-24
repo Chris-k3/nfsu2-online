@@ -949,7 +949,9 @@ static void status_line(double t, double tms, const char *label){
      * since the last line (runtime/web/gcpu.c, win32_ext.c) */
     if (k > 0) k = (int)strlen(ms);
     if (k > 0 && k < (int)sizeof ms){ int gcpu_status(char *, size_t); k += gcpu_status(ms + k, sizeof ms - (size_t)k); }
-    if (k > 0 && k < (int)sizeof ms){ int win32_gil_status(char *, size_t); win32_gil_status(ms + k, sizeof ms - (size_t)k); }
+    if (k > 0 && k < (int)sizeof ms){ int win32_gil_status(char *, size_t); k += win32_gil_status(ms + k, sizeof ms - (size_t)k); }
+    /* the frame pacer's spin on the clock per sleep since the last line (win32_ext.c sleep_precise_ns) */
+    if (k > 0 && k < (int)sizeof ms){ int pacer_spin_status(char *, size_t); pacer_spin_status(ms + k, sizeof ms - (size_t)k); }
 #endif
     fprintf(stderr, "[status]%s%s f=%ld t=%.1fs fps=%.1f cpu=%.0f%% gcpu=%.2fms/f flow=%u rss=%ldMB%s\n",
             label ? " " : "", label ? label : "", g_frame, tms / 1e3, dt > 0 ? nf / dt : 0.0,

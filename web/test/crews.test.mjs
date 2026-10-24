@@ -4,9 +4,11 @@
 //   capitals and spaces do not count) left out, the first 4
 // - a list written back through settings.ini to NFSU2_ROAM_CREW, a "; comment" cut off, a crew longer than 24
 //   characters refusing the line, an older file getting the option's paragraph
-// - what the panel's box lets join: nothing typed, a comma, # or ;, too long, a repeat by hash, a fifth
+// - what the panel's box lets join: nothing typed, a comma, # or ;, too long, a slur, a repeat by hash, a fifth
+// - the Room setting refuses a name that reads as a slur, as Your name does
 // - Reset all settings keeps the crews, as it keeps the name
-// - /players?crews=: the hashes in the player's order (beside room=), the counts by hash, none from an older server
+// - /players?crews=: the hashes in the player's order (beside room=), the counts by hash, none from an older server,
+//   and a late answer to an earlier question not shown over a later one
 // The modules are bundled from web/src with esbuild, as web/test/settings-reset.test.mjs does.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -135,6 +137,12 @@ test('what the box lets join', () => {
   assert.equal(C.checkCrew('Zoë', ['zoË']).ok, true, 'only A to Z made small');
   assert.equal(C.checkCrew('Fifth', ['a', 'b', 'c', 'd']).why, 'Up to 4 crews: leave one to join another.');
   assert.equal(C.checkCrew('', ['a', 'b', 'c', 'd']).why, 'Up to 4 crews: leave one to join another.', 'said with nothing typed too');
+  // a name that reads as a slur (names.mjs, as a player's name) is no crew; the words round them still are
+  for (const typed of ['N1gg 4', 'f4g_42', 'XxCoonXx', 'Paki Crew', 'ｆａｇ'])
+    assert.equal(C.checkCrew(typed, list).why, 'Not a crew name: it reads as a slur.', typed);
+  for (const typed of ['Mustafa GS', 'Raccoon', 'Van Dyke', 'Spice Girls']) assert.equal(C.checkCrew(typed, list).ok, true, typed);
+  assert.deepEqual(C.crewList('Blue Room, XxCoonXx, Night Owls'), ['Blue Room', 'Night Owls'], 'a hand-written one left out, as the game does');
+  assert.deepEqual(C.crewsOf('a, f4g_42, b', '111111, 222222, 333333').map(c => c.name), ['a', 'b'], 'and it takes no place');
   // whatever joins makes a value the game reads back the same
   let crews = [];
   for (const typed of [' Blue Room', 'night owls', 'Ünïcode ✓', 'x'.repeat(24)]) {
@@ -145,6 +153,19 @@ test('what the box lets join', () => {
     assert.equal(v.ok, true);
     assert.deepEqual(C.crewList(v.value), crews);
   }
+});
+
+test('the Room setting: a name that reads as a slur is refused, as Your name is', () => {
+  assert.equal(S.keyDef('roam_room').kind, 'room');
+  assert.deepEqual(S.checkSetting('roam_room', 'Team ; ours'), { ok: true, env: 'NFSU2_ROAM_ROOM', value: 'Team' });
+  assert.equal(S.checkSetting('roam_room', 'Mustafa GS').ok, true);
+  for (const v of ['XxCoonXx', 'f4g_42 ; mine', 'ｆａｇ']) {
+    const r = S.checkSetting('roam_room', v);
+    assert.equal(r.ok, false, v);
+    assert.equal(r.why, '"{value}" is not a room name (it reads as a slur)', v);
+  }
+  assert.match(S.checkSetting('roam_room', 'z'.repeat(64)).reason, /is not text of 1 to 63 bytes/);
+  assert.equal(S.resolveEnv('roam = on\nroam_room = XxCoonXx\n', {}, {}).env.NFSU2_ROAM_ROOM, undefined, 'no room at Play');
 });
 
 test('Reset all settings keeps the crews and their colours', () => {
@@ -191,5 +212,30 @@ test('/players?crews=: asked in the player\'s order, the counts by hash', async 
   w.now(); await wait();
   assert.equal(asked[2], '/players', 'no crews, no room: as before');
   assert.equal(shown[2].counts.size, 0);
+  delete globalThis.window; delete globalThis.document; globalThis.fetch = fetch0;
+});
+
+test('/players: an answer that comes after a later question\'s is not shown (the page\'s first, before settings.ini)', async () => {
+  const blue = P.roomHash('Blue Room'), fetch0 = globalThis.fetch;
+  globalThis.window = { setInterval: () => 0 };
+  globalThis.document = { visibilityState: 'visible', addEventListener() {} };
+  // the first question (no crews yet) waits until the second (with them) is answered
+  const held = [];
+  globalThis.fetch = async url => {
+    const answer = url.includes('crews=') ? { players: 3, online: 0, roam: 2, crews: [2] } : { players: 3, online: 0, roam: 2 };
+    const r = { status: 200, ok: true, json: async () => answer };
+    return url.includes('crews=') ? r : new Promise(res => held.push(() => res(r)));
+  };
+  let crews = [];
+  const shown = [];
+  const w = P.watchPlayers((line, counts) => shown.push(counts), () => true, undefined, () => '', () => crews);
+  await new Promise(r => setTimeout(r, 0));
+  crews = [blue];
+  const fresh = await w.fresh(1000);
+  assert.deepEqual(shown.map(c => [...c]), [[[blue, 2]]], 'the second answer, with the crew');
+  held.forEach(f => f()); await new Promise(r => setTimeout(r, 0));
+  assert.deepEqual(shown.map(c => [...c]), [[[blue, 2]]], 'the first, late, left out');
+  assert.deepEqual(w.last(), fresh, 'and the newest answer is still the second');
+  assert.deepEqual(w.last().crews, [2]);
   delete globalThis.window; delete globalThis.document; globalThis.fetch = fetch0;
 });

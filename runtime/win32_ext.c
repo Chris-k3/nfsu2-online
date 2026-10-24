@@ -370,11 +370,11 @@ uint64_t g_sleep_late_ns, g_sleep_gil_ns, g_sleep_n;    /* diagnostics: sleep la
  * 1 ms wait took 15.5 ms at the median, a few came back after ~1 ms), and
  * every oversleep of the frame pacer cost a 120 Hz slot: a race ran at
  * 94 fps where the game thread's work alone allows 119.  So the wait ends a
- * margin before the deadline and the rest is spun on the clock, with the
- * guest lock still released.  The margin is learned from the waits: it
- * jumps to a late wake-up and comes down slowly, so with a precise timer the
- * spin stays short.  No spin while the page does not draw (a hidden tab):
- * nobody sees the frames then.
+ * margin before the deadline, the margin is waited in shorter waits as far
+ * as the timer allows, and the rest is spun on the clock, with the guest
+ * lock still released.  The margin is learned from the waits: it jumps to a
+ * late wake-up and comes down slowly.  No spin while the page does not draw
+ * (a hidden tab): nobody sees the frames then.
  *
  * Whether a wait can be tried at all comes from a probe thread, not from
  * the pacer's own waits.  Before, with the 15.6 ms timer the pacer spun its
@@ -391,6 +391,16 @@ static _Atomic int g_probe_late_us = -1;                    /* the probe's laten
 static uint64_t g_probe_n, g_probe_coarse;                  /* diagnostics: probes, those > 4 ms late */
 static uint64_t g_ps_n, g_ps_waits, g_ps_over;              /* pacer sleeps, waits tried, waits past the deadline */
 static double g_ps_over_max;
+/* diagnostics: ms spun on the clock (total, and since the last [status] line with its sleeps), and how late the
+ * waits woke: < 0.25, 0.5, 1, 2, 4, 8 ms and later */
+static double g_ps_spin_ms, g_ps_spin_win_ms, g_ps_margin; static uint64_t g_ps_win_n;
+static uint64_t g_ps_halves, g_ps_hover; static double g_ps_hover_max;   /* the margin's waits, those past the deadline */
+static uint64_t g_ps_late_h[7];
+int pacer_spin_status(char *buf, size_t n){
+    int k = g_ps_win_n ? snprintf(buf, n, " spin=%.2fms/f", g_ps_spin_win_ms / (double)g_ps_win_n) : 0;
+    g_ps_spin_win_ms = 0; g_ps_win_n = 0;
+    return k;
+}
 static void *timer_probe_main(void *unused){
     (void)unused;
     double est = -1.0;
@@ -433,6 +443,19 @@ void pacer_sleep_report(void){
         fprintf(stderr, "  timer probe: %llu waits of 1 ms, %.1f %% more than 4 ms late, lateness now %.2f ms\n",
                 (unsigned long long)g_probe_n, g_probe_n ? 100.0 * g_probe_coarse / g_probe_n : 0.0, pl / 1000.0);
     else fprintf(stderr, "  timer probe: none (no thread)\n");
+    uint64_t lw = 0; for (int i = 0; i < 7; i++) lw += g_ps_late_h[i];
+    double q = lw ? 100.0 / (double)lw : 0.0;
+    fprintf(stderr, "  pacer spin: %.2f ms per sleep, margin now %.2f ms; its waits woke late by < 0.25 ms %.1f %%, < 0.5 %.1f %%, "
+            "< 1 %.1f %%, < 2 %.1f %%, < 4 %.1f %%, < 8 %.1f %%, more %.1f %%\n", g_ps_spin_ms / (double)g_ps_n, g_ps_margin,
+            g_ps_late_h[0] * q, g_ps_late_h[1] * q, g_ps_late_h[2] * q, g_ps_late_h[3] * q, g_ps_late_h[4] * q, g_ps_late_h[5] * q,
+            g_ps_late_h[6] * q);
+    if (g_ps_halves)
+        fprintf(stderr, "  pacer margin waits: %.2f per sleep, %llu woke past the deadline (worst %.2f ms)\n",
+                (double)g_ps_halves / (double)g_ps_n, (unsigned long long)g_ps_hover, g_ps_hover_max);
+}
+static void ps_late(double ms){
+    int i = ms < 0.25 ? 0 : ms < 0.5 ? 1 : ms < 1.0 ? 2 : ms < 2.0 ? 3 : ms < 4.0 ? 4 : ms < 8.0 ? 5 : 6;
+    g_ps_late_h[i]++;
 }
 static void sleep_precise_ns(int64_t ns){
     static _Thread_local double margin = 2.0;               /* ms */
@@ -443,26 +466,52 @@ static void sleep_precise_ns(int64_t ns){
     if (spin < 0){ const char *e = getenv("NFSU2_PACE_SPIN"); spin = !(e && *e == '0'); }
     if (!spin || !hfr_display_live()){
         struct timespec ts = { (time_t)(ns / 1000000000LL), (long)(ns % 1000000000LL) };
+        double t0 = nfsu2_now_ms();
         nanosleep(&ts, 0);
+        if (spin || !hfr_display_live()) return;            /* a hidden page: not counted */
+        g_ps_n++; g_ps_win_n++; g_ps_waits++; ps_late(nfsu2_now_ms() - t0 - (double)ns / 1e6);
         return;
     }
     pthread_once(&probe_once, timer_probe_start);
     int pl = atomic_load(&g_probe_late_us);
     double need = pl < 0 ? 0.0 : pl / 1000.0 * 1.25 + 0.25;   /* what the probe's lateness needs */
     double t0 = nfsu2_now_ms(), until = t0 + (double)ns / 1e6, coarse = until - (margin > need ? margin : need) - t0;
-    g_ps_n++;
+    g_ps_n++; g_ps_win_n++;
     if (coarse >= 0.25){
         int64_t cns = (int64_t)(coarse * 1e6);
         struct timespec ts = { (time_t)(cns / 1000000000LL), (long)(cns % 1000000000LL) };
         nanosleep(&ts, 0);
         double t1 = nfsu2_now_ms(), want = (t1 - (t0 + coarse)) * 1.25 + 0.25;
         margin = want > margin ? want : margin - (margin - want) * 0.02;
-        g_ps_waits++;
+        g_ps_waits++; ps_late(t1 - (t0 + coarse));
         if (t1 > until){ g_ps_over++; if (t1 - until > g_ps_over_max) g_ps_over_max = t1 - until; }
     } else margin *= 0.997;                                  /* no wait made */
     if (margin < 0.5) margin = 0.5;
     if (margin > 20.0) margin = 20.0;
-    while (nfsu2_now_ms() < until) {}
+    g_ps_margin = margin;
+    /* The margin is mostly waited too, in waits of half what is left: a wait wakes late by a share of its
+     * length (WebKit, Safari and every iPhone browser: a 10 ms wait 1-4 ms, a 1 ms wait 0.3 ms), so the
+     * halves end close to the deadline, the last wait (as short as the probe's) ends what the probe's
+     * lateness needs before it, and only that is spun.  Spinning the whole margin there was 2.7 ms a frame
+     * at 60 fps, 0.7 ms with these waits, and the web content process took a quarter less CPU in free roam
+     * with no more missed slots (Playwright WebKit, M4 Pro, 2026-10-24; a player's iPhone log has the
+     * same 0.3 ms for the probe's 1 ms waits).  No such wait
+     * is shorter than 0.25 ms or ends later than the probe's lateness allows, so a coarse timer (probe
+     * lateness at the timer's tick) never tries one. */
+    static int halve = -1;
+    if (halve < 0){ const char *e = getenv("NFSU2_PACE_HALVE"); halve = !(e && *e == '0'); }
+    double hneed = need > 0.4 ? need : 0.4;
+    for (double rem; halve && pl >= 0 && (rem = until - nfsu2_now_ms()) >= hneed + 0.25;){
+        int64_t hns = (int64_t)((rem >= 2.0 * hneed ? rem * 0.5 : rem - hneed) * 1e6);
+        struct timespec ts = { (time_t)(hns / 1000000000LL), (long)(hns % 1000000000LL) };
+        nanosleep(&ts, 0);
+        g_ps_halves++;
+        double t2 = nfsu2_now_ms();
+        if (t2 > until){ g_ps_hover++; if (t2 - until > g_ps_hover_max) g_ps_hover_max = t2 - until; break; }
+    }
+    double s0 = nfsu2_now_ms(), s1 = s0;
+    while (s1 < until) s1 = nfsu2_now_ms();
+    g_ps_spin_ms += s1 - s0; g_ps_spin_win_ms += s1 - s0;
 }
 #else
 /* On macOS nanosleep wakes up with the timer coalescing slack: in the game a

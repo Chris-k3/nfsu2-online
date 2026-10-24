@@ -8,7 +8,8 @@
 //   - publishes a display clock from requestAnimationFrame (HOST_KIND_VSYNC)
 //     that the game's frame pacer locks to;
 //   - reads frames back for the autotest "dump" command and F12 (dump()), as
-//     PNGs made in png-worker.ts.
+//     PNGs made in png-worker.ts, and textures for the game (a frame's rb_*:
+//     the DVD and magazine covers' pictures, which it waits for in LockRect).
 // Triggers: Atomics.waitAsync on the game's doorbell, every rAF, and every
 // finished GPU frame.  The main thread never blocks.
 import type { GameProcess } from '../host/process';
@@ -49,8 +50,10 @@ export interface RendererOptions {
   /** diagnostics: a slower GPU, from a pass of this many iterations of busy work for each pixel
    *  of a 512x512 target in every frame (tests frame pacing on GPUs slower than this one) */
   gpuBurn?: number;
-  /** the GPU device was lost (the graphics driver reset, the browser's graphics process crashed): nothing
-   *  is drawn from then on, and only a new game process can show the game again (see detach) */
+  /** the GPU device was lost (the graphics driver reset, the browser's graphics process crashed; device.lost, or
+   *  in Safari every WebGPU call failing frame after frame): nothing is drawn from then on, and only a new game
+   *  process can show the game again (see detach), in Safari only after a reload of the page (requestAdapter
+   *  gives no adapter until then) */
   onLost?: () => void;
   /** every frame drawn, in the same task: quick chat's places over the cars in it (gpu_proto.h GwMarks): n marks of
    *  4 numbers in m (id, x, y as parts of the game's picture, scale; reused, read it at once) */
@@ -112,6 +115,15 @@ export interface Renderer {
   detach(): void;
 }
 
+/** WebGPU calls that failed this many times in a row (one try per frame, a second at 60 fps): the device is gone */
+const LOST_AFTER = 60;
+/** an exception for the log: Safari's stack has no line with the message, Chrome's starts with it */
+const errText = (x: unknown) => {
+  if (!(x instanceof Error)) return String(x);
+  const head = `${x.name}: ${x.message}`;
+  return x.stack?.startsWith(head) ? x.stack : x.stack ? `${head}\n${x.stack}` : head;
+};
+
 export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElement, opts: RendererOptions = {}): Promise<Renderer> {
   const log = opts.log ?? ((s: string) => console.log(s));
   if (!navigator.gpu) throw new Error('WebGPU is not available in this browser');
@@ -131,18 +143,23 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
     if (errors <= 20) log(`[gpu] WebGPU error: ${(e as GPUUncapturedErrorEvent).error.message}`);
   };
   device.addEventListener('uncapturederror', onError);
-  device.lost.then(i => {
-    if (i.reason === 'destroyed') return;            // our own destroy(): detach, or giving up before it
-    log(`[gpu] device lost: ${i.reason} ${i.message}`);
+  // the device is gone (onLost, once): device.lost, or frames that cannot be encoded any more (pump)
+  let ownDestroy = false, lostSaid = false;
+  const lost = (why: string) => {
+    if (ownDestroy || lostSaid) return;
+    lostSaid = true;
+    log(`[gpu] ${why}`);
     opts.onLost?.();
-  });
+  };
+  // our own destroy() (detach, or giving up before it) says nothing, whatever reason the browser gives
+  device.lost.then(i => lost(`device lost: ${i.reason} ${i.message}`));
   // Until the renderer holds the control block, every way out gives the device
   // and the canvas back (a game stopped before it registered its blocks included).
   let configured: GPUCanvasContext | null = null;
   const giveUp: (e: unknown) => never = (e) => {
     try { configured?.unconfigure(); } catch { /* not configured */ }
     device.removeEventListener('uncapturederror', onError);
-    device.destroy();
+    ownDestroy = true; device.destroy();
     throw e;
   };
 
@@ -262,6 +279,15 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
     } else if (!winWaits) winWaitT = now;
   };
 
+  // Safari's graphics process went away (it starts again by itself, for other pages): from then on every call into
+  // it throws (createCommandEncoder: InvalidStateError) and device.lost never comes, so the picture would stay
+  // frozen while the game plays on.  So many failures in a row are a lost device.
+  let failRun = 0;
+  const failed = (what: string, x: unknown) => {
+    errors++; failRun++;
+    log(`[gpu] ${what} failed: ${errText(x)}`);
+    if (failRun === LOST_AFTER) lost(`device gone: ${LOST_AFTER} times in a row the WebGPU calls failed`);
+  };
   const pump = () => {
     if (!alive || pumping) return;
     pumping = true;
@@ -275,12 +301,11 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
         const s = Atomics.load(I, cw + C.state), r = s & 3, e = (s >> 2) & 3;
         // a pending frame: its resources first, nothing recorded after it
         const limit = r && !e ? U[cw + C.frame + (r - 1) * (P.FRAME_BYTES >> 2) + F.rqEnd] : head;
-        enc.drain(limit);
+        try { enc.drain(limit); } catch (x) { failed('resource upload', x); break; }
         waiting(!!r && !e && inFlight >= maxInFlight);
         if (!r || e || inFlight >= maxInFlight) break;
         if (Atomics.compareExchange(I, cw + C.state, s, s | (r << 2)) !== s) continue;
-        try { encodeAndSubmit(r - 1); }
-        catch (x) { errors++; log(`[gpu] encode failed: ${(x as Error).stack ?? x}`); }
+        try { encodeAndSubmit(r - 1); failRun = 0; } catch (x) { failed('encode', x); }
         Atomics.store(I, cw + C.state, 0); Atomics.notify(I, cw + C.state);
       }
     } finally { pumping = false; }
@@ -368,8 +393,12 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
       const sn = enc.snapshot(ce, id);
       if (sn) { log(`[gpu] dump texture ${id}: ${sn.info}`); reads.push({ name: `${dumpName}_tex${id}`, rb: copyOut(ce, sn.tex) }); }
     }
+    // a texture the game waits for (gpu_web.c metal_read_texture), drawn by this very frame
+    const rbId = U[fw + F.rbId], rbTex = rbId ? enc.readable(ce, U[fw + F.rbTex]) : null;
+    const rbRead = rbTex ? copyOut(ce, rbTex) : null;
     device.queue.submit([ce.finish()]);
     enc.afterSubmit();
+    if (rbId) readForGame(rbId, rbRead, U[fw + F.rbDst], U[fw + F.rbPitch], U[fw + F.rbRows]);
     // quick chat's places over the cars in this very frame (GwMarks in its constants, from a module that writes them)
     if (opts.onMarks) {
       const k = (U[fw + F.k] + P.K_MARKS) >>> 2;
@@ -421,6 +450,26 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
     const buf = device.createBuffer({ size: bpr * t.height, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
     ce.copyTextureToBuffer({ texture: t }, { buffer: buf, bytesPerRow: bpr }, [t.width, t.height, 1]);
     return { buf, w: t.width, h: t.height, bpr };
+  };
+
+  // The game's lock buffer gets the texture's rows once the GPU has them, unless the game stopped waiting: it then
+  // cancelled the request in rbWant, and the buffer is not the page's to write any more.  The claim, the bytes and
+  // rbDone happen in one go.
+  const readForGame = (id: number, rb: Readback | null, dst: number, pitch: number, rows: number) => {
+    const answer = (px: ArrayBuffer | null) => {
+      const I = i32();
+      if (Atomics.compareExchange(I, cw + C.rbWant, id, id | P.RB_FLAG) !== id) return;
+      if (px && rb) {
+        const m = new Uint8Array(mem.buffer), n = Math.min(pitch, rb.w * 4);
+        for (let y = 0; y < Math.min(rows, rb.h); y++) m.set(new Uint8Array(px, y * rb.bpr, n), dst + y * pitch);
+      }
+      Atomics.store(I, cw + C.rbDone, px ? id : id | P.RB_FLAG);
+      Atomics.notify(I, cw + C.rbDone);
+    };
+    if (!rb) { log(`[gpu] texture read back for the game: not there`); answer(null); return; }
+    const job = rb.buf.mapAsync(GPUMapMode.READ).then(() => { answer(rb.buf.getMappedRange()); rb.buf.unmap(); },
+      x => { log(`[gpu] texture read back for the game failed: ${x}`); answer(null); }).finally(() => rb.buf.destroy());
+    pending.add(job); job.finally(() => pending.delete(job));
   };
 
   const linear = device.createSampler({ minFilter: 'linear', magFilter: 'linear' });
@@ -552,7 +601,7 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
       void Promise.allSettled([...pending]).then(() => pngWorker?.terminate());
       try { ctx.unconfigure(); } catch { /* already gone */ }
       device.removeEventListener('uncapturederror', onError);
-      device.destroy();
+      ownDestroy = true; device.destroy();
       log(`[gpu] renderer detached after ${frames} frames`);
     },
   };

@@ -3357,9 +3357,28 @@ int com_call(CPU *c, uint32_t magic){
                             stex, so, ss?MR32(ss+4):0, ss?MR32(ss+8):0,
                             dtex, doo, ds?MR32(ds+4):0, ds?MR32(ds+8):0); }
             }
+            /* A source rectangle (the cover shoot's picture, 0x5C3120: the
+             * middle of the screen) is in the screen the game believes it has
+             * (g_req_w x g_req_h), whose 640x480 menus res_pick shows in the
+             * middle of the back buffer, ws_ui_x/y of its size: one from the
+             * back buffer is mapped the same way.  The destination is whole. */
+            uint32_t srp = A(c,2);
+            int sr[4], *srq = NULL;
+            if (srp && mem_is_committed(srp+15)){
+                for (int k = 0; k < 4; k++) sr[k] = (int)MR32(srp + 4u*(uint32_t)k);
+                uint32_t so = (ss && mem_is_committed(ss+43)) ? MR32(ss+40) : 0;
+                if (so == 1u && g_req_w && g_req_h){
+                    float ux = ws_ui_x(), uy = ws_ui_y();
+                    for (int k = 0; k < 4; k += 2){
+                        sr[k]   = (int)lroundf((float)g_bb_w * (0.5f + ((float)sr[k]   / (float)g_req_w - 0.5f) * ux));
+                        sr[k+1] = (int)lroundf((float)g_bb_h * (0.5f + ((float)sr[k+1] / (float)g_req_h - 0.5f) * uy));
+                    }
+                }
+                srq = sr;
+            }
             if (metal_available() && (stex || dtex) && stex != dtex){
-                void metal_blit(unsigned,unsigned);
-                metal_blit(stex, dtex);
+                void metal_blit_rect(unsigned,unsigned,const int*);
+                metal_blit_rect(stex, dtex, srq);
             }
             r=0; }
         else if (MID(SetRenderTarget)){
@@ -3901,6 +3920,12 @@ int com_call(CPU *c, uint32_t magic){
                                             : (self + 32u + 4u*level)) : 0;
             uint32_t buf = slot ? MR32(slot) : 0;
             if(!buf){ buf = gbuf_alloc(pitch*rows + 64u); if(slot) MR32(slot)=buf; }
+            /* a render target the game made lockable (CreateRenderTarget):
+             * what the GPU drew there, the cover shoot's picture (gpu_web.c) */
+            if (iface==IF_SURF && self && MR32(self+40)==3u && MR32(self+28) && metal_available()){
+                int metal_read_texture(unsigned, void *, unsigned, unsigned);
+                metal_read_texture(MR32(self+28), g_mem+buf, pitch, rows);
+            }
             if(plr){ mem_commit(plr,8); MR32(plr)=pitch; MR32(plr+4)=buf; }
             r=0; }
         else if (MID(UnlockRect)){

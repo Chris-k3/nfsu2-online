@@ -48,8 +48,9 @@ server answers. The start page then says **Offline**, and the game runs from the
 it first. The movies are off for such a game unless every one of them is on the PC already. Free roam and Online
 need the server; your saves are in the browser either way.
 
-**Phones and tablets** (Chrome on Android): a tap is a click, so the game's menus work by touch, and two fingers
-dragged sideways turn the car in the garage. The ☰ button opens the page menu. On a phone the game goes full screen
+**Phones and tablets** (Chrome on Android): a tap is a click, so the game's menus work by touch, two fingers
+dragged sideways turn the car in the garage, and a finger dragged up or down on a column of the ECU or Turbo tuning
+graph moves its dot. The ☰ button opens the page menu. On a phone the game goes full screen
 when you press Play and renders at 75% resolution scale (Settings, Display changes both). After a few minutes of driving the page checks whether the phone keeps its frame rate with GPU
 time to spare; if so, it renders at 100% from the next game on that phone (and goes back to 75% if it later falls
 behind). This only applies while you leave the resolution scale at its default. Held sideways, the game fills the screen with the touch controls over it; held upright, it shows
@@ -82,6 +83,7 @@ rev in the countdown) and step aside for menus, the pause menu and free roam's c
 | R | Respawn |
 | H, J | Hydraulics, with the Hydraulics part (Car Specialties): hold H to pressurize or J to bounce, then the arrows pick the corners; under 10 mph |
 | N | Horn (free roam and races with other players) |
+| X | Drift mode in free roam: drift handling, the drift camera and a drift score (see below) |
 | 1 to 4, then 1 to 4 | Quick chat in free roam with other players: a group, then a phrase (see section 6) |
 | M, Tab | Map, messages |
 | Esc or P | Pause; Esc also goes back in menus |
@@ -94,8 +96,15 @@ rev in the countdown) and step aside for menus, the pause menu and free roam's c
 The start page shows these keys under **Controls**, and F9, Controls shows them while you play.
 
 - **Change the keys:** in the game, Options, Controls. The horn stays on N (the game has no horn of its own).
+- **Drift mode (X):** in free roam, the car handles as in the game's drift races (its drift tuning and the drift
+  assist), the camera is the drift races' (C still goes through all of them), and drifts score as there: the drift
+  races' panel (Best, the multiplier with the points its next level needs, Total) shows under Bank, and DRIFT with
+  the points of each drift. Just for fun: the points never go into the bank or the career. X again turns it off and
+  gives your camera back. It is off in races and outruns and comes back in free roam after them.
 - **Mouse:** works in the menus; in the garage, drag with the middle button (the wheel) held to turn the car, as in
-  the PC game. **Touch:** a tap is a click there; drag two fingers to turn the car.
+  the PC game. On the ECU and Turbo tuning graphs the wheel moves the dot of the column under the pointer, as in the
+  PC game, and so does a drag up or down on that column. **Touch:** a tap is a click there; drag two fingers to turn
+  the car; drag one finger up or down on a tuning graph's column.
 - **Controller:** an Xbox or PlayStation pad works through the browser. The browser shows a pad to the page only
   after a button is pressed on it. The triggers are throttle and brake, the left stick steers, LB is nitrous, RB the
   handbrake, A and X shift, Y and B are camera and look back, View respawns, Start pauses; D-pad up starts an event
@@ -140,19 +149,23 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
 | Group | Settings |
 |---|---|
 | Online | its own section under Saves: how many play on this server now, free roam with others, your name (in free roam and online), crews (with their colours), your horn, room, ghost mode, the game's Online mode (on by default); more: the free-roam network |
-| Game | language, movies, autosave; more: startup movies (skippable, original or off), sound, pause or keep running in the background, sound output latency |
+| Game | language, movies, subtitles, autosave; more: startup movies (skippable, original or off), sound, pause or keep running in the background, sound output latency |
 | Display | full screen on Play (off: the game plays in the browser window; on by default on phones), resolution scale (phones start at 75%, 100% once one shows it has the room), frame rate (auto follows the screen: 120 on a 120 Hz display, 240 on a 240 Hz one; 30, 60, 120 or 240, where 30 keeps a phone that cannot hold 60 steady; Online and LAN races at most 120); more: menus and HUD (original or upscaled), HUD layout, movie framing, cutscene bars, other cars' headlights (players, all cars, off), frame-rate counter |
 | Controller | rumble; more: controller on or off, menu buttons, dead zones |
 
 - **Language:** English, French, German, Italian, Spanish, Dutch, Swedish, Danish, Korean, Chinese, Japanese, Russian,
-  Thai, Portuguese (Brazil) or Polish, for the menus and all the game's text, and the movies' subtitles in all but
-  English, French, German, Italian and Spanish. Where the server has the [language packs](VPS.md#languages), French, German, Italian, Spanish, Japanese and Russian also play with their dubbed voices and movies,
+  Thai, Portuguese (Brazil) or Polish, for the menus and all the game's text. Where the server has the [language packs](VPS.md#languages), French, German, Italian, Spanish, Japanese and Russian also play with their dubbed voices and movies,
   Chinese, Japanese and Thai with their full text, and Portuguese and Polish with their text at all (without the
   packs they play in English, with English voices). Your browser fetches only your language's files: the dubbed
   voices are about 50 MB (Russian 94 MB), and the dubbed movies are smaller than the English ones they replace.
   The start page follows the same choice (the list at its top sets it too): its text, settings and messages in
   that language, English until you pick another. Its problems and errors carry a short code (`GPU-ADAPTER-WIN`),
   the same in every language, to quote when you ask for help; the log stays English.
+- **Subtitles:** on by default: the movies' lines as text (the PSA, the tutorials and the story) in every language
+  but French, German, Italian and Spanish, whose movies are dubbed. English's are VileStuff's
+  [English Subtitles Fixed](https://nfsmods.xyz/mod/5286), with who says each line, where the server has its
+  [language pack](VPS.md#languages) (without it English has none: the game's own English lines stop at their first
+  apostrophe).
 - **Menus and HUD:** Original (the default) is the game's own. Upscaled shows LunicAura106's
   [Upscaled HUD](https://nfsmods.xyz/mod/4319) where the server has its [texture pack](VPS.md#texture-packs): the
   menus, the race HUD, the fonts and the car and brand logos redrawn at four times their size, sharp on a large
@@ -404,9 +417,12 @@ Good to know:
   their cars at any distance, with the distance past 100 m ("Sam (1.2 km)"), in front of other names, and their
   minimap arrows and world-map markers (with their names beside them) are in the crew's colour. You can be in up to 4
   crews; each has its own colour (cyan, magenta, violet, red unless you tap its dot to pick another), and the crew
-  list shows how many of each are in free roam now. Capitals and spaces don't count ("Blue Room" is "blueroom").
-  Everyone else is still there, unlike a Room. Not private: anyone who types the same name joins. A player on an
-  older version is in no crew.
+  list shows how many of each are in free roam now (in the page menu, you count too once you drive). A crew of more
+  than 64 players in one room is too big to pair first: they see each other only nearby, and the list says so (pick a
+  less common name). Capitals and spaces don't count ("Blue Room" is "blueroom"); a name that reads as a slur is no
+  crew. Everyone else is still there, unlike a Room. Not private: anyone who types the same name joins, but other
+  players never learn your crews: the server tells each game which players near it share one. A player on an older
+  version is in no crew.
 - **Rooms:** set the same "Room" to see only some of the players' cars. A room is a filter between players, not
   privacy: every browser on the server still sees your name ("Your name", or the profile name), whether you are in
   the menus or driving, and the room, and someone with their own tools could join it. Play on a server only with
@@ -508,7 +524,8 @@ Good to know:
 | `GPU-ADAPTER`, `GPU-ADAPTER-FIREFOX` | The browser would not use the graphics. Restart it; update the graphics driver (on a Mac: macOS) and the browser. `chrome://gpu` in Chrome, about:support (Graphics) in Firefox says why. In Firefox on Windows, graphics without Direct3D 12 cannot run it either. |
 | `GPU-NO-BC`: a note about packed textures | Nothing to do: the game plays. This GPU (in many phones, Pixels among them) cannot read the game's compressed textures, so the page unpacks them as the game loads: about 200 MB more memory, and loading screens may pause for a moment. |
 | `GPU-INTEGRATED-FIREFOX`: "Graphics: Intel (integrated)" (or AMD) in Firefox on Windows | Firefox runs the game on the graphics it draws its own windows with, whatever the game asks for. If the computer also has a graphics card, as many laptops do, give Firefox the card: Windows Settings, System, Display, Graphics, Firefox, High performance; then quit Firefox completely and start it again. On a computer with integrated graphics only, nothing changes. Chrome does the same (its `chrome://gpu` names the graphics it uses): the same Windows setting for Chrome, or `chrome://flags/#force-high-performance-gpu`. |
-| `GPU-RENDERER`, `GPU-LOST`: "The game was stopped" | The graphics did not start, or stopped during the game (the graphics driver reset, or the browser's graphics process crashed): the game cannot go on without them. Restart the browser and press **Play**; if it happens again, update the graphics driver, and download the log (its `[gpu]` lines say why). |
+| `GPU-RENDERER`: "The game was stopped" | The graphics did not start: the game cannot go on without them. Restart the browser and press **Play**; if it happens again, update the graphics driver, and download the log (its `[gpu]` lines say why). |
+| `GPU-LOST`: "The game was stopped" | The graphics stopped during the game (the graphics driver reset, or the browser's graphics process crashed): the game cannot go on without them. Press **Play**: the page reloads, which starts the graphics again (Safari gives a page no graphics after that until it reloads), then **Play** starts the game. Your saves and settings stay; the log is cleared by the reload, so download it first if you want to keep it. If it keeps happening, restart the browser. |
 | "Game module" | The game did not load, or the server is not reachable. The page tries again by itself, or press **Retry**. If the module is missing, start the server with `web/start.sh`, which builds it. |
 | "A new version of the game is on the server" | Press **Reload** or **Play**: the page loads the new version, and your saves and settings stay. The log is cleared by the reload, so download it first if you want to keep it. Before any game the page reloads by itself; during a game it says so over the game, and the start page offers it when you quit. |
 | "Open elsewhere" | The game runs in another tab of this browser. Switch to it, or close it. |

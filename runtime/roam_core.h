@@ -21,9 +21,9 @@
 #include <stddef.h>
 
 #define RC_PROTO_VER     1          /* header byte 4; a different value is ignored */
-#define RC_CORE_VER      7          /* HELLO: implementation revision (2: lists of up to RC_MAX_PEERS; 3: RC_MSG_DUEL;
+#define RC_CORE_VER      8          /* HELLO: implementation revision (2: lists of up to RC_MAX_PEERS; 3: RC_MSG_DUEL;
                                        4: state extensions, RC_HF_STATEX; 5: race lobbies, RC_HF_LOBBY; 6: quick chat,
-                                       RC_HF_SAY; 7: crews, RC_HF_CREW) */
+                                       RC_HF_SAY; 7: crews, RC_HF_CREW; 8: crews from the hub, RC_HF_HUBCREW) */
 #define RC_MAGIC0        0x4E       /* "N2FR" */
 #define RC_MAGIC1        0x32
 #define RC_MAGIC2        0x46
@@ -172,13 +172,24 @@ enum { RC_PLAT_MAC = 1, RC_PLAT_WIN = 2, RC_PLAT_TOOL = 3 };
 /* header flags (HELLO): this player reads crews.  A HELLO with it may end,
  * after its ids, in its crews (the Crews setting): a count byte, at most
  * RC_CREW_MAX, then that many rc_room_hash values (u32, none 0); whatever a
- * newer core adds after them is skipped.  The crews go only to the hub and
- * to a peer whose HELLO carries the flag (an older core counts the longer
- * HELLO as bad), never in the beacon.  Players who share a crew are linked
- * first by the hub, wherever they are, and see each other in the crew's
- * colour (roam_game.c) */
+ * newer core adds after them is skipped.  The crews go to the hub; to a peer
+ * whose HELLO carries the flag (an older core counts the longer HELLO as
+ * bad) only without a hub (a LAN of its own), and never in the beacon.
+ * Players who share a crew are linked first by the hub, wherever they are,
+ * and see each other in the crew's colour (roam_game.c).
+ * On a PEERS from the hub the same flag says the list ends in crew marks
+ * (only to a player whose HELLO carries RC_HF_HUBCREW): after the entries, the
+ * receiver's own crews as the hub has them (a count byte, at most
+ * RC_CREW_MAX, then that many hashes, none 0), then a byte per entry, bit c
+ * set: that player is in crew c of those too; whatever a newer hub adds
+ * after them is skipped.  So with a hub no player ever learns another's
+ * crews: a crew's hash would be all a stranger near us needs to be linked
+ * with us anywhere on the map, and a short crew name is easy to find from it */
 #define RC_HF_CREW       0x0200
 #define RC_CREW_MAX      4
+/* header flags (HELLO, core 8 and up): this player reads the crew marks of
+ * the hub's PEERS (RC_HF_CREW above); a hub sends them to no other */
+#define RC_HF_HUBCREW    0x0400
 /* decoder results */
 enum { RC_OK = 0, RC_E_SHORT = -1, RC_E_MAGIC = -2, RC_E_VERSION = -3, RC_E_LENGTH = -4,
        RC_E_CRC = -5, RC_E_TYPE = -6, RC_E_FIELD = -7, RC_E_TRAIL = -8, RC_E_RANGE = -9 };
@@ -281,7 +292,8 @@ typedef struct {
         struct { uint16_t core_ver; uint8_t platform, status; uint16_t listen_port, cfg_rev;
                  uint32_t room; char name[RC_NAME_MAX + 1]; uint8_t n_seen; uint32_t seen[RC_MAX_PEERS];
                  uint8_t n_crews; uint32_t crews[RC_CREW_MAX]; } hello;   /* crews: with RC_HF_CREW only */
-        struct { uint8_t n; struct { uint32_t ip; uint16_t port; uint32_t id; } e[RC_MAX_PEERS]; } peers;
+        struct { uint8_t n; struct { uint32_t ip; uint16_t port; uint32_t id; } e[RC_MAX_PEERS];
+                 uint8_t n_mine; uint32_t mine[RC_CREW_MAX]; uint8_t crew[RC_MAX_PEERS]; } peers;   /* the crew marks: with RC_HF_CREW only */
         struct { uint8_t status, epoch; uint16_t cfg_rev; uint8_t n, clock; rc_state s[RC_SNAP_STATES]; } snap;
         struct { uint16_t cfg_rev; uint8_t frag, nfrag; uint16_t total, dlen; const uint8_t *data; } cfg;
         struct { uint16_t cfg_rev; uint8_t have_mask; } cfgreq;
@@ -449,7 +461,8 @@ typedef struct {
     uint8_t  statex;              /* its HELLO says it reads state extensions (RC_HF_STATEX) */
     uint8_t  say;                  /* its HELLO says it takes quick chat (RC_HF_SAY) */
     uint8_t  reads_crews;          /* its HELLO says it reads crews (RC_HF_CREW) */
-    uint8_t  n_crews;  uint32_t crews[RC_CREW_MAX];   /* its crews, as its last HELLO had them */
+    uint8_t  n_crews;  uint32_t crews[RC_CREW_MAX];   /* its crews, as its last HELLO had them (an older core's, or no hub) */
+    uint8_t  n_hub_crews; uint32_t hub_crews[RC_CREW_MAX];   /* our crews it is in too, as the hub's last list naming it said */
     uint16_t cfg_rev_seen;         /* what the peer announces */
     int      hears_us, lost;
     int      hears_miss;           /* with the hub: one HELLO without our id forgiven (hub mode only) */
@@ -545,10 +558,12 @@ int  rc_established(const rc_session *s);
 /* peer i is on the hub's last list (or there is no hub): a peer left out goes within T_HUB_GRACE, and the game gives
  * its car's slot to one the hub lists */
 int  rc_peer_listed(const rc_session *s, int i);
-/* the first of our crews (conf.crews) that peer i is in too: 0 .. n_crews - 1, or -1 */
+/* the first of our crews (conf.crews) that peer i is in too: 0 .. n_crews - 1, or -1 (as the hub's list marks it,
+ * or as its HELLO names its crews: an older core's, or without a hub) */
 int  rc_peer_crew(const rc_session *s, int i);
 /* our crews changed while the session runs: at most RC_CREW_MAX, 0s and
- * repeats left out; the hub and the peers hear them at the next tick */
+ * repeats left out; the hub (or without one, the peers) hears them at the
+ * next tick */
 void rc_set_crews(rc_session *s, const uint32_t *crews, int n);
 /* a DUEL message to the established peer with id `to`, if its HELLO said it
  * takes them; 1 when sent */

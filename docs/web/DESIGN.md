@@ -137,8 +137,9 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
     the manifest: `/data-blocks/v2/`): runs of up to 8 blocks as one answer, compressed with zstd, br or gzip as
     Content-Encoding, which the browser undoes itself; a run whose first 64 KB does not compress goes as it is. One
     block (all the page asks for) goes to a client that takes br as the server keeps it: compressed once at brotli's
-    best in its state folder (`web/server-rs/src/app/kept.rs`, threads of its own at the lowest priority, the blocks
-    asked for first, then the manifest's), or as it is where that found it does not compress; until it is kept, as
+    best in its state folder (`web/server-rs/src/app/kept.rs`, threads of its own at the lowest priority that wait
+    while the CPU quota is 70 % used, the blocks asked for first, then the manifest's), or as it is where that found
+    it does not compress; until it is kept, as
     above, and Cloudflare keeps that answer 10 minutes only (`EDGE_WHILE`). `v2` since: Cloudflare's copies of the
     answers from before are at the old addresses, which still answer. The address carries the file's
     mtime and size (`m`, `s`), and the server lets a shared cache (Cloudflare) keep a run for good when they are the
@@ -204,8 +205,10 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
   (`Op.MovieDecode`), whose `VideoDecoder` (`optimizeForLatency`: otherwise Chrome and Firefox hold 2–3 frames back)
   writes the picture straight into a block of the VP6 decoder's layout in the game's memory (Y with a 48-pixel
   border, then U and V), and the player gets that block. Chrome gives I420 (copied in place); Firefox gives BGRX,
-  turned back into the YUV it came from by the frame's matrix. A frame takes 2 to 4 ms in Chrome and about 8 in Firefox (the
-  conversion), less than the lifted VP6 decoder took; one that brings no picture within 250 ms keeps the last one on screen. One log line a movie:
+  turned back into the YUV it came from by the frame's matrix; Safari, whose AV1 decoder is the Mac's or iPhone's
+  hardware (it says yes to the software preference too, and gives every picture at once), gives NV12, its UV split
+  into U and V. A frame takes 2 to 4 ms in Chrome, about 8 in Firefox (the conversion) and about 1 in Safari 27 on
+  an M4 Mac, less than the lifted VP6 decoder took; one that brings no picture within 250 ms keeps the last one on screen. One log line a movie:
   `[movie] AV1 768x512: N frames, 0 without a picture, decode … ms a frame (max …), 0 catch-ups`.
   `NFSU2_MOVIE_CODEC = vp6` (settings.ini, `&env=`) plays the VP6 files anyway; the page's session line says which.
   At crf 26 (cpu-used 4) every movie keeps a VMAF of 95 or more against its VP6 pictures, and the pictures the game
@@ -247,7 +250,10 @@ The game thread keeps `com.c` (D3D9 state, shader translation) and records throu
 - The TypeScript side (`web/src/gpu/`) reads those structures **zero-copy** from the wasm memory and uploads arenas with
   one `queue.writeBuffer` each per frame. It keeps pipeline and bind-group caches and encodes the passes. It presents to
   the canvas at native resolution, aspect-fit, and reads frames back for the tests' dumps and F12 screenshots (the
-  PNGs are made in a worker, `png-worker.ts`, off the thread that draws). When the game's device size is
+  PNGs are made in a worker, `png-worker.ts`, off the thread that draws). The one readback the game waits for: a
+  render target it locks to read, the picture of a DVD or magazine cover. The frame drawn so far goes to the page
+  early with the request, and the page writes the texture's rows into the game's lock buffer
+  (`gpu_web.c` `metal_read_texture`). When the game's device size is
   the canvas's (the usual case) the frame draws its screen straight into the canvas texture: no back buffer and no
   composite pass. A frame that copies from the screen before drawing to it keeps the back buffer (it reads the
   previous frame); none of the checked scenes did. `?direct=0` on the test page turns the direct path off.

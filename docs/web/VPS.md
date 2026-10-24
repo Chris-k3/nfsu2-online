@@ -202,7 +202,12 @@ compose file's limit), 40 GB of disk and a 1 Gbit/s port with a few TB of traffi
   in 1.28 GB instead of the 1.39 GB of compressing as it is sent (the tracks 41 -> 33 % of their size, SPEED2.EXE
   50 -> 41 %, the voices 84 -> 79 %, the music 86 -> 84 %; the movies not at all), at no CPU per player. Two threads
   at the lowest priority make them after each start and each change of the game files (a manifest `?refresh`), the
-  blocks players ask for first: about half an hour for the whole folder (5600 blocks, 3100 that compress). Until a block is kept it goes out as before, compressed as it is sent, and
+  blocks players ask for first: about half an hour for the whole folder (5600 blocks, 3100 that compress). Their two
+  cores count against `nfsu2.slice`'s quota all the same, so they wait while the slice is 70 % used and go on below
+  55 % (`kept blocks: waiting while /nfsu2.slice uses ...`, then `going on`): on a busy evening the folder takes
+  longer, and free roam's busy cap never sees them. Without room (16 GB in `blocks/`, or less than 2 GB free on its
+  disk) they wait too, the room looked at again every minute. Until a block is kept it goes out as before, compressed
+  as it is sent, and
   Cloudflare keeps that answer 10 minutes only. The page asks at `/data-blocks/v2/` since, so Cloudflare's copies of
   the answers from before are not served for them (the Cache Rule covers both). `NFSU2_COMPRESS_THREADS` in the
   server's environment sets the threads (0: none, every block as before). The `[blocks]` line every 5 minutes counts
@@ -359,7 +364,8 @@ players the evening before.
 Every player picks the game's language in Settings. The North American game folder has the text of thirteen,
 but English voices and movies only, and short early versions of the Chinese, Japanese and Thai text. The rest comes
 from KyoriAsh's "Multi 13 languages" mod ([nfsmods.xyz/mod/5749](https://nfsmods.xyz/mod/5749)), for Brazilian
-Portuguese TraduMix's and MixMods' translation and for Polish PLProjekt's, as language packs: a `LANGPACKS` folder in
+Portuguese TraduMix's and MixMods' translation, for Polish PLProjekt's and for the English subtitles VileStuff's
+"English Subtitles Fixed" ([nfsmods.xyz/mod/5286](https://nfsmods.xyz/mod/5286)), as language packs: a `LANGPACKS` folder in
 the game folder, one folder per language, whose files a game in that language reads in place of the game folder's
 (`runtime/language.c`). The game folder itself stays as it is.
 
@@ -372,19 +378,24 @@ the game folder, one folder per language, whose files a game in that language re
    [portal24h.pl](https://www.portal24h.pl/spolszczenia-gier/spolszczenia-gier/mo/Need-For-Speed-Underground-2-(plprojekt)-1456/))
    and extract it into a third empty folder (`unrar x`). It holds two Windows installers; the tool reads either one's
    files and never runs it.
-4. `tools/langpacks.py "<your game folder>" --multi13 "<the mod's folder>" --ptbr "<the translation's folder>"
-   --pl "<the Polish folder>"` builds `LANGPACKS` (1.6 GB) and prints what each language got: the dubbed voices and
-   movies of French, German, Italian, Spanish, Japanese and Russian, the full Chinese, Japanese and Thai text with
-   their fonts, Russian, Portuguese and Polish in English's place (Polish with its fonts), and the Danish, Dutch and
-   Swedish EA logos. Korean needs nothing. Any source can be left out: the others' packs stay as they are.
-5. Copy it like the rest, from inside the game folder:
+4. Download the English subtitles (`English Subtitles Fixed (v1.0).7z`) and extract it into a fourth empty folder
+   (`7z x`; `bsdtar` and Windows' `tar` read it too). The tool reads its Binary script; neither Binary nor the
+   Extra Options mod it asks for is needed.
+5. `tools/langpacks.py "<your game folder>" --multi13 "<the mod's folder>" --ptbr "<the translation's folder>"
+   --pl "<the Polish folder>" --subs "<the subtitles' folder>"` builds `LANGPACKS` (1.6 GB) and prints what each
+   language got: the dubbed voices and movies of French, German, Italian, Spanish, Japanese and Russian, the full
+   Chinese, Japanese and Thai text with their fonts, Russian, Portuguese and Polish in English's place (Polish with
+   its fonts), the Danish, Dutch and Swedish EA logos, and English's text with the movies' lines whole (0.3 MB).
+   Korean needs nothing. Any source can be left out: the others' packs stay as they are.
+6. Copy it like the rest, from inside the game folder:
    `rsync -rlt LANGPACKS root@<vps>:/srv/nfsu2/game/`, then the same `chmod`.
 
 A player's browser fetches only their own language's pack: "Preload the game data" adds about 50 MB of dubbed
 voices (Russian 94 MB), and the dubbed movies (206 MB in all) stream in place of the English ones (725 MB). Without
 `LANGPACKS` every language but Russian, Portuguese and Polish still plays its text, with English voices and movies;
-those three play in English. All but English, French, German, Italian and Spanish (whose texts leave the lines their
-dubs speak empty) show the movies' subtitles; the North American game shows none.
+those three play in English. All but French, German, Italian and Spanish (whose texts leave the lines their dubs
+speak empty) show the movies' subtitles (Settings, Game, Subtitles, on by default), English only with its pack: the
+game folder's English lines stop at their first apostrophe ("But if you"). The North American game shows none.
 
 ## Texture packs
 
@@ -434,10 +445,11 @@ have (the cache names a file by its size and time) until the player deletes the 
 ## Movies in AV1
 
 The game's movies are VP6 at 5 to 12 Mbit/s, the most a player downloads after the game data. Browsers that decode
-AV1 themselves (Chrome, Edge and Firefox, on computers and phones) can play them as AV1 instead, at about a fifth of
-the size and looking the same: a copy of each movie in an `AV1` folder next to it (`MOVIES/AV1`,
-`LANGPACKS/<language>/MOVIES/AV1`), which the page opens in its place (`runtime/movie.c`). Safari, and any browser
-without it, keeps playing the VP6 movies, so the game folder keeps them too.
+AV1 (Chrome, Edge and Firefox, on computers and phones; Safari on the Macs and iPhones that decode it in hardware, M3
+and iPhone 15 Pro on) can play them as AV1 instead, at about a fifth of the size and looking the same: a copy of each
+movie in an `AV1` folder next to it (`MOVIES/AV1`, `LANGPACKS/<language>/MOVIES/AV1`), which the page opens in its
+place (`runtime/movie.c`). Safari on older Macs and iPhones, and any browser without AV1, keeps playing the VP6
+movies, so the game folder keeps them too.
 
 1. `sudo apt install ffmpeg` (the encoder is its libaom), then from the repository:
    `tools/movies_av1.py "<your game folder>" <out>`. The AV1 files land in `<out>`, at their places in the game

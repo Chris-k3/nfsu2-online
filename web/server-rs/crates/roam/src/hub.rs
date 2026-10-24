@@ -133,6 +133,9 @@ struct Player {
     /// its crews as its last HELLO named them (wire::HF_CREW), each once, 0 after them: its crew-mates of its room are
     /// linked with it first (`crew_pairs`), and /players counts them (`crew_counts`)
     crews: [u32; wire::CREWS],
+    /// its HELLO says it reads the crew marks of our lists (wire::HF_HUBCREW): its lists end in them while it is in
+    /// a crew (`lists`)
+    marks: bool,
     /// the race lobby it hosts, as its last advert to the hub had it, and when that came
     lobby: Option<(HubLobby, f64)>,
     /// the lobby it asked to join (its id), and when
@@ -287,6 +290,8 @@ struct Scratch {
     ccount: Vec<u32>,
     /// each place's links made first, the lobbies' and the crews' (the first of its new links: `link_every_pair`)
     npre: Vec<u32>,
+    /// a list's crew marks, one a link (`lists`)
+    marks: Vec<u8>,
     /// a large room's links of the last tick, sorted (`link_many`)
     olds: Vec<Cand>,
     /// each place's links of the last tick as places in the room: `olinks[ostart[i]..ostart[i + 1]]`
@@ -545,6 +550,7 @@ impl Hub {
                     seen: 0.0,
                     lobbies: false,
                     crews: [0; wire::CREWS],
+                    marks: false,
                     lobby: None,
                     join: None,
                     reported: None,
@@ -563,7 +569,7 @@ impl Hub {
         // (in a crew before this HELLO, and after it)
         let mut crewed = None;
         match m {
-            Msg::Hello { sender, core, status, room, name, lobbies, crews } => {
+            Msg::Hello { sender, core, status, room, name, lobbies, marks, crews } => {
                 // another start of the game on the same endpoint
                 if p.id != sender {
                     p.links.clear();
@@ -577,6 +583,7 @@ impl Hub {
                 }
                 p.degree = if core >= 2 { degree } else { degree.min(DEGREE_V1) };
                 p.lobbies = lobbies;
+                p.marks = marks;
                 let was = p.crews[0] != 0;
                 p.crews = distinct(crews);
                 crewed = Some((was, p.crews[0] != 0));
@@ -781,7 +788,18 @@ impl Hub {
         for &slot in &self.order {
             let Some(Some(p)) = self.slots.get(slot as usize) else { continue };
             let links = &s.fresh[slot as usize];
-            let n = F_DATA + wire::peers_len(links.len());
+            let slots = &self.slots;
+            // its crews and, a link each, which of them that player is in too: only to a player that reads them and
+            // is in a crew (so no crews but its own go out)
+            let mine = if p.marks && self.crewed > 0 { &p.crews[..crews_of(p).count()] } else { &[][..] };
+            s.marks.clear();
+            if !mine.is_empty() {
+                s.marks.extend(links.iter().map(|l| match slots.get(l.slot as usize) {
+                    Some(Some(q)) => mine.iter().enumerate().fold(0u8, |m, (c, h)| m | (q.crews.contains(h) as u8) << c),
+                    _ => 0,
+                }));
+            }
+            let n = F_DATA + if mine.is_empty() { wire::peers_len(links.len()) } else { wire::peers_crew_len(links.len(), mine.len()) };
             if s.buf.capacity() < n {
                 s.buf = BytesMut::with_capacity(LIST_BLOCK.max(n));
             }
@@ -792,12 +810,11 @@ impl Hub {
             buf[8..12].copy_from_slice(&p.vip.to_be_bytes());
             buf[12..14].copy_from_slice(&p.hub_port.to_be_bytes());
             buf[14..16].copy_from_slice(&p.port.to_be_bytes());
-            let slots = &self.slots;
             let list = links.iter().map(|l| match slots.get(l.slot as usize) {
                 Some(Some(q)) => PeerEntry { vip: q.vip, port: q.port, id: q.id },
                 _ => PeerEntry { vip: 0, port: 0, id: 0 },
             });
-            wire::write_peers(&mut buf[F_DATA..], self.id, self.seq, list);
+            wire::write_peers(&mut buf[F_DATA..], self.id, self.seq, list, mine, &s.marks);
             self.seq = self.seq.wrapping_add(1);
             if (self.send)(p.vip, buf.split().freeze()) {
                 self.st.lists += 1;

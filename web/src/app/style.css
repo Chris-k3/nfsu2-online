@@ -281,16 +281,16 @@ kbd .glyph { display: inline-block; width: 14px; height: 14px; vertical-align: -
   color: var(--muted); font-size: 14px; line-height: 20px; text-decoration: underline; text-underline-offset: 4px;
 }
 .text-btn:hover:not(:disabled) { color: var(--lime); }
-/* the crews (settings-ui.ts crewControl): the row's label and help, and under them across the row a line of chips that
- * wraps, one per crew: its colour in the game (the dot, which opens the palette), its name (cut short with "…", the
- * whole of it in the chip's tooltip), how many are in free roam in it and Leave; under them the palette when open,
- * a value box with Join in it, and why a name cannot join; Reset under it all */
+/* the crews (settings-ui.ts crewControl): the row's label and help, and under them across the row one line of pills
+ * that wraps: a chip per crew, its colour in the game (the dot, which opens the palette), its name (cut short with
+ * "…", the whole of it in the chip's tooltip), how many are in free roam in it and Leave; then a value box with Join
+ * in it, a pill too.  Under the line the palette when open, and why a name cannot join.  No Reset: each chip's x */
 .set-list { grid-template-columns: minmax(0, 1fr); grid-template-areas: "label" "help" "ctl"; }
 /* one line (not the phone's wrap): a wrapping column stretches to its widest item, and a long name would widen the page */
 .set-list .set-control { flex-direction: column; flex-wrap: nowrap; align-items: stretch; justify-content: flex-start; margin-top: 8px; }
-.set-list .set-control > .text-btn { order: 1; align-self: flex-start; }
-.crews { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
-.crews:empty { display: none; }
+.crew-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* (its chips are pills of the line, the box after the last of them) */
+.crews { display: contents; list-style: none; }
 .crew {
   display: flex; align-items: center; gap: 4px; height: 40px; max-width: 100%; padding: 4px;
   border-radius: 20px; background: var(--field);
@@ -319,12 +319,12 @@ kbd .glyph { display: inline-block; width: 14px; height: 14px; vertical-align: -
 /* words for a screen reader only (a crew's count in full) */
 .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .crew-add {
-  display: flex; align-items: center; height: 40px; max-width: 360px; padding-right: 2px;
-  border: 2px solid var(--edge); border-radius: 8px; background: var(--field);
+  display: flex; align-items: center; flex: 0 1 240px; max-width: 100%; height: 40px; padding-right: 2px;
+  border: 2px solid var(--edge); border-radius: 20px; background: var(--field);
 }
 .crew-add:focus-within { border-color: var(--lime); box-shadow: 0 0 12px var(--lime-glow); }
 .set .crew-add input[type="text"], .dlg .crew-add input[type="text"] {
-  flex: 1; min-width: 0; width: auto; height: 100%; padding: 0 10px; border: 0; background: none; outline: none; box-shadow: none;
+  flex: 1; min-width: 0; width: auto; height: 100%; padding: 0 8px 0 16px; border: 0; background: none; outline: none; box-shadow: none;
 }
 .crew-add:has(input:disabled) { opacity: 0.5; }
 .crew-add input:disabled { cursor: not-allowed; }
@@ -609,6 +609,38 @@ html:has(> body > .stage:not([hidden])) { overflow: hidden; }
 .notices div { animation: notice-fade 5s linear both; }
 .notices b { font-weight: 700; color: rgba(200, 240, 136, 0.9); }    /* --lime */
 @keyframes notice-fade { 0% { opacity: 0; } 4%, 84% { opacity: 1; } 100% { opacity: 0; } }
+/* free roam's drift mode (drift.ts): the drift event's panel (HUD_Drift: Best, the multiplier and the points its next
+ * level needs, Total) under the game's Bank panel and as wide, sized with the HUD (--u, one HUD unit), its rows, type
+ * and colours as the drift event's: grey labels with their letters apart, the best in lime, the multiplier in big
+ * green italics, its points in amber, Total in green */
+.drift-panel {
+  --u: 1px;
+  position: absolute; z-index: 2; width: calc(176 * var(--u)); pointer-events: none;
+  display: flex; flex-direction: column; gap: calc(1 * var(--u));
+  font: 400 calc(11 * var(--u)) / 1 var(--font); letter-spacing: 0.08em; color: #bdbdbd; white-space: nowrap;
+}
+.drift-panel > div {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: calc(7 * var(--u)) calc(8 * var(--u)); background: rgba(0, 0, 0, 0.55);
+}
+.drift-panel > div:first-child { border-radius: calc(5 * var(--u)) calc(5 * var(--u)) 0 0; }
+.drift-panel > div:last-child { border-radius: 0 0 calc(5 * var(--u)) calc(5 * var(--u)); }
+.drift-panel b { font-weight: 400; letter-spacing: 0; color: var(--lime); font-variant-numeric: tabular-nums; }
+.drift-x { font: italic 700 calc(24 * var(--u)) / 1 var(--font); letter-spacing: 0; color: #30cd30; }
+.drift-gain { display: flex; flex-direction: column; align-items: flex-end; gap: calc(5 * var(--u)); }
+.drift-gain b { color: #d8a020; }
+.drift-total, .drift-total b { color: #30cd30; }
+/* a drift banked (drift.ts): the drift event's DRIFT popup, in lime, the label over the points in big italics, where
+ * free roam's HUD shows its own popups (right-aligned there: its left is that edge), fading out after 2 s */
+.drift-pop {
+  --u: 1px;
+  position: absolute; z-index: 2; translate: -100% 0; pointer-events: none;
+  display: flex; flex-direction: column; align-items: flex-end; gap: calc(3 * var(--u));
+  color: var(--lime); white-space: nowrap; animation: drift-pop 2.4s linear both;
+}
+.drift-pop span { font: 400 calc(13 * var(--u)) / 1 var(--font); letter-spacing: 0.08em; }
+.drift-pop b { font: italic 700 calc(26 * var(--u)) / 1 var(--font); }
+@keyframes drift-pop { 0% { opacity: 0; } 6%, 80% { opacity: 1; } 100% { opacity: 0; } }
 /* quick chat's lines in the log (shell.ts chatLine): a speech balloon first, upright and brighter than the notices,
  * as big as the race lobby card's text, for 8 s */
 .notices div.chat {
@@ -752,7 +784,6 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.64); }
 #menu-save:empty { display: none; }
 /* the menu's Crews popup (a game in free roam): the Crews row's control under the help, Done under it */
 .crews-pop-box { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
-.crews-pop-box .crew-add { max-width: none; }
 .dlg ul.crews { margin: 0; padding: 0; color: inherit; font-size: inherit; line-height: inherit; }
 .dlg p.set-note { margin: 0; }
 

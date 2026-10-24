@@ -1008,6 +1008,49 @@ void sub_00631e20(CPU *c){
     }
 }
 
+/* --- sub_00639f20(texture set): a ride's textures let go, thiscall, ret 4 --
+ * The car loader keeps a reference for each texture on a loaded ride's list
+ * (its texture set, entry +0xCF0: the list +0x31C, the count +0x318) on the
+ * texture's name record (the word at +0xC), and a texture is unloaded when
+ * its count gets to 0.  This gives back the set's references, unloads the
+ * textures that are then at 0 (0x637C10, 0x490150), and only then empties the
+ * list and returns 1; when none got to 0 (each texture is on another ride's
+ * list too: a car type shown twice) it returns 0 with the references given
+ * back and the list as it was.  The purge (0x63A1B0 with phase 1: a load step
+ * found no room in the Cars pool, 0x63AD97 and others) calls it for each ride
+ * it holds, the ones on cars too, until one returns 1, and has the render
+ * infos of that car type made again (0x5F4650).  The rides before it kept
+ * their lists without references: their textures were unloaded when the
+ * other ride went (Unload 0x63AE00 frees a ride nobody uses at once), with
+ * the car still showing its ride, whose render info then drew with freed
+ * textures -- its shadow (+0x33C, from 0x638827; 0x620AE0 -> 0x5CEA30) or a
+ * part's (0x5C5930): "memory access out of bounds" in free roam with friends'
+ * cars coming and going (the 2026-10-24 reports) -- and when the ride itself
+ * went, its list gave the references back a second time.  Here a purge's call
+ * that unloaded nothing takes them again; a ride's own unload (0x639FB0) lets
+ * them go as before.  NFSU2_TEST_TEXREFS_DROP=1 (test aid): the game's way. */
+#define PURGE_RET       0x0063a223u   /* the purge's call (phase 1) returns here */
+#define TS_COUNT        0x318u
+#define TS_NAMES        0x31cu
+void sub_00639f20_orig(CPU *c);
+void sub_00639f20(CPU *c){
+    static int drop = -1; static long kept;
+    if (drop < 0){ const char *e = getenv("NFSU2_TEST_TEXREFS_DROP"); drop = e && *e == '1'; }
+    uint32_t ret = MR32(c->esp), ts = MR32(c->esp + 4u);
+    sub_00639f20_orig(c);
+    if (c->eax || ret != PURGE_RET || !ts || drop) return;
+    uint32_t n = MR32(ts + TS_COUNT);
+    if (n > TEXLIST_MAX) n = TEXLIST_MAX;
+    if (!n) return;
+    for (uint32_t i = 0; i < n; i++){
+        uint32_t r = MR32(ts + TS_NAMES + 4u * i);
+        if (r) MR16(r + 0xcu) = (uint16_t)(MR16(r + 0xcu) + 1u);
+    }
+    if (++kept == 1 || kept == 10 || kept == 100 || kept % 1000 == 0)
+        fprintf(stderr, "[textures] f=%ld the car loader's purge gave back a ride's %u texture references and unloaded none: "
+                "taken again (%ld times)\n", autotest_frame(), n, kept);
+}
+
 /* --- a car's shadow outline: sub_0060cee0(points, n, comparator), cdecl ----
  * 0x60D000 projects a car's shadow mesh onto the ground and keeps the convex
  * hull, in two halves per car and frame: here the CRT qsort (0x75CC70) of the

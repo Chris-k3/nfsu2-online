@@ -64,6 +64,8 @@ pub fn dgram_flags(kind: u8, sender: u32, flags: u16, payload: &[u8]) -> Vec<u8>
 
 /// the HELLO flag of a player that reads crews (roam_core.h RC_HF_CREW)
 pub const HF_CREW: u16 = 0x0200;
+/// the HELLO flag of a player that reads the crew marks of the hub's lists (roam_core.h RC_HF_HUBCREW, core 8)
+pub const HF_HUBCREW: u16 = 0x0400;
 
 pub struct HelloOpts<'a> {
     pub room: u32,
@@ -75,11 +77,13 @@ pub struct HelloOpts<'a> {
     /// its crews: with them the HELLO has the crew flag and ends with them (a count, the hashes); None, a HELLO of
     /// before
     pub crews: Option<&'a [u32]>,
+    /// it reads the crew marks of the hub's lists (HF_HUBCREW, with HF_CREW), as a core of version 8 does
+    pub hubcrew: bool,
 }
 
 impl Default for HelloOpts<'_> {
     fn default() -> Self {
-        HelloOpts { room: 0, status: 2, name: b"p", seen: &[], cfg_rev: 3, core: 1, crews: None }
+        HelloOpts { room: 0, status: 2, name: b"p", seen: &[], cfg_rev: 3, core: 1, crews: None, hubcrew: false }
     }
 }
 
@@ -99,12 +103,13 @@ pub fn hello_with(sender: u32, o: &HelloOpts) -> Vec<u8> {
         let at = 14 + nl + 4 * i;
         p[at..at + 4].copy_from_slice(&s.to_le_bytes());
     }
-    let Some(crews) = o.crews else { return dgram(1, sender, &p) };
+    let hub = if o.hubcrew { HF_CREW | HF_HUBCREW } else { 0 };
+    let Some(crews) = o.crews else { return dgram_flags(1, sender, hub, &p) };
     p.push(crews.len() as u8);
     for c in crews {
         p.extend_from_slice(&c.to_le_bytes());
     }
-    dgram_flags(1, sender, HF_CREW, &p)
+    dgram_flags(1, sender, HF_CREW | hub, &p)
 }
 
 pub fn hello(sender: u32) -> Vec<u8> {
@@ -200,6 +205,20 @@ pub fn peers_of(f: &[u8]) -> Vec<PeerEntry> {
             }
         })
         .collect()
+}
+
+/// the crew marks a PEERS list in a frame of the hub's ends in (roam_core.h RC_HF_CREW on a PEERS): the receiver's
+/// crews and a mark an entry (bit c: in its crew c too); None for a list without them
+pub fn crew_marks(f: &[u8]) -> Option<(Vec<u32>, Vec<u8>)> {
+    let d = &f[16..];
+    if u16::from_le_bytes([d[14], d[15]]) & HF_CREW == 0 {
+        return None;
+    }
+    let n = d[16] as usize;
+    let o = 17 + 10 * n;
+    let k = d[o] as usize;
+    let mine = (0..k).map(|c| u32::from_le_bytes(d[o + 1 + 4 * c..o + 5 + 4 * c].try_into().unwrap())).collect();
+    Some((mine, d[o + 1 + 4 * k..o + 1 + 4 * k + n].to_vec()))
 }
 
 /// the PEERS lists out of the hub's frames to the browsers, by `vip:port`

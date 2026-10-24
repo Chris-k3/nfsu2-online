@@ -20,8 +20,8 @@
 #include <stddef.h>
 
 #define GW_MAGIC   0x55504757u          /* "WGPU" */
-#define GW_VERSION 4u                   /* 2: the headlights block in the K arena (GwHL); 3: K blocks 16-byte aligned, bound in windows;
-                                           4: GwDraw.clip */
+#define GW_VERSION 5u                   /* 2: the headlights block in the K arena (GwHL); 3: K blocks 16-byte aligned, bound in windows;
+                                           4: GwDraw.clip; 5: GW_BLIT's source rectangle, a texture read back (GwFrame.rb_*) */
 #define GW_NBUF    2                    /* record buffers: one being written, one handed off */
 
 /* GwDraw.kind */
@@ -29,8 +29,9 @@ enum { GW_DRAW = 0, GW_CLEAR = 1, GW_BLIT = 2 };
 
 /* One record.  Fields as in metal.m's MDraw, minus the HD-only ones (c0, gh). */
 typedef struct {
-    uint32_t first;       /* TVert path: first vertex in the TVert arena */
-    uint32_t count;       /* vertices (TVert/raw) or indices (indexed); a multiple of 3 */
+    uint32_t first;       /* TVert path: first vertex in the TVert arena; GW_BLIT: source rectangle left | top << 16 */
+    uint32_t count;       /* vertices (TVert/raw) or indices (indexed); a multiple of 3;
+                           * GW_BLIT: source rectangle right | bottom << 16 (pixels), 0 = the whole source */
     uint32_t tex;         /* stage-0 texture id (0 = white) */
     uint32_t target;      /* render target: texid | (cube face + 1) << 16; 0 = back buffer */
     uint32_t kind;        /* GW_DRAW, GW_CLEAR, GW_BLIT */
@@ -75,6 +76,11 @@ typedef struct {
     uint32_t dump;        /* nonzero: read this frame back (autotest "dump") */
     int32_t  dump_frame;  /* guest frame number for the file name */
     char     dump_label[64];
+    /* rb_id nonzero: after this frame, texture rb_tex's level 0 goes to the
+     * game, rb_rows rows of rb_pitch bytes at wasm address rb_dst (BGRA, as
+     * D3DFMT_A8R8G8B8 is in memory).  The game waits in LockRect for it
+     * (GwCtl.rb_want / rb_done); gpu_web.c metal_read_texture. */
+    uint32_t rb_id, rb_tex, rb_dst, rb_pitch, rb_rows;
 } GwFrame;
 
 /* GwCtl.state: the handoff word.  bits 0-1 ready buffer + 1 (0 = none),
@@ -112,9 +118,17 @@ typedef struct {
     uint32_t st_errors;   /* page: WebGPU validation errors seen */
     uint32_t dumps_done;  /* page: frame dumps written */
     uint32_t st_pipelines;/* page: pipelines created */
-    uint32_t pad[2];
+    /* a texture read back (GwFrame.rb_*): rb_want is the request the game
+     * waits for; the page claims it with a CAS to rb_id | GW_RB_FLAG before it
+     * writes rb_dst (the game cancels with a CAS to 0 when it stops waiting:
+     * the lock buffer is not the page's to write then), then stores rb_done =
+     * rb_id once the bytes are there, rb_id | GW_RB_FLAG when it could not
+     * read the texture, and notifies */
+    int32_t  rb_want, rb_done;
     GwFrame  frame[GW_NBUF];
 } GwCtl;
+
+#define GW_RB_FLAG 0x80000000u
 
 #define GW_FEAT_BC       1u   /* texture-compression-bc */
 #define GW_FEAT_SWIZZLE  2u   /* texture-component-swizzle */
@@ -191,12 +205,14 @@ _Static_assert(offsetof(GwDraw, cull) == 104 && offsetof(GwDraw, fogv) == 108 &&
 _Static_assert(offsetof(GwDraw, clr_flags) == 128 && offsetof(GwDraw, clr_z) == 132 && offsetof(GwDraw, ksz) == 136, "GwDraw f");
 _Static_assert(offsetof(GwDraw, ix_isz) == 140 && offsetof(GwDraw, ix_ib) == 144 && offsetof(GwDraw, ix_base) == 148, "GwDraw g");
 _Static_assert(offsetof(GwDraw, clip) == 152, "GwDraw h");
-_Static_assert(sizeof(GwFrame) == 136 && offsetof(GwFrame, rq_end) == 44 && offsetof(GwFrame, dump_label) == 72, "GwFrame");
+_Static_assert(sizeof(GwFrame) == 156 && offsetof(GwFrame, rq_end) == 44 && offsetof(GwFrame, dump_label) == 72, "GwFrame");
+_Static_assert(offsetof(GwFrame, rb_id) == 136 && offsetof(GwFrame, rb_rows) == 152, "GwFrame rb");
 _Static_assert(offsetof(GwCtl, state) == 16 && offsetof(GwCtl, bell) == 20 && offsetof(GwCtl, attached) == 24, "GwCtl a");
 _Static_assert(offsetof(GwCtl, rq_head) == 28 && offsetof(GwCtl, rq_tail) == 32 && offsetof(GwCtl, rq_ptr) == 36, "GwCtl b");
 _Static_assert(offsetof(GwCtl, frames_done) == 44 && offsetof(GwCtl, view_w) == 48 && offsetof(GwCtl, features) == 60, "GwCtl c");
 _Static_assert(offsetof(GwCtl, st_draws) == 64 && offsetof(GwCtl, st_pipelines) == 84 && offsetof(GwCtl, frame) == 96, "GwCtl d");
-_Static_assert(sizeof(GwCtl) == 96 + 2 * 136, "GwCtl");
+_Static_assert(offsetof(GwCtl, rb_want) == 88 && offsetof(GwCtl, rb_done) == 92, "GwCtl e");
+_Static_assert(sizeof(GwCtl) == 96 + 2 * 156, "GwCtl");
 _Static_assert(sizeof(GwVsync) == 32 && offsetof(GwVsync, ts_ms) == 8 && offsetof(GwVsync, hz) == 24, "GwVsync");
 _Static_assert(sizeof(GwCmd) == GW_CMD_HDR, "GwCmd");
 _Static_assert(sizeof(GwHLight) == 80 && sizeof(GwHL) == GW_HL_BYTES && offsetof(GwHL, l) == 16, "GwHL");

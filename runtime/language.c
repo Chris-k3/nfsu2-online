@@ -18,7 +18,8 @@
  * it, Russian, Portuguese, Polish) comes from LANGPACKS/<language> in the game
  * folder, built by tools/langpacks.py: fileio.c reads a file there in place of
  * the game folder's file of the same path.  A language without a pack plays
- * its text with English voices and movies.
+ * its text with English voices and movies.  English's own pack, if the server
+ * has one, is its text with the movies' lines whole (below).
  *
  * Two things the North American exe cannot do by itself, which the
  * multilingual mod's U2_ThaiSupport.asi patches into its code; here they are
@@ -41,9 +42,13 @@
  * language's texts) are shown by the game's region ([0x864f24], 0x570a30),
  * not by its language: in regions 2 and 5 for every language but English, in
  * 4 and 12 for all, and in this exe's own, 0, never.  language_hook() shows
- * them for a language whose text has the movies' lines: all but English and
- * the dubbed French, German, Italian and Spanish, whose texts leave the lines
- * their dubs speak empty (the game would still draw an empty line's bar). */
+ * them (NFSU2_SUBTITLES, on by default) for a language whose text has the
+ * movies' lines: not the dubbed French, German, Italian and Spanish, whose
+ * texts leave the lines their dubs speak empty (the game would still draw an
+ * empty line's bar), and English only with its pack: the game folder's
+ * English lines stop at their first apostrophe ("But if you").  The pack's
+ * are VileStuff's English Subtitles Fixed (tools/langpacks.py --subs): whole,
+ * and with who speaks them. */
 #include "cpu.h"
 #include "widescreen.h"           /* HOOK_SITE */
 #include <stdio.h>
@@ -82,6 +87,8 @@ static const struct lang { const char *key, *reg; uint32_t fonts; int thai; } LA
     { "polish",   "English", 0, 0 },
 };
 static const struct lang *g_lang = &LANGS[0];
+static int g_subtitles = 1;       /* NFSU2_SUBTITLES */
+static int g_english_pack;        /* English's text is its pack's, with the movies' lines whole */
 static const uint32_t THAI_FONTS[4] = { 0x4815619du, 0xa87927beu, 0xa73823ffu, 0xbbba71c2u };
 
 const char *language_registry(void){ return g_lang->reg; }
@@ -114,13 +121,14 @@ int language_no_profile(const char *name){
 
 /* The subtitles' check, 0x50d350 (the front end's movies and InGamePlayMovie's
  * next one) and its copy in InGamePlayMovie's constructor: the last of its
- * region tests, "region == 12", made true for a language other than English
- * whose text has the movies' lines (the PSA's first, "Hi, I'm Brooke Burke"). */
+ * region tests, "region == 12", made true for a language whose text has the
+ * movies' lines (the PSA's first, "Hi, I'm Brooke Burke"), English only with
+ * its pack. */
 int language_hook(CPU *c, uint32_t ip){
     switch (ip){
     case HOOK_SITE(0x0050d388):           /* cmp eax, 0xc; sete al */
     case HOOK_SITE(0x00553a62): {         /* cmp eax, 0xc; jne (no subtitles) */
-        uint32_t s = g_lang != &LANGS[0] ? game_text(0x03812413u) : 0;
+        uint32_t s = g_subtitles && (g_lang != &LANGS[0] || g_english_pack) ? game_text(0x03812413u) : 0;
         if (s && mem_is_committed(s) && MR8(s)) c->eax = 0xc;
         return 1; }
     }
@@ -144,10 +152,16 @@ void language_install(void){
         if (i < n) g_lang = &LANGS[i];
         else fprintf(stderr, "language: \"%s\" is not one of the game's, English it is\n", e);
     }
-    if (g_lang == &LANGS[0]) return;
+    const char *v = getenv("NFSU2_SUBTITLES");
+    if (v && (v[0] == '0' || !strcasecmp(v, "off") || !strcasecmp(v, "no"))) g_subtitles = 0;
 
     char pack[64]; snprintf(pack, sizeof pack, "LANGPACKS/%s", g_lang->key);
     int files = fileio_set_language_pack(pack);
+    if (g_lang == &LANGS[0]){
+        g_english_pack = files > 0;
+        if (files) fprintf(stderr, "language: english, %s: the movies' subtitles%s\n", pack, g_subtitles ? "" : " (off)");
+        return;
+    }
     fprintf(stderr, "language: %s (registry \"%s\"), %s: %d file%s\n", g_lang->key, g_lang->reg,
             pack, files, files == 1 ? "" : "s");
     if (!g_lang->fonts) return;

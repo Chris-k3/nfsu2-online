@@ -6,13 +6,18 @@
 //! times the CPU: so never while a client waits.  A block not kept yet is answered as before and queued (blocks.rs).
 //! Threads of their own (NFSU2_COMPRESS_THREADS, 2 unless given; 0: none, the answers as before) at the lowest
 //! priority make what the answers queued first, then every block of each new manifest (a changed file is a new key),
-//! and remove what no file of the manifest has any more.
+//! and remove what no file of the manifest has any more.  The lowest priority only puts them behind the server's
+//! other threads on a core they share: under a CPU quota (nfsu2.slice's 14 cores, which the free-roam hub's busy cap
+//! reads too) their cores count all the same, 2 of 14 on top of a busy evening's 11.8.  So they wait while the
+//! quota is PAUSE_AT used and go on below RESUME_AT, and never take it to the cap's 85 % themselves.
 //!
 //! A kept block is a file named by a hash of the game file's real path, size, mtime and the block's number: its
 //! brotli stream, or nothing at all for a block that is sent as it is: brotli makes it no smaller, or zstd at its
-//! fastest makes it not even 0.5 % smaller (the movies' video: not worth brotli's time).  Written next to its place
-//! and renamed into it: a reader finds a whole one or none.  The folder stops growing at MAX_BYTES, or while the disk
-//! under it has less than MIN_FREE free; the answers then are as before.
+//! fastest makes it not even 0.5 % smaller (the movies' video: not worth brotli's time).  Written next to its place,
+//! on the disk before it is renamed into it: a reader finds a whole one or none, also after a power cut (Cloudflare
+//! would keep a cut-short stream for good).  The folder stops growing at MAX_BYTES, or while the disk under it has
+//! less than MIN_FREE free, looked at again every ROOM_EVERY then; the answers are as before meanwhile, and the
+//! queues wait.
 
 use std::collections::{HashSet, VecDeque};
 use std::io::{self, Write};
@@ -20,11 +25,12 @@ use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use parking_lot::{Condvar, Mutex};
 use sha2::{Digest, Sha256};
 
+use nfsu2_util::cpu::{QuotaBusy, QuotaUse};
 use nfsu2_util::log;
 
 use super::blocks::read_full_at;
@@ -41,6 +47,13 @@ const MIN_FREE: u64 = 2 << 30;
 const FIRST_MAX: usize = 20_000;
 /// a file being written that is this old is a crash's: the sweep removes it
 const STALE_TMP: Duration = Duration::from_secs(600);
+/// how often the room is looked at again while there is none (a full disk freed, an old image removed)
+const ROOM_EVERY: Duration = Duration::from_millis(if cfg!(test) { 50 } else { 60_000 });
+/// the CPU quota the server shares: the threads wait from this share of it used, and go on below RESUME_AT (the gap
+/// is their own 2 of 14 cores, so that their pause does not end it at once); read at most every PACE_EVERY
+const PAUSE_AT: f64 = 0.70;
+const RESUME_AT: f64 = 0.55;
+const PACE_EVERY: Duration = Duration::from_millis(if cfg!(test) { 50 } else { 5_000 });
 
 pub type Key = [u8; 16];
 
@@ -92,6 +105,14 @@ struct Queues {
     made: u64,
 }
 
+/// the CPU quota the server shares, as the threads read it (PAUSE_AT, RESUME_AT)
+struct Pace {
+    /// the fullest quota's use since the last call (QuotaBusy); None: no quota to read (no Linux, no cgroup v2)
+    sample: Option<Box<dyn FnMut() -> Option<QuotaUse> + Send>>,
+    at: Instant,
+    paused: bool,
+}
+
 pub struct KeptBlocks {
     dir: PathBuf,
     threads: usize,
@@ -99,8 +120,10 @@ pub struct KeptBlocks {
     cv: Condvar,
     /// the bytes the folder takes (counted by each sweep, then added to)
     bytes: AtomicU64,
-    /// whether there is room for more
+    /// whether there is room for more, and when that was looked at
     room: AtomicBool,
+    room_at: Mutex<Instant>,
+    pace: Mutex<Pace>,
     /// the sweeps started: an older one stops when a newer starts
     sweeps: AtomicU64,
     /// the manifest swept last (its ETag): the same manifest again is not swept again
@@ -119,6 +142,12 @@ impl KeptBlocks {
             cv: Condvar::new(),
             bytes: AtomicU64::new(0),
             room: AtomicBool::new(true),
+            room_at: Mutex::new(Instant::now()),
+            pace: Mutex::new(Pace {
+                sample: QuotaBusy::find().map(|mut q| Box::new(move || q.sample_use()) as Box<dyn FnMut() -> Option<QuotaUse> + Send>),
+                at: Instant::now(),
+                paused: false,
+            }),
             sweeps: AtomicU64::new(0),
             swept: Mutex::new(String::new()),
             tmp_n: AtomicU64::new(0),
@@ -149,9 +178,37 @@ impl KeptBlocks {
         }
     }
 
-    /// whether blocks are kept (false while the folder or the disk is full: the answers are as before then)
+    /// whether blocks are kept (false while the folder or the disk is full: the answers are as before then).  Without
+    /// room no block is made, so the room is looked at again here, every ROOM_EVERY: one look at a moment the disk
+    /// was short (an image pulled at a release) kept them off until a restart.
     pub fn keeping(&self) -> bool {
+        if !self.room.load(Ordering::Relaxed) && self.room_at.lock().elapsed() >= ROOM_EVERY {
+            self.check_room();
+        }
         self.room.load(Ordering::Relaxed)
+    }
+
+    /// whether the CPU quota the server shares is too full to compress now (PAUSE_AT, RESUME_AT), read at most every
+    /// PACE_EVERY; a change is told on the console
+    fn slice_full(&self) -> bool {
+        let mut p = self.pace.lock();
+        if p.at.elapsed() < PACE_EVERY {
+            return p.paused;
+        }
+        p.at = Instant::now();
+        let Some(u) = p.sample.as_mut().and_then(|f| f()) else { return p.paused };
+        let (was, share) = (p.paused, u.share());
+        p.paused = share >= if was { RESUME_AT } else { PAUSE_AT };
+        if p.paused != was {
+            log::line(&format!(
+                "kept blocks: {} while {} uses {:.0} % of its {} cores",
+                if p.paused { "waiting" } else { "going on" },
+                u.group,
+                share * 100.0,
+                u.cores
+            ));
+        }
+        p.paused
     }
 
     /// a block an answer did not find, to be made before the manifest's others
@@ -184,11 +241,16 @@ impl KeptBlocks {
             *s = etag.to_string();
         }
         let n = self.sweeps.fetch_add(1, Ordering::SeqCst) + 1;
-        let k = self.clone();
+        let (k, etag) = (self.clone(), etag.to_string());
         let _ = std::thread::Builder::new().name("nfsu2-kept-sweep".into()).spawn(move || {
             nfsu2_util::cpu::lower_this_thread(19);
             if let Err(e) = k.sweep_now(n, &paths, &locate) {
                 log::error(&format!("kept blocks: {}: {e}", k.dir.display()));
+                // not swept: the next look at the manifest (a ?refresh) sweeps it again
+                let mut s = k.swept.lock();
+                if *s == etag {
+                    s.clear();
+                }
             }
         });
     }
@@ -220,7 +282,13 @@ impl KeptBlocks {
             for e in std::fs::read_dir(&sub)? {
                 let e = e?;
                 let name = e.file_name().to_string_lossy().into_owned();
-                let md = e.metadata()?;
+                let md = match e.metadata() {
+                    Ok(md) => md,
+                    // gone since the folder was read: a block renamed into its place meanwhile (the threads work on
+                    // while a sweep runs), a file an older sweep removed
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
+                    Err(e) => return Err(e),
+                };
                 let old = md.modified().ok().and_then(|t| SystemTime::now().duration_since(t).ok()).is_some_and(|a| a > STALE_TMP);
                 if names.contains(&name) {
                     bytes += md.len();
@@ -262,6 +330,7 @@ impl KeptBlocks {
         });
         let ok = self.bytes.load(Ordering::Relaxed) < MAX_BYTES && free.is_none_or(|f| f >= MIN_FREE);
         self.room.store(ok, Ordering::Relaxed);
+        *self.room_at.lock() = Instant::now();
     }
 
     fn work(&self) {
@@ -269,6 +338,11 @@ impl KeptBlocks {
             let job = {
                 let mut q = self.q.lock();
                 loop {
+                    // no room, or the CPU quota nearly used: the queues wait as they are
+                    if (!q.first.is_empty() || !q.rest.is_empty()) && (!self.keeping() || self.slice_full()) {
+                        self.cv.wait_for(&mut q, PACE_EVERY.min(ROOM_EVERY));
+                        continue;
+                    }
                     if let Some(j) = q.first.pop_front() {
                         q.in_first.remove(&j.key);
                         break j;
@@ -290,7 +364,7 @@ impl KeptBlocks {
                     self.cv.wait(&mut q);
                 }
             };
-            if !self.keeping() || self.path(&job.key).exists() {
+            if self.path(&job.key).exists() {
                 continue;
             }
             match self.make(&job) {
@@ -336,6 +410,9 @@ impl KeptBlocks {
         let r = (|| {
             let mut w = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
             w.write_all(body)?;
+            // on the disk before its name: after a power cut a renamed file could come back cut short, and be served
+            // as a whole brotli stream that Cloudflare keeps for good
+            w.sync_all()?;
             std::fs::rename(&tmp, &to)
         })();
         if r.is_err() {
@@ -481,6 +558,85 @@ mod tests {
         k.sweep("m2", vec![a.clone()], locate);
         eventually_sync("b's block removed", || !k.path(&keys[2]).exists());
         assert!(k.path(&keys[0]).exists());
+    }
+
+    /// the CPU quota the threads read, at `share` of its 4 cores used (read at once)
+    fn quota(k: &KeptBlocks, share: Arc<AtomicU64>) {
+        let mut p = k.pace.lock();
+        p.sample = Some(Box::new(move || {
+            Some(QuotaUse { group: "/test.slice".into(), cores: 4.0, used: f64::from_bits(share.load(Ordering::SeqCst)) * 4.0 })
+        }));
+        p.at = Instant::now().checked_sub(PACE_EVERY).unwrap_or(p.at);
+    }
+
+    fn not_kept(k: &KeptBlocks, real: &str, md: &std::fs::Metadata) -> bool {
+        matches!(k.lookup(&key(real, md, 0)), Kept::No)
+    }
+
+    // the CPU quota the server shares nearly used: no block is made until it is under RESUME_AT, the queue kept
+    #[test]
+    fn a_full_cpu_quota_holds_the_blocks_back() {
+        let d = tempfile::tempdir().unwrap();
+        let (real, md) = file_with(d.path(), "game.bin", &data(1 << 20, true));
+        let k = KeptBlocks::open(d.path().join("blocks"), 1).unwrap();
+        let share = Arc::new(AtomicU64::new(0.9f64.to_bits()));
+        quota(&k, share.clone());
+        k.queue(&real, &md, 0);
+        std::thread::sleep(PACE_EVERY * 6);
+        assert!(not_kept(&k, &real, &md), "made at 90 %");
+        // under PAUSE_AT, not under RESUME_AT: still waiting
+        share.store(0.6f64.to_bits(), Ordering::SeqCst);
+        std::thread::sleep(PACE_EVERY * 6);
+        assert!(not_kept(&k, &real, &md), "made at 60 % after 90 %");
+        share.store(0.3f64.to_bits(), Ordering::SeqCst);
+        eventually_sync("made at 30 %", || !not_kept(&k, &real, &md));
+    }
+
+    // no room (the folder or the disk full): what is queued waits, and is made once there is room again, which is
+    // looked at again by itself; the answers keep blocks again too.  (The threads dropped every job without room,
+    // and only a block made looked at the room again: none ever was.)
+    #[test]
+    fn blocks_wait_for_room_and_are_made_once_there_is() {
+        let d = tempfile::tempdir().unwrap();
+        let (real, md) = file_with(d.path(), "game.bin", &data(1 << 20, true));
+        let k = KeptBlocks::open(d.path().join("blocks"), 1).unwrap();
+        // held back by the quota while the room goes
+        let share = Arc::new(AtomicU64::new(0.9f64.to_bits()));
+        quota(&k, share.clone());
+        k.queue(&real, &md, 0);
+        k.bytes.store(MAX_BYTES, Ordering::Relaxed);
+        k.check_room();
+        assert!(!k.keeping());
+        share.store(0f64.to_bits(), Ordering::SeqCst);
+        std::thread::sleep(ROOM_EVERY * 6);
+        assert!(not_kept(&k, &real, &md), "made without room");
+        k.bytes.store(0, Ordering::Relaxed);
+        eventually_sync("made once there is room", || !not_kept(&k, &real, &md));
+        assert!(k.keeping());
+    }
+
+    // a sweep that fails (a folder it cannot read) is not taken as done: the same manifest is swept again
+    #[test]
+    fn a_failed_sweep_is_swept_again() {
+        // SAFETY: geteuid has no preconditions
+        if unsafe { libc::geteuid() } == 0 {
+            return; // root reads any folder
+        }
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        let (a, _) = file_with(d.path(), "a.bin", &data(100, true));
+        let k = KeptBlocks::open(d.path().join("blocks"), 0).unwrap();
+        let locked = k.dir().join("zz");
+        std::fs::create_dir(&locked).unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let locate = |p: &str| Some((p.to_string(), std::fs::metadata(p).ok()?));
+        k.sweep("m1", vec![a.clone()], locate);
+        eventually_sync("the failed sweep forgotten", || k.swept.lock().is_empty());
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o700)).unwrap();
+        k.sweep("m1", vec![a.clone()], locate);
+        assert_eq!(k.sweeps.load(Ordering::SeqCst), 2);
+        eventually_sync("a's block queued", || k.q.lock().rest.len() == 1);
+        assert_eq!(*k.swept.lock(), "m1");
     }
 
     /// a measurement, not a check: blocks of $NFSU2_BENCH_FILE at brotli's best, the time and size each

@@ -13,7 +13,9 @@
 //     binds a scratch depth and turns the Z test off;
 //   - no viewport (com.c ignores SetViewport), full-target passes; a scissor only
 //     for the 2D UI's 4:3 band on a screen narrower than 4:3 (GwDraw.clip);
-//   - StretchRect: a copy when size and format match, else a scaled quad.
+//   - StretchRect: a copy when size and format match, else a scaled quad; from a
+//     source rectangle (the cover shoot's picture) always a scaled quad, opaque from
+//     the screen (the D3D back buffer has no alpha).
 // Deliberate differences: the clear colour is the frame's own (Clear records
 // in stream order) rather than a global read at encode time; scaled blits do
 // not blend; draws into a texture that no longer exists are dropped (the Mac
@@ -591,10 +593,12 @@ export class Encoder {
         const sid = u32[w + D.blitSrc], tgt = u32[w + D.target];
         const st = sid ? this.tex[sid] : null, dt = tgt ? this.tex[tgt & 0xFFFF] : null;
         const sTex = sid ? st?.tex : this.screen!, dTex = tgt ? dt?.tex : this.screen!;
-        if (tr) tr.push(`  #${i} blit ${sid || 'SCREEN'} -> ${tgt ? tgt & 0xFFFF : 'SCREEN'}${!sTex || !dTex ? ' (missing: skipped)' : ''}`);
+        const r0 = u32[w + D.first], r1 = u32[w + D.count];   // a source rectangle (r1 0: the whole source)
+        if (tr) tr.push(`  #${i} blit ${sid || 'SCREEN'}${r1 ? ` (${r0 & 0xFFFF},${r0 >>> 16})-(${r1 & 0xFFFF},${r1 >>> 16})` : ''} -> ${tgt ? tgt & 0xFFFF : 'SCREEN'}${!sTex || !dTex ? ' (missing: skipped)' : ''}`);
         if (!sTex || !dTex || sTex === dTex || (tgt && !dt!.rt)) { skipped++; continue; }
         endPass(); curT = -1; curZ = -1;
-        if (sTex.width === dTex.width && sTex.height === dTex.height && sTex.format === dTex.format && sTex.depthOrArrayLayers === 1 && dTex.depthOrArrayLayers === 1)
+        if (r1 && this.blitRect(enc, sTex, r0, r1, tgt ? dt!.rtViews[0] : this.screenView!, !sid)) passes++;
+        else if (sTex.width === dTex.width && sTex.height === dTex.height && sTex.format === dTex.format && sTex.depthOrArrayLayers === 1 && dTex.depthOrArrayLayers === 1)
           { enc.copyTextureToTexture({ texture: sTex }, { texture: dTex }, [sTex.width, sTex.height, 1]); this.calls.copy++; }
         else {
           const sv = sid ? (st!.cube ? st!.tex.createView({ dimension: '2d', baseArrayLayer: 0, arrayLayerCount: 1, baseMipLevel: 0, mipLevelCount: 1 }) : st!.view) : this.screenView!;
@@ -766,6 +770,29 @@ export class Encoder {
     if (pslots) this.queue.writeBuffer(this.pBuf, 0, ps, 0, pslots * (PSLOT / 4));
     this.totalDraws += draws; this.totalPasses += passes;
     return { draws, passes, skipped, encodeMs: performance.now() - t0, direct: isDirect };
+  }
+
+  /** StretchRect from a rectangle of `src` (r0 left | top << 16, r1 right | bottom << 16): the rectangle copied into
+   *  a texture of its own, then drawn over the whole of `dst`; false when there is nothing to copy that way */
+  private blitRect(enc: GPUCommandEncoder, src: GPUTexture, r0: number, r1: number, dst: GPUTextureView, opaque: boolean): boolean {
+    const x0 = Math.min(r0 & 0xFFFF, src.width), y0 = Math.min(r0 >>> 16, src.height);
+    const x1 = Math.min(r1 & 0xFFFF, src.width), y1 = Math.min(r1 >>> 16, src.height);
+    if (x1 <= x0 || y1 <= y0 || src.format !== 'bgra8unorm') return false;
+    const part = this.device.createTexture({ label: `blit rect ${x1 - x0}x${y1 - y0}`, size: [x1 - x0, y1 - y0], format: 'bgra8unorm',
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+    enc.copyTextureToTexture({ texture: src, origin: [x0, y0, 0] }, { texture: part }, [x1 - x0, y1 - y0, 1]);
+    this.calls.copy++;
+    this.copyQuad(enc, part.createView(), dst, 'bgra8unorm', this.linear, undefined, opaque);
+    this.destroyLater.push(part);
+    return true;
+  }
+
+  /** texture `id` in bgra8unorm for a copy into a buffer (read back for the game): itself when it is a 2D texture in
+   *  that format (its level 0 is copied), else its level 0 drawn into a new one (alpha 1); null when there is none */
+  readable(enc: GPUCommandEncoder, id: number): GPUTexture | null {
+    const t = this.tex[id];
+    if (!t) return null;
+    return t.tex.format === 'bgra8unorm' && !t.cube ? t.tex : this.snapshot(enc, id)?.tex ?? null;
   }
 
   /** diagnostics: texture `id` (level 0, face 0) drawn into a new bgra8 texture of its size, or null */

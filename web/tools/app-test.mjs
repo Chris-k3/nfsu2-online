@@ -40,6 +40,9 @@
 //   slowgpu   a renderer that comes after the game stopped waiting for it (NFSU2_RENDERER_WAIT_MS)
 //             is refused and the game stopped with the reason, not left on a black screen; the page
 //             points to #bug-reports on Discord
+//   gpulost   every WebGPU call failing in the middle of a game, as in Safari once its graphics process went away
+//             (createCommandEncoder throws, device.lost never comes): the game is stopped with GPU-LOST instead of a
+//             frozen picture, the page says Play reloads it, and Play does reload it (then plays)
 //   crash     a trap (exit 134): "Stopped" with the error code, the trap in the log, the pointer to
 //             #bug-reports on Discord; a normal close after it takes the pointer away
 //   leak     three Play -> Stop rounds with sound on in one tab (the second with free roam on, so
@@ -791,6 +794,47 @@ try {
       attachedLines: (tail.match(/\[gpu\] renderer attached:/g) ?? []).length, bugReport: await p.locator('#report').isVisible() };
     report('slowgpu', r.phase === 'exited' && r.gameGaveUp && r.refused && r.attachedLines === 0 && r.headline === 'Did not start' &&
       /the graphics could not start\. Restart Chrome, then press Play/.test(r.sub) && r.bugReport, r);
+    await c2.close();
+  }
+
+  // ---------------------------------------------------------- gpulost --
+  // Safari's graphics process went away (a player's iPhone log, 2026-10-24): every frame's createCommandEncoder threw
+  // InvalidStateError from then on, device.lost never came, and the picture stayed frozen while the game played on
+  if (want('gpulost')) {
+    const c2 = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    await c2.addInitScript(() => {
+      const ce = GPUDevice.prototype.createCommandEncoder;
+      GPUDevice.prototype.createCommandEncoder = function (...a) {
+        if (window.__gpuGone) throw new DOMException('GPUDevice.createCommandEncoder: Unable to make command encoder.', 'InvalidStateError');
+        return ce.apply(this, a);
+      };
+    });
+    const p = watch(await c2.newPage(), 'L');
+    await open(p, `save=${RUN}-l&fresh&env=NOMOVIES%3D1`);
+    await p.click('#play');
+    await waitPhase(p, ['playing'], 60000);
+    await p.waitForFunction(() => (window.__nfsu2.log.tail(400) ?? []).some(l => /\[gpu\] display \d+ Hz/.test(l)), null, { timeout: 60000, polling: 500 });
+    await p.waitForTimeout(3000);
+    await p.evaluate(() => { window.__gpuGone = true; });
+    const ph = await waitPhase(p, ['exited'], 30000).catch(() => phase(p));
+    const tail = (await p.evaluate(() => window.__nfsu2.log.tail(600))).join('\n');
+    const r = { phase: ph, headline: await p.locator('#status').textContent(), sub: await p.locator('#status-sub').textContent(),
+      failed: (tail.match(/\[gpu\] encode failed: InvalidStateError: GPUDevice\.createCommandEncoder/g) ?? []).length,
+      gone: /\[gpu\] device gone: 60 times in a row/.test(tail), stopped: /\[app\] the graphics stopped working: stopping the game/.test(tail),
+      bugReport: await p.locator('#report').isVisible() };
+    await shot(p, 'gpulost-exited.png');
+    // Play reloads the page (a fresh one: the log starts over), and the next Play plays
+    const nav = p.waitForEvent('framenavigated', { timeout: 30000 }).then(() => true, () => false);
+    await p.click('#play');
+    r.reloaded = await nav;
+    if (r.reloaded) {
+      await waitPhase(p, ['ready', 'error'], 60000);
+      r.logAfter = (await p.evaluate(() => window.__nfsu2.log.tail(50))).some(l => /the last game lost its graphics/.test(l));
+      await p.click('#play');
+      r.playsAgain = await waitPhase(p, ['playing'], 60000).then(() => true, () => false);
+    }
+    report('gpulost', r.phase === 'exited' && r.headline === 'Stopped' && r.failed >= 1 && r.gone && r.stopped &&
+      /the graphics stopped working\. Play reloads this page/.test(r.sub) && r.bugReport && r.reloaded && !r.logAfter && r.playsAgain, r);
     await c2.close();
   }
 
