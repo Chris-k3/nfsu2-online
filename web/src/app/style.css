@@ -70,10 +70,6 @@ html[data-touch] .key-only, html:not([data-touch]) .touch-only { display: none; 
 .panel { background: var(--panel); border-radius: 12px; padding: 24px; min-width: 0; }
 .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .row.end { justify-content: flex-end; }
-/* the page's last lines, the Ko-fi note and the contact for rights holders: quiet, centred, in the controls' rim grey */
-.foot { grid-column: 1 / -1; text-align: center; }
-.foot .hint, .foot a { color: var(--edge); }
-.foot a:hover { color: var(--lime); }
 
 h1 { font-size: 32px; line-height: 40px; }
 h2 { font-size: 20px; line-height: 28px; color: var(--lime); margin-bottom: 16px; }
@@ -207,8 +203,8 @@ kbd .glyph { display: inline-block; width: 14px; height: 14px; vertical-align: -
 .wheel-learn .bar-fill { transition: none; }
 .wheel-learn .text-btn { padding: 0; }
 
-/* ------------------------------------------- changes from the original */
-.changes { display: grid; gap: 12px; font-size: 14px; line-height: 20px; }
+/* ------------------------------------- changes from the original, about */
+.prose { display: grid; gap: 12px; font-size: 14px; line-height: 20px; }
 
 /* -------------------------------------------------------------- settings */
 .group h3 { margin-top: 32px; }
