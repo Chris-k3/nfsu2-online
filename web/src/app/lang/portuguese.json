@@ -847,5 +847,9 @@
   "Ghost mode, crews, full screen, controls": "Modo fantasma, equipes, tela cheia, controles",
   "Ghost mode, crews, controls": "Modo fantasma, equipes, controles",
   "Full screen, frame-rate counter, controls": "Tela cheia, contador de FPS, controles",
-  "Frame-rate counter, controls": "Contador de FPS, controles"
+  "Frame-rate counter, controls": "Contador de FPS, controles",
+  "Shifter": "Alavanca de câmbio",
+  "Sequential: push to shift up": "Sequencial: empurre para subir",
+  "Sequential: pull to shift up": "Sequencial: puxe para subir",
+  "The game shifts one gear at a time. Sequential: each move of the lever into a gear is one shift, and reverse holds the handbrake. Handbrake: any gear holds it.": "O jogo troca uma marcha por vez. Sequencial: cada vez que você engata uma marcha com a alavanca é uma troca, e a ré segura o freio de mão. Freio de mão: qualquer marcha o segura."
 }

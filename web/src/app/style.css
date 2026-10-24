@@ -192,10 +192,16 @@ kbd {
 kbd .glyph { display: inline-block; width: 14px; height: 14px; vertical-align: -2px; stroke-width: 1.4; }
 [data-fam="xb"] .ps, [data-fam="ps"] .xb { display: none; }
 .pad-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-top: 16px; }
-/* a steering wheel instead (wheel-setup.ts): its name, what its controls do, its set-up's step and the hold's bar */
+/* a steering wheel instead (wheel-setup.ts): its name, what its controls do, its shifter, its set-up's step and the
+   hold's bar */
 .wheel-name { font-size: 16px; line-height: 24px; margin-bottom: 4px; }
 .wheel .pad-foot .hint { flex: 1 1 240px; }
-.wheel > .keys + .hint { margin: 16px 0 0; }
+.wheel > .keys + .wheel-shifter { box-shadow: inset 0 1px var(--line); }
+/* the shifter's choice under its text and as wide as the panel, for the long names of its choices */
+.wheel > .wheel-shifter { grid-template-columns: minmax(0, 1fr); grid-template-areas: "label" "help" "ctl"; }
+.wheel-shifter .set-control { justify-content: flex-start; margin-top: 8px; }
+.set.wheel-shifter select { width: 100%; }
+.wheel > .keys ~ .hint { margin: 16px 0 0; }
 .wheel-learn { margin-top: 16px; }
 .wheel-learn .bar { margin: 8px 0 4px; }
 .wheel-learn .bar-fill { transition: none; }

@@ -826,5 +826,9 @@
   "Ghost mode, crews, full screen, controls": "Spøgelsestilstand, crews, fuld skærm, kommandoer",
   "Ghost mode, crews, controls": "Spøgelsestilstand, crews, kommandoer",
   "Full screen, frame-rate counter, controls": "Fuld skærm, FPS-tæller, kommandoer",
-  "Frame-rate counter, controls": "FPS-tæller, kommandoer"
+  "Frame-rate counter, controls": "FPS-tæller, kommandoer",
+  "Shifter": "Gearstang",
+  "Sequential: push to shift up": "Sekventiel: skub for at skifte op",
+  "Sequential: pull to shift up": "Sekventiel: træk for at skifte op",
+  "The game shifts one gear at a time. Sequential: each move of the lever into a gear is one shift, and reverse holds the handbrake. Handbrake: any gear holds it.": "Spillet skifter ét gear ad gangen. Sekventiel: hver gang du sætter stangen i et gear, er det ét skift, og bakgearet holder håndbremsen. Håndbremse: ethvert gear holder den."
 }

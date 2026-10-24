@@ -3,11 +3,23 @@
 // set-up, for a wheel the page reads wrong: let go, turn the wheel to full lock, press each pedal (WheelLearn).  The
 // set-up is kept in this browser for that model, and the game's controller follows it at once (gamepad.ts).  While a
 // game runs, the sheet is the wheel's only while the wheel drives (a controller takes over with a button pressed on it,
-// gamepad.ts), and a line says so while one is connected too.
+// gamepad.ts), and a line says so while one is connected too.  For a wheel with a shifter, what the shifter does
+// (wheel.ts Shifter), kept in this browser for that model too.
 
 import { drivingPad, familyOf, mayDrive, PAD_DRIVER_EVENT } from '../input/gamepad';
-import { guessMap, loadMap, saveMap, WheelLearn, wheelOf, type LearnStep } from '../input/wheel';
+import {
+  guessMap, loadMap, loadShifter, saveMap, saveShifter, SHIFTER_MODES, shifterOf, WheelLearn, wheelOf, type LearnStep,
+  type ShifterMode,
+} from '../input/wheel';
 import { N, t } from './i18n';
+
+const SHIFTER_NAMES: Record<ShifterMode, string> = {
+  'push-up': N('Sequential: push to shift up'),
+  'pull-up': N('Sequential: pull to shift up'),
+  handbrake: N('Handbrake'),
+  off: N('Off'),
+};
+let sections = 0;
 
 const STEPS: Record<LearnStep, string> = {
   rest: N('Centre the wheel, then let go of it and of the pedals.'),
@@ -46,7 +58,9 @@ export function wheelSection(pad: HTMLElement, cap: (xb: string, ps: string) => 
   box.className = 'wheel';
   box.hidden = true;
   const $ = <T extends HTMLElement>(s: string) => box.querySelector<T>(s)!;
+  const uid = `wheel${++sections}`;
   let learnBox: HTMLElement, step: HTMLElement, fill: HTMLElement, learnBtn: HTMLButtonElement, guessBtn: HTMLButtonElement;
+  let shifterRow: HTMLElement, shifterSel: HTMLSelectElement;
   /** what a set-up going on shows now (its step), and the line under the list ('' for the usual one) */
   let stepText = '', stateText = '';
 
@@ -61,6 +75,12 @@ export function wheelSection(pad: HTMLElement, cap: (xb: string, ps: string) => 
       ${row(`${cap('view', 'Share')} ${cap('menu', 'Options')}`, N('Respawn, pause'))}
       ${row(`${cap('up', 'up')} ${cap('left', 'left')} ${cap('right', 'right')}`, N('Start event, map, messages'))}
     </dl>
+    <div class="set wheel-shifter" hidden>
+      <label class="set-label" for="${uid}-shifter">${esc(t('Shifter'))}</label>
+      <p class="set-help" id="${uid}-shifter-help">${esc(t('The game shifts one gear at a time. Sequential: each move of the lever into a gear is one shift, and reverse holds the handbrake. Handbrake: any gear holds it.'))}</p>
+      <div class="set-control"><select id="${uid}-shifter" aria-describedby="${uid}-shifter-help">${SHIFTER_MODES.map(m =>
+        `<option value="${m}">${esc(t(SHIFTER_NAMES[m]))}</option>`).join('')}</select></div>
+    </div>
     <p class="hint wheel-other" hidden>${esc(t('With a controller connected too, the game uses whichever you last pressed a button on.'))}</p>
     <div class="pad-foot">
       <p class="hint wheel-state"></p>
@@ -76,6 +96,8 @@ export function wheelSection(pad: HTMLElement, cap: (xb: string, ps: string) => 
     </div>`;
     learnBox = $('.wheel-learn'); step = $('.wheel-step'); fill = $('.bar-fill');
     learnBtn = $<HTMLButtonElement>('[data-wheel="learn"]'); guessBtn = $<HTMLButtonElement>('[data-wheel="guess"]');
+    shifterRow = $('.wheel-shifter'); shifterSel = $<HTMLSelectElement>('.wheel-shifter select');
+    shifterSel.onchange = () => { if (id) saveShifter(id, shifterSel.value as ShifterMode); };
     if (learn) { step.textContent = t(stepText); learnBtn.disabled = true; }
     learnBtn.onclick = start;
     $<HTMLButtonElement>('[data-wheel="cancel"]').onclick = () => stop();
@@ -94,6 +116,8 @@ export function wheelSection(pad: HTMLElement, cap: (xb: string, ps: string) => 
     if (!g) return;
     $('.wheel-name').textContent = familyOf(g.id).name;
     $('.wheel-other').hidden = !otherPad(g.index);
+    shifterRow.hidden = !shifterOf(wheelOf(g.id)!, g.buttons.length);
+    shifterSel.value = loadShifter(g.id);
     const kept = !!loadMap(g.id);
     $('.wheel-state').textContent = stateText ? t(stateText) : kept ? t('Set up in this browser.')
       : t('How it steers and brakes is a guess from how the browser reports it. Wrong? Set it up.');

@@ -1,6 +1,6 @@
 // Steering wheels through the Gamepad API (web/src/input/wheel.ts, gamepad.ts): which controllers are wheels, a known
 // model's layout as each browser places its axes, the layout guessed from where a wheel's axes sat when it showed
-// up, the pad they make, the set-up's steps, and which of a wheel and a controller drives the pad.
+// up, the pad they make, the shifter's gears, the set-up's steps, and which of a wheel and a controller drives the pad.
 //   node --test web/test/wheel.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -9,8 +9,9 @@ import { fileURLToPath } from 'node:url';
 import * as esbuild from 'esbuild';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const load = async (f) => import('data:text/javascript;base64,' + Buffer.from((await esbuild.build({
-  entryPoints: [path.join(ROOT, f)], bundle: true, format: 'esm', write: false })).outputFiles[0].text).toString('base64'));
+// tag: another instance of the module (its own module state)
+const load = async (f, tag = '') => import('data:text/javascript;base64,' + Buffer.from((await esbuild.build({
+  entryPoints: [path.join(ROOT, f)], bundle: true, format: 'esm', write: false })).outputFiles[0].text + tag).toString('base64'));
 const W = await load('web/src/input/wheel.ts');
 const P = await load('web/src/input/proto.ts');
 const G = await load('web/src/input/gamepad.ts');
@@ -55,7 +56,8 @@ test('the G29\'s layout from its descriptor: the wheel, Z the gas, Rz the brake,
   assert.deepEqual(m.gas, { axis: 2, rest: 1, full: -1 });
   assert.deepEqual(m.brake, { axis: 5, rest: 1, full: -1 });
   assert.equal(m.dpad, undefined);
-  assert.match(W.describeMap(m, 9), /gas axis 2 .* brake axis 5 .* D-pad axis 9, the model's own \(axes placed by usage\)$/);
+  assert.match(W.describeMap(m, 9),
+    /gas axis 2 .* brake axis 5 .* D-pad axis 9, shifter buttons 12 13 14 15 16 17 18, the model's own \(axes placed by usage\)$/);
   const press = (...i) => W.readWheel(G29_REST, Array.from({ length: 25 }, (_, j) => i.includes(j)), m, 9).buttons;
   assert.equal(press(0), bit(P.PAD_A));                       // Cross
   assert.equal(press(1), bit(P.PAD_X));                       // Square
@@ -64,10 +66,68 @@ test('the G29\'s layout from its descriptor: the wheel, Z the gas, Rz the brake,
   assert.equal(press(4, 5), bit(P.PAD_RB, P.PAD_LB));         // the paddles
   assert.equal(press(8, 9), bit(P.PAD_BACK, P.PAD_START));    // Share, Options
   assert.equal(press(10, 11), bit(P.PAD_RS, P.PAD_LS));       // R3, L3
-  assert.equal(press(12, 13, 18), 0);                         // the shifter
+  assert.equal(press(12, 13, 18), 0);                         // the shifter: none of the pad's buttons (Shifter)
+  assert.deepEqual(m.gears, [12, 13, 14, 15, 16, 17, 18]);
   assert.equal(press(21), bit(P.PAD_DDOWN));                  // the dial
   assert.equal(press(23), bit(P.PAD_A));                      // Enter
   assert.equal(press(24), bit(P.PAD_HOME));                   // PS: the page's menu
+});
+
+test('other Logitech wheels\' buttons and shifters: the G25, G27 and Driving Force GT in the G29\'s order, the G920\'s', () => {
+  const map = (product, axes, n) => W.guessMap(W.wheelOf(`Logitech wheel (Vendor: 046d Product: ${product})`), axes, n);
+  const press = (m, ...i) => W.readWheel([], Array.from({ length: m.buttons.length }, (_, j) => i.includes(j)), m, -1).buttons;
+  for (const [product, n, gears] of [['c299', 19, [12, 13, 14, 15, 16, 17, 18]], ['c29b', 23, [12, 13, 14, 15, 16, 17, 22]]]) {
+    const m = map(product, [0, 1, 1, 0, 0, 1, 0, 0, 0, H], n);
+    assert.equal(press(m, 4), bit(P.PAD_RB), product);                  // the right paddle shifts up
+    assert.equal(press(m, 5), bit(P.PAD_LB), product);
+    assert.equal(press(m, ...gears), 0, product);                       // the gears were the D-pad and the page's menu
+    assert.deepEqual(m.gears, gears, product);
+  }
+  assert.deepEqual(map('c29b', [0, 1, 1, 0, 0, 1, 0, 0, 0, H], 22).gears, [12, 13, 14, 15, 16, 17, -1]);   // no reverse shown
+  const d = map('c29a', [0, 1, 1, 0, 0, 0, 0, 0, 0, H], 21);
+  assert.equal(W.wheelOf('Driving Force GT (Vendor: 046d Product: c29a)').layout, 'ps');
+  assert.deepEqual([press(d, 12), press(d, 13)], [bit(P.PAD_RB), bit(P.PAD_LB)]);   // its shifter pulled back, pushed
+  assert.deepEqual([press(d, 4), press(d, 15), press(d, 18)], [bit(P.PAD_RB), bit(P.PAD_RB), bit(P.PAD_LB)]);
+  assert.deepEqual([press(d, 14), press(d, 16), press(d, 19), press(d, 20)],
+    [bit(P.PAD_A), bit(P.PAD_DDOWN), bit(P.PAD_LS), bit(P.PAD_HOME)]);   // Enter, the dial, the horn, PS
+  assert.equal(d.gears, undefined);
+  // the G920's shifter one button further on than the G29's (Logitech's table); a G920 showing 11 buttons has none
+  assert.deepEqual(W.guessMap(W.wheelOf(G920), [0, 1, 1, 0, 0, 1, 0, 0, 0, H], 20).gears, [13, 14, 15, 16, 17, 18, 19]);
+  assert.equal(W.guessMap(W.wheelOf(G920), [0, 1, 1, 0, 0, 1, 0, 0, 0, H], 11).gears, undefined);
+  assert.equal(map('c26e', [0, 1, 1, 0, 0, 1, 0, 0, 0, H], 30).gears, undefined);   // the G923 for Xbox: not known
+});
+
+test('the shifter: one shift a move into a gear, reverse the handbrake', () => {
+  const RB = bit(P.PAD_RB), LB = bit(P.PAD_LB), X = bit(P.PAD_X), ms = W.SHIFT_PRESS_MS;
+  const run = (mode, moves, start = 0) => {
+    const s = new W.Shifter();
+    s.buttons(start, mode, 0);
+    let t = 1000;
+    return moves.map(g => { const b = s.buttons(g, mode, t); const after = s.buttons(g, mode, t + ms); t += 2 * ms; return [b, after]; });
+  };
+  // push up: forward (1, 3, 5) up, back (2, 4, 6) down; a press of SHIFT_PRESS_MS, then nothing while in the gear
+  assert.deepEqual(run('push-up', [1, 0, 2, 0, 3, 5, 0, 7, 0]),
+    [[RB, 0], [0, 0], [LB, 0], [0, 0], [RB, 0], [RB, 0], [0, 0], [X, X], [0, 0]]);
+  assert.deepEqual(run('pull-up', [1, 2, 7]), [[LB, 0], [RB, 0], [X, X]]);
+  assert.deepEqual(run('handbrake', [1, 0, 4, 7, 0]), [[X, X], [0, 0], [X, X], [X, X], [0, 0]]);
+  assert.deepEqual(run('off', [1, 2, 7]), [[0, 0], [0, 0], [0, 0]]);
+  // a lever in a gear when the wheel showed up: no shift; in reverse, no handbrake until it has been in neutral
+  assert.deepEqual(run('push-up', [3, 0, 3], 3), [[0, 0], [0, 0], [RB, 0]]);
+  assert.deepEqual(run('push-up', [7, 0, 7], 7), [[0, 0], [0, 0], [X, X]]);
+  // the lever's position from the buttons; the first gear found wins
+  assert.equal(W.shifterGear([], [12, 13, 14, 15, 16, 17, 18]), 0);
+  assert.equal(W.shifterGear(Object.assign(Array(25).fill(false), { 14: true }), [12, 13, 14, 15, 16, 17, 18]), 3);
+  assert.equal(W.shifterGear(Object.assign(Array(25).fill(false), { 18: true }), [12, 13, 14, 15, 16, 17, 18]), 7);
+  assert.equal(W.shifterGear(Object.assign(Array(25).fill(false), { 18: true }), [12, 13, 14, 15, 16, 17, -1]), 0);
+});
+
+test('a set-up kept from before: the model\'s buttons and shifter under the player\'s wheel and pedals', () => {
+  const guess = W.guessMap(W.wheelOf('Logitech G27 (Vendor: 046d Product: c29b)'), [0, 1, 1, 0, 0, 1, 0, 0, 0, H], 23);
+  const old = { steer: 0, centre: 0.01, lock: -0.3, gas: { axis: 2, rest: 1, full: -1 }, brake: { axis: 5, rest: 1, full: -1 },
+    buttons: [P.PAD_A, P.PAD_B, P.PAD_X, P.PAD_Y, P.PAD_LB, P.PAD_RB, -1, -1, 6, 7, 8, 9, P.PAD_DUP, P.PAD_DDOWN], learned: true };
+  const m = W.withSetUp(guess, old);
+  assert.deepEqual([m.steer, m.centre, m.lock, m.gas, m.brake, m.learned, m.placed], [0, 0.01, -0.3, old.gas, old.brake, true, undefined]);
+  assert.deepEqual([m.buttons[4], m.buttons[12], m.gears], [P.PAD_RB, -1, [12, 13, 14, 15, 16, 17, 22]]);
 });
 
 test('the wheel, the pedals and the D-pad as the pad', () => {
@@ -248,4 +308,68 @@ test('a wheel and a controller: the one a button was last pressed on drives the 
     if (nav) Object.defineProperty(globalThis, 'navigator', nav); else delete globalThis.navigator;
     Object.assign(globalThis, ev);
   }
+});
+
+/** fn with navigator.getGamepads() giving pads and the window's events on a target of its own */
+async function withPads(fn) {
+  const nav = Object.getOwnPropertyDescriptor(globalThis, 'navigator'), et = new EventTarget(), pads = [];
+  Object.defineProperty(globalThis, 'navigator', { value: { getGamepads: () => pads }, configurable: true });
+  const ev = { addEventListener: globalThis.addEventListener, removeEventListener: globalThis.removeEventListener, dispatchEvent: globalThis.dispatchEvent };
+  Object.assign(globalThis, { addEventListener: et.addEventListener.bind(et), removeEventListener: et.removeEventListener.bind(et),
+    dispatchEvent: et.dispatchEvent.bind(et) });
+  try { await fn(pads); } finally {
+    if (nav) Object.defineProperty(globalThis, 'navigator', nav); else delete globalThis.navigator;
+    Object.assign(globalThis, ev);
+  }
+}
+const fakePad = (id, index, mapping, axes, n) => ({ id, index, mapping, connected: true, axes: [...axes],
+  buttons: Array.from({ length: n }, () => ({ pressed: false, value: 0 })) });
+const pressOn = (g, i, on = true) => { g.buttons[i] = { pressed: on, value: on ? 1 : 0 }; };
+
+test('a wheel taking the pad back with the gas down keeps its pedals (a report: the gas died until a reload)', async () => {
+  const G2 = await load('web/src/input/gamepad.ts', '\n// a page of its own');
+  await withPads(async (pads) => {
+    const buf = new SharedArrayBuffer(4096), h = new Int32Array(buf), f = new Float32Array(buf), logs = [];
+    const wheel = fakePad(G29, 0, '', G29_REST, 25);
+    const ds = fakePad('DualSense Wireless Controller (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)', 1, 'standard', [0, 0, 0, 0], 17);
+    pads.push(wheel, ds);
+    const p = new G2.PadPoller(h, new Uint8Array(buf), 0, () => {}, s => logs.push(s));
+    const gas = () => +f[P.IM_PAD_AXIS + P.PAD_AXIS_RT].toFixed(2);
+    p.poll();
+    wheel.axes[2] = 0; p.poll();                                    // the gas half down
+    assert.deepEqual([h[P.IM_PAD_WHEEL], gas()], [1, 0.5]);
+    wheel.axes[2] = 1; pressOn(ds, 0); p.poll(); pressOn(ds, 0, false); p.poll();   // the controller takes over
+    assert.equal(h[P.IM_PAD_WHEEL], 0);
+    wheel.axes[2] = -1; pressOn(wheel, 4); p.poll();                // on the gas, the right paddle: the wheel's again
+    assert.deepEqual([h[P.IM_PAD_WHEEL], gas()], [1, 1]);
+    wheel.axes[1] = -1; wheel.axes[2] = 1; p.poll();                // the clutch is still no gas
+    assert.equal(gas(), 0);
+    assert.match(logs.filter(s => /a steering wheel/.test(s)).at(-1), /gas axis 2 .* the model's own/);
+    p.dispose();
+  });
+});
+
+test('the shifter through the poller: a move into third, the right paddle for a moment; the pick per model', async () => {
+  const G2 = await load('web/src/input/gamepad.ts', '\n// another page');
+  const W2 = await load('web/src/input/wheel.ts', '\n// another page');
+  await withPads(async (pads) => {
+    const buf = new SharedArrayBuffer(4096), h = new Int32Array(buf), logs = [];
+    const wheel = fakePad(G29, 0, '', G29_REST, 25);
+    pads.push(wheel);
+    const p = new G2.PadPoller(h, new Uint8Array(buf), 0, () => {}, s => logs.push(s));
+    p.poll();
+    assert.match(logs.at(-1), /shifter buttons 12 .* 18, .*; the shifter: push-up$/);
+    pressOn(wheel, 14); p.poll();                                   // third gear
+    assert.equal(h[P.IM_PAD_BUTTONS], bit(P.PAD_RB));
+    await new Promise(r => setTimeout(r, W.SHIFT_PRESS_MS + 20));
+    p.poll();
+    assert.equal(h[P.IM_PAD_BUTTONS], 0);                           // the lever left in third holds nothing
+    pressOn(wheel, 14, false); pressOn(wheel, 18); p.poll();        // reverse: the handbrake
+    assert.equal(h[P.IM_PAD_BUTTONS], bit(P.PAD_X));
+    W2.saveShifter(G29, 'off');                                     // this page's wheel.ts is G2's own: no event to it
+    assert.equal(W2.loadShifter(G29), 'off');
+    assert.equal(W2.loadShifter('046d-c24f-G29 Driving Force Racing Wheel'), 'off');   // the same model in Firefox
+    assert.equal(W2.loadShifter(G920), 'push-up');
+    p.dispose();
+  });
 });

@@ -11,7 +11,10 @@
 // G HUB's combined pedals), it guesses from where the axes sit when the wheel shows up.  A pedal rests at one end
 // of its axis (+1 on Logitech's, which report a released pedal as 255), so read as a stick it held the stick down:
 // the bug this file fixed first.  The player can teach the page the right layout (WheelLearn, in the Controls
-// sheet: turn the wheel, press each pedal), kept in this browser per model.
+// sheet: turn the wheel, press each pedal), kept in this browser per model.  A shifter on the wheel (Logitech's
+// Driving Force Shifter, the G25's and G27's) shows its gears as buttons; the game's gearbox only shifts up and down,
+// so a move of the lever into a gear is one shift up or down, or the lever holds the handbrake (Shifter), as the
+// player picks in the same sheet.
 
 import { PAD_A, PAD_B, PAD_BACK, PAD_DDOWN, PAD_DLEFT, PAD_DRIGHT, PAD_DUP, PAD_HOME, PAD_LB, PAD_LS, PAD_RB, PAD_RS,
   PAD_START, PAD_X, PAD_Y } from './proto';
@@ -26,6 +29,7 @@ export interface WheelMap {
   gas: Pedal | null;
   brake: Pedal | null;
   buttons: number[];             // buttons[i]: the PAD_* button i is (-1: none)
+  gears?: number[];              // the shifter's buttons: 1st to 6th gear, then reverse (-1: none); absent: no shifter
   dpad?: [number, number];       // a hat switch read as two axes, x and y (Linux), where known
   placed?: Placement;            // from the model's descriptor, its axes placed so; absent: guessed
   learned?: boolean;             // set up by the player (WheelLearn), not guessed
@@ -76,29 +80,60 @@ const YZR: ModelAxes = { axes: ['x', 'y', 'z', 'rz', 'hat'], listed: false, stee
 // The Driving Force GT's: the hat switch, X the wheel, Y the gas, Z the brake.
 const DFGT: ModelAxes = { axes: ['hat', 'x', 'y', 'z'], listed: true, steer: 'x', gas: 'y', brake: 'z' };
 
-/** a wheel model: its USB ids, its buttons' layout (G29 family: PlayStation, G920 family: Xbox), its rotation, and
- *  its axes where its descriptor is known */
-export interface WheelInfo { vendor: string; product: string; layout: 'ps' | 'xbox' | 'generic'; degrees: number; axes?: ModelAxes }
+/** a wheel model: its USB ids, its buttons' layout (G29 family: PlayStation, G920 family: Xbox), its rotation, its
+ *  axes where its descriptor is known, and where its buttons are known to differ from its layout's, they (buttons:
+ *  as WheelMap's); gears: its shifter's buttons, 1st to 6th gear and reverse, where known */
+export interface WheelInfo {
+  vendor: string; product: string; layout: 'ps' | 'xbox' | 'generic'; degrees: number; axes?: ModelAxes;
+  buttons?: readonly number[]; gears?: readonly number[];
+}
 
 /** the game's full lock, in degrees of a wheel turned from lock to lock, where the model's rotation is known: an
  *  arcade game's steering is quick, and a G29 turned half of its 900 degrees for full lock is a chore */
 export const DEFAULT_LOCK_DEGREES = 270;
 
+// the buttons in the order the G29 and G923 (PlayStation) report them (lgff_wheel_adapter reports.h g29_report_t,
+// as SDL's lg4ff driver reads them; every browser keeps a wheel's buttons in their usages' order): Cross, Square,
+// Circle, Triangle, the right and left paddles (R1, L1), R2, L2, Share, Options, R3, L3, the shifter's six gears and
+// reverse, plus, minus, the red dial clockwise and back, its Enter, PS.  The G920 and G923 (Xbox): A, B, X, Y, the
+// right and left paddles, Menu, View, the right and left stick buttons, Xbox.  Plus and minus shift too, the dial
+// and Enter work the menus.  The shifter's gears are none of the pad's: Shifter makes them shifts.
+const PS_BUTTONS = [PAD_A, PAD_X, PAD_B, PAD_Y, PAD_RB, PAD_LB, -1, -1, PAD_BACK, PAD_START, PAD_RS, PAD_LS,
+  -1, -1, -1, -1, -1, -1, -1, PAD_RB, PAD_LB, PAD_DDOWN, PAD_DUP, PAD_A, PAD_HOME];
+const XBOX_BUTTONS = [PAD_A, PAD_B, PAD_X, PAD_Y, PAD_RB, PAD_LB, PAD_START, PAD_BACK, PAD_RS, PAD_LS, PAD_HOME];
+// any other wheel: as the standard mapping's order (gamepad.ts BUTTON_OF), its triggers' places left out
+const GENERIC_BUTTONS = [PAD_A, PAD_B, PAD_X, PAD_Y, PAD_LB, PAD_RB, -1, -1, PAD_BACK, PAD_START, PAD_LS, PAD_RS,
+  PAD_DUP, PAD_DDOWN, PAD_DLEFT, PAD_DRIGHT, PAD_HOME];
+// The G25's and G27's (lgff_wheel_adapter g25_report_t, g27_report_t): twelve buttons in the G29's order, the right
+// paddle fifth, then the shifter's gears (the G25's reverse after them, the G27's four more wheel buttons first and
+// its reverse last), which the generic table made the D-pad and the page's menu.  Their buttons are unlabelled: the
+// generic table's, but for the paddles.
+const G25_BUTTONS = [PAD_A, PAD_B, PAD_X, PAD_Y, PAD_RB, PAD_LB, -1, -1, PAD_BACK, PAD_START, PAD_LS, PAD_RS];
+// The Driving Force GT's (dfgt_report_t), a PlayStation wheel: the G29's twelve, then its sequential shifter pulled
+// back (+, up) and pushed forward (-, down), Enter, plus, the dial clockwise and back, minus, the horn, PS.
+const DFGT_BUTTONS = [...PS_BUTTONS.slice(0, 12), PAD_RB, PAD_LB, PAD_A, PAD_RB, PAD_DDOWN, PAD_DUP, PAD_LB, PAD_LS, PAD_HOME];
+// the shifter's buttons, 1st to 6th gear and reverse: the G29's and G923's (PlayStation) after their first twelve;
+// the G920's one further on (Logitech's table of the Driving Force Shifter's buttons); the G25's as the G29's, the
+// G27's reverse alone at the end
+const range = (from: number) => Array.from({ length: 7 }, (_, i) => from + i);
+const PS_GEARS = range(12), G920_GEARS = range(13), G27_GEARS = [...range(12).slice(0, 6), 22];
+
 // the wheels SDL knows (src/joystick/SDL_joystick.c, initial_wheel_devices): vendor:product -> layout, rotation, axes
 const LOGI_PS = { layout: 'ps', degrees: 900 } as const, LOGI_XB = { layout: 'xbox', degrees: 900 } as const;
+const G29 = { ...LOGI_PS, gears: PS_GEARS }, G920 = { ...LOGI_XB, gears: G920_GEARS };
 const KNOWN: Record<string, Omit<WheelInfo, 'vendor' | 'product'>> = {
-  '046d:c24f': { ...LOGI_PS, axes: ZRY }, '046d:c260': LOGI_PS,         // G29 (PS3 mode, PS4 mode)
-  '046d:c266': { ...LOGI_PS, axes: ZRY }, '046d:c267': { ...LOGI_PS, axes: ZRY },   // G923 for PlayStation and PC
+  '046d:c24f': { ...G29, axes: ZRY }, '046d:c260': G29,                 // G29 (PS3 mode, PS4 mode)
+  '046d:c266': { ...G29, axes: ZRY }, '046d:c267': { ...G29, axes: ZRY },   // G923 for PlayStation and PC
   '046d:c268': { layout: 'ps', degrees: 1080 }, '046d:c269': { layout: 'ps', degrees: 1080 },   // PRO Racing Wheel
-  '046d:c261': LOGI_XB, '046d:c262': { ...LOGI_XB, axes: YZR },         // G920 (Xbox mode, then the PC's)
+  '046d:c261': G920, '046d:c262': { ...G920, axes: YZR },               // G920 (Xbox mode, then the PC's)
   '046d:c26d': LOGI_XB, '046d:c26e': { ...LOGI_XB, axes: YZR },         // G923 for Xbox
   '046d:c272': { layout: 'xbox', degrees: 1080 },                      // PRO Racing Wheel for Xbox
   '046d:c294': { layout: 'generic', degrees: 0 },                      // a Logitech wheel before its driver switched it
   '046d:c295': { layout: 'generic', degrees: 0 }, '046d:ca03': { layout: 'generic', degrees: 0 },   // MOMO
   '046d:c298': { layout: 'generic', degrees: 900 },                    // Driving Force Pro
-  '046d:c299': { layout: 'generic', degrees: 900, axes: ZRY },         // G25
-  '046d:c29b': { layout: 'generic', degrees: 900, axes: ZRY },         // G27
-  '046d:c29a': { layout: 'generic', degrees: 900, axes: DFGT },        // Driving Force GT
+  '046d:c299': { layout: 'generic', degrees: 900, axes: ZRY, buttons: G25_BUTTONS, gears: PS_GEARS },    // G25
+  '046d:c29b': { layout: 'generic', degrees: 900, axes: ZRY, buttons: G25_BUTTONS, gears: G27_GEARS },   // G27
+  '046d:c29a': { layout: 'ps', degrees: 900, axes: DFGT, buttons: DFGT_BUTTONS },                        // Driving Force GT
 };
 // whole vendors that make wheels and little else: Thrustmaster's wheel bases, Fanatec, Simagic, Simucube, Moza ...
 const WHEEL_IDS = new Set(['044f:b65d', '044f:b65e', '044f:b664', '044f:b669', '044f:b66d', '044f:b66e', '044f:b66f',
@@ -127,19 +162,6 @@ export function wheelOf(id: string): WheelInfo | null {
   return w;
 }
 
-// the buttons in the order the G29 and G923 (PlayStation) report them (lgff_wheel_adapter reports.h g29_report_t,
-// as SDL's lg4ff driver reads them; every browser keeps a wheel's buttons in their usages' order): Cross, Square,
-// Circle, Triangle, the right and left paddles (R1, L1), R2, L2, Share, Options, R3, L3, the shifter's six gears and
-// reverse, plus, minus, the red dial clockwise and back, its Enter, PS.  The G920 and G923 (Xbox): A, B, X, Y, the
-// right and left paddles, Menu, View, the right and left stick buttons, Xbox.  Plus and minus shift too, the dial
-// and Enter work the menus.
-const PS_BUTTONS = [PAD_A, PAD_X, PAD_B, PAD_Y, PAD_RB, PAD_LB, -1, -1, PAD_BACK, PAD_START, PAD_RS, PAD_LS,
-  -1, -1, -1, -1, -1, -1, -1, PAD_RB, PAD_LB, PAD_DDOWN, PAD_DUP, PAD_A, PAD_HOME];
-const XBOX_BUTTONS = [PAD_A, PAD_B, PAD_X, PAD_Y, PAD_RB, PAD_LB, PAD_START, PAD_BACK, PAD_RS, PAD_LS, PAD_HOME];
-// any other wheel: as the standard mapping's order (gamepad.ts BUTTON_OF), its triggers' places left out
-const GENERIC_BUTTONS = [PAD_A, PAD_B, PAD_X, PAD_Y, PAD_LB, PAD_RB, -1, -1, PAD_BACK, PAD_START, PAD_LS, PAD_RS,
-  PAD_DUP, PAD_DDOWN, PAD_DLEFT, PAD_DRIGHT, PAD_HOME];
-
 /** whether an axis value is a hat switch read as one axis, let go (it reads outside -1..1 then) */
 const hatRest = (v: number) => Math.abs(v) > 1.05;
 
@@ -152,13 +174,14 @@ const hatRest = (v: number) => Math.abs(v) > 1.05;
  * wheel's are guessed: the wheel is the first axis that is neither a hat switch let go nor at an end (X, axis 0,
  * where the browser has no hat switch before it); pedals are the axes resting at an end, the first the gas, the
  * brake Rz (axis 5 where axes are placed by usage) or else the last; without one at an end, combined pedals on the
- * axis after the wheel, gas up, brake down.
+ * axis after the wheel, gas up, brake down.  The buttons and the shifter's are the model's.
  */
 export function guessMap(info: WheelInfo, axes0: readonly number[], nbuttons: number): WheelMap {
-  const table = info.layout === 'ps' ? PS_BUTTONS : info.layout === 'xbox' ? XBOX_BUTTONS : GENERIC_BUTTONS;
+  const table = info.buttons ?? (info.layout === 'ps' ? PS_BUTTONS : info.layout === 'xbox' ? XBOX_BUTTONS : GENERIC_BUTTONS);
+  const gears = shifterOf(info, nbuttons);
   const base = {
     centre: 0, lock: info.degrees > DEFAULT_LOCK_DEGREES ? DEFAULT_LOCK_DEGREES / info.degrees : 1,
-    buttons: Array.from({ length: nbuttons }, (_, i) => table[i] ?? -1),
+    buttons: Array.from({ length: nbuttons }, (_, i) => table[i] ?? -1), ...(gears ? { gears } : {}),
   };
   const atEnd = (v: number | undefined) => typeof v === 'number' && !hatRest(v) && Math.abs(v) >= 0.9;
   const pedal = (i: number): Pedal => { const r = atEnd(axes0[i]) ? Math.sign(axes0[i]) : 1; return { axis: i, rest: r, full: -r }; };
@@ -226,20 +249,94 @@ export function findHat(axes: readonly number[]): number {
   return axes.findIndex(hatRest);
 }
 
+// ---- the shifter ---------------------------------------------------------------------------------------------------
+/** the model's shifter buttons (1st to 6th gear, reverse; -1 one the wheel does not show), or null: none known */
+export function shifterOf(info: WheelInfo, nbuttons: number): number[] | null {
+  const g = info.gears?.map(i => i < nbuttons ? i : -1);
+  return g && g.some(i => i >= 0) ? g : null;
+}
+
+/** the shifter's position: 1 to 6 a gear, 7 reverse, 0 neutral */
+export function shifterGear(pressed: readonly boolean[], gears: readonly number[]): number {
+  for (let i = 0; i < gears.length; i++) if (gears[i] >= 0 && pressed[gears[i]]) return i + 1;
+  return 0;
+}
+
+/** what the shifter does: push-up, a move into 1st, 3rd or 5th gear shifts up and into 2nd, 4th or 6th down, reverse
+ *  holds the handbrake; pull-up, the same but up and down the other way round; handbrake, any gear holds it; off */
+export type ShifterMode = 'push-up' | 'pull-up' | 'handbrake' | 'off';
+export const SHIFTER_MODES: readonly ShifterMode[] = ['push-up', 'pull-up', 'handbrake', 'off'];
+/** how long (ms) a move into a gear presses shift up or down: the game reads its controller once a frame, 30 times
+ *  a second at the least, and a press it must see, and a let-go between two */
+export const SHIFT_PRESS_MS = 100;
+
+/**
+ * The shifter as the pad's buttons, those the wheel's own shift with (runtime/dinput_pad.c g_prof_wheel, or what the
+ * player bound to them in the game's Controls): the right paddle (RB) shifts up, the left (LB) down, Square (X) is
+ * the handbrake.  The game's gearbox only shifts up and down, one gear a press, so a move of the lever into a gear
+ * is a press of SHIFT_PRESS_MS, and the next shift a move back through neutral and in again: a lever left in a gear
+ * holds no button, and the paddles shift as before.  A handbrake gear holds it while the lever is there, but not a
+ * lever there when the wheel showed up (left in reverse, it would hold the car) until it has been in neutral.
+ */
+export class Shifter {
+  private gear = -1;          // the lever's position as last read (-1: not yet)
+  private armed = false;      // the lever has been in neutral since the wheel showed up
+  private press = 0;
+  private until = 0;
+
+  /** the PAD_* bits for the lever in gear (shifterGear) at time now (ms) */
+  buttons(gear: number, mode: ShifterMode, now: number): number {
+    if (this.gear < 0) this.gear = gear;
+    if (gear === 0) this.armed = true;
+    if (gear !== this.gear) {
+      this.gear = gear;
+      if (gear >= 1 && gear <= 6 && (mode === 'push-up' || mode === 'pull-up')) {
+        this.press = (gear % 2 === 1) === (mode === 'push-up') ? 1 << PAD_RB : 1 << PAD_LB;
+        this.until = now + SHIFT_PRESS_MS;
+      }
+    }
+    const brake = mode === 'handbrake' ? gear > 0 : mode !== 'off' && gear === 7;
+    return (now < this.until ? this.press : 0) | (brake && this.armed ? 1 << PAD_X : 0);
+  }
+}
+
 /** a short line for the log: what drives what */
 export function describeMap(m: WheelMap, hat: number): string {
   const p = (x: Pedal | null) => x ? `axis ${x.axis} (${x.rest.toFixed(2)} to ${x.full.toFixed(2)})` : 'none';
+  const gears = m.gears ? m.gears.map(i => i >= 0 ? i : '-').join(' ') : '';
   return `wheel axis ${m.steer} (centre ${m.centre.toFixed(2)}, full lock ${m.lock >= 0 ? '+' : ''}${m.lock.toFixed(2)}), ` +
     `gas ${p(m.gas)}, brake ${p(m.brake)}, D-pad ${m.dpad ? `axes ${m.dpad.join(' and ')}` : hat >= 0 ? `axis ${hat}` : 'none seen'}, ` +
+    `shifter ${gears ? `buttons ${gears}` : 'none known'}, ` +
     (m.learned ? 'set up by the player' : m.placed ? `the model's own (axes placed by ${m.placed})` : 'guessed');
 }
 
 // ---- the player's set-up, kept in this browser per model ------------------------------------------------------
-const KEY = 'nfsu2.wheel.';
-/** the key a wheel's set-up is kept under: its USB ids, or its name where the browser gives none */
+const KEY = 'nfsu2.wheel.', SHIFTER_KEY = 'nfsu2.shifter.';
+/** a model's part of the keys: its USB ids, or its name where the browser gives none */
+const modelKey = (id: string) => { const u = usbIds(id); return u ? `${u.vendor}:${u.product}` : id.slice(0, 80); };
+/** the key a wheel's set-up is kept under */
 export function wheelKey(id: string): string {
-  const u = usbIds(id);
-  return KEY + (u ? `${u.vendor}:${u.product}` : id.slice(0, 80));
+  return KEY + modelKey(id);
+}
+/** the model's layout (guessMap) with the player's set-up of its wheel and pedals over it: the buttons and the
+ *  shifter stay the model's, so a set-up kept from before a change to those gets it */
+export function withSetUp(guess: WheelMap, kept: WheelMap): WheelMap {
+  return { ...guess, steer: kept.steer, centre: kept.centre, lock: kept.lock, gas: kept.gas, brake: kept.brake,
+    dpad: kept.dpad ?? guess.dpad, placed: undefined, learned: true };
+}
+/** the picks of this page (storage may be off) */
+const shifterPicks = new Map<string, ShifterMode>();
+/** what the player picked for the model's shifter (default push-up) */
+export function loadShifter(id: string): ShifterMode {
+  let v: string | null | undefined = shifterPicks.get(modelKey(id));
+  try { v ??= localStorage.getItem(SHIFTER_KEY + modelKey(id)); } catch { /* storage off */ }
+  return SHIFTER_MODES.find(m => m === v) ?? 'push-up';
+}
+/** keep the player's pick for the model's shifter; gamepad.ts reads it again on the event */
+export function saveShifter(id: string, mode: ShifterMode) {
+  shifterPicks.set(modelKey(id), mode);
+  try { localStorage.setItem(SHIFTER_KEY + modelKey(id), mode); } catch { /* storage off: for this page only */ }
+  dispatchEvent(new Event(WHEEL_MAP_EVENT));
 }
 export function loadMap(id: string): WheelMap | null {
   try {

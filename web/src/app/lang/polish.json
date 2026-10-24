@@ -868,5 +868,9 @@
   "Ghost mode, crews, full screen, controls": "Tryb ducha, ekipy, pełny ekran, sterowanie",
   "Ghost mode, crews, controls": "Tryb ducha, ekipy, sterowanie",
   "Full screen, frame-rate counter, controls": "Pełny ekran, licznik klatek, sterowanie",
-  "Frame-rate counter, controls": "Licznik klatek, sterowanie"
+  "Frame-rate counter, controls": "Licznik klatek, sterowanie",
+  "Shifter": "Drążek biegów",
+  "Sequential: push to shift up": "Sekwencyjnie: pchnij, aby wrzucić wyższy",
+  "Sequential: pull to shift up": "Sekwencyjnie: pociągnij, aby wrzucić wyższy",
+  "The game shifts one gear at a time. Sequential: each move of the lever into a gear is one shift, and reverse holds the handbrake. Handbrake: any gear holds it.": "Gra zmienia biegi po jednym. Sekwencyjnie: każde wrzucenie biegu drążkiem to jedna zmiana, a wsteczny trzyma ręczny. Ręczny: każdy bieg go trzyma."
 }

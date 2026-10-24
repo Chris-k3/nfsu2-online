@@ -113,6 +113,12 @@ The start page shows these keys under **Controls**, and F9, Controls shows them 
   itself. If steering or a pedal is wrong, or you want another full lock, open Controls, Controller and press Set up
   the wheel: turn it to full lock, then press each pedal. That is kept in this browser. The clutch does nothing (the
   game has none). A browser cannot drive a wheel's motor: no force feedback.
+- **Shifter:** the game's gearbox shifts one gear at a time, so a shifter (the Driving Force Shifter on a G29, G920
+  or G923 for PlayStation, the G25's and G27's own) works as a sequential one: each move of the lever into 1st, 3rd
+  or 5th shifts up, into 2nd, 4th or 6th down, and the lever goes back through neutral for the next shift; in reverse
+  it holds the handbrake. The paddles still shift. Controls, Controller, Shifter can turn it round (pull to shift
+  up), make every gear the handbrake, or turn it off; that is kept in this browser per wheel model. The Driving Force
+  GT's own shifter shifts up when pulled back, down when pushed.
 - **The page menu on a controller:** Home, or both sticks pressed in, opens it (where the browser passes Home on; on
   Windows the Game Bar may take it). The D-pad or left stick moves in it, A picks, B closes it; meanwhile the game
   gets no controller input. A stick pressed in alone reaches the game a moment later (0.12 s), so the shortcut never

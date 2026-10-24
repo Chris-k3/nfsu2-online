@@ -868,5 +868,9 @@
   "Ghost mode, crews, full screen, controls": "Режим призрака, команды, полный экран, управление",
   "Ghost mode, crews, controls": "Режим призрака, команды, управление",
   "Full screen, frame-rate counter, controls": "Полный экран, счётчик кадров, управление",
-  "Frame-rate counter, controls": "Счётчик кадров, управление"
+  "Frame-rate counter, controls": "Счётчик кадров, управление",
+  "Shifter": "Рычаг КПП",
+  "Sequential: push to shift up": "Секвентально: от себя — вверх",
+  "Sequential: pull to shift up": "Секвентально: на себя — вверх",
+  "The game shifts one gear at a time. Sequential: each move of the lever into a gear is one shift, and reverse holds the handbrake. Handbrake: any gear holds it.": "Игра переключает передачи по одной. Секвентально: каждое включение передачи рычагом — одно переключение, а задняя передача держит ручник. Ручник: его держит любая передача."
 }
