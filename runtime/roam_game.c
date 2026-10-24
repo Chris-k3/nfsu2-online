@@ -904,6 +904,16 @@ static int near_box(const float *b, float x, float y){
 }
 static int near_door(float x, float y){ for (int i = 0; i < g_pass.n; i++) if (near_box(g_pass.box[i], x, y)) return 1; return 0; }
 static int near_event(float x, float y){ for (int i = 0; i < g_pass.nev; i++) if (near_box(g_pass.ev[i].box, x, y)) return 1; return 0; }
+#if MPRACES
+/* in one of the player's open events' triggers: Engage there enters the game's */
+static int in_event(float x, float y){
+    for (int i = 0; i < g_pass.nev; i++){
+        const float *b = g_pass.ev[i].box;
+        if (x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3]) return 1;
+    }
+    return 0;
+}
+#endif
 /* The player's open events: the event triggers Engage would enter now, by
  * the game's own test (0x5EB040 finds the trigger the car is in, 0x527800
  * what it leads to, 0x5EAFB0 enters it if 0x532A50 says so: a race open in
@@ -3011,11 +3021,15 @@ static void du_hud(CPU *c, int64_t host){
  * start: every event trigger (type 13, the whole career's) holds at most one
  * race of each stage (the race table's +0x28 marker hash is the trigger's
  * +0x30; EV_04 in stage 4 holds two, an SUV race and another).  The race a
- * spot offers is the one of the player's current stage there -- with Solo
- * too when the career has it open, by the game's own test (as events_read),
- * else multiplayer only, with the reason -- or, when this stage has none
+ * spot offers is the one the game's Engage enters there, by its own test
+ * (as events_read; Solo too) -- else the one of the player's current stage
+ * there (multiplayer only, with the reason) or, when this stage has none
  * there, the latest one the player has won there (multiplayer only), or
- * none: never a race of a stage not reached yet.  None in the prologue
+ * none: never a race of a stage not reached yet.  A spot is multiplayer
+ * only where Engage enters nothing of the game's (a race of another stage
+ * still open on the trigger, a cover shoot, another trigger's open event at
+ * the same place): elsewhere our lobby would take Enter and close the
+ * game's race card.  None in the prologue
  * (stage 0), none while a guided event (a story step) runs, and no story
  * races (type 3; the DDAY events' track 4000 has no LAN race).  Lookups in
  * the career's tables only, a few triggers a frame as events_read. */
@@ -3042,6 +3056,11 @@ static struct {
     int64_t  next;
 } g_spot;
 static uint32_t race_at(uint32_t i){ uint32_t t = rd32(G_RACES); return t && i < rd32(G_NRACES) ? t + i * RACE_SZ : 0; }
+/* the race's name as the race table has it ("S2_CIRCUIT_5") */
+static void race_name(uint32_t r, char *o, int n){
+    uint32_t pool = rd32(G_STRPOOL);
+    cstr(r && pool ? pool + MR16(r) : 0, o, n);
+}
 static uint32_t race_by_hash(uint32_t h){
     uint32_t n = rd32(G_NRACES);
     for (uint32_t i = 0; i < n && i < 1024; i++){ uint32_t r = race_at(i); if (ok(r, RACE_SZ) && MR32(r + 8u) == h) return r; }
@@ -3088,14 +3107,20 @@ static void spot_of(CPU *c, uint32_t e, uint32_t stage, MpSpot *sp){
             if (!cur || (race_open(r) && !race_open(cur)) || (!race_open(cur) && !!MR8(r + 0xdu) == car_suv() && !!MR8(cur + 0xdu) != car_suv())) cur = r;
         } else if (st < stage && race_won(r) && (!won || st > MR8(won + 0x37u))) won = r;
     }
-    if (cur){
-        /* open: the game's own test (the guided events and the list), as Engage asks it */
-        uint32_t out = g_gmem + EV_SCR, a[2] = { out, e };
-        rh_call(c, FN_MARKER_WHAT, G_CAREER, 0, 2, a);
-        int open = MR32(out) == e && MR32(out + 4u) == cur && (rh_call(c, FN_MARKER_OPEN, G_CAREER, 0, 1, &out) & 0xffu);
-        sp->race = cur; sp->kind = open ? MPS_OPEN : MPS_ONLY; sp->why = open ? MPW_OPEN : (uint8_t)race_why(cur, stage);
-    } else if (won){ sp->race = won; sp->kind = MPS_ONLY; sp->why = MPW_WON; }
-    if (!sp->kind) return;
+    if (!cur && !won) return;
+    /* what Engage enters here, by the game's own test (the guided events and
+     * the list, as events_read): the first race of the career's open list at
+     * this trigger, of any stage (0x527780), else a cover shoot or another
+     * event.  Where it enters one, Enter is the game's: Solo or Multiplayer
+     * for its race, or no spot (not a LAN race, not a race) */
+    uint32_t out = g_gmem + EV_SCR, a[2] = { out, e };
+    rh_call(c, FN_MARKER_WHAT, G_CAREER, 0, 2, a);
+    uint32_t game = MR32(out + 4u);
+    if (MR32(out) == e && (rh_call(c, FN_MARKER_OPEN, G_CAREER, 0, 1, &out) & 0xffu)){
+        if (!game || !race_lan(game)) return;
+        sp->race = game; sp->kind = MPS_OPEN; sp->why = MPW_OPEN;
+    } else if (cur){ sp->race = cur; sp->kind = MPS_ONLY; sp->why = (uint8_t)race_why(cur, stage); }
+    else { sp->race = won; sp->kind = MPS_ONLY; sp->why = MPW_WON; }
     sp->trig = e;
     for (int j = 0; j < 4; j++) sp->box[j] = MRF32(e + 0x20u + 4u * (uint32_t)j);
     if (!(sp->box[0] <= sp->box[2] && sp->box[1] <= sp->box[3])) sp->kind = MPS_NONE;
@@ -3123,17 +3148,28 @@ static void spots_read(CPU *c, int64_t host){
         g_spot.at = sz > 0 ? e + (uint32_t)sz : end;
     }
     if (g_spot.at < end && ok(g_spot.at, 0x44)) return;
+    /* a multiplayer-only spot whose marker is in another trigger's open event
+     * (two triggers at one place: STAGE_1_SPRINT_1's at Bayview Plaza, won
+     * in every career, and the one of the later stages' races there): Engage
+     * there enters the game's (0x5EB040 takes the first trigger the car is in
+     * that has one), so it is no spot of ours (mp_spot_here: the edges) */
     int open = 0;
-    for (int i = 0; i < g_spot.nn; i++) open += g_spot.nw[i].kind == MPS_OPEN;
-    if (g_spot.nn != g_spot.n) rlog("[roam] f=%ld race spots: %d of the career's %d event triggers (%d open in the career, %d multiplayer only)\n",
-                                    rh_frame(), g_spot.nn, g_spot.seen, open, g_spot.nn - open);
+    char gone[160] = "";
+    for (int i = 0; i < g_spot.nn; i++){
+        const float *b = g_spot.nw[i].box;
+        if (g_spot.nw[i].kind == MPS_ONLY && in_event((b[0] + b[2]) / 2, (b[1] + b[3]) / 2)){
+            size_t u = strlen(gone);
+            char nm[32]; race_name(g_spot.nw[i].race, nm, sizeof nm);
+            snprintf(gone + u, sizeof gone - u, "%s%s", u ? ", " : "; at an open event of the game's: ", nm);
+            g_spot.nw[i--] = g_spot.nw[--g_spot.nn];
+            continue;
+        }
+        open += g_spot.nw[i].kind == MPS_OPEN;
+    }
+    if (g_spot.nn != g_spot.n) rlog("[roam] f=%ld race spots: %d of the career's %d event triggers (%d open in the career, %d multiplayer only%s)\n",
+                                    rh_frame(), g_spot.nn, g_spot.seen, open, g_spot.nn - open, gone);
     memcpy(g_spot.s, g_spot.nw, sizeof g_spot.s);
     g_spot.n = g_spot.nn; g_spot.at = 0; g_spot.next = host + EV_SWEEP_US;
-}
-/* the race's name as the race table has it ("S2_CIRCUIT_5") */
-static void race_name(uint32_t r, char *o, int n){
-    uint32_t pool = rd32(G_STRPOOL);
-    cstr(r && pool ? pool + MR16(r) : 0, o, n);
 }
 #endif
 
@@ -3327,16 +3363,21 @@ static MpLobby *mp_seen(uint32_t host_id, int make){
 static void mp_forget(uint32_t host_id){
     for (int i = 0; i < g_mp.nseen; i++) if (g_mp.seen[i].host == host_id){ g_mp.seen[i] = g_mp.seen[--g_mp.nseen]; return; }
 }
-/* the race spot the player's car is in (its trigger's box), or 0 */
+/* the race spot the player's car is in (its trigger's box), or 0; a
+ * multiplayer-only one not where the car is in an open event of the game's
+ * too (Enter is the game's there: spots_read) */
 static const MpSpot *mp_spot_here(void){
     uint32_t me = player_car();
     if (!me) return 0;
     float x = MRF32(me + 0x60u), y = MRF32(me + 0x64u);
+    const MpSpot *only = 0;
     for (int i = 0; i < g_spot.n; i++){
         const float *b = g_spot.s[i].box;
-        if (x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3]) return &g_spot.s[i];
+        if (!(x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3])) continue;
+        if (g_spot.s[i].kind == MPS_OPEN) return &g_spot.s[i];
+        if (!only) only = &g_spot.s[i];
     }
-    return 0;
+    return only && !in_event(x, y) ? only : 0;
 }
 /* the lobby nearest the player that it may join now: open, room in it, its start within MP_JOIN_M, its host linked
  * with us (the hub links a lobby's host with the players near its start first: a JOIN goes over that link) */

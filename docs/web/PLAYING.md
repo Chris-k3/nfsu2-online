@@ -324,7 +324,9 @@ Good to know:
     only there and why (you won it in your career, your sponsor's contract has no place for it, a URL race before
     its wins, an SUV race without an SUV, not open yet), and that Enter opens a lobby. A spot offers the race of your
     stage there, else the last one you won there: never one of a stage you have not reached. None in the prologue,
-    none while a story task runs.
+    none while a story task runs, and none where the game has something of its own to enter at the same place (a race
+    open in your career there, a cover shoot): Enter is the game's there, and an open race's card asks Solo or
+    Multiplayer as above.
   - **Multiplayer opens a lobby** at the start: the panel shows it, its race, track and laps and its six places (drag
     4, 3 on the three-lane track) with the players in them, the host first and yours marked. The players near see
     "Thom's circuit (1/6)" over the start (from about 250 m); everyone in free roam sees its race's icon on the world
