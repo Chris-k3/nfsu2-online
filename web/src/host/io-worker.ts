@@ -15,7 +15,8 @@
 import {
   CTL_IO_DOORBELL, E, MAX_THREADS, Op, RPC_DONE, RPC_POSTED, RPC_SLOT, RPC_TAKEN, type BootConfig,
 } from './proto';
-import { BLOCK, CACHE_DIR, blockRuns, cacheKey, dataUrl, openCacheFile, putBlock, runUrl, type CacheFile, type Manifest } from './datacache';
+import { BLOCK, CACHE_DIR, av1Path, blockRuns, cacheKey, dataUrl, openCacheFile, putBlock, runUrl, type CacheFile, type Manifest } from './datacache';
+import { movieClose, movieDecode, movieOpen } from './movie';
 
 interface Init { memory: WebAssembly.Memory; ctl: SharedArrayBuffer; rpc: SharedArrayBuffer; cfg: BootConfig }
 
@@ -60,6 +61,14 @@ function dataLookup(rel: string): DNode | null {
     cur = n;
   }
   return cur;
+}
+/** A file the game opens: a movie's AV1 copy in its place where the page plays AV1 (NFSU2_MOVIE_CODEC = av1,
+ *  movie.ts) and the folder has one (tools/movies_av1.py), else the file itself. */
+function dataFile(rel: string): DNode | null {
+  const n = dataLookup(rel);
+  if (!n || n.dir || cfg.env.NFSU2_MOVIE_CODEC !== 'av1') return n;
+  const a = av1Path(n.path);
+  return (a && dataLookup(a)) || n;
 }
 
 // block cache: memory LRU over OPFS-persisted blocks over HTTP
@@ -313,7 +322,7 @@ async function op(o: Op, a: bigint[]): Promise<number> {
       }
       if (dir.mount === 'data') {
         if (oflags & 1 || wantWrite && (oflags & 8)) return E.ROFS;
-        const node = dataLookup(rel); if (!node) return E.NOENT;
+        const node = dataFile(rel); if (!node) return E.NOENT;
         if (oflags & 2 && !node.dir) return E.NOTDIR;
         const fd = allocFd({ mount: 'data', kind: node.dir ? 'dir' : 'file', path: node.path, pos: 0, append: false, node });
         dv().setUint32(n(8), fd, true); return 0;
@@ -397,7 +406,7 @@ async function op(o: Op, a: bigint[]): Promise<number> {
     case Op.PathFilestatGet: {
       const dir = fds.get(n(0)); if (!dir || dir.kind !== 'dir') return E.BADF;
       const rel = normRel(joinRel(dir.path, readPath(n(2), n(3)))); if (rel === null) return E.PERM;
-      if (dir.mount === 'data') { const nd = dataLookup(rel); if (!nd) return E.NOENT; writeFilestat(n(4), nd.ino, nd.dir ? FT_DIR : FT_FILE, nd.size, nd.mtime); return 0; }
+      if (dir.mount === 'data') { const nd = dataFile(rel); if (!nd) return E.NOENT; writeFilestat(n(4), nd.ino, nd.dir ? FT_DIR : FT_FILE, nd.size, nd.mtime); return 0; }
       const st = await statSave(rel); if (!st) return E.NOENT;
       writeFilestat(n(4), inoOf(rel), st.type, st.size, st.mtime); return 0;
     }
@@ -449,6 +458,9 @@ async function op(o: Op, a: bigint[]): Promise<number> {
     }
     case Op.FdRenumber: { const f = fds.get(n(0)); if (!f) return E.BADF; fds.delete(n(0)); fds.set(n(1), f); return 0; }
     case Op.FdAdvise: return 0;
+    case Op.MovieOpen: return movieOpen(n(0), n(1));
+    case Op.MovieDecode: return await movieDecode(memory, n(0), n(1), n(2), n(3), n(4), n(5), n(6), n(7), note);
+    case Op.MovieClose: movieClose(n(0)); return 0;
   }
   return E.NOSYS;
 }

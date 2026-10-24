@@ -191,6 +191,26 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
   - `/dev`: `null`, `zero`, `urandom`.
 
   The runtime runs as on the Mac with `NFSU2_SAVEDIR=/save` and `NFSU2_READONLY_DATA=1`.
+- **Movies in AV1:** where the browser decodes AV1 (WebCodecs `VideoDecoder.isConfigSupported`, software decoder
+  preferred: `web/src/host/movie.ts` `movieCodec`, before Play and in `startProcess`), the I/O worker opens
+  `MOVIES/AV1/<name>.vp6` (and `LANGPACKS/<language>/MOVIES/AV1/<name>.vp6`) in place of `MOVIES/<name>.vp6` when
+  the manifest has it (`io-worker.ts` `dataFile`, `datacache.ts` `av1Path`; the offline "every movie kept" check and
+  the preload's movie exclusion count the same files). `tools/movies_av1.py` makes them: EA's movie file with every
+  chunk kept in place (the sound byte for byte) and each video frame's payload swapped for `AV01`, a key flag and one
+  AV1 temporal unit, a key frame at every `MV0K` (the player jumps to the next one when it falls 16 frames behind),
+  pictures stored bottom-up as the game's VP6 decoder leaves them. The game's own movie player still reads the file,
+  keeps the time, plays the sound, skips and ends it; `runtime/movie.c` takes over the VP6 decoder's three calls
+  (decode `0x702e47`, picture `0x70288e`, free `0x702e5e`) for tagged frames: each goes to the I/O worker
+  (`Op.MovieDecode`), whose `VideoDecoder` (`optimizeForLatency`: otherwise Chrome and Firefox hold 2–3 frames back)
+  writes the picture straight into a block of the VP6 decoder's layout in the game's memory (Y with a 48-pixel
+  border, then U and V), and the player gets that block. Chrome gives I420 (copied in place); Firefox gives BGRX,
+  turned back into the YUV it came from by the frame's matrix. A frame takes 2 to 4 ms in Chrome and about 8 in Firefox (the
+  conversion), less than the lifted VP6 decoder took; one that brings no picture within 250 ms keeps the last one on screen. One log line a movie:
+  `[movie] AV1 768x512: N frames, 0 without a picture, decode … ms a frame (max …), 0 catch-ups`.
+  `NFSU2_MOVIE_CODEC = vp6` (settings.ini, `&env=`) plays the VP6 files anyway; the page's session line says which.
+  At crf 26 (cpu-used 4) every movie keeps a VMAF of 95 or more against its VP6 pictures, and the pictures the game
+  gets are within 42 to 55 dB PSNR of its own VP6 decoder's (`NFSU2_MOVIE_DUMP`, `runtime/movie.c`): the game
+  folder's 965 MB of movies become 179 MB, a dubbed language's 216 MB 153 MB.
 - **Clock:** `clock_gettime(MONOTONIC)` is `performance.timeOrigin + performance.now()`, which is one clock across
   workers.
 - **Frame pacing on Windows:** a worker's `Atomics.wait` timeout wakes on the OS timer, which Chrome on Windows runs

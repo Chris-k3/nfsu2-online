@@ -44,12 +44,24 @@ function gameFiles(files: DataFile[], language: string, texpack: string): DataFi
   });
 }
 const isMovie = (f: DataFile) => { const p = parts(f); return (p[0] === 'langpacks' ? p[2] : p[0]) === 'movies'; };
+/** The AV1 copy of a movie (tools/movies_av1.py, played where the browser decodes AV1: movie.ts): MOVIES/<name>.vp6 ->
+ *  MOVIES/AV1/<name>.vp6, the same in a language pack's MOVIES; null for any other path. */
+export function av1Path(path: string): string | null {
+  const p = path.split('/'), i = p[0].toLowerCase() === 'langpacks' ? 2 : 0;
+  if (p.length !== i + 2 || p[i].toLowerCase() !== 'movies' || !p[i + 1].toLowerCase().endsWith('.vp6')) return null;
+  return [...p.slice(0, i + 1), 'AV1', p[i + 1]].join('/');
+}
 /** What "Preload the game data" fetches: all but the movies (MOVIES/, a third of the folder in VP6 video that
- *  does not compress).  They stream as they play, and with Movies off the game never opens them. */
+ *  does not compress, and their AV1 copies).  They stream as they play, and with Movies off the game never opens
+ *  them. */
 export const aheadFiles = (files: DataFile[], language: string, texpack = '') =>
   gameFiles(files, language, texpack).filter(f => !isMovie(f));
-/** The movies a game in this language can open. */
-export const languageMovies = (files: DataFile[], language: string) => gameFiles(files, language, '').filter(isMovie);
+/** The movies a game in this language can open: its VP6 files, or where it plays AV1 (av1) their AV1 copies, the
+ *  VP6 file where a movie has none (as the I/O worker opens them, io-worker.ts dataFile). */
+export function languageMovies(files: DataFile[], language: string, av1 = false): DataFile[] {
+  const all = gameFiles(files, language, '').filter(isMovie), byPath = new Map(all.map(f => [f.path.toLowerCase(), f]));
+  return all.filter(f => av1Path(f.path) !== null).map(f => (av1 && byPath.get(av1Path(f.path)!.toLowerCase())) || f);
+}
 export const dataUrl = (base: string, path: string) => base + path.split('/').map(encodeURIComponent).join('/');
 export function cacheKey(f: DataFile) { return `${f.path.replace(/[^A-Za-z0-9._-]/g, '_')}.${f.size}.${f.mtime}`; }
 export const blockCount = (size: number) => Math.ceil(size / BLOCK);

@@ -50,6 +50,7 @@ import { AwayCheck, AWAY_LIMITS, type AwayLimits } from './away';
 import { pageId } from './page-id';
 import { RenderCheck, RENDER_CHECK_TIMES, type RenderCheckTimes } from './rendercheck';
 import { moviesKept, Predownload } from './predownload';
+import { movieCodec } from '../host/movie';
 
 type Phase = 'boot' | 'ready' | 'error' | 'waiting' | 'starting' | 'playing' | 'exited';
 
@@ -394,10 +395,12 @@ async function startGame() {
   // offline mode: the server does not answer.  The movies stream from it, so unless every one of them is in this
   // browser they are off for this game (a movie the game could not read would stop it).
   setReach(await serverAnswers(2000));
+  // the movies in AV1 where this browser decodes it, else in VP6 (host/movie.ts; settings.ini NFSU2_MOVIE_CODEC)
+  r.env.NFSU2_MOVIE_CODEC = await movieCodec(r.env);
   let offlineNote = '';
   if (offline) {
     log.add('[app] offline: the server does not answer, the game runs from this PC (no free roam or Online)');
-    if (r.env.NOMOVIES !== '1' && !await moviesKept(language(r)).catch(() => false)) {
+    if (r.env.NOMOVIES !== '1' && !await moviesKept(language(r), r.env.NFSU2_MOVIE_CODEC === 'av1').catch(() => false)) {
       r.env.NOMOVIES = '1';
       log.add('[app] offline: not every movie is on this PC, so the movies are off for this game');
       offlineNote = t('Offline: the movies are off for this game.') + ' ';
@@ -407,7 +410,7 @@ async function startGame() {
   // more of this browser than its major version and system (the audit's PRIV-5).  These session lines stay when
   // a long game fills the log (logs.ts keep).
   log.keep(`=== NFSU2 web, ${new Date().toISOString()}, game ${loaded!.info.rev}, server ${serverKind()} ===`);
-  log.keep(`[app] save folder: OPFS ${SAVE} (/save); canvas ${size.w}x${size.h} device pixels, display ${displayHz} Hz; ${browserBrief()}; ${checks.get('gpu')?.label ?? 'WebGPU'}`);
+  log.keep(`[app] save folder: OPFS ${SAVE} (/save); canvas ${size.w}x${size.h} device pixels, display ${displayHz} Hz; ${browserBrief()}; ${checks.get('gpu')?.label ?? 'WebGPU'}; movies in ${r.env.NFSU2_MOVIE_CODEC === 'av1' ? 'AV1' : 'VP6'}`);
   for (const n of r.notes) log.keep(`[app] ${n}`);
   const reg = r.env.NFSU2_REGFILE.replace(/^\/save\//, '');
   if (q.get('reg')) {

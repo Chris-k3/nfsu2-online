@@ -2,6 +2,7 @@
 // and RPC blocks, the I/O worker and a pool of game-thread workers.
 import { CTL_EXIT, CTL_INTS, CTL_NEXT_TID, CTL_POOL, MAX_THREADS, POOL_RUN_MAIN, RPC_BYTES, type BootConfig, type ToPage } from './proto';
 import { tzEnv } from './tz';
+import { movieCodec } from './movie';
 
 export interface ProcessOptions {
   module: WebAssembly.Module;
@@ -37,6 +38,8 @@ export async function startProcess(o: ProcessOptions): Promise<GameProcess> {
   const pool = Math.min(o.pool ?? 24, MAX_THREADS);
   // the page's time zone (WASI has none); an explicit NFSU2_TZ in the config wins
   const cfg: BootConfig = { ...o.cfg, env: { ...tzEnv(), ...o.cfg.env } };
+  // which movies the I/O worker opens (the page decides before the game starts: shell.ts; a test page here)
+  cfg.env.NFSU2_MOVIE_CODEC = await movieCodec(cfg.env);
   const initial = o.initialPages ?? memoryPagesOf(o.module) ?? 16384;
   const memory = new WebAssembly.Memory({ initial, maximum: 65536, shared: true });
   const ctlBuf = new SharedArrayBuffer(CTL_INTS * 4), rpc = new SharedArrayBuffer(RPC_BYTES);

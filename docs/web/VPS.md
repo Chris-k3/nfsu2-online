@@ -431,6 +431,29 @@ has not kept and Cloudflare has not either, the music stops or turns to noise un
 game itself carries on). A quiet hour keeps that to a few players. Browsers keep the old file's blocks they already
 have (the cache names a file by its size and time) until the player deletes the game data.
 
+## Movies in AV1
+
+The game's movies are VP6 at 5 to 12 Mbit/s, the most a player downloads after the game data. Browsers that decode
+AV1 themselves (Chrome, Edge and Firefox, on computers and phones) can play them as AV1 instead, at about a fifth of
+the size and looking the same: a copy of each movie in an `AV1` folder next to it (`MOVIES/AV1`,
+`LANGPACKS/<language>/MOVIES/AV1`), which the page opens in its place (`runtime/movie.c`). Safari, and any browser
+without it, keeps playing the VP6 movies, so the game folder keeps them too.
+
+1. `sudo apt install ffmpeg` (the encoder is its libaom), then from the repository:
+   `tools/movies_av1.py "<your game folder>" <out>`. The AV1 files land in `<out>`, at their places in the game
+   folder: the game folder's 965 MB of movies become 179 MB, each dubbed language's 216 MB 153 MB. It took about
+   50 minutes on 12 cores; a second run makes only what is new, and the dubbed languages share their pictures, so
+   those are encoded once.
+2. Optional: `tools/movies_av1.py --check "<your game folder>" <out> --ffmpeg <an ffmpeg with libvmaf>` measures
+   each AV1 movie against its VP6 one (VMAF; 95 or more looks the same).
+3. Copy them over like the rest, from inside `<out>`:
+   `rsync -rlt MOVIES LANGPACKS root@<vps>:/srv/nfsu2/game/`, then the same `chmod`, and open
+   `https://<your site>/data-manifest?refresh`.
+
+The order of this and a new version does not matter: a page that does not know the AV1 files never opens them, and
+one that does opens a movie's AV1 copy only where there is one. `NFSU2_MOVIE_CODEC = vp6` in a player's settings.ini
+plays the VP6 movies anyway.
+
 ## How it runs
 
 - **The VPS's own network.** Caddy and the server use the VPS's network (`network_mode: host`), as they would
