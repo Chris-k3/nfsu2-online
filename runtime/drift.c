@@ -76,7 +76,9 @@
  *   drift_key    X presses so far (the page's note on each)
  *   drift_x      the multiplier (1-5)       drift_gain   its next level's points (0 at 5)
  *   drift_total  points banked in drift mode since the game started
- *   drift_best   the most of one drift */
+ *   drift_best   the most of one drift
+ *   drift_st     STYLE_DRIFT's state: 0 a drift that counts, 1 starting, 2 none, 3 banked, 4 lost (a wall)
+ *   drift_pend   its points so far (the page counts them up, as the drift event's HUD does) */
 #include "cpu.h"
 #include "kbd.h"
 #include <stdio.h>
@@ -119,7 +121,9 @@ __attribute__((weak)) void host_status_set_n(const int *slot, const double *valu
 #define DC_LEVEL       0x1cu         /* the multiplier */
 #define DC_GAIN        0x20u         /* the next level's points */
 #define DC_BEST        0x30u         /* the farthest route distance */
-#define ST_TOTAL       0x2cu         /* a style: points banked (float) */
+#define ST_STATE       0x14u         /* a style: its state (drift_st) */
+#define ST_PEND        0x24u         /* the drift's points so far (float) */
+#define ST_TOTAL       0x2cu         /* points banked (float) */
 #define PL_HUD         0x9a4u
 #define VIEW_DRIFT     4u
 
@@ -150,7 +154,7 @@ static struct {
     float last;
     double total, best;
     uint32_t keys, kseq; int kinit;
-    int slot[6]; double val[6]; int slots;
+    int slot[8]; double val[8]; int slots;
 } D;
 
 /* X presses since the last frame, from the keyboard's events (a tap between frames counts) */
@@ -264,20 +268,25 @@ static void camera_off(CPU *c, int live){
     } else MR32(va) = back;
 }
 
+/* the status, every frame it changes (a drift's points: every frame of it), all in one consistent section */
 static void publish(void){
-    static const char *const k[6] = { "drift", "drift_key", "drift_x", "drift_gain", "drift_total", "drift_best" };
-    if (!D.slots){ D.slots = 1; for (int i = 0; i < 6; i++){ D.slot[i] = host_status_slot(k[i]); D.val[i] = -1; } }
-    uint32_t dc = 0, rc = D.on ? racer() : 0;
+    static const char *const k[8] = { "drift", "drift_key", "drift_x", "drift_gain", "drift_total", "drift_best", "drift_st", "drift_pend" };
+    if (!D.slots){ D.slots = 1; for (int i = 0; i < 8; i++){ D.slot[i] = host_status_slot(k[i]); D.val[i] = -1; } }
+    uint32_t dc = 0, st = 0, rc = D.on ? racer() : 0, ds = rc ? rd32(rc + RC_DRIFTSCORE) : 0;
     if (rc) dc = rd32(rc + RC_DRIFTCAR);
+    if (ok(ds, 3)) st = rd32(ds);
+    if (!ok(st, ST_TOTAL + 4u)) st = 0;
     int lvl = dc && ok(dc, DC_GAIN + 4u) ? (int)MR32(dc + DC_LEVEL) : 1;
     if (lvl < 1 || lvl > 5) lvl = 1;
-    double v[6] = { (double)(D.want | (D.on ? 2 : 0) | (D.note ? 4 : 0)), (double)D.keys, (double)lvl,
-                    lvl < 5 && dc ? (double)(int32_t)MR32(dc + DC_GAIN) : 0.0, D.total, D.best };
+    float pend = st ? MRF32(st + ST_PEND) : 0.f;
+    double v[8] = { (double)(D.want | (D.on ? 2 : 0) | (D.note ? 4 : 0)), (double)D.keys, (double)lvl,
+                    lvl < 5 && dc ? (double)(int32_t)MR32(dc + DC_GAIN) : 0.0, D.total, D.best,
+                    st ? (double)MR32(st + ST_STATE) : 2.0, pend > 0.f && pend < 1e9f ? (double)(int)pend : 0.0 };
     int changed = 0;
-    for (int i = 0; i < 6; i++) changed |= v[i] != D.val[i];
+    for (int i = 0; i < 8; i++) changed |= v[i] != D.val[i];
     if (!changed) return;
     memcpy(D.val, v, sizeof v);
-    host_status_set_n(D.slot, v, 6);
+    host_status_set_n(D.slot, v, 8);
 }
 
 void drift_frame(CPU *c){

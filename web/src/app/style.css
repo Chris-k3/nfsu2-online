@@ -630,17 +630,20 @@ html:has(> body > .stage:not([hidden])) { overflow: hidden; }
 .drift-gain { display: flex; flex-direction: column; align-items: flex-end; gap: calc(5 * var(--u)); }
 .drift-gain b { color: #d8a020; }
 .drift-total, .drift-total b { color: #30cd30; }
-/* a drift banked (drift.ts): the drift event's DRIFT popup, in lime, the label over the points in big italics, where
- * free roam's HUD shows its own popups (right-aligned there: its left is that edge), fading out after 2 s */
+/* the DRIFT counter (drift.ts): the drift event's, centred under free roam's arrow, the label over the points in big
+ * italics: lime while a drift counts and when it banks, red (the drift event's) when a wall loses it; a banked or lost
+ * one fades out */
 .drift-pop {
   --u: 1px;
-  position: absolute; z-index: 2; translate: -100% 0; pointer-events: none;
-  display: flex; flex-direction: column; align-items: flex-end; gap: calc(3 * var(--u));
-  color: var(--lime); white-space: nowrap; animation: drift-pop 2.4s linear both;
+  position: absolute; z-index: 2; translate: -50% 0; pointer-events: none;
+  display: flex; flex-direction: column; align-items: center; gap: calc(3 * var(--u));
+  color: var(--lime); white-space: nowrap;
 }
+.drift-pop.banked { animation: drift-pop 2.4s linear both; }
+.drift-pop.lost { color: #ce3030; animation: drift-pop 1.6s linear both; }
 .drift-pop span { font: 400 calc(13 * var(--u)) / 1 var(--font); letter-spacing: 0.08em; }
-.drift-pop b { font: italic 700 calc(26 * var(--u)) / 1 var(--font); }
-@keyframes drift-pop { 0% { opacity: 0; } 6%, 80% { opacity: 1; } 100% { opacity: 0; } }
+.drift-pop b { font: italic 700 calc(26 * var(--u)) / 1 var(--font); font-variant-numeric: tabular-nums; }
+@keyframes drift-pop { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
 /* quick chat's lines in the log (shell.ts chatLine): a speech balloon first, upright and brighter than the notices,
  * as big as the race lobby card's text, for 8 s */
 .notices div.chat {
