@@ -722,7 +722,8 @@
   "Keyboard": "Clavier",
   "Touch": "Tactile",
   "Site": "Site",
-  "Tap to use the game's menus. While you drive, touch controls show on the game: the button in the top right corner switches the steering between buttons, a thumb stick and tilt. A controller works too.": "Touchez l'écran pour utiliser les menus du jeu. Pendant que vous conduisez, des commandes tactiles s'affichent sur le jeu : le bouton en haut à droite fait alterner la direction entre boutons, joystick et inclinaison. Une manette fonctionne aussi.",
+  "Tap the game's menus, or use the arrows, OK and Back beside them. While you drive, touch controls show on the game. A controller works too.": "Touchez les menus du jeu, ou utilisez les flèches, OK et Retour à côté. Pendant que vous conduisez, des commandes tactiles s'affichent sur le jeu. Une manette fonctionne aussi.",
+  "How you steer while driving. The button in the game's top right corner switches it too.": "Votre façon de diriger en conduisant. Le bouton en haut à droite du jeu la change aussi.",
   "Level horizon": "Horizon à niveau",
   "With tilt steering, the view turns against the phone, so the road's horizon stays level.": "Avec la direction par inclinaison, la vue tourne à l’inverse du téléphone, pour que l’horizon de la route reste droit.",
   "Throttle, brake and reverse": "Accélérer, freiner et reculer",
@@ -783,5 +784,14 @@
   "Reset all settings?": "Réinitialiser tous les paramètres ?",
   "Every setting here goes back to its default, and any other line in settings.ini is removed. Your name and language stay, as do the options set inside the game.": "Chaque paramètre ici revient à sa valeur par défaut, et toute autre ligne de settings.ini est supprimée. Votre nom et votre langue restent, tout comme les options réglées dans le jeu.",
   "Settings are back to their defaults. Applies the next time you press Play.": "Les paramètres sont revenus à leurs valeurs par défaut. S'applique la prochaine fois que vous appuyez sur Jouer.",
-  "Saved: {key} is back to its default. Applies the next time you press Play.": "Enregistré : {key} est revenu à sa valeur par défaut. S'applique la prochaine fois que vous appuyez sur Jouer."
+  "Saved: {key} is back to its default. Applies the next time you press Play.": "Enregistré : {key} est revenu à sa valeur par défaut. S'applique la prochaine fois que vous appuyez sur Jouer.",
+  "Buttons": "Boutons",
+  "Thumb stick": "Joystick",
+  "Tilt": "Inclinaison",
+  "Up": "Haut",
+  "Left": "Gauche",
+  "Right": "Droite",
+  "Down": "Bas",
+  "Back": "Retour",
+  "OK": "OK"
 }

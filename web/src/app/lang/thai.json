@@ -638,7 +638,8 @@
   "Keyboard": "คีย์บอร์ด",
   "Touch": "สัมผัส",
   "Site": "เว็บไซต์",
-  "Tap to use the game's menus. While you drive, touch controls show on the game: the button in the top right corner switches the steering between buttons, a thumb stick and tilt. A controller works too.": "แตะเพื่อใช้เมนูของเกม ขณะขับรถ ปุ่มควบคุมแบบสัมผัสจะแสดงบนเกม: ปุ่มที่มุมขวาบนใช้สลับการบังคับเลี้ยวระหว่างปุ่ม อนาล็อก และการเอียงเครื่อง ใช้คอนโทรลเลอร์ก็ได้เช่นกัน",
+  "Tap the game's menus, or use the arrows, OK and Back beside them. While you drive, touch controls show on the game. A controller works too.": "แตะเมนูของเกม หรือใช้ลูกศร ปุ่มตกลง และปุ่มกลับที่อยู่ด้านข้าง ขณะขับรถ ปุ่มควบคุมแบบสัมผัสจะแสดงบนเกม ใช้คอนโทรลเลอร์ก็ได้เช่นกัน",
+  "How you steer while driving. The button in the game's top right corner switches it too.": "วิธีบังคับเลี้ยวขณะขับรถ ปุ่มที่มุมขวาบนของเกมก็ใช้สลับได้เช่นกัน",
   "Level horizon": "ขอบฟ้าตรงเสมอ",
   "With tilt steering, the view turns against the phone, so the road's horizon stays level.": "เมื่อบังคับเลี้ยวด้วยการเอียงเครื่อง ภาพจะหมุนสวนทางกับโทรศัพท์ ขอบฟ้าของถนนจึงตรงอยู่เสมอ",
   "Throttle, brake and reverse": "คันเร่ง เบรก และถอยหลัง",
@@ -699,5 +700,14 @@
   "Reset all settings?": "ต้องการรีเซ็ตการตั้งค่าทั้งหมดหรือไม่",
   "Every setting here goes back to its default, and any other line in settings.ini is removed. Your name and language stay, as do the options set inside the game.": "การตั้งค่าทุกอย่างที่นี่จะกลับเป็นค่าเริ่มต้น และบรรทัดอื่นใน settings.ini จะถูกลบ ชื่อและภาษาของคุณยังคงอยู่ รวมถึงตัวเลือกที่ตั้งไว้ในเกม",
   "Settings are back to their defaults. Applies the next time you press Play.": "การตั้งค่ากลับเป็นค่าเริ่มต้นแล้ว มีผลเมื่อกด “เล่น” ครั้งถัดไป",
-  "Saved: {key} is back to its default. Applies the next time you press Play.": "บันทึกแล้ว: {key} กลับเป็นค่าเริ่มต้นแล้ว มีผลเมื่อกด “เล่น” ครั้งถัดไป"
+  "Saved: {key} is back to its default. Applies the next time you press Play.": "บันทึกแล้ว: {key} กลับเป็นค่าเริ่มต้นแล้ว มีผลเมื่อกด “เล่น” ครั้งถัดไป",
+  "Buttons": "ปุ่ม",
+  "Thumb stick": "อนาล็อก",
+  "Tilt": "เอียงเครื่อง",
+  "Up": "ขึ้น",
+  "Left": "ซ้าย",
+  "Right": "ขวา",
+  "Down": "ลง",
+  "Back": "กลับ",
+  "OK": "ตกลง"
 }

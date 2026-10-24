@@ -94,7 +94,8 @@ export interface InputHandle {
   /** performance.now() of the player's last key, mouse or controller input (the attach before any); null
    *  while the game's own driver writes the event ring (an input script without the page's input) */
   lastInput(): number | null;
-  /** a key the page presses or lets go for the player (the touch controls), by KeyboardEvent.code */
+  /** a key the page presses or lets go for the player (the touch controls), by KeyboardEvent.code; Enter and Escape
+   *  also type their characters, as a keyboard's do */
   key(code: string, down: boolean): void;
   /** the touch controls' virtual controller, merged with a real one (null: none) */
   touchPad(t: TouchPad | null): void;
@@ -115,6 +116,10 @@ export interface InputHandle {
 
 /** what counts as the player's use of keyboard and mouse (lastInput) */
 const USE_EVENTS = ['keydown', 'pointerdown', 'pointermove', 'wheel'];
+
+/** the characters a key the page presses types, as a keyboard's does: the game's text fields and some of its prompts
+ *  take Enter and Escape only as characters (runtime/dinput_pad.c fe_keys) */
+const PAGE_KEY_CHARS: Record<string, number[]> = { Enter: [13], Escape: [27] };
 
 const detectMac = () => {
   const p = (navigator as unknown as { userAgentData?: { platform?: string } }).userAgentData?.platform ?? navigator.platform ?? '';
@@ -410,7 +415,7 @@ export function attachInput(proc: GameProcess, element: HTMLElement, opts: Input
     lastInput() { return refused ? null : lastUse; },
     key(code, down) {
       const k = CODES[code];
-      if (k && !detached) push(down ? IEV_KEY_DOWN : IEV_KEY_UP, k.dik, k.vk, 0);
+      if (k && !detached) push(down ? IEV_KEY_DOWN : IEV_KEY_UP, k.dik, k.vk, 0, down ? PAGE_KEY_CHARS[code] ?? [] : []);
     },
     touchPad(t) { pads?.setTouch(t); },
     viewRoll(rad) { if (h && !detached) { roll[0] = rad; Atomics.store(h, IM_VIEW_ROLL, rollBits[0]); } },

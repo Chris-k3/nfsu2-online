@@ -638,7 +638,8 @@
   "Keyboard": "鍵盤",
   "Touch": "觸控",
   "Site": "網站",
-  "Tap to use the game's menus. While you drive, touch controls show on the game: the button in the top right corner switches the steering between buttons, a thumb stick and tilt. A controller works too.": "點一下即可操作遊戲選單。開車時，遊戲畫面上會顯示觸控操作：右上角的按鈕可在按鈕、搖桿與傾斜之間切換轉向方式。也可以使用控制器。",
+  "Tap the game's menus, or use the arrows, OK and Back beside them. While you drive, touch controls show on the game. A controller works too.": "點一下遊戲選單，或使用兩旁的方向鍵、確定與返回。開車時，遊戲畫面上會顯示觸控操作。也可以使用控制器。",
+  "How you steer while driving. The button in the game's top right corner switches it too.": "開車時的轉向方式。遊戲右上角的按鈕也能切換。",
   "Level horizon": "地平線保持水平",
   "With tilt steering, the view turns against the phone, so the road's horizon stays level.": "使用傾斜轉向時，畫面會與手機反向旋轉，讓道路的地平線保持水平。",
   "Throttle, brake and reverse": "油門、煞車與倒車",
@@ -699,5 +700,14 @@
   "Reset all settings?": "要重設所有設定嗎？",
   "Every setting here goes back to its default, and any other line in settings.ini is removed. Your name and language stay, as do the options set inside the game.": "這裡的每項設定都會恢復預設值，settings.ini 中的其他行也會被移除。你的名稱和語言會保留，在遊戲內設定的選項也一樣。",
   "Settings are back to their defaults. Applies the next time you press Play.": "設定已恢復預設值。下次按「開始遊戲」時生效。",
-  "Saved: {key} is back to its default. Applies the next time you press Play.": "已儲存：{key} 已恢復預設值。下次按「開始遊戲」時生效。"
+  "Saved: {key} is back to its default. Applies the next time you press Play.": "已儲存：{key} 已恢復預設值。下次按「開始遊戲」時生效。",
+  "Buttons": "按鈕",
+  "Thumb stick": "搖桿",
+  "Tilt": "傾斜",
+  "Up": "上",
+  "Left": "左",
+  "Right": "右",
+  "Down": "下",
+  "Back": "返回",
+  "OK": "確定"
 }

@@ -701,7 +701,8 @@
   "Keyboard": "Tangentbord",
   "Touch": "Pekskärm",
   "Site": "Sidan",
-  "Tap to use the game's menus. While you drive, touch controls show on the game: the button in the top right corner switches the steering between buttons, a thumb stick and tilt. A controller works too.": "Tryck för att använda spelets menyer. När du kör visas pekkontroller över spelet: knappen i det övre högra hörnet växlar styrningen mellan knappar, en styrspak och lutning. En handkontroll fungerar också.",
+  "Tap the game's menus, or use the arrows, OK and Back beside them. While you drive, touch controls show on the game. A controller works too.": "Tryck i spelets menyer, eller använd pilarna, OK och Tillbaka bredvid dem. När du kör visas pekkontroller över spelet. En handkontroll fungerar också.",
+  "How you steer while driving. The button in the game's top right corner switches it too.": "Hur du styr när du kör. Knappen i spelets övre högra hörn växlar det också.",
   "Level horizon": "Rak horisont",
   "With tilt steering, the view turns against the phone, so the road's horizon stays level.": "Med styrning genom lutning vrids vyn mot telefonens lutning, så att vägens horisont förblir rak.",
   "Throttle, brake and reverse": "Gasa, bromsa och backa",
@@ -762,5 +763,14 @@
   "Reset all settings?": "Återställa alla inställningar?",
   "Every setting here goes back to its default, and any other line in settings.ini is removed. Your name and language stay, as do the options set inside the game.": "Varje inställning här går tillbaka till standard, och alla andra rader i settings.ini tas bort. Ditt namn och språk finns kvar, liksom alternativen som ställts in i själva spelet.",
   "Settings are back to their defaults. Applies the next time you press Play.": "Inställningarna är tillbaka på standard. Gäller nästa gång du trycker på Spela.",
-  "Saved: {key} is back to its default. Applies the next time you press Play.": "Sparat: {key} är tillbaka på standard. Gäller nästa gång du trycker på Spela."
+  "Saved: {key} is back to its default. Applies the next time you press Play.": "Sparat: {key} är tillbaka på standard. Gäller nästa gång du trycker på Spela.",
+  "Buttons": "Knappar",
+  "Thumb stick": "Styrspak",
+  "Tilt": "Lutning",
+  "Up": "Upp",
+  "Left": "Vänster",
+  "Right": "Höger",
+  "Down": "Ned",
+  "Back": "Tillbaka",
+  "OK": "OK"
 }

@@ -722,7 +722,8 @@
   "Keyboard": "Tastiera",
   "Touch": "Touch",
   "Site": "Sito",
-  "Tap to use the game's menus. While you drive, touch controls show on the game: the button in the top right corner switches the steering between buttons, a thumb stick and tilt. A controller works too.": "Tocca per usare i menu del gioco. Mentre guidi, sul gioco compaiono i comandi touch: il pulsante nell'angolo in alto a destra alterna lo sterzo tra pulsanti, uno stick e l'inclinazione. Funziona anche un controller.",
+  "Tap the game's menus, or use the arrows, OK and Back beside them. While you drive, touch controls show on the game. A controller works too.": "Tocca i menu del gioco, oppure usa le frecce, OK e Indietro ai lati. Mentre guidi, sul gioco compaiono i comandi touch. Funziona anche un controller.",
+  "How you steer while driving. The button in the game's top right corner switches it too.": "Come sterzi mentre guidi. Anche il pulsante in alto a destra nel gioco lo cambia.",
   "Level horizon": "Orizzonte livellato",
   "With tilt steering, the view turns against the phone, so the road's horizon stays level.": "Con lo sterzo a inclinazione, la visuale ruota in senso opposto al telefono, così l’orizzonte della strada resta dritto.",
   "Throttle, brake and reverse": "Acceleratore, freno e retromarcia",
@@ -783,5 +784,14 @@
   "Reset all settings?": "Ripristinare tutte le impostazioni?",
   "Every setting here goes back to its default, and any other line in settings.ini is removed. Your name and language stay, as do the options set inside the game.": "Ogni impostazione qui torna al valore predefinito e ogni altra riga di settings.ini viene rimossa. Il tuo nome e la lingua restano, come le opzioni impostate nel gioco.",
   "Settings are back to their defaults. Applies the next time you press Play.": "Le impostazioni sono tornate ai valori predefiniti. Si applica la prossima volta che premi Gioca.",
-  "Saved: {key} is back to its default. Applies the next time you press Play.": "Salvato: {key} è tornato al valore predefinito. Si applica la prossima volta che premi Gioca."
+  "Saved: {key} is back to its default. Applies the next time you press Play.": "Salvato: {key} è tornato al valore predefinito. Si applica la prossima volta che premi Gioca.",
+  "Buttons": "Pulsanti",
+  "Thumb stick": "Stick",
+  "Tilt": "Inclinazione",
+  "Up": "Su",
+  "Left": "Sinistra",
+  "Right": "Destra",
+  "Down": "Giù",
+  "Back": "Indietro",
+  "OK": "OK"
 }

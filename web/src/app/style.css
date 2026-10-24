@@ -435,6 +435,23 @@ html:has(> body > .stage:not([hidden])) { overflow: hidden; }
 .touch:not([data-steering="stick"]) .stick,
 .touch:not([data-steering="tilt"]) [data-ctl="center"],
 .touch:not([data-roam]) .roam { display: none; }
+/* the menus': the arrows as a D-pad bottom left, Back over OK bottom right, in the bars beside the game's 4:3 menus
+ * (--bar wide): the keys as big as the bar leaves room for, 44 to 52 px.  A faint rim: the bars are black behind the
+ * movies and the profile screens */
+.touch[data-mode="menu"] > :not(.menu), .touch:not([data-mode="menu"]) > .menu { display: none; }
+.tc.menu { box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.2); }
+.touch {
+  --bar: calc((100vw - 100dvh * 4 / 3) / 2);
+  --k: clamp(44px, calc((var(--bar) - var(--l) - 16px) / 3), 52px); --w: clamp(96px, calc(var(--bar) - var(--r) - 8px), 136px);
+}
+.tc.dpad { width: var(--k); height: var(--k); border-radius: 12px; }
+.tc[data-ctl="m-up"] { left: calc(var(--l) + var(--k) + 4px); bottom: calc(var(--b) + 2 * (var(--k) + 4px)); }
+.tc[data-ctl="m-left"] { left: var(--l); bottom: calc(var(--b) + var(--k) + 4px); }
+.tc[data-ctl="m-right"] { left: calc(var(--l) + 2 * (var(--k) + 4px)); bottom: calc(var(--b) + var(--k) + 4px); }
+.tc[data-ctl="m-down"] { left: calc(var(--l) + var(--k) + 4px); bottom: var(--b); }
+.tc.wide { right: var(--r); width: var(--w); height: var(--k); border-radius: 999px; }
+.tc[data-ctl="m-back"] { bottom: calc(var(--b) + var(--k) + 12px); }
+.tc[data-ctl="m-ok"] { bottom: var(--b); }
 /* the thumb stick: anywhere in the lower left; at rest it waits in the corner, a touch brings it under the thumb */
 .stick { left: 0; bottom: 0; width: 42%; height: 72%; }
 .stick-base {
@@ -454,7 +471,7 @@ html:has(> body > .stage:not([hidden])) { overflow: hidden; }
   -webkit-user-select: text; user-select: text; touch-action: manipulation;
 }
 /* a note on the game, and the frame-rate counter, go under the row of small buttons */
-.stage:has(> .touch:not([hidden])) :is(.toast:not(.away), .hud-fps) { top: calc(max(12px, env(safe-area-inset-top)) + 60px); }
+.stage:has(> .touch[data-mode="drive"]) :is(.toast:not(.away), .hud-fps) { top: calc(max(12px, env(safe-area-inset-top)) + 60px); }
 /* a touch screen held upright: the game in a 4:5 picture at the top, as wide as the screen and at most 60% of its
  * height, and the menu's button and the touch controls in the space below it, so nothing covers the picture */
 @media (orientation: portrait) {
@@ -462,7 +479,8 @@ html:has(> body > .stage:not([hidden])) { overflow: hidden; }
   html[data-touch] .stage canvas { inset: 0 auto auto 50%; width: calc(var(--pic-h) * 0.8); height: var(--pic-h); transform: translateX(-50%); }
   html[data-touch] .stage-menu { top: calc(var(--pic-h) + 12px); }
   html[data-touch] .touch { --t: calc(var(--pic-h) + 12px); }
-  html[data-touch] .stage:has(> .touch:not([hidden])) :is(.toast:not(.away), .hud-fps) { top: 16px; }
+  html[data-touch] .stage:has(> .touch[data-mode="drive"]) :is(.toast:not(.away), .hud-fps) { top: 16px; }
+  html[data-touch] .touch { --k: 56px; --w: 136px; }
   html[data-touch] .tc[data-ctl="map"] { left: var(--l); top: calc(var(--t) + 56px); }
   html[data-touch] .tc[data-ctl="msgs"] { left: calc(var(--l) + 56px); top: calc(var(--t) + 56px); }
   html[data-touch] .tc[data-ctl="horn"] { left: calc(var(--l) + 112px); top: calc(var(--t) + 56px); }

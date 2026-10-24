@@ -638,7 +638,8 @@
   "Keyboard": "キーボード",
   "Touch": "タッチ",
   "Site": "サイト",
-  "Tap to use the game's menus. While you drive, touch controls show on the game: the button in the top right corner switches the steering between buttons, a thumb stick and tilt. A controller works too.": "ゲームのメニューはタップで操作します。走行中はゲーム画面にタッチ操作が表示されます。右上のボタンで、ステアリングをボタン、スティック、傾きに切り替えられます。コントローラーも使えます。",
+  "Tap the game's menus, or use the arrows, OK and Back beside them. While you drive, touch controls show on the game. A controller works too.": "ゲームのメニューはタップするか、横にある矢印、OK、戻るで操作します。走行中はゲーム画面にタッチ操作が表示されます。コントローラーも使えます。",
+  "How you steer while driving. The button in the game's top right corner switches it too.": "走行中のステアリング方法です。ゲーム画面右上のボタンでも切り替えられます。",
   "Level horizon": "水平線を保つ",
   "With tilt steering, the view turns against the phone, so the road's horizon stays level.": "傾きステアリング中は、画面がスマホと逆方向に回転し、道路の地平線を水平に保ちます。",
   "Throttle, brake and reverse": "アクセル、ブレーキ、バック",
@@ -699,5 +700,14 @@
   "Reset all settings?": "すべての設定をリセットしますか？",
   "Every setting here goes back to its default, and any other line in settings.ini is removed. Your name and language stay, as do the options set inside the game.": "ここでの設定はすべてデフォルトに戻り、settings.iniのその他の行は削除されます。名前と言語、ゲーム内で設定したオプションはそのまま残ります。",
   "Settings are back to their defaults. Applies the next time you press Play.": "設定をデフォルトに戻しました。次に「プレイ」を押したときに反映されます。",
-  "Saved: {key} is back to its default. Applies the next time you press Play.": "保存しました: {key}をデフォルトに戻しました。次に「プレイ」を押したときに反映されます。"
+  "Saved: {key} is back to its default. Applies the next time you press Play.": "保存しました: {key}をデフォルトに戻しました。次に「プレイ」を押したときに反映されます。",
+  "Buttons": "ボタン",
+  "Thumb stick": "スティック",
+  "Tilt": "傾き",
+  "Up": "上",
+  "Left": "左",
+  "Right": "右",
+  "Down": "下",
+  "Back": "戻る",
+  "OK": "OK"
 }

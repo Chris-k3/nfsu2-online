@@ -701,7 +701,8 @@
   "Keyboard": "Toetsenbord",
   "Touch": "Touch",
   "Site": "Website",
-  "Tap to use the game's menus. While you drive, touch controls show on the game: the button in the top right corner switches the steering between buttons, a thumb stick and tilt. A controller works too.": "Tik om de menu's van het spel te gebruiken. Tijdens het rijden verschijnt de touchbesturing op het spel: de knop rechtsboven wisselt de besturing tussen knoppen, een duimstick en kantelen. Een controller werkt ook.",
+  "Tap the game's menus, or use the arrows, OK and Back beside them. While you drive, touch controls show on the game. A controller works too.": "Tik op de menu's van het spel, of gebruik de pijlen, OK en Terug ernaast. Tijdens het rijden verschijnt de touchbesturing op het spel. Een controller werkt ook.",
+  "How you steer while driving. The button in the game's top right corner switches it too.": "Hoe je stuurt tijdens het rijden. De knop rechtsboven in het spel wisselt het ook.",
   "Level horizon": "Horizon recht houden",
   "With tilt steering, the view turns against the phone, so the road's horizon stays level.": "Bij sturen door kantelen draait het beeld tegen de telefoon in, zodat de horizon van de weg recht blijft.",
   "Throttle, brake and reverse": "Gas geven, remmen en achteruit",
@@ -762,5 +763,14 @@
   "Reset all settings?": "Alle instellingen resetten?",
   "Every setting here goes back to its default, and any other line in settings.ini is removed. Your name and language stay, as do the options set inside the game.": "Elke instelling hier gaat terug naar de standaard, en elke andere regel in settings.ini wordt verwijderd. Je naam en taal blijven, net als de opties die je in het spel zelf instelt.",
   "Settings are back to their defaults. Applies the next time you press Play.": "De instellingen staan weer op de standaard. Geldt vanaf de volgende keer dat je op Spelen drukt.",
-  "Saved: {key} is back to its default. Applies the next time you press Play.": "Opgeslagen: {key} staat weer op de standaard. Geldt vanaf de volgende keer dat je op Spelen drukt."
+  "Saved: {key} is back to its default. Applies the next time you press Play.": "Opgeslagen: {key} staat weer op de standaard. Geldt vanaf de volgende keer dat je op Spelen drukt.",
+  "Buttons": "Knoppen",
+  "Thumb stick": "Duimstick",
+  "Tilt": "Kantelen",
+  "Up": "Omhoog",
+  "Left": "Links",
+  "Right": "Rechts",
+  "Down": "Omlaag",
+  "Back": "Terug",
+  "OK": "OK"
 }

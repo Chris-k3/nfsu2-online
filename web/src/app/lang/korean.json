@@ -638,7 +638,8 @@
   "Keyboard": "키보드",
   "Touch": "터치",
   "Site": "사이트",
-  "Tap to use the game's menus. While you drive, touch controls show on the game: the button in the top right corner switches the steering between buttons, a thumb stick and tilt. A controller works too.": "게임 메뉴는 탭해서 조작해요. 주행 중에는 게임 위에 터치 컨트롤이 표시돼요. 오른쪽 위 버튼으로 조향 방식을 버튼, 스틱, 기울이기로 바꿀 수 있어요. 컨트롤러도 쓸 수 있어요.",
+  "Tap the game's menus, or use the arrows, OK and Back beside them. While you drive, touch controls show on the game. A controller works too.": "게임 메뉴를 탭하거나, 옆에 있는 화살표, 확인, 뒤로 버튼을 쓰세요. 주행 중에는 게임 위에 터치 컨트롤이 표시돼요. 컨트롤러도 쓸 수 있어요.",
+  "How you steer while driving. The button in the game's top right corner switches it too.": "주행 중 조향 방식이에요. 게임 오른쪽 위 버튼으로도 바꿀 수 있어요.",
   "Level horizon": "수평 유지",
   "With tilt steering, the view turns against the phone, so the road's horizon stays level.": "기울이기 조향을 쓰면 화면이 휴대폰과 반대로 돌아가서 도로의 지평선이 수평으로 유지돼요.",
   "Throttle, brake and reverse": "가속, 브레이크, 후진",
@@ -699,5 +700,14 @@
   "Reset all settings?": "모든 설정을 초기화할까요?",
   "Every setting here goes back to its default, and any other line in settings.ini is removed. Your name and language stay, as do the options set inside the game.": "여기 있는 모든 설정이 기본값으로 돌아가고, settings.ini의 다른 줄은 모두 삭제돼요. 이름과 언어, 게임 안에서 설정한 옵션은 그대로 남아요.",
   "Settings are back to their defaults. Applies the next time you press Play.": "설정을 기본값으로 되돌렸어요. 다음에 '플레이'를 누를 때 적용돼요.",
-  "Saved: {key} is back to its default. Applies the next time you press Play.": "저장했어요: {key}을(를) 기본값으로 되돌렸어요. 다음에 '플레이'를 누를 때 적용돼요."
+  "Saved: {key} is back to its default. Applies the next time you press Play.": "저장했어요: {key}을(를) 기본값으로 되돌렸어요. 다음에 '플레이'를 누를 때 적용돼요.",
+  "Buttons": "버튼",
+  "Thumb stick": "스틱",
+  "Tilt": "기울이기",
+  "Up": "위",
+  "Left": "왼쪽",
+  "Right": "오른쪽",
+  "Down": "아래",
+  "Back": "뒤로",
+  "OK": "확인"
 }

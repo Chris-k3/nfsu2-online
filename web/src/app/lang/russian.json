@@ -743,7 +743,8 @@
   "Keyboard": "Клавиатура",
   "Touch": "Сенсор",
   "Site": "Сайт",
-  "Tap to use the game's menus. While you drive, touch controls show on the game: the button in the top right corner switches the steering between buttons, a thumb stick and tilt. A controller works too.": "Касайтесь экрана, чтобы пользоваться меню игры. Во время езды поверх игры появляется сенсорное управление: кнопка в правом верхнем углу переключает руление между кнопками, стиком и наклоном. Геймпад тоже работает.",
+  "Tap the game's menus, or use the arrows, OK and Back beside them. While you drive, touch controls show on the game. A controller works too.": "Касайтесь меню игры или пользуйтесь стрелками и кнопками «ОК» и «Назад» по бокам. Во время езды поверх игры появляется сенсорное управление. Геймпад тоже работает.",
+  "How you steer while driving. The button in the game's top right corner switches it too.": "Как вы рулите во время езды. Кнопка в правом верхнем углу игры тоже переключает его.",
   "Level horizon": "Ровный горизонт",
   "With tilt steering, the view turns against the phone, so the road's horizon stays level.": "При рулении наклоном изображение поворачивается против наклона телефона, и горизонт дороги остаётся ровным.",
   "Throttle, brake and reverse": "Газ, тормоз и задний ход",
@@ -804,5 +805,14 @@
   "Reset all settings?": "Сбросить все настройки?",
   "Every setting here goes back to its default, and any other line in settings.ini is removed. Your name and language stay, as do the options set inside the game.": "Все настройки здесь вернутся к значениям по умолчанию, а остальные строки в settings.ini будут удалены. Ваше имя и язык сохранятся, как и параметры, заданные в самой игре.",
   "Settings are back to their defaults. Applies the next time you press Play.": "Настройки возвращены к значениям по умолчанию. Вступит в силу при следующем нажатии «Играть».",
-  "Saved: {key} is back to its default. Applies the next time you press Play.": "Сохранено: {key} — снова значение по умолчанию. Вступит в силу при следующем нажатии «Играть»."
+  "Saved: {key} is back to its default. Applies the next time you press Play.": "Сохранено: {key} — снова значение по умолчанию. Вступит в силу при следующем нажатии «Играть».",
+  "Buttons": "Кнопки",
+  "Thumb stick": "Стик",
+  "Tilt": "Наклон",
+  "Up": "Вверх",
+  "Left": "Влево",
+  "Right": "Вправо",
+  "Down": "Вниз",
+  "Back": "Назад",
+  "OK": "ОК"
 }

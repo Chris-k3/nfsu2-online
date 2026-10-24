@@ -701,7 +701,8 @@
   "Keyboard": "Tastatur",
   "Touch": "Touch",
   "Site": "Website",
-  "Tap to use the game's menus. While you drive, touch controls show on the game: the button in the top right corner switches the steering between buttons, a thumb stick and tilt. A controller works too.": "Tippe, um die Menüs des Spiels zu bedienen. Beim Fahren erscheint die Touch-Steuerung über dem Spiel: Die Schaltfläche oben rechts schaltet die Lenkung zwischen Tasten, einem Stick und Neigen um. Ein Controller funktioniert auch.",
+  "Tap the game's menus, or use the arrows, OK and Back beside them. While you drive, touch controls show on the game. A controller works too.": "Tippe auf die Menüs des Spiels oder nutze die Pfeile, OK und Zurück daneben. Beim Fahren erscheint die Touch-Steuerung über dem Spiel. Ein Controller funktioniert auch.",
+  "How you steer while driving. The button in the game's top right corner switches it too.": "Wie du beim Fahren lenkst. Die Schaltfläche oben rechts im Spiel schaltet es auch um.",
   "Level horizon": "Horizont ausgleichen",
   "With tilt steering, the view turns against the phone, so the road's horizon stays level.": "Beim Lenken durch Neigen dreht sich die Ansicht gegen das Handy, sodass der Horizont der Straße gerade bleibt.",
   "Throttle, brake and reverse": "Gas geben, bremsen und rückwärts",
@@ -762,5 +763,14 @@
   "Reset all settings?": "Alle Einstellungen zurücksetzen?",
   "Every setting here goes back to its default, and any other line in settings.ini is removed. Your name and language stay, as do the options set inside the game.": "Jede Einstellung hier geht auf ihren Standard zurück, und jede andere Zeile in settings.ini wird entfernt. Dein Name und deine Sprache bleiben, ebenso die Optionen, die im Spiel selbst eingestellt sind.",
   "Settings are back to their defaults. Applies the next time you press Play.": "Die Einstellungen sind wieder auf dem Standard. Gilt, wenn du das nächste Mal auf „Spielen“ drückst.",
-  "Saved: {key} is back to its default. Applies the next time you press Play.": "Gespeichert: {key} ist wieder auf dem Standard. Gilt, wenn du das nächste Mal auf „Spielen“ drückst."
+  "Saved: {key} is back to its default. Applies the next time you press Play.": "Gespeichert: {key} ist wieder auf dem Standard. Gilt, wenn du das nächste Mal auf „Spielen“ drückst.",
+  "Buttons": "Tasten",
+  "Thumb stick": "Stick",
+  "Tilt": "Neigen",
+  "Up": "Hoch",
+  "Left": "Links",
+  "Right": "Rechts",
+  "Down": "Runter",
+  "Back": "Zurück",
+  "OK": "OK"
 }

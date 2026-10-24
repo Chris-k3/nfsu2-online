@@ -81,8 +81,13 @@
           <button type="button" class="tab" role="tab" data-tab="site" data-i18n>Site</button>
         </div>
         <div class="tab-panel" role="tabpanel" data-tab="keys">
-          <p class="hint touch-only" data-i18n>Tap to use the game's menus. While you drive, touch controls show on the game: the button in the top right corner switches the steering between buttons, a thumb stick and tilt. A controller works too.</p>
-          <!-- the level horizon's switch: controls.ts -->
+          <p class="hint touch-only" data-i18n>Tap the game's menus, or use the arrows, OK and Back beside them. While you drive, touch controls show on the game. A controller works too.</p>
+          <!-- the steering's list and the level horizon's switch: controls.ts -->
+          <div class="set touch-only" data-steer>
+            <label class="set-label" data-i18n>Steering</label>
+            <p class="set-help" data-i18n>How you steer while driving. The button in the game's top right corner switches it too.</p>
+            <div class="set-control"><select></select></div>
+          </div>
           <div class="set touch-only" data-level>
             <label class="set-label" data-i18n>Level horizon</label>
             <p class="set-help" data-i18n>With tilt steering, the view turns against the phone, so the road's horizon stays level.</p>

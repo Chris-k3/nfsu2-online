@@ -743,7 +743,8 @@
   "Keyboard": "Klawiatura",
   "Touch": "Dotyk",
   "Site": "Strona",
-  "Tap to use the game's menus. While you drive, touch controls show on the game: the button in the top right corner switches the steering between buttons, a thumb stick and tilt. A controller works too.": "Dotykaj, aby korzystać z menu gry. Podczas jazdy na grze pojawia się sterowanie dotykowe: przycisk w prawym górnym rogu przełącza sterowanie między przyciskami, gałką a przechylaniem. Działa też kontroler.",
+  "Tap the game's menus, or use the arrows, OK and Back beside them. While you drive, touch controls show on the game. A controller works too.": "Dotykaj menu gry albo używaj strzałek, OK i Wstecz obok nich. Podczas jazdy na grze pojawia się sterowanie dotykowe. Działa też kontroler.",
+  "How you steer while driving. The button in the game's top right corner switches it too.": "Sposób sterowania podczas jazdy. Przełącza go też przycisk w prawym górnym rogu gry.",
   "Level horizon": "Poziomy horyzont",
   "With tilt steering, the view turns against the phone, so the road's horizon stays level.": "Przy sterowaniu przechylaniem obraz obraca się przeciwnie do telefonu, więc horyzont drogi pozostaje poziomy.",
   "Throttle, brake and reverse": "Gaz, hamulec i wsteczny",
@@ -804,5 +805,14 @@
   "Reset all settings?": "Zresetować wszystkie ustawienia?",
   "Every setting here goes back to its default, and any other line in settings.ini is removed. Your name and language stay, as do the options set inside the game.": "Każde ustawienie tutaj wraca do domyślnego, a każdy inny wiersz w settings.ini zostaje usunięty. Twoja nazwa i język zostają, tak jak opcje ustawione w samej grze.",
   "Settings are back to their defaults. Applies the next time you press Play.": "Ustawienia wróciły do domyślnych. Zadziała przy następnym naciśnięciu „Graj”.",
-  "Saved: {key} is back to its default. Applies the next time you press Play.": "Zapisano: {key} ma znowu wartość domyślną. Zadziała przy następnym naciśnięciu „Graj”."
+  "Saved: {key} is back to its default. Applies the next time you press Play.": "Zapisano: {key} ma znowu wartość domyślną. Zadziała przy następnym naciśnięciu „Graj”.",
+  "Buttons": "Przyciski",
+  "Thumb stick": "Gałka",
+  "Tilt": "Przechylanie",
+  "Up": "W górę",
+  "Left": "W lewo",
+  "Right": "W prawo",
+  "Down": "W dół",
+  "Back": "Wstecz",
+  "OK": "OK"
 }

@@ -3,7 +3,8 @@
 // drawing of a pad with what each button the game uses does beside it, the buttons named as Xbox or PlayStation
 // names them (the switch under it; a PlayStation controller connecting, or taking over in the game, picks those
 // names).  While a steering wheel is connected (in the game: drives), the tab is the wheel's instead (wheel-setup.ts).
-// The touch tab has the level horizon's switch (touch.ts), the same in both copies.
+// The touch tab has the steering's list and the level horizon's switch (touch.ts), the same in both copies and in step
+// with the touch controls' own steering button.
 //
 // The drawing: a front view in its own units (260 x 180, x 130 the middle, the triggers above y 0) at SCALE in the
 // SVG's 336 px, the labels in rows of px left and right of it and over its middle, each joined to its control by a
@@ -12,7 +13,8 @@
 import { drivingPad, familyOf, PAD_DRIVER_EVENT } from '../input/gamepad';
 import { PADF_PLAYSTATION } from '../input/proto';
 import { wheelSection } from './wheel-setup';
-import { levelHorizon, onLevelHorizon, setLevelHorizon } from './touch';
+import { askMotion, levelHorizon, onLevelHorizon, onSteering, setLevelHorizon, setSteering, steering, STEERING, steeringName,
+  type Steering } from './touch';
 import { language, N, onLanguage, t } from './i18n';
 
 export type Tab = 'keys' | 'pad' | 'site';
@@ -217,6 +219,24 @@ export function controlsSheet(root: HTMLElement, id: string, opts: { tab?: Tab; 
     picked = true;
     sheet.show(tabs[to].dataset.tab as Tab, true);
   };
+  const steer = root.querySelector<HTMLElement>('[data-steer]');
+  if (steer) {
+    const sel = steer.querySelector('select')!;
+    sel.id = `${id}-steering`; steer.querySelector('label')!.htmlFor = sel.id;
+    const help = steer.querySelector('.set-help')!; help.id = `${id}-steering-help`; sel.setAttribute('aria-describedby', help.id);
+    const fill = () => {
+      sel.replaceChildren(...STEERING.map(s => { const o = document.createElement('option'); o.value = s; o.textContent = steeringName(s); return o; }));
+      sel.value = steering();
+    };
+    sel.onchange = () => {
+      const to = sel.value as Steering;
+      if (to === 'tilt') void askMotion();          // iOS asks from a choice of the player's
+      setSteering(to);
+    };
+    onSteering(() => { sel.value = steering(); });
+    onLanguage(fill);
+    fill();
+  }
   const level = root.querySelector<HTMLElement>('[data-level]');
   if (level) {
     const sw = level.querySelector<HTMLInputElement>('.switch')!, val = level.querySelector('.val')!;

@@ -1,32 +1,62 @@
-// Touch controls: the controls on the game while the player drives on a phone or tablet (races and free roam).
-//   steering  three ways, switched with the mode button (top right) and kept in this browser:
+// Touch controls: the controls on the game on a phone or tablet, for driving (races and free roam) and for the menus.
+//   steering  three ways, switched with the mode button (top right) or the Controls sheet's touch tab, and kept in
+//             this browser:
 //               buttons  ◀ ▶ press the arrow keys, so the game's own keyboard steering applies (the default)
 //               stick    a thumb stick where the left thumb lands: the controller's left stick
 //               tilt     the phone is the wheel, from its motion sensor: the controller's left stick
 //   pedals    Gas and Brake press the up and down arrows; Nitro and the handbrake are the controller's LB and RB
-//             (Alt, the nitrous key, would turn the other keys into Alt+key).  With tilt, Brake and the handbrake go
-//             under the left thumb.
+//             (Alt, the nitrous key, would turn the other keys into Alt+key).  Nitro holds Gas too, so the thumb on
+//             Gas can go up to it, and a thumb slides between Gas, Brake and Nitro without letting go.  With tilt,
+//             Brake and the handbrake go under the left thumb.
 //   gears     with a manual gearbox, gear down and up above the left thumb: the controller's X and A, as on a pad
 //             (Ctrl and Shift on the keyboard would be modifiers too)
 //   small     pause, camera, look back, reset; in free roam also the map, messages, horn and start an event
 //   horizon   while tilt steers, the game's 3D view turns against the phone's tilt from straight ahead, so the road's
 //             horizon stays level with the real one (the HUD stays on the phone; runtime/overrides.c sub_005c7ec0).
 //             Not in a cutscene (a race's start); faded in and out.  A switch in the Controls sheet's touch tab.
+//   menus     the arrow keys as a D-pad bottom left, OK (Enter) and Back (Esc) bottom right, in the bars beside the
+//             game's 4:3 menus; a tap on the game stays a click.  The game repeats a held arrow itself.
 // The controller part is a virtual one the input module merges with a real one (gamepad.ts withTouch).
-// They show while the game says the player drives ("drive" in its status block, runtime/web/status_web.c: 1 in a
-// race, 2 in free roam, + 4 with a manual gearbox, + 8 in a cutscene), once a finger has touched the game (at once on
-// a touch screen), and hide when a keyboard or a controller is used, until the next touch.  The game reads its input
-// once a frame, so a key a tap presses stays down HOLD_MS at least.
+// The driving controls show while the game says the player drives ("drive" in its status block,
+// runtime/web/status_web.c: 1 in a race, 2 in free roam, + 4 with a manual gearbox, + 8 in a cutscene), the menu's
+// otherwise once the game draws ("frames"); both once a finger has touched the game (at once on a touch screen), and
+// they hide when a keyboard or a controller is used, until the next touch.  The game reads its input once a frame,
+// so a key a tap presses stays down HOLD_MS at least.
 import { PAD_A, PAD_LB, PAD_RB, PAD_X } from '../input/proto';
 import type { GameSession } from './game';
 import { touchFirst } from './device';
 import { N, t } from './i18n';
 
 export type Steering = 'buttons' | 'stick' | 'tilt';
-const STEERING: Steering[] = ['buttons', 'stick', 'tilt'];
+export const STEERING: readonly Steering[] = ['buttons', 'stick', 'tilt'];
 const NAMES: Record<Steering, string> = { buttons: N('buttons'), stick: N('thumb stick'), tilt: N('tilt') };
+const LIST_NAMES: Record<Steering, string> = { buttons: N('Buttons'), stick: N('Thumb stick'), tilt: N('Tilt') };
 const STORE = 'nfsu2-touch-steering';
 const HOLD_MS = 150;
+
+const STEER_EVENT = 'nfsu2-touch-steering';
+let steeringNow: Steering = (() => {
+  try { const s = localStorage.getItem(STORE) as Steering; return STEERING.includes(s) ? s : 'buttons'; } catch { return 'buttons'; }
+})();
+/** how the touch controls steer: the mode button's choice and the Controls sheet's, kept in this browser */
+export function steering(): Steering { return steeringNow; }
+export function setSteering(to: Steering) {
+  if (to === steeringNow || !STEERING.includes(to)) return;
+  steeringNow = to;
+  try { localStorage.setItem(STORE, to); } catch { /* not kept: a private window */ }
+  dispatchEvent(new Event(STEER_EVENT));
+}
+/** fn runs when the steering changes */
+export function onSteering(fn: () => void) { addEventListener(STEER_EVENT, fn); }
+/** the steering's name in a list (the Controls sheet), in the page's language */
+export function steeringName(s: Steering): string { return t(LIST_NAMES[s]); }
+/** iOS asks once whether the page may read the motion sensor, from a tap: false when it was not allowed */
+export function askMotion(): Promise<boolean> {
+  const D = typeof DeviceOrientationEvent === 'undefined' ? null
+    : DeviceOrientationEvent as unknown as { requestPermission?(): Promise<string> };
+  if (typeof D?.requestPermission !== 'function') return Promise.resolve(true);
+  return D.requestPermission().then(r => r === 'granted', () => false);
+}
 /** the thumb stick: px from its centre to full lock; tilt: degrees of roll to full lock */
 const STICK_PX = 64, TILT_DEG = 30;
 /** the level horizon: the most it turns the view (degrees), how long it takes to come and go (ms) */
@@ -44,14 +74,18 @@ export function setLevelHorizon(on: boolean) {
 /** fn runs when the switch changes */
 export function onLevelHorizon(fn: () => void) { addEventListener(LEVEL_EVENT, fn); }
 
-/** label: what a screen reader says (English, translated where drawn); text: the words on it, if any */
+/** label: what a screen reader says (English, translated where drawn); text: the words on it, if any; keys: the keys
+ *  it holds (two controls may hold the same one: it is down while either is) */
 interface Ctl {
   id: string; el: HTMLElement; label: string; text?: string;
-  key?: string; bit?: number; act?: () => void;
+  keys?: string[]; bit?: number; act?: () => void;
   /** a finger slides between the controls of a group */
   group?: 'steer' | 'pedal';
   fingers: Set<number>; downAt: number; upTimer: number;
 }
+
+/** which controls show: the driving ones, the menu's, or none */
+type Mode = 'drive' | 'menu' | '';
 
 const path = (d: string) => `<svg viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
 const ICONS = {
@@ -70,6 +104,8 @@ const ICONS = {
   tilt: '<rect x="4" y="8" width="16" height="9" rx="2" transform="rotate(-18 12 12)"/>',
   down: '<path d="M6 9l6 6 6-6"/>',
   up: '<path d="M6 15l6-6 6 6"/>',
+  menuUp: '<path class="fill" d="M5 16l7-9 7 9z"/>',
+  menuDown: '<path class="fill" d="M5 8l7 9 7-9z"/>',
 };
 
 /** the roll of the phone in the screen's plane, radians, 0 = upright, + = turned clockwise (a wheel turned right);
@@ -92,16 +128,19 @@ export class TouchControls {
   private root: HTMLElement;
   private ctls = new Map<string, Ctl>();
   private byFinger = new Map<number, Ctl>();
-  private steering: Steering;
+  /** the keys the controls hold, each with how many hold it */
+  private keys = new Map<string, number>();
+  private steering = steering();
   private session: GameSession | null = null;
   private raf = 0;
   private drive = 0;
+  private frames = 0;
   private statusAt = 0;
   /** a finger touched the game; a keyboard or controller was used after the last touch */
   private seen = touchFirst();
   private away = false;
   private touchedAt = 0;
-  private shown = false;
+  private mode: Mode = '';
   private padButtons = 0;
   private lx = 0;
   // the thumb stick: its finger and where it landed
@@ -122,7 +161,6 @@ export class TouchControls {
   private sentRoll = 0;
 
   constructor(stage: HTMLElement, private deps: TouchDeps) {
-    this.steering = (() => { try { const s = localStorage.getItem(STORE) as Steering; return STEERING.includes(s) ? s : 'buttons'; } catch { return 'buttons'; } })();
     const root = this.root = document.createElement('div');
     root.className = 'touch'; root.hidden = true; root.dataset.nfsu2Ui = '';
     root.dataset.steering = this.steering;
@@ -141,25 +179,33 @@ export class TouchControls {
       root.append(el);
       this.ctls.set(id, { id, el, label, text: typeof inner === 'string' ? undefined : inner.text, fingers: new Set(), downAt: 0, upTimer: 0, ...c });
     };
-    add('pause', N('Pause'), path(ICONS.pause), { key: 'Escape' }, 'small');
-    add('camera', N('Camera'), path(ICONS.camera), { key: 'KeyC' }, 'small');
-    add('look', N('Look back'), path(ICONS.look), { key: 'KeyB' }, 'small');
-    add('reset', N('Reset'), path(ICONS.reset), { key: 'KeyR' }, 'small');
-    add('map', N('Map'), path(ICONS.map), { key: 'KeyM' }, 'small roam');
-    add('msgs', N('Messages'), path(ICONS.msgs), { key: 'Tab' }, 'small roam');
-    add('horn', N('Horn'), path(ICONS.horn), { key: 'KeyN' }, 'small roam');
+    add('pause', N('Pause'), path(ICONS.pause), { keys: ['Escape'] }, 'small');
+    add('camera', N('Camera'), path(ICONS.camera), { keys: ['KeyC'] }, 'small');
+    add('look', N('Look back'), path(ICONS.look), { keys: ['KeyB'] }, 'small');
+    add('reset', N('Reset'), path(ICONS.reset), { keys: ['KeyR'] }, 'small');
+    add('map', N('Map'), path(ICONS.map), { keys: ['KeyM'] }, 'small roam');
+    add('msgs', N('Messages'), path(ICONS.msgs), { keys: ['Tab'] }, 'small roam');
+    add('horn', N('Horn'), path(ICONS.horn), { keys: ['KeyN'] }, 'small roam');
     add('mode', N('Steering'), path(ICONS[this.steering]), { act: () => this.nextSteering() }, 'small');
     add('center', N('Straight ahead'), path(ICONS.center), { act: () => this.recenter() }, 'small');
-    add('start', N('Start an event'), { text: N('Start') }, { key: 'Enter' }, 'pill roam');
-    add('left', N('Steer left'), path(ICONS.left), { key: 'ArrowLeft', group: 'steer' }, 'big');
-    add('right', N('Steer right'), path(ICONS.right), { key: 'ArrowRight', group: 'steer' }, 'big');
-    add('brake', N('Brake'), { text: N('Brake') }, { key: 'ArrowDown', group: 'pedal' }, 'big');
-    add('gas', N('Gas'), { text: N('Gas') }, { key: 'ArrowUp', group: 'pedal' }, 'big');
-    add('nitro', N('Nitrous'), '<i class="nitro" aria-hidden="true"></i>', { bit: 1 << PAD_LB }, 'round');
+    add('start', N('Start an event'), { text: N('Start') }, { keys: ['Enter'] }, 'pill roam');
+    add('left', N('Steer left'), path(ICONS.left), { keys: ['ArrowLeft'], group: 'steer' }, 'big');
+    add('right', N('Steer right'), path(ICONS.right), { keys: ['ArrowRight'], group: 'steer' }, 'big');
+    add('brake', N('Brake'), { text: N('Brake') }, { keys: ['ArrowDown'], group: 'pedal' }, 'big');
+    add('gas', N('Gas'), { text: N('Gas') }, { keys: ['ArrowUp'], group: 'pedal' }, 'big');
+    add('nitro', N('Nitrous'), '<i class="nitro" aria-hidden="true"></i>', { keys: ['ArrowUp'], bit: 1 << PAD_LB, group: 'pedal' }, 'round');
     add('hb', N('Handbrake'), { text: N('Hand\nbrake') }, { bit: 1 << PAD_RB }, 'round');
     add('down', N('Gear down'), path(ICONS.down), { bit: 1 << PAD_X }, 'gear');
     add('up', N('Gear up'), path(ICONS.up), { bit: 1 << PAD_A }, 'gear');
+    // the menus'
+    add('m-up', N('Up'), path(ICONS.menuUp), { keys: ['ArrowUp'] }, 'menu dpad');
+    add('m-left', N('Left'), path(ICONS.left), { keys: ['ArrowLeft'] }, 'menu dpad');
+    add('m-right', N('Right'), path(ICONS.right), { keys: ['ArrowRight'] }, 'menu dpad');
+    add('m-down', N('Down'), path(ICONS.menuDown), { keys: ['ArrowDown'] }, 'menu dpad');
+    add('m-back', N('Back'), { text: N('Back') }, { keys: ['Escape'] }, 'menu wide');
+    add('m-ok', N('OK'), { text: N('OK') }, { keys: ['Enter'] }, 'menu wide');
     this.relabel();
+    onSteering(() => this.applySteering(steering()));
     stage.append(root);
 
     root.addEventListener('pointerdown', this.onDown);
@@ -172,7 +218,7 @@ export class TouchControls {
       if (e.pointerType !== 'touch') return;
       this.seen = true; this.away = false; this.touchedAt = performance.now(); this.update();
       // while driving, a finger beside the controls is no mouse for the game (it would draw its cursor in the race)
-      if (this.shown && e.target instanceof HTMLCanvasElement) e.stopPropagation();
+      if (this.mode === 'drive' && e.target instanceof HTMLCanvasElement) e.stopPropagation();
     }, { capture: true });
     addEventListener('keydown', e => { if (e.isTrusted && this.session) { this.away = true; this.update(); } }, { capture: true });
   }
@@ -198,16 +244,20 @@ export class TouchControls {
     this.raf = requestAnimationFrame(tick);
   }
 
-  /** for tests and logs: what the controls do now */
-  state() { return { shown: this.shown, drive: this.drive, steering: this.steering, lx: this.lx, buttons: this.padButtons, roll: this.sentRoll }; }
+  /** for tests and logs: what the controls do now (shown: the driving ones, menu: the menu's) */
+  state() {
+    return { shown: this.mode === 'drive', menu: this.mode === 'menu', drive: this.drive, steering: this.steering, lx: this.lx,
+      buttons: this.padButtons, keys: [...this.keys.keys()], roll: this.sentRoll };
+  }
 
   /** the game ended: everything let go, nothing of it kept */
   stop() {
     cancelAnimationFrame(this.raf);
-    this.hide();
+    this.setMode('');
     this.levelK = this.tilt = 0;
     if (this.sentRoll) { this.sentRoll = 0; this.session?.input?.viewRoll?.(0); }
     this.session = null;
+    this.drive = this.frames = 0;
   }
 
   private frame() {
@@ -217,7 +267,7 @@ export class TouchControls {
     if (now - this.statusAt > 100) {
       this.statusAt = now;
       const st = s.status?.read();                // null while the game writes it: the last state stands
-      if (st) this.drive = st.get('drive') ?? 0;
+      if (st) { this.drive = st.get('drive') ?? 0; this.frames = st.get('frames') ?? 0; }
     }
     if (!this.away && (s.input?.padPressed?.() ?? 0) > this.touchedAt) this.away = true;
     this.update();
@@ -227,7 +277,7 @@ export class TouchControls {
   /** the level horizon: the view turned against the tilt while tilt steers outside a cutscene, faded in and out
    *  (smoothstep) as that starts and ends, the tilt itself as the sensor gives it (a smoothed one would lag) */
   private level(now: number) {
-    const on = this.shown && this.steering === 'tilt' && levelOn && (this.drive & 8) === 0;
+    const on = this.mode === 'drive' && this.steering === 'tilt' && levelOn && (this.drive & 8) === 0;
     const dt = Math.min(100, now - this.levelAt);
     this.levelAt = now;
     this.levelK = Math.max(0, Math.min(1, this.levelK + (on ? dt : -dt) / LEVEL_FADE_MS));
@@ -238,27 +288,27 @@ export class TouchControls {
   }
 
   private update() {
-    const show = !!this.session && this.seen && !this.away && (this.drive & 3) > 0;
+    const on = !!this.session && this.seen && !this.away;
+    const mode: Mode = !on ? '' : (this.drive & 3) > 0 ? 'drive' : this.frames > 0 ? 'menu' : '';
     this.root.toggleAttribute('data-roam', (this.drive & 3) === 2);
     this.root.toggleAttribute('data-gears', (this.drive & 4) !== 0);
-    if (show === this.shown) return;
-    if (show) {
-      this.shown = true; this.root.hidden = false;
-      if (this.steering === 'tilt') this.tiltOn();
-      this.sendPad();
-    } else this.hide();
+    this.setMode(mode);
   }
 
-  /** hidden: every control let go, the stick and tilt at rest */
-  private hide() {
-    this.root.hidden = true;
+  /** the driving controls, the menu's or none: every control let go on a change, the stick and tilt at rest */
+  private setMode(mode: Mode) {
+    if (mode === this.mode) return;
+    const drove = this.mode === 'drive';
     for (const c of this.ctls.values()) { c.fingers.clear(); this.up(c, true); }
     this.byFinger.clear();
     this.stickUp();
     this.tiltOff();
     this.lx = 0; this.padButtons = 0;
-    if (this.shown) this.sendPad();
-    this.shown = false;
+    this.mode = mode;
+    this.root.dataset.mode = mode;
+    this.root.hidden = !mode;
+    if (mode === 'drive' && this.steering === 'tilt') this.tiltOn();
+    if (drove || mode === 'drive') this.sendPad();
   }
 
   private sendPad() {
@@ -283,9 +333,10 @@ export class TouchControls {
     if (!c?.group) return;
     const to = this.ctlAt(e.clientX, e.clientY);
     if (!to || to === c || to.group !== c.group) return;
-    this.release(c, e.pointerId);
+    // the next one first: a key both hold (Gas's, Nitro's) stays down
     this.byFinger.set(e.pointerId, to);
     this.press(to, e.pointerId);
+    this.release(c, e.pointerId);
   };
   private onUp = (e: PointerEvent) => {
     if (e.pointerId === this.stickFinger) { this.stickUp(); this.sendPad(); return; }
@@ -304,7 +355,7 @@ export class TouchControls {
     navigator.vibrate?.(8);
     if (c.upTimer) { clearTimeout(c.upTimer); c.upTimer = 0; return; }   // still down from the last tap
     c.downAt = performance.now();
-    if (c.key) this.session?.input?.key?.(c.key, true);
+    for (const k of c.keys ?? []) this.keyDown(k);
     if (c.bit) { this.padButtons |= c.bit; this.sendPad(); }
   }
   private release(c: Ctl, finger: number) {
@@ -317,14 +368,27 @@ export class TouchControls {
     if (wait > 0) c.upTimer = setTimeout(() => { c.upTimer = 0; if (!c.fingers.size) this.up(c); }, wait) as unknown as number;
     else this.up(c);
   }
-  /** the control's key or button up (now: also one waiting for its HOLD_MS) */
+  /** the control's keys or button up (now: also one waiting for its HOLD_MS) */
   private up(c: Ctl, now = false) {
     if (now) { c.el.classList.remove('on'); if (!c.upTimer && !c.downAt) return; }
     clearTimeout(c.upTimer); c.upTimer = 0;
     if (!c.downAt) return;
     c.downAt = 0;
-    if (c.key) this.session?.input?.key?.(c.key, false);
+    for (const k of c.keys ?? []) this.keyUp(k);
     if (c.bit) { this.padButtons &= ~c.bit; this.sendPad(); }
+  }
+  /** a key goes down with the first control that holds it and up with the last */
+  private keyDown(code: string) {
+    const n = this.keys.get(code) ?? 0;
+    this.keys.set(code, n + 1);
+    if (!n) this.session?.input?.key?.(code, true);
+  }
+  private keyUp(code: string) {
+    const n = this.keys.get(code) ?? 0;
+    if (n > 1) { this.keys.set(code, n - 1); return; }
+    if (!n) return;
+    this.keys.delete(code);
+    this.session?.input?.key?.(code, false);
   }
 
   // ---- the thumb stick ---------------------------------------------------------------------
@@ -371,7 +435,7 @@ export class TouchControls {
     this.center = null; this.tiltHeard = false;
     clearTimeout(this.tiltCheck);
     this.tiltCheck = setTimeout(() => {
-      if (!this.tiltHeard && this.shown && this.steering === 'tilt')
+      if (!this.tiltHeard && this.mode === 'drive' && this.steering === 'tilt')
         this.deps.toast(t('Tilt has no motion sensor to read in this browser. The steering button (top right) switches to buttons.'), 6000);
     }, 2000) as unknown as number;
   }
@@ -387,23 +451,20 @@ export class TouchControls {
   // ---- the steering button -------------------------------------------------------------------
   private nextSteering() {
     const to = STEERING[(STEERING.indexOf(this.steering) + 1) % STEERING.length];
-    // iOS asks once whether the page may read the motion sensor, from a tap
-    const ask = (DeviceOrientationEvent as unknown as { requestPermission?(): Promise<string> }).requestPermission;
-    if (to === 'tilt' && typeof ask === 'function')
-      void ask().then(r => { if (r !== 'granted') this.deps.toast(t('Tilt needs the motion sensor, which was not allowed.'), 5000); }, () => {});
-    this.setSteering(to);
+    if (to === 'tilt') void askMotion().then(ok => { if (!ok) this.deps.toast(t('Tilt needs the motion sensor, which was not allowed.'), 5000); });
+    setSteering(to);
     this.deps.toast(to === 'tilt' ? t('Steering: tilt. Hold the phone like a wheel; the button beside this one sets straight ahead.')
       : t('Steering: {how}', { how: t(NAMES[to]) }), to === 'tilt' ? 5000 : 2000);
   }
-  private setSteering(to: Steering) {
+  /** the steering changed (here or in the Controls sheet) */
+  private applySteering(to: Steering) {
+    if (to === this.steering) return;
     for (const c of this.ctls.values()) if (c.group) { c.fingers.clear(); this.up(c, true); }
     this.stickUp(); this.tiltOff();
     this.steering = to; this.lx = 0;
     this.root.dataset.steering = to;
     this.ctls.get('mode')!.el.innerHTML = path(ICONS[to]);
-    try { localStorage.setItem(STORE, to); } catch { /* not kept: a private window */ }
-    if (to === 'tilt' && this.shown) this.tiltOn();
-    this.sendPad();
+    if (this.mode === 'drive') { if (to === 'tilt') this.tiltOn(); this.sendPad(); }
     this.deps.log(`[app] touch controls: steering with ${NAMES[to]}`);
   }
 }

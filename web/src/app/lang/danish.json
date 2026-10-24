@@ -701,7 +701,8 @@
   "Keyboard": "Tastatur",
   "Touch": "Touchskærm",
   "Site": "Siden",
-  "Tap to use the game's menus. While you drive, touch controls show on the game: the button in the top right corner switches the steering between buttons, a thumb stick and tilt. A controller works too.": "Tryk for at bruge spillets menuer. Mens du kører, vises touchknapper på spillet: knappen i øverste højre hjørne skifter styringen mellem knapper, et joystick og hældning. En controller virker også.",
+  "Tap the game's menus, or use the arrows, OK and Back beside them. While you drive, touch controls show on the game. A controller works too.": "Tryk på spillets menuer, eller brug pilene, OK og Tilbage ved siden af dem. Mens du kører, vises touchknapper på spillet. En controller virker også.",
+  "How you steer while driving. The button in the game's top right corner switches it too.": "Hvordan du styrer, mens du kører. Knappen i spillets øverste højre hjørne skifter det også.",
   "Level horizon": "Vandret horisont",
   "With tilt steering, the view turns against the phone, so the road's horizon stays level.": "Med styring ved hældning drejer billedet modsat telefonen, så vejens horisont forbliver vandret.",
   "Throttle, brake and reverse": "Speeder, bremse og bakgear",
@@ -762,5 +763,14 @@
   "Reset all settings?": "Nulstil alle indstillinger?",
   "Every setting here goes back to its default, and any other line in settings.ini is removed. Your name and language stay, as do the options set inside the game.": "Hver indstilling her går tilbage til standard, og alle andre linjer i settings.ini fjernes. Dit navn og sprog bliver, ligesom de indstillinger, der er valgt inde i spillet.",
   "Settings are back to their defaults. Applies the next time you press Play.": "Indstillingerne er tilbage på standard. Gælder, næste gang du trykker på Spil.",
-  "Saved: {key} is back to its default. Applies the next time you press Play.": "Gemt: {key} er tilbage på standard. Gælder, næste gang du trykker på Spil."
+  "Saved: {key} is back to its default. Applies the next time you press Play.": "Gemt: {key} er tilbage på standard. Gælder, næste gang du trykker på Spil.",
+  "Buttons": "Knapper",
+  "Thumb stick": "Joystick",
+  "Tilt": "Hældning",
+  "Up": "Op",
+  "Left": "Venstre",
+  "Right": "Højre",
+  "Down": "Ned",
+  "Back": "Tilbage",
+  "OK": "OK"
 }

@@ -722,7 +722,8 @@
   "Keyboard": "Teclado",
   "Touch": "Toque",
   "Site": "Site",
-  "Tap to use the game's menus. While you drive, touch controls show on the game: the button in the top right corner switches the steering between buttons, a thumb stick and tilt. A controller works too.": "Toque para usar os menus do jogo. Enquanto você dirige, controles de toque aparecem sobre o jogo: o botão no canto superior direito alterna a direção entre botões, analógico e inclinação. Um controle também funciona.",
+  "Tap the game's menus, or use the arrows, OK and Back beside them. While you drive, touch controls show on the game. A controller works too.": "Toque nos menus do jogo ou use as setas, OK e Voltar ao lado deles. Enquanto você dirige, controles de toque aparecem sobre o jogo. Um controle também funciona.",
+  "How you steer while driving. The button in the game's top right corner switches it too.": "Como você controla a direção ao dirigir. O botão no canto superior direito do jogo também troca.",
   "Level horizon": "Horizonte nivelado",
   "With tilt steering, the view turns against the phone, so the road's horizon stays level.": "Com a direção por inclinação, a visão gira ao contrário do celular, para que o horizonte da estrada fique reto.",
   "Throttle, brake and reverse": "Acelerador, freio e ré",
@@ -783,5 +784,14 @@
   "Reset all settings?": "Restaurar todas as configurações?",
   "Every setting here goes back to its default, and any other line in settings.ini is removed. Your name and language stay, as do the options set inside the game.": "Cada configuração aqui volta ao padrão, e qualquer outra linha do settings.ini é removida. Seu nome e seu idioma ficam, assim como as opções definidas dentro do jogo.",
   "Settings are back to their defaults. Applies the next time you press Play.": "As configurações voltaram ao padrão. Vale na próxima vez que você pressionar Jogar.",
-  "Saved: {key} is back to its default. Applies the next time you press Play.": "Salvo: {key} voltou ao padrão. Vale na próxima vez que você pressionar Jogar."
+  "Saved: {key} is back to its default. Applies the next time you press Play.": "Salvo: {key} voltou ao padrão. Vale na próxima vez que você pressionar Jogar.",
+  "Buttons": "Botões",
+  "Thumb stick": "Analógico",
+  "Tilt": "Inclinação",
+  "Up": "Cima",
+  "Left": "Esquerda",
+  "Right": "Direita",
+  "Down": "Baixo",
+  "Back": "Voltar",
+  "OK": "OK"
 }
