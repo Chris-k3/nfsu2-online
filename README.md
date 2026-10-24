@@ -6,7 +6,7 @@ Web Audio. You bring your own copy of the game.
 
 > Not affiliated with or endorsed by Electronic Arts. This repository contains none of the game's code or data.
 
-![The start page: Play, the controls, the settings and your saves](docs/web/start-page.png)
+![The start page: Play, the controls, your saves and Online](docs/web/start-page.png)
 
 ## What you need
 
