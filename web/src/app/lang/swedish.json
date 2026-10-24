@@ -821,5 +821,10 @@
   "Wait a moment": "Vänta lite",
   "Esc closes": "Esc stänger",
   "Say one of sixteen set phrases to the players near you in free roam: 1 to 4, then 1 to 4 (on a controller, the right stick twice; on a touch screen, the chat button). Theirs show over their cars.": "Säg en av sexton färdiga fraser till spelarna nära dig i läget Utforska: 1 till 4, sedan 1 till 4 (på en handkontroll högra styrspaken två gånger; på en pekskärm chattknappen). Deras fraser visas ovanför deras bilar.",
-  "Quick chat (with other players): a group, then a phrase": "Snabbchatt (med andra spelare): en grupp, sedan en fras"
+  "Quick chat (with other players): a group, then a phrase": "Snabbchatt (med andra spelare): en grupp, sedan en fras",
+  "More options": "Fler alternativ",
+  "Ghost mode, crews, full screen, controls": "Spökläge, crews, helskärm, kontroller",
+  "Ghost mode, crews, controls": "Spökläge, crews, kontroller",
+  "Full screen, frame-rate counter, controls": "Helskärm, FPS-räknare, kontroller",
+  "Frame-rate counter, controls": "FPS-räknare, kontroller"
 }

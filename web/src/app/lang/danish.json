@@ -821,5 +821,10 @@
   "Wait a moment": "Vent lidt",
   "Esc closes": "Esc lukker",
   "Say one of sixteen set phrases to the players near you in free roam: 1 to 4, then 1 to 4 (on a controller, the right stick twice; on a touch screen, the chat button). Theirs show over their cars.": "Sig en af seksten faste sætninger til spillerne i nærheden i udforsknings-mode: 1 til 4, derefter 1 til 4 (på en controller højre stick to gange; på en touchskærm chatknappen). Deres sætninger vises over deres biler.",
-  "Quick chat (with other players): a group, then a phrase": "Hurtigchat (med andre spillere): en gruppe, derefter en sætning"
+  "Quick chat (with other players): a group, then a phrase": "Hurtigchat (med andre spillere): en gruppe, derefter en sætning",
+  "More options": "Flere muligheder",
+  "Ghost mode, crews, full screen, controls": "Spøgelsestilstand, crews, fuld skærm, kommandoer",
+  "Ghost mode, crews, controls": "Spøgelsestilstand, crews, kommandoer",
+  "Full screen, frame-rate counter, controls": "Fuld skærm, FPS-tæller, kommandoer",
+  "Frame-rate counter, controls": "FPS-tæller, kommandoer"
 }

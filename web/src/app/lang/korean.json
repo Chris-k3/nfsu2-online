@@ -758,5 +758,10 @@
   "Wait a moment": "잠시 기다려 주세요",
   "Esc closes": "Esc로 닫기",
   "Say one of sixteen set phrases to the players near you in free roam: 1 to 4, then 1 to 4 (on a controller, the right stick twice; on a touch screen, the chat button). Theirs show over their cars.": "자유 주행에서 근처의 플레이어에게 정해진 문구 16가지 중 하나를 말해요. 1~4를 누른 다음 다시 1~4를 누르세요(컨트롤러는 오른쪽 스틱을 두 번, 터치스크린은 채팅 버튼). 다른 플레이어의 문구는 그 플레이어의 차 위에 표시돼요.",
-  "Quick chat (with other players): a group, then a phrase": "빠른 채팅(다른 플레이어와 있을 때): 그룹을 고른 다음 문구"
+  "Quick chat (with other players): a group, then a phrase": "빠른 채팅(다른 플레이어와 있을 때): 그룹을 고른 다음 문구",
+  "More options": "더 많은 옵션",
+  "Ghost mode, crews, full screen, controls": "고스트 모드, 크루, 전체 화면, 조작법",
+  "Ghost mode, crews, controls": "고스트 모드, 크루, 조작법",
+  "Full screen, frame-rate counter, controls": "전체 화면, 프레임 레이트 표시, 조작법",
+  "Frame-rate counter, controls": "프레임 레이트 표시, 조작법"
 }

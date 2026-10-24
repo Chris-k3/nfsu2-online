@@ -30,6 +30,7 @@ import { markPad, padPress, pageDialog } from './padnav';
 import { controlsSheet, type ControlsSheet } from './controls';
 import { TouchControls } from './touch';
 import { TextField } from './textentry';
+import { PauseHint } from './pausehint';
 import type { PadPage } from '../input/gamepad';
 import type { NetQueue, NetRemoved } from '../net';
 import { checkSetting, HOST_FIXED, pageOnly, resolveEnv, settingsUpgrade, TEMPLATE, type Resolved } from './settings';
@@ -477,6 +478,7 @@ async function startGame() {
   if (r.source.NFSU2_RENDER === 'device') renderCheck = new RenderCheck(session, r.env.NFSU2_RENDER, renderCheckTimes(), logLine);
   touch.start(session);
   textField.start(session);
+  pauseHint.start(session);
   quickChat.start(session, net && r.env.NFSU2_ROAM === '1' && r.env.NFSU2_ROAM_SAY !== '0');
   fps.memory = session.proc.memory;
   const st = session;
@@ -594,10 +596,12 @@ const PAD_PAGE: PadPage = {
 let awake: (() => void) | null = null;   // the running game's Wake Lock (display.ts keepScreenOn)
 let touch: TouchControls;                // the controls on the game while a finger drives (touch.ts)
 let textField: TextField;               // the field for a phone's keyboard while the game asks for text (textentry.ts)
+let pauseHint: PauseHint;               // the line to the page's menu under the game's pause menu (pausehint.ts)
 
 function endStage() {
   touch.stop();
   textField.stop();
+  pauseHint.stop();
   quickChat.stop();
   awake?.(); awake = null;
   away?.stop(); away = null;
@@ -1251,6 +1255,11 @@ export async function boot() {
   quickChat = new QuickChat($('#stage'), { line: chatLine, lobby: (name, text) => lobbyPanel.say(name, text), place: placeNotices, log: logLine });
   touch = new TouchControls($('#stage'), { toast, log: logLine, chat: () => quickChat.toggle() });
   textField = new TextField($('#stage'), { log: logLine });
+  pauseHint = new PauseHint($('#stage'), {
+    open: openMenu, log: logLine,
+    roam: () => solidCars !== null && !!session?.net?.solid,
+    fullscreen: () => canFullscreen() || !fromHomeScreen(),
+  });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { void checkNewer(); vault.shown(); } });
   setInterval(() => { if (document.visibilityState === 'visible') void checkNewer(); }, NEWER_EVERY_MS);
 

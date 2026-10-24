@@ -572,6 +572,20 @@ html:has(> body > .stage:not([hidden])) { overflow: hidden; }
   position: absolute; left: 50%; top: 16px; transform: translateX(-50%); z-index: 3; max-width: calc(100vw - 32px);
   padding: 8px 16px; border-radius: 8px; background: rgba(0, 0, 0, 0.8); font-size: 14px; line-height: 20px; pointer-events: none;
 }
+/* the game's pause menu: what opens the page's menu, under the game's panel (pausehint.ts places it), as a toast */
+.pause-hint {
+  position: absolute; z-index: 3; transform: translateX(-50%); width: max-content;
+  padding: 8px 16px; border: 1px solid var(--line); border-radius: 8px; background: rgba(0, 0, 0, 0.8);
+  color: var(--text); font: 400 14px/20px var(--font); text-align: center; cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.pause-hint:hover { border-color: var(--edge); }
+.pause-hint:active { color: var(--lime); }
+.pause-hint kbd {
+  min-width: 0; margin-right: 8px; padding: 0 6px; border-radius: 3px;
+  font: 700 0.85em/1.5 var(--font); vertical-align: 1px;
+}
+.pause-hint-list { color: var(--muted); }
+.pause-hint-list::before { content: " · "; }
 /* the away check (away.ts): in the middle, until the player is back; a kick or a ban (shell.ts netRemoved) the same */
 .toast.away { top: 50%; transform: translate(-50%, -50%); width: max-content; max-width: min(560px, calc(100vw - 32px)); text-align: center; }
 /* a full server: the place in line for one (players.ts queueText), at the top while the game waits; a note on the

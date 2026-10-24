@@ -758,5 +758,10 @@
   "Wait a moment": "請稍候",
   "Esc closes": "按 Esc 關閉",
   "Say one of sixteen set phrases to the players near you in free roam: 1 to 4, then 1 to 4 (on a controller, the right stick twice; on a touch screen, the chat button). Theirs show over their cars.": "在自由漫遊中，對附近的玩家說出 16 句固定短語之一：先按 1 至 4，再按 1 至 4（使用控制器時撥動右搖桿兩次；使用觸控螢幕時按聊天按鈕）。其他玩家說的話會顯示在他們的車上方。",
-  "Quick chat (with other players): a group, then a phrase": "快速聊天（與其他玩家同玩時）：先選分類，再選短語"
+  "Quick chat (with other players): a group, then a phrase": "快速聊天（與其他玩家同玩時）：先選分類，再選短語",
+  "More options": "更多選項",
+  "Ghost mode, crews, full screen, controls": "幽靈模式、車隊、全螢幕、操作方式",
+  "Ghost mode, crews, controls": "幽靈模式、車隊、操作方式",
+  "Full screen, frame-rate counter, controls": "全螢幕、影格率顯示、操作方式",
+  "Frame-rate counter, controls": "影格率顯示、操作方式"
 }

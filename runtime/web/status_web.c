@@ -122,13 +122,22 @@ static int drive_state(void){
  * uncapped), so the page can tell whether the game keeps up with it
  * (web/src/app/rendercheck.ts) */
 int hfr_rate_now(void);
+/* "pause": 1 while the game's pause menu (UI_Pause.fng) is the top package,
+ * not its options or a question over it, so the page can point to its own
+ * menu under the panel (web/src/app/pausehint.ts) */
+static int pause_state(void){
+    const char *top = autotest_top_fng();
+    return top && !strcasecmp(top, "UI_Pause.fng");
+}
 void status_web_frame(void){
-    static int slot = -2, last = -1, rslot = -2, rlast = -1;
-    if (slot == -2){ slot = host_status_slot("drive"); rslot = host_status_slot("rate"); }
+    static int slot = -2, last = -1, rslot = -2, rlast = -1, pslot = -2, plast = -1;
+    if (slot == -2){ slot = host_status_slot("drive"); rslot = host_status_slot("rate"); pslot = host_status_slot("pause"); }
     int v = drive_state();
     if (v != last && slot >= 0){ last = v; host_status_set(slot, v); }
     int r = hfr_rate_now();
     if (r != rlast && rslot >= 0){ rlast = r; host_status_set(rslot, r); }
+    int p = pause_state();
+    if (p != plast && pslot >= 0){ plast = p; host_status_set(pslot, p); }
 }
 
 /* main_web.c, before the guest starts */

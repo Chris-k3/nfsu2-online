@@ -758,5 +758,10 @@
   "Wait a moment": "少し待ってください",
   "Esc closes": "Escで閉じる",
   "Say one of sixteen set phrases to the players near you in free roam: 1 to 4, then 1 to 4 (on a controller, the right stick twice; on a touch screen, the chat button). Theirs show over their cars.": "フリーロームで、近くのプレイヤーに16個の決まったフレーズのどれかを送ります。1～4を押してから、もう一度1～4を押します（コントローラーでは右スティックを2回倒し、タッチスクリーンではチャットボタンを使います）。他のプレイヤーのフレーズは、その車の上に表示されます。",
-  "Quick chat (with other players): a group, then a phrase": "クイックチャット（他のプレイヤーといるとき）: グループ、次にフレーズ"
+  "Quick chat (with other players): a group, then a phrase": "クイックチャット（他のプレイヤーといるとき）: グループ、次にフレーズ",
+  "More options": "その他のオプション",
+  "Ghost mode, crews, full screen, controls": "ゴーストモード、クルー、全画面表示、操作方法",
+  "Ghost mode, crews, controls": "ゴーストモード、クルー、操作方法",
+  "Full screen, frame-rate counter, controls": "全画面表示、フレームレート表示、操作方法",
+  "Frame-rate counter, controls": "フレームレート表示、操作方法"
 }

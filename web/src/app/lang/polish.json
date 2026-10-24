@@ -863,5 +863,10 @@
   "Wait a moment": "Poczekaj chwilę",
   "Esc closes": "Esc – zamknij",
   "Say one of sixteen set phrases to the players near you in free roam: 1 to 4, then 1 to 4 (on a controller, the right stick twice; on a touch screen, the chat button). Theirs show over their cars.": "Powiedz graczom w pobliżu na przejażdżce jeden z szesnastu gotowych zwrotów: od 1 do 4, potem znów od 1 do 4 (na kontrolerze dwa ruchy prawą gałką, na ekranie dotykowym przycisk czatu). Zwroty innych graczy widać nad ich samochodami.",
-  "Quick chat (with other players): a group, then a phrase": "Szybki czat (z innymi graczami): grupa, potem zwrot"
+  "Quick chat (with other players): a group, then a phrase": "Szybki czat (z innymi graczami): grupa, potem zwrot",
+  "More options": "Więcej opcji",
+  "Ghost mode, crews, full screen, controls": "Tryb ducha, ekipy, pełny ekran, sterowanie",
+  "Ghost mode, crews, controls": "Tryb ducha, ekipy, sterowanie",
+  "Full screen, frame-rate counter, controls": "Pełny ekran, licznik klatek, sterowanie",
+  "Frame-rate counter, controls": "Licznik klatek, sterowanie"
 }

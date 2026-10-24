@@ -863,5 +863,10 @@
   "Wait a moment": "Подождите немного",
   "Esc closes": "Esc — закрыть",
   "Say one of sixteen set phrases to the players near you in free roam: 1 to 4, then 1 to 4 (on a controller, the right stick twice; on a touch screen, the chat button). Theirs show over their cars.": "Скажите игрокам рядом в свободной езде одну из шестнадцати готовых фраз: от 1 до 4, затем снова от 1 до 4 (на геймпаде — дважды правым стиком, на сенсорном экране — кнопка чата). Фразы других игроков видны над их машинами.",
-  "Quick chat (with other players): a group, then a phrase": "Быстрый чат (с другими игроками): группа, затем фраза"
+  "Quick chat (with other players): a group, then a phrase": "Быстрый чат (с другими игроками): группа, затем фраза",
+  "More options": "Другие настройки",
+  "Ghost mode, crews, full screen, controls": "Режим призрака, команды, полный экран, управление",
+  "Ghost mode, crews, controls": "Режим призрака, команды, управление",
+  "Full screen, frame-rate counter, controls": "Полный экран, счётчик кадров, управление",
+  "Frame-rate counter, controls": "Счётчик кадров, управление"
 }

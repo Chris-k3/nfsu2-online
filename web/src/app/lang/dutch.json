@@ -821,5 +821,10 @@
   "Wait a moment": "Wacht even",
   "Esc closes": "Esc sluit",
   "Say one of sixteen set phrases to the players near you in free roam: 1 to 4, then 1 to 4 (on a controller, the right stick twice; on a touch screen, the chat button). Theirs show over their cars.": "Zeg een van zestien vaste zinnen tegen de spelers bij je in de buurt in Verkennen: 1 tot 4, dan 1 tot 4 (op een controller twee keer de rechterstick; op een touchscreen de chatknop). Hun zinnen verschijnen boven hun wagens.",
-  "Quick chat (with other players): a group, then a phrase": "Snelchat (met andere spelers): een groep, dan een zin"
+  "Quick chat (with other players): a group, then a phrase": "Snelchat (met andere spelers): een groep, dan een zin",
+  "More options": "Meer opties",
+  "Ghost mode, crews, full screen, controls": "Spookmodus, crews, volledig scherm, besturing",
+  "Ghost mode, crews, controls": "Spookmodus, crews, besturing",
+  "Full screen, frame-rate counter, controls": "Volledig scherm, framerate-teller, besturing",
+  "Frame-rate counter, controls": "Framerate-teller, besturing"
 }
