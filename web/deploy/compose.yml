@@ -19,7 +19,8 @@
 #                                    keeps the rest of the VPS its share; docs/web/VPS.md, "A share of the VPS")
 # then:  docker compose up -d && docker compose logs -f server
 # Port 80 taken by something else on the VPS: compose.443.yml.  A Cloudflare Tunnel instead of Caddy:
-# compose.tunnel.yml.  Cloudflare's proxy (orange cloud) in front of Caddy: compose.cloudflare.yml.
+# compose.tunnel.yml.  Cloudflare's proxy (orange cloud) in front of Caddy: compose.cloudflare.yml.  Cloudflare's
+# proxy straight to the server (no Caddy, no tunnel): compose.origin.yml.
 name: nfsu2-web
 services:
   caddy:

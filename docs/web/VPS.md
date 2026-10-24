@@ -667,6 +667,60 @@ What follows from this setup:
 A real tunnel was **not** opened here (**UNVERIFIED**). The layout was: `cloudflared` stood in by a container that
 reaches the server on 127.0.0.1, crashes of either side, a reboot.
 
+### Cloudflare's proxy, straight to the server
+
+No Caddy and no `cloudflared`: Cloudflare's proxy connects to the server itself, which does TLS with a Cloudflare
+Origin CA certificate (TLS choice B with C, [Without Docker](#tls-pick-one)). An Origin Rule sends
+`https://<your name>` to a high port (28443 here), so the VPS needs nothing on 80 or 443. On nfsu2.xyz the tunnel
+took about 3/4 of the CPU (1.72 of 2.25 cores per 1000 players, 2026-10-24); without it the port (0.114 Mbit/s a
+player) is the limit, about 7,000-8,000 players on 1 Gbit/s.
+
+1. **Cloudflare, before anything on the VPS:**
+   - SSL/TLS, Origin Server, **Create Certificate**: your name and `*.<your name>`, 15 years. Save the certificate
+     as `/srv/nfsu2/tls/origin.pem` and the key as `origin.key`, then `chown -R 1000:1000 /srv/nfsu2/tls && chmod
+     700 /srv/nfsu2/tls && chmod 600 /srv/nfsu2/tls/origin.key` (the container runs as uid 1000).
+   - SSL/TLS, Origin Server, **Authenticated Origin Pulls** on.
+   - SSL/TLS, Overview: **Full (strict)**. SSL/TLS, Edge Certificates: **Always Use HTTPS** on (http:// never reaches
+     the VPS: the Origin Rule sends every request for the name to the TLS port).
+   - Rules, Origin Rules: hostname equals your name, **Destination Port** 28443. Deploy it at step 4 (with the
+     tunnel still in front it is not needed).
+   - The proxy's settings 7-9 above apply as they are (the Cache Rule stays).
+2. **Firewall:** the port from Cloudflare's addresses only (`ufw status` first; with ufw off, `ufw allow 22/tcp`
+   before `ufw enable`):
+
+   ```sh
+   for r in $(curl -s https://www.cloudflare.com/ips-v4) $(curl -s https://www.cloudflare.com/ips-v6); do
+     ufw allow proto tcp from "$r" to any port 28443 comment cloudflare
+   done
+   ```
+
+3. **Compose:** copy `web/deploy/compose.origin.yml` next to `compose.yml`; in `.env`
+   `COMPOSE_FILE=compose.yml:compose.origin.yml` (and `NFSU2_TLS_DIR=/srv/nfsu2/tls`). Keep `TUNNEL_TOKEN`: it is the
+   way back.
+4. **The switch** (everyone reconnects once, as at a release): `docker compose up -d --remove-orphans` (removes
+   `cloudflared` and `net`), then in Cloudflare's DNS delete the tunnel's record for your name (CNAME to
+   `<id>.cfargotunnel.com`) and add a proxied (orange) `A` record to the VPS's IPv4, and deploy the Origin Rule. In
+   Zero Trust, delete the tunnel's public hostname (the tunnel itself can stay). Leave out `AAAA` unless the firewall
+   step covered IPv6 and you want it.
+5. **Check:** the log says `HTTPS : port 28443` and `cloudflare: its addresses must show its origin-pull
+   certificate`; the page loads; `curl -kv --max-time 5 https://<vps>:28443/` from outside Cloudflare gets no
+   answer (the firewall); players' `[roam]` rtt as before or lower.
+
+**Back to the tunnel:** `COMPOSE_FILE=compose.yml:compose.tunnel.yml`, `docker compose up -d --remove-orphans`,
+turn the Origin Rule off, delete the `A` record and add the tunnel's public hostname again (that makes its CNAME).
+
+What the handshake lets through: an address outside Cloudflare's ranges never gets past the firewall; one inside
+must show the origin-pull certificate, and every handshake must ask for a name in the certificate (none, or another
+name: no certificate, no answer). Authenticated Origin Pulls' Cloudflare certificate is the same for every
+Cloudflare account, so it proves Cloudflare's proxy, not your zone: another account's proxy would also need to send
+your name as its SNI, which only Enterprise plans can set, and Cloudflare sets `CF-Connecting-IP` there itself.
+A certificate of your own (zone-level Authenticated Origin Pulls) would close that too, but the server trusts
+Cloudflare's CA only (built in).
+
+Checked on a Mac (2026-10-24, the arguments of `compose.origin.yml`, a self-signed certificate): the health
+check's 127.0.0.1 port and HTTPS for the name answer, the bare address and another name get no handshake. Through a
+real Cloudflare: **UNVERIFIED**.
+
 ## A proxy you already have
 
 With Caddy or nginx already on the VPS, run the server alone on the VPS's network and forward your name to
