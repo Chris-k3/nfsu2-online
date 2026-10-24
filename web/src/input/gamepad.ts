@@ -12,10 +12,10 @@
 // takes it back with one of its own.  Before any press, and when that one
 // goes away, the first connected of them drives (one that connects later
 // waits for a press), as gamepad.m does; without either the first
-// controller is read as if it had the standard mapping, but for an axis
-// resting at an end when it showed up (a pedal, a throttle, a trigger),
-// which is no stick.  Chrome exposes a controller only after a button press
-// on the page.
+// controller is read through its known layout (hidpad.ts: 8BitDo's), or else
+// as if it had the standard mapping, but for an axis resting at an end when
+// it showed up (a pedal, a throttle, a trigger), which is no stick.  Chrome
+// exposes a controller only after a button press on the page.
 //
 // Rumble goes the other way: runtime/dinput_pad.c plays the game's
 // force-feedback effects as two motor levels in the mailbox, updated every
@@ -39,6 +39,7 @@ import {
   describeMap, findHat, guessMap, hatDirs, loadMap, loadShifter, readWheel, Shifter, shifterGear, usbIds, WHEEL_MAP_EVENT,
   wheelOf, withSetUp, type ShifterMode, type WheelInfo, type WheelMap,
 } from './wheel';
+import { eightBitDoFace, HidPadReader } from './hidpad';
 
 export interface PadSnapshot { connected: boolean; buttons: number; axes: number[]; family: number; name: string; index: number; wheel?: boolean }
 
@@ -49,13 +50,14 @@ const BUTTON_OF: (number | -1)[] = [PAD_A, PAD_B, PAD_X, PAD_Y, PAD_LB, PAD_RB, 
 /** the controller family and a display name from Gamepad.id: Chrome writes
  *  "Name (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)", Firefox "054c-0ce6-Name"
  *  (on Linux and macOS without the leading zeros: "54c-ce6-Name").
- *  A wheel's family is its buttons' (a G29's are PlayStation's, a G920's Xbox's). */
+ *  A wheel's family is its buttons' (a G29's are PlayStation's, a G920's Xbox's), an 8BitDo pad's its labels'. */
 export function familyOf(id: string): { family: number; name: string } {
   const v = usbIds(id)?.vendor;
   let name = id.replace(/\s*\((?:STANDARD GAMEPAD\s*)?(?:Vendor:[^)]*)?\)\s*$/i, '').replace(/^[0-9a-f]{1,4}-[0-9a-f]{1,4}-/i, '').trim();
   if (!name) name = 'Game Controller';
-  const s = id.toLowerCase(), w = wheelOf(id)?.layout;
+  const s = id.toLowerCase(), w = wheelOf(id)?.layout, e = eightBitDoFace(id);
   if (w === 'ps' || w === 'xbox') return { family: w === 'ps' ? PADF_PLAYSTATION : PADF_XBOX, name };
+  if (e) return { family: e === 'xbox' ? PADF_XBOX : PADF_NINTENDO, name };
   const family = v === '045e' || /xbox|xinput/.test(s) ? PADF_XBOX
     : v === '054c' || /dualsense|dualshock|playstation/.test(s) ? PADF_PLAYSTATION
     : v === '057e' || /pro controller|joy-con|nintendo/.test(s) ? PADF_NINTENDO : PADF_GENERIC;
@@ -94,23 +96,32 @@ export function mapWheel(g: Gamepad, m: WheelMap, hat: number, shift?: { shifter
   return { connected: true, buttons, axes, family, name, index: g.index, wheel: true };
 }
 
+/** an 8BitDo pad without the standard mapping -> the virtual pad (hidpad.ts) */
+export function mapHid(g: Gamepad, r: HidPadReader): PadSnapshot {
+  const { buttons, axes } = r.read(g.axes, g.buttons.map(b => !!b && (b.pressed || b.value > 0.5)));
+  const { family, name } = familyOf(g.id);
+  return { connected: true, buttons, axes, family, name, index: g.index };
+}
+
 /** the controller driving the game's pad (null: no game, or no controller); PAD_DRIVER_EVENT on the window when
  *  another one does (the Controls sheet shows that one) */
 let driver: { index: number; id: string } | null = null;
 export const PAD_DRIVER_EVENT = 'nfsu2-pad-driver';
-/** whether a controller may drive the pad while others are connected: the standard mapping, or a steering wheel */
-export const mayDrive = (g: Gamepad | null) => !!g && (g.mapping === 'standard' || !!wheelOf(g.id));
+/** whether a controller may drive the pad while others are connected: the standard mapping, a steering wheel, or an
+ *  8BitDo pad (hidpad.ts) */
+export const mayDrive = (g: Gamepad | null) => !!g && (g.mapping === 'standard' || !!wheelOf(g.id) || !!eightBitDoFace(g.id));
 export function drivingPad(): Gamepad | null {
   if (!driver) return null;
   try { const g = navigator.getGamepads?.()[driver.index]; return g?.connected && g.id === driver.id ? g : null; }
   catch { return null; }
 }
 
-/** what the poller knows of the controller driving the pad: its axes when it showed up, and if it is a wheel, the
- *  model, how it makes the pad, the axis of its D-pad, its shifter and what the player picked for that */
+/** what the poller knows of the controller driving the pad: its axes when it showed up; if it is a wheel, the model,
+ *  how it makes the pad, the axis of its D-pad, its shifter and what the player picked for that; if it is an 8BitDo
+ *  pad without the standard mapping, its reader */
 interface Seen {
   index: number; id: string; axes0: number[]; ends: Set<number>; wheel: WheelInfo | null; map: WheelMap | null; hat: number;
-  shifter: Shifter; mode: ShifterMode;
+  shifter: Shifter; mode: ShifterMode; hid: HidPadReader | null;
 }
 
 /**
@@ -294,22 +305,26 @@ export class PadPoller {
   }
 
   /** the controller driving the pad as the pad: a wheel through its layout (the model's, with the player's set-up
-   *  over it, or the guess from how it showed up) and its shifter, one in the standard mapping as it is, any other as
-   *  if it were, but for the axes that rested at an end when it showed up, and with Chrome's hat switch as its D-pad */
+   *  over it, or the guess from how it showed up) and its shifter, one in the standard mapping as it is, an 8BitDo pad
+   *  through its known layout, any other as if it had the standard mapping, but for the axes that rested at an end when
+   *  it showed up, and with Chrome's hat switch as its D-pad */
   private read(g: Gamepad): PadSnapshot {
     let k = this.seen;
     if (!k || k.index !== g.index || k.id !== g.id) {
-      const wheel = wheelOf(g.id), axes0 = axesWhenSeen(g, wheel);
+      const wheel = wheelOf(g.id), axes0 = axesWhenSeen(g, wheel), face = eightBitDoFace(g.id);
       const ends = new Set<number>();
       axes0.forEach((v, i) => { if (Math.abs(v) >= 0.9 && Math.abs(v) <= 1.05) ends.add(i); });
-      k = this.seen = { index: g.index, id: g.id, axes0, ends, wheel, map: null, hat: findHat(axes0), shifter: new Shifter(), mode: 'off' };
+      const hid = !wheel && face && g.mapping !== 'standard' ? new HidPadReader(face, axes0) : null;
+      k = this.seen = { index: g.index, id: g.id, axes0, ends, wheel, map: null, hat: findHat(axes0), shifter: new Shifter(), mode: 'off', hid };
       if (g.mapping !== 'standard') {
         this.log(`[pad] ${g.id}: no standard mapping in this browser; ${g.axes.length} axes at ` +
           `[${axes0.map(v => v.toFixed(2)).join(' ')}], ${g.buttons.length} buttons`);
-        if (!k.wheel) this.log(`[pad] read as if it had one${ends.size ? `, but for axes ${[...ends].join(', ')} (at an end: no stick)` : ''}` +
+        if (hid) this.log(`[pad] read as ${hid.describe()}`);
+        else if (!k.wheel) this.log(`[pad] read as if it had one${ends.size ? `, but for axes ${[...ends].join(', ')} (at an end: no stick)` : ''}` +
           `${k.hat >= 0 ? `, the D-pad on axis ${k.hat}` : ''}`);
       }
     }
+    if (k.hid) return mapHid(g, k.hid);
     if (k.hat < 0 && g.mapping !== 'standard') {
       k.hat = findHat(g.axes);
       if (k.hat >= 0) this.log(`[pad] ${g.id}: the D-pad on axis ${k.hat}`);
