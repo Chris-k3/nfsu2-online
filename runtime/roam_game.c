@@ -324,7 +324,7 @@ static struct {
     int test_owncars;                         /* NFSU2_ROAM_TEST_OWNCARS (test aid): friends only in cars of our own (slots 3 and up) */
     int test_outside;                         /* NFSU2_ROAM_TEST_OUTSIDE (test aid): every car of our own outside the car index */
     int hit_share;                            /* NFSU2_ROAM_HIT_SHARE: % of a hit with a friend's car the player's car keeps (roam_game_contact);
-                                                 -1: by the two cars' weights (car_mass), 100: the game's own (the whole hit) */
+                                                 -1: by the two cars' weights (car_mass, their square roots), 100: the game's own (the whole hit) */
     int test_mass, test_fmass;                /* NFSU2_ROAM_TEST_MASS / _FMASS (test aid, kg): car_mass of the player's car / friends' cars */
     char name[RC_NAME_MAX + 1], room[64];
     char crew[RC_CREW_MAX][100]; int ncrew;   /* NFSU2_ROAM_CREW: the crews' names, in the player's order (crews_parse; the
@@ -5996,16 +5996,18 @@ static void block_hit(Slot *s, int64_t host){
  * in one step (0.1 m/s) on its screen, and the standing one left at 10 m/s
  * within three on its own, where two equal cars both go on at about 5.  So
  * the player's car keeps the friend's car's part of the two cars' weight
- * (car_mass; O.hit_share % instead when set) of the change the game gave
- * its motion (contact_set), and the friend's car takes the rest of the
- * momentum as a push on the car as drawn here, from the next frame until
- * the friend's own report of the hit comes (push_pose): against a car of
- * the same weight half each, a 106 against a Hummer 75 and 25 %.  Each game
- * does the same with its own car, so the hit is shared on both screens: the
- * same ram now left the two at 5.6 and 4.4 m/s; at 32 m/s into a standing
- * car (the game: the driver back at -3.5, the other off at 35.5) 14.3 and
- * 18.2, 7.6 and 10.5 into one of 2.9 t; head on, 32 against 18.4 m/s, both
- * on at 4.0 and 9.3 (the game: thrown back at 23 and 37 m/s).
+ * (car_mass, by their square roots; O.hit_share % instead when set) of the
+ * change the game gave its motion (contact_set), and the friend's car takes
+ * the rest of the momentum as a push on the car as drawn here, from the
+ * next frame until the friend's own report of the hit comes (push_pose):
+ * against a car of the same weight half each, a 106 against a Hummer 63 and
+ * 37 %.  By the weights themselves that was 75 and 25 %, and a braked Hummer
+ * hardly moved for anyone (2026-10-24).  Each game does the same with its
+ * own car, so the hit is shared on both screens: the same ram now left the
+ * two at 5.6 and 4.4 m/s; at 32 m/s into a standing car (the game: the
+ * driver back at -3.5, the other off at 35.5) 14.3 and 18.2; head on, 32
+ * against 18.4 m/s, both on at 4.0 and 9.3 (the game: thrown back at 23 and
+ * 37 m/s).
  * The game's crash view (slow motion and the jump camera: Player mode 6,
  * 0x6022E0) starts inside the pair's impulse (0x5AF0E0 -> 0x5A9620 ->
  * 0x59FB70) when the hit on the player's car (its impulse, capped at 40
@@ -6041,7 +6043,7 @@ void roam_game_contact(CPU *c, void (*orig)(CPU *)){
     Slot *s = &g_sl[k];
     float st0[CS_N], st[CS_N];
     float mm = car_mass(me, 1), mf = car_mass(s->car, 0);
-    float keep = O.hit_share >= 0 ? (float)O.hit_share / 100.f : mf / (mm + mf), dv[3], push[3], d2 = 0;
+    float keep = O.hit_share >= 0 ? (float)O.hit_share / 100.f : rc_sqrtf(mf) / (rc_sqrtf(mm) + rc_sqrtf(mf)), dv[3], push[3], d2 = 0;
     int again = s->hits && s->hit_step == g_step;
     uint32_t pl = rd32(G_PLAYER1), mode = ok(pl, 0x5c) ? MR32(pl + 0x58u) : 0;
     float view = MRF32(G_CRASH_VIEW), cap = MRF32(G_CRASH_CAP), need = again || keep <= 0.f ? 1e30f : CRASH_VIEW_X * view / keep;
