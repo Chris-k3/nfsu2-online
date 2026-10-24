@@ -1587,10 +1587,11 @@ static uint32_t prim_verts(uint32_t pt, uint32_t n){
     }
 }
 
-/* D3D9 lines are one pixel wide, and the renderers draw triangles only: each
- * segment becomes a quad one pixel across its minor axis (the diamond rule
- * covers one pixel per column of an x-major line), from the transformed
- * vertices.  The dyno chart draws its curves, grid and rpm marker as
+/* The renderers draw triangles only: each line segment becomes a quad across
+ * its minor axis (the diamond rule covers one pixel per column of an x-major
+ * line), from the transformed vertices.  D3D9 lines are one pixel wide, a
+ * hairline at today's sizes: these are one HUD pixel (of 640x480) wide, in
+ * whole pixels.  The dyno chart draws its curves and rpm marker as
  * one-segment line strips (0x50dcd0): taken for a triangle strip, each got
  * a third vertex from the game's stack, near the middle of the screen. */
 static void draw_lines(const TVert *tv, uint32_t nv, uint32_t pt){
@@ -1599,6 +1600,8 @@ static void draw_lines(const TVert *tv, uint32_t nv, uint32_t pt){
     unsigned w = g_bb_w, h = g_bb_h;
     if (g_cur_rt) metal_tex_size(g_cur_rt, &w, &h);
     if (!w || !h) return;
+    float px = fminf((float)w / 640.f, (float)h / 480.f);
+    px = px < 1.f ? 1.f : roundf(px);
     static TVert q[64 * 6];
     unsigned nq = 0;
     uint32_t nseg = (pt == 2u) ? nv / 2u : nv - 1u;
@@ -1609,9 +1612,9 @@ static void draw_lines(const TVert *tv, uint32_t nv, uint32_t pt){
         float dx = (b->x / b->w - a->x / a->w) * (float)w;
         float dy = (b->y / b->w - a->y / a->w) * (float)h;
         if (dx == 0.f && dy == 0.f) continue;
-        /* half a pixel either side: NDC spans 2 / size per pixel */
+        /* half the width either side: NDC spans 2 / size per pixel */
         float ox = 0.f, oy = 0.f;
-        if (fabsf(dx) >= fabsf(dy)) oy = 1.f / (float)h; else ox = 1.f / (float)w;
+        if (fabsf(dx) >= fabsf(dy)) oy = px / (float)h; else ox = px / (float)w;
         TVert *o = &q[nq];
         o[0] = *a; o[0].x += ox * a->w; o[0].y += oy * a->w;
         o[1] = *b; o[1].x += ox * b->w; o[1].y += oy * b->w;
