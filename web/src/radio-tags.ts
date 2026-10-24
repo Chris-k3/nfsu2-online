@@ -1,4 +1,4 @@
-// What the game's plaque shows of a track: artist, title and album, in letters its font draws.
+// What the game's plaque shows of a track: artist, title and album, read from the file or its name, in letters its font draws.
 import type { Lines } from './app/radio-link';
 
 const PLAQUE_CHARS = 40;                 // what the game's plaque shows of a line
@@ -38,5 +38,30 @@ export function plaqueTags(tags: Lines, album = 'My music'): Lines {
   return { artist: fit(tags.artist) || 'Unknown artist', title: fit(title), album: fit(tags.album) || fit(album) || 'My music' };
 }
 
-/** The tags of a track: what its file name says. */
-export async function tagsOf(handle: { name: string }): Promise<Lines> { return nameTags(handle.name); }
+const synchsafe = (b: Uint8Array, at: number) => ((b[at] & 0x7f) << 21) | ((b[at + 1] & 0x7f) << 14) | ((b[at + 2] & 0x7f) << 7) | (b[at + 3] & 0x7f);
+
+function id3Text(b: Uint8Array): string {
+  const enc = ['latin1', 'utf-16', 'utf-16be', 'utf-8'][b[0]] ?? 'latin1';
+  return new TextDecoder(enc).decode(b.subarray(1)).replace(/\0[\s\S]*$/, '').trim();
+}
+
+/** Artist, title and album: the ID3v2 tags at the start of an mp3, else what the file name says.  Reads one file, its first megabyte at most. */
+export async function tagsOf(handle: FileSystemFileHandle): Promise<Lines> {
+  const out = nameTags(handle.name);
+  try {
+    const b = new Uint8Array(await (await handle.getFile()).slice(0, 1 << 20).arrayBuffer());
+    if (String.fromCharCode(b[0], b[1], b[2]) !== 'ID3' || b[3] < 3) return out;   // ID3v2.3 or 2.4 only
+    const end = Math.min(10 + synchsafe(b, 6), b.length);
+    for (let p = 10; p + 10 <= end;) {
+      const id = String.fromCharCode(b[p], b[p + 1], b[p + 2], b[p + 3]);
+      const size = b[3] === 4 ? synchsafe(b, p + 4) : new DataView(b.buffer).getUint32(p + 4);
+      if (!size || p + 10 + size > end) break;
+      const text = id3Text(b.subarray(p + 10, p + 10 + size));
+      if (id === 'TIT2') out.title = text || out.title;
+      if (id === 'TPE1') out.artist = text || out.artist;
+      if (id === 'TALB') out.album = text || out.album;
+      p += 10 + size;
+    }
+  } catch { /* a file that cannot be read for its tags keeps its name */ }
+  return out;
+}
