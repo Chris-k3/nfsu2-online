@@ -1575,6 +1575,56 @@ static void texproj_push(void){
     metal_set_texproj(sel);
 }
 
+/* vertices of a DrawPrimitiveUP call with n primitives: D3DPT_POINTLIST 1,
+ * LINELIST 2, LINESTRIP 3, TRIANGLELIST 4, TRIANGLESTRIP 5, TRIANGLEFAN 6 */
+static uint32_t prim_verts(uint32_t pt, uint32_t n){
+    switch (pt){
+    case 1: return n;
+    case 2: return n * 2u;
+    case 3: return n + 1u;
+    case 4: return n * 3u;
+    default: return n + 2u;
+    }
+}
+
+/* D3D9 lines are one pixel wide, and the renderers draw triangles only: each
+ * segment becomes a quad one pixel across its minor axis (the diamond rule
+ * covers one pixel per column of an x-major line), from the transformed
+ * vertices.  The dyno chart draws its curves, grid and rpm marker as
+ * one-segment line strips (0x50dcd0): taken for a triangle strip, each got
+ * a third vertex from the game's stack, near the middle of the screen. */
+static void draw_lines(const TVert *tv, uint32_t nv, uint32_t pt){
+    void metal_tex_size(unsigned, unsigned *, unsigned *);
+    void metal_set_cull(unsigned);
+    unsigned w = g_bb_w, h = g_bb_h;
+    if (g_cur_rt) metal_tex_size(g_cur_rt, &w, &h);
+    if (!w || !h) return;
+    static TVert q[64 * 6];
+    unsigned nq = 0;
+    uint32_t nseg = (pt == 2u) ? nv / 2u : nv - 1u;
+    metal_set_cull(1u);                      /* lines are never culled */
+    for (uint32_t s = 0; s < nseg; s++){
+        const TVert *a = &tv[(pt == 2u) ? 2u * s : s], *b = a + 1;
+        if (a->w <= 0.f || b->w <= 0.f) continue;
+        float dx = (b->x / b->w - a->x / a->w) * (float)w;
+        float dy = (b->y / b->w - a->y / a->w) * (float)h;
+        if (dx == 0.f && dy == 0.f) continue;
+        /* half a pixel either side: NDC spans 2 / size per pixel */
+        float ox = 0.f, oy = 0.f;
+        if (fabsf(dx) >= fabsf(dy)) oy = 1.f / (float)h; else ox = 1.f / (float)w;
+        TVert *o = &q[nq];
+        o[0] = *a; o[0].x += ox * a->w; o[0].y += oy * a->w;
+        o[1] = *b; o[1].x += ox * b->w; o[1].y += oy * b->w;
+        o[2] = *a; o[2].x -= ox * a->w; o[2].y -= oy * a->w;
+        o[3] = o[2]; o[4] = o[1];
+        o[5] = *b; o[5].x -= ox * b->w; o[5].y -= oy * b->w;
+        nq += 6;
+        if (nq == sizeof q / sizeof q[0]){ metal_draw_tv(q, nq, 4u, g_cur_tex); nq = 0; }
+    }
+    if (nq) metal_draw_tv(q, nq, 4u, g_cur_tex);
+    metal_set_cull(g_rs[22] ? g_rs[22] : 3u);
+}
+
 /* dip_indexed -> draw_up: this draw's vertices are to be read by index from
  * the copies in the pool (while n > 0).  If draw_up cannot take the GPU path
  * it returns 0 and the caller falls back to the old (index expansion) path. */
@@ -1667,8 +1717,10 @@ static int draw_up(uint32_t pt, uint32_t nv, uint32_t vp, uint32_t stride){
      * MSL and run on the GPU; vertices are sent RAW, and the fetch layout is
      * taken from the D3D declaration and baked into the shader.
      * A shader that cannot be translated (flow control etc.) does not run
-     * silently wrong: vs_to_msl returns 0 and we fall back to the proven CPU path. */
-    if (prog && nel && stride && stride <= 256u && g_gpuvs){
+     * silently wrong: vs_to_msl returns 0 and we fall back to the proven CPU path.
+     * Lines take the CPU path: draw_lines widens them from the transformed vertices. */
+    int lines = (pt == 2u || pt == 3u);
+    if (prog && nel && stride && stride <= 256u && g_gpuvs && !lines){
         int gid = gpuvs_id(prog, g_cur_vs, g_cur_decl, el, nel);
         if (gid > 0){
             int  metal_draw_raw(const void*, unsigned, unsigned, unsigned,
@@ -1867,7 +1919,8 @@ static int draw_up(uint32_t pt, uint32_t nv, uint32_t vp, uint32_t stride){
                         g_vsk.f[q][0],g_vsk.f[q][1],g_vsk.f[q][2],g_vsk.f[q][3]);
         }
     }
-    metal_draw_tv(tv, nv, pt, g_cur_tex);
+    if (lines) draw_lines(tv, nv, pt);
+    else metal_draw_tv(tv, nv, pt, g_cur_tex);
     return 1;
 }
 
@@ -2555,15 +2608,16 @@ int com_call(CPU *c, uint32_t magic){
                 draw_stats_save(ptype, stride_hist);
                 if (metal_available()){
                     uint32_t nprim=A(c,2), vp=A(c,3);
-                    uint32_t nv = (pt==4) ? nprim*3u : nprim+2u;
-                    if (vp && stride && nv >= 3 && nv < 4096u &&
+                    uint32_t nv = prim_verts(pt, nprim);
+                    /* points: never drawn by the game */
+                    if (vp && stride && pt >= 2u && pt <= 6u && nv >= 2u && nv < 4096u &&
                         mem_is_committed(vp) && mem_is_committed(vp + nv*stride - 1))
                         draw_up(pt, nv, vp, stride);
                 }
                 if (dd_on()){
                     static uint32_t last_decl = 0xFFFFFFFFu; static int nd = 0;
                     uint32_t nprim=A(c,2), vp=A(c,3);
-                    uint32_t nv = (pt==4) ? nprim*3u : nprim+2u;
+                    uint32_t nv = prim_verts(pt, nprim);
                     if (g_cur_decl != last_decl){ last_decl = g_cur_decl; dd_decl(g_cur_decl); }
                     if (nd++ < 40){
                         fprintf(stderr,"   #%-3d type=%u verts=%-4u stride=%u tex=%u\n",
@@ -2588,7 +2642,7 @@ int com_call(CPU *c, uint32_t magic){
                             pt, A(c,2), stride, d, g_cur_fvf, el);
                     /* dump the first vertices' data */
                     { uint32_t vp = A(c,3), nprim = A(c,2);
-                      uint32_t nv = (pt==6||pt==5) ? nprim+2u : nprim*3u;
+                      uint32_t nv = prim_verts(pt, nprim);
                       if (nv > 6) nv = 6;
                       for (uint32_t v=0; v<nv; v++){
                         uint32_t o = vp + v*stride;
