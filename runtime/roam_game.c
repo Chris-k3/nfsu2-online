@@ -91,6 +91,7 @@
 #include "roam_core.h"
 #include "roam_plat.h"
 #include "carsfx.h"
+#include "names.h"
 
 /* ---- game addresses (v1.2 NA) ------------------------------------------------ */
 /* multiplayer races from free roam (mp_*, mprace.c): not in the Windows plugin */
@@ -4554,8 +4555,10 @@ static uint8_t local_status(int in_roam){
 static const uint32_t CREW_RGB[RC_CREW_MAX] = { 0x3cd2ff, 0xff50c8, 0xa078ff, 0xff4646 };
 static void crew_rgb_parse(const char *rgb);
 /* The Crews setting: names joined by commas (the start page's list), each
- * trimmed; empty ones and one that hashes as an earlier one (rc_room_hash:
- * spaces and A-Z case do not count) are left out, at most RC_CREW_MAX */
+ * trimmed; empty ones, one that hashes as an earlier one (rc_room_hash:
+ * spaces and A-Z case do not count) and one that reads as a slur (names.h:
+ * the page's box refuses it, a hand-written .ini may have it) are left out,
+ * at most RC_CREW_MAX */
 static void crews_parse(const char *v, rc_config *cf){
     O.ncrew = 0; cf->n_crews = 0;
     while (v && *v && O.ncrew < RC_CREW_MAX){
@@ -4568,7 +4571,7 @@ static void crews_parse(const char *v, rc_config *cf){
         uint32_t h = rc_room_hash(nm);
         int dup = 0;
         for (int i = 0; i < cf->n_crews; i++) dup |= cf->crews[i] == h;
-        if (h && !dup){ snprintf(O.crew[O.ncrew++], sizeof O.crew[0], "%s", nm); cf->crews[cf->n_crews++] = h; }
+        if (h && !dup && !name_blocked(nm)){ snprintf(O.crew[O.ncrew++], sizeof O.crew[0], "%s", nm); cf->crews[cf->n_crews++] = h; }
         v = *e ? e + 1 : 0;
     }
     crew_rgb_parse(opt("NFSU2_ROAM_CREW_RGB"));
@@ -4633,6 +4636,8 @@ static void init_once(CPU *c){
     if (nm && *nm) rc_name_clean(O.name, nm, 64);
     else O.name[0] = 0;                                    /* the profile name, once there is one */
     const char *rm = opt("NFSU2_ROAM_ROOM");
+    /* a room that reads as a slur is none (the settings refuse it; the Windows plugin's .ini does not) */
+    if (rm && name_blocked(rm)){ rlog("[roam] the room setting reads as a slur: no room\n"); rm = 0; }
     snprintf(O.room, sizeof O.room, "%s", rm ? rm : "");
     rc_config cf; memset(&cf, 0, sizeof cf);
     cf.self_id = roam_plat_random(); cf.port = (uint16_t)port; cf.room = rc_room_hash(O.room);

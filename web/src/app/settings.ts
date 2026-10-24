@@ -20,9 +20,9 @@ import { fill, LANGUAGES, N, type Vars } from './i18n';
 export { LANGUAGES };
 
 /** bundle.m's K_* kinds, and the browser's own crews (a list of names: crews.ts).  ic: K_IC, "value ; comment" (the
- *  free-roam keys). */
+ *  free-roam keys).  room: K_ROOM, text that does not read as a slur (names.mjs, as a player's name). */
 export type Kind = 'raw' | 'bool' | 'boolInv' | 'enum' | 'num' | 'id' | 'token' | 'int' | 'name' | 'peers'
-  | 'path' | 'text' | 'wxh' | 'fixes' | 'ifname' | 'ipv4' | 'mac' | 'host' | 'parts' | 'dump' | 'crews' | 'rgbs';
+  | 'path' | 'text' | 'room' | 'wxh' | 'fixes' | 'ifname' | 'ipv4' | 'mac' | 'host' | 'parts' | 'dump' | 'crews' | 'rgbs';
 
 export interface KeyDef {
   key: string;
@@ -105,7 +105,7 @@ export const KEYS: readonly KeyDef[] = [
   { key: 'roam_port', env: 'NFSU2_ROAM_PORT', kind: 'int', vals: '1024..65535', ic: true, scope: 'mac' },
   { key: 'roam_peers', env: 'NFSU2_ROAM_PEERS', kind: 'peers', ic: true, scope: 'mac' },
   { key: 'roam_discovery', env: 'NFSU2_ROAM_DISCOVERY', kind: 'bool', ic: true, scope: 'web' },
-  { key: 'roam_room', env: 'NFSU2_ROAM_ROOM', kind: 'text', ic: true, scope: 'web' },
+  { key: 'roam_room', env: 'NFSU2_ROAM_ROOM', kind: 'room', ic: true, scope: 'web' },
   // the crews the player is in (crews.ts; runtime/roam_game.c): bundle.m's K_CREWS
   { key: 'roam_crew', env: 'NFSU2_ROAM_CREW', kind: 'crews', ic: true, scope: 'web' },
   // and each one's colour, in the same order (crews.ts): bundle.m's K_RGBS
@@ -646,6 +646,10 @@ export function checkSetting(key: string, val: string): Checked | Refused | null
       if (blockedName(val)) return refuse(N('"{value}" is not a name (it reads as a slur)'), val);
       break;
     }
+    case 'room':
+      if (!valueOk('text', val)) return refuse(N('"{value}" is not {kind}'), val, { kind: KIND_TEXT.text! });
+      if (blockedName(val)) return refuse(N('"{value}" is not a room name (it reads as a slur)'), val);
+      break;
     case 'peers': {
       const bad = peersBad(val);
       if (bad !== null) return refuse(N('"{value}": "{bad}" is not a.b.c.d or a.b.c.d:port (IPv4 numbers, no names)'), val, { bad });
