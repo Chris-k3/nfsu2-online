@@ -304,10 +304,13 @@ test('deleted elsewhere, and the server\'s refusals', async () => {
   srv.refuse = 429;
   a.files.set(at('THOM'), profile('THOM', { money: 1 }));
   await assert.rejects(a.sync.push());
-  assert.deepEqual(a.sync.state, { s: 'error', msg: 'the server asks this address to wait a minute (too many requests)' });
+  // the message in English, the same as written for the page's language, and its code (the same in every language)
+  const err = (msg, code, v) => ({ s: 'error', msg, why: { t: msg, v }, code });
+  assert.deepEqual(a.sync.state, err('the server asks this address to wait a minute (too many requests)', 'VAULT-HTTP-429', { status: 429 }));
   srv.refuse = 507;
   await assert.rejects(a.sync.push());
   assert.equal(a.sync.state.msg, 'the server has no room for more saves now');
+  assert.equal(a.sync.state.code, 'VAULT-HTTP-507');
   srv.refuse = 0;
   await a.sync.push();
   assert.equal(a.sync.state.s, 'synced');
@@ -339,7 +342,7 @@ test('deleted elsewhere, and the server\'s refusals', async () => {
   // a server that keeps no keyphrase saves now (--vault-gb 0): a failure, the link as it was
   srv.off = true;
   await assert.rejects(a.sync.pull());
-  assert.deepEqual(a.sync.state, { s: 'error', msg: 'the server keeps no cloud saves now' });
+  assert.deepEqual(a.sync.state, err('the server keeps no cloud saves now', 'VAULT-OFF'));
   assert.equal(a.sync.link.phrase, phrase);
   assert.ok(!a.sync.link.gone);
   srv.off = false;
@@ -349,7 +352,7 @@ test('deleted elsewhere, and the server\'s refusals', async () => {
   const c = browser({ fetch: async () => { throw new TypeError('fetch failed'); } });
   seed(c, 1);
   await assert.rejects(c.sync.create());
-  assert.deepEqual(c.sync.state, { s: 'error', msg: 'the server does not answer' });
+  assert.deepEqual(c.sync.state, err('the server does not answer', 'VAULT-NO-ANSWER'));
   assert.equal(c.sync.link, null);
 });
 

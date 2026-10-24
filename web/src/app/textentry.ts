@@ -11,6 +11,7 @@ import type { GameSession } from './game';
 import type { TextEntry } from '../input/index';
 import { cp1252 } from '../input/keymap';
 import { touchFirst } from './device';
+import { t } from './i18n';
 
 /** the punctuation the game's kinds 0 and 3 take besides letters and digits (0x7FA3D0) */
 const PUNCT = ' .,_@-`=[]\\;\'/<>?:"{}|+()*&%#!~';
@@ -59,7 +60,7 @@ export class TextField {
     const f = this.field = document.createElement('input');
     f.type = 'text'; f.autocomplete = 'off'; f.spellcheck = false; f.enterKeyHint = 'done';
     f.setAttribute('autocapitalize', 'off'); f.setAttribute('autocorrect', 'off');
-    f.setAttribute('aria-label', 'Text for the game');
+    f.setAttribute('aria-label', t('Text for the game'));
     root.append(f);
     stage.append(root);
     f.addEventListener('input', () => this.onInput());

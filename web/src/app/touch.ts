@@ -20,10 +20,11 @@
 import { PAD_A, PAD_LB, PAD_RB, PAD_X } from '../input/proto';
 import type { GameSession } from './game';
 import { touchFirst } from './device';
+import { N, t } from './i18n';
 
 export type Steering = 'buttons' | 'stick' | 'tilt';
 const STEERING: Steering[] = ['buttons', 'stick', 'tilt'];
-const NAMES: Record<Steering, string> = { buttons: 'buttons', stick: 'thumb stick', tilt: 'tilt' };
+const NAMES: Record<Steering, string> = { buttons: N('buttons'), stick: N('thumb stick'), tilt: N('tilt') };
 const STORE = 'nfsu2-touch-steering';
 const HOLD_MS = 150;
 /** the thumb stick: px from its centre to full lock; tilt: degrees of roll to full lock */
@@ -43,8 +44,9 @@ export function setLevelHorizon(on: boolean) {
 /** fn runs when the switch changes */
 export function onLevelHorizon(fn: () => void) { addEventListener(LEVEL_EVENT, fn); }
 
+/** label: what a screen reader says (English, translated where drawn); text: the words on it, if any */
 interface Ctl {
-  id: string; el: HTMLElement;
+  id: string; el: HTMLElement; label: string; text?: string;
   key?: string; bit?: number; act?: () => void;
   /** a finger slides between the controls of a group */
   group?: 'steer' | 'pedal';
@@ -130,32 +132,34 @@ export class TouchControls {
     this.knobEl = document.createElement('div'); this.knobEl.className = 'stick-knob';
     this.baseEl.append(this.knobEl); this.stickEl.append(this.baseEl);
     root.append(this.stickEl);
-    const add = (id: string, label: string, inner: string, c: Partial<Ctl>, cls = '') => {
+    // inner: an icon; or text, the words on it ("\n": a second line)
+    const add = (id: string, label: string, inner: string | { text: string }, c: Partial<Ctl>, cls = '') => {
       const el = document.createElement('div');
       el.className = `tc ${cls}`.trim(); el.dataset.ctl = id;
-      el.setAttribute('role', 'button'); el.setAttribute('aria-label', label);
-      el.innerHTML = inner;
+      el.setAttribute('role', 'button');
+      if (typeof inner === 'string') el.innerHTML = inner;
       root.append(el);
-      this.ctls.set(id, { id, el, fingers: new Set(), downAt: 0, upTimer: 0, ...c });
+      this.ctls.set(id, { id, el, label, text: typeof inner === 'string' ? undefined : inner.text, fingers: new Set(), downAt: 0, upTimer: 0, ...c });
     };
-    add('pause', 'Pause', path(ICONS.pause), { key: 'Escape' }, 'small');
-    add('camera', 'Camera', path(ICONS.camera), { key: 'KeyC' }, 'small');
-    add('look', 'Look back', path(ICONS.look), { key: 'KeyB' }, 'small');
-    add('reset', 'Reset', path(ICONS.reset), { key: 'KeyR' }, 'small');
-    add('map', 'Map', path(ICONS.map), { key: 'KeyM' }, 'small roam');
-    add('msgs', 'Messages', path(ICONS.msgs), { key: 'Tab' }, 'small roam');
-    add('horn', 'Horn', path(ICONS.horn), { key: 'KeyN' }, 'small roam');
-    add('mode', 'Steering', path(ICONS[this.steering]), { act: () => this.nextSteering() }, 'small');
-    add('center', 'Straight ahead', path(ICONS.center), { act: () => this.recenter() }, 'small');
-    add('start', 'Start an event', 'Start', { key: 'Enter' }, 'pill roam');
-    add('left', 'Steer left', path(ICONS.left), { key: 'ArrowLeft', group: 'steer' }, 'big');
-    add('right', 'Steer right', path(ICONS.right), { key: 'ArrowRight', group: 'steer' }, 'big');
-    add('brake', 'Brake', 'Brake', { key: 'ArrowDown', group: 'pedal' }, 'big');
-    add('gas', 'Gas', 'Gas', { key: 'ArrowUp', group: 'pedal' }, 'big');
-    add('nitro', 'Nitrous', 'Nitro', { bit: 1 << PAD_LB }, 'round');
-    add('hb', 'Handbrake', '<span>Hand<br>brake</span>', { bit: 1 << PAD_RB }, 'round');
-    add('down', 'Gear down', path(ICONS.down), { bit: 1 << PAD_X }, 'gear');
-    add('up', 'Gear up', path(ICONS.up), { bit: 1 << PAD_A }, 'gear');
+    add('pause', N('Pause'), path(ICONS.pause), { key: 'Escape' }, 'small');
+    add('camera', N('Camera'), path(ICONS.camera), { key: 'KeyC' }, 'small');
+    add('look', N('Look back'), path(ICONS.look), { key: 'KeyB' }, 'small');
+    add('reset', N('Reset'), path(ICONS.reset), { key: 'KeyR' }, 'small');
+    add('map', N('Map'), path(ICONS.map), { key: 'KeyM' }, 'small roam');
+    add('msgs', N('Messages'), path(ICONS.msgs), { key: 'Tab' }, 'small roam');
+    add('horn', N('Horn'), path(ICONS.horn), { key: 'KeyN' }, 'small roam');
+    add('mode', N('Steering'), path(ICONS[this.steering]), { act: () => this.nextSteering() }, 'small');
+    add('center', N('Straight ahead'), path(ICONS.center), { act: () => this.recenter() }, 'small');
+    add('start', N('Start an event'), { text: N('Start') }, { key: 'Enter' }, 'pill roam');
+    add('left', N('Steer left'), path(ICONS.left), { key: 'ArrowLeft', group: 'steer' }, 'big');
+    add('right', N('Steer right'), path(ICONS.right), { key: 'ArrowRight', group: 'steer' }, 'big');
+    add('brake', N('Brake'), { text: N('Brake') }, { key: 'ArrowDown', group: 'pedal' }, 'big');
+    add('gas', N('Gas'), { text: N('Gas') }, { key: 'ArrowUp', group: 'pedal' }, 'big');
+    add('nitro', N('Nitrous'), { text: N('Nitro') }, { bit: 1 << PAD_LB }, 'round');
+    add('hb', N('Handbrake'), { text: N('Hand\nbrake') }, { bit: 1 << PAD_RB }, 'round');
+    add('down', N('Gear down'), path(ICONS.down), { bit: 1 << PAD_X }, 'gear');
+    add('up', N('Gear up'), path(ICONS.up), { bit: 1 << PAD_A }, 'gear');
+    this.relabel();
     stage.append(root);
 
     root.addEventListener('pointerdown', this.onDown);
@@ -171,6 +175,19 @@ export class TouchControls {
       if (this.shown && e.target instanceof HTMLCanvasElement) e.stopPropagation();
     }, { capture: true });
     addEventListener('keydown', e => { if (e.isTrusted && this.session) { this.away = true; this.update(); } }, { capture: true });
+  }
+
+  /** the controls' words in the page's language (again when it changes) */
+  relabel() {
+    for (const c of this.ctls.values()) {
+      c.el.setAttribute('aria-label', t(c.label));
+      if (c.text === undefined) continue;
+      const lines = t(c.text).split('\n');
+      if (lines.length === 1) { c.el.textContent = lines[0]; continue; }
+      const span = document.createElement('span');
+      lines.forEach((l, i) => { if (i) span.append(document.createElement('br')); span.append(l); });
+      c.el.replaceChildren(span);
+    }
   }
 
   /** a game started: the controls follow its state until stop() */
@@ -355,7 +372,7 @@ export class TouchControls {
     clearTimeout(this.tiltCheck);
     this.tiltCheck = setTimeout(() => {
       if (!this.tiltHeard && this.shown && this.steering === 'tilt')
-        this.deps.toast('Tilt has no motion sensor to read in this browser. The steering button (top right) switches to buttons.', 6000);
+        this.deps.toast(t('Tilt has no motion sensor to read in this browser. The steering button (top right) switches to buttons.'), 6000);
     }, 2000) as unknown as number;
   }
   private tiltOff() {
@@ -364,7 +381,7 @@ export class TouchControls {
   }
   private recenter() {
     this.center = this.lastRoll;
-    this.deps.toast('Straight ahead is where the phone is now.', 2000);
+    this.deps.toast(t('Straight ahead is where the phone is now.'), 2000);
   }
 
   // ---- the steering button -------------------------------------------------------------------
@@ -373,9 +390,10 @@ export class TouchControls {
     // iOS asks once whether the page may read the motion sensor, from a tap
     const ask = (DeviceOrientationEvent as unknown as { requestPermission?(): Promise<string> }).requestPermission;
     if (to === 'tilt' && typeof ask === 'function')
-      void ask().then(r => { if (r !== 'granted') this.deps.toast('Tilt needs the motion sensor, which was not allowed.', 5000); }, () => {});
+      void ask().then(r => { if (r !== 'granted') this.deps.toast(t('Tilt needs the motion sensor, which was not allowed.'), 5000); }, () => {});
     this.setSteering(to);
-    this.deps.toast(`Steering: ${NAMES[to]}${to === 'tilt' ? '. Hold the phone like a wheel; the button beside this one sets straight ahead.' : ''}`, to === 'tilt' ? 5000 : 2000);
+    this.deps.toast(to === 'tilt' ? t('Steering: tilt. Hold the phone like a wheel; the button beside this one sets straight ahead.')
+      : t('Steering: {how}', { how: t(NAMES[to]) }), to === 'tilt' ? 5000 : 2000);
   }
   private setSteering(to: Steering) {
     for (const c of this.ctls.values()) if (c.group) { c.fingers.clear(); this.up(c, true); }

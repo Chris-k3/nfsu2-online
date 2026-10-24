@@ -139,6 +139,9 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
   Chinese, Japanese and Thai with their full text, and Portuguese and Polish with their text at all (without the
   packs they play in English, with English voices). Your browser fetches only your language's files: the dubbed
   voices are about 50 MB (Russian 94 MB), and the dubbed movies are smaller than the English ones they replace.
+  The start page follows the same choice (the list at its top sets it too): its text, settings and messages in
+  that language, English until you pick another. Its problems and errors carry a short code (`GPU-ADAPTER-WIN`),
+  the same in every language, to quote when you ask for help; the log stays English.
 - **Menus and HUD:** Original (the default) is the game's own. Upscaled shows LunicAura106's
   [Upscaled HUD](https://nfsmods.xyz/mod/4319) where the server has its [texture pack](VPS.md#texture-packs): the
   menus, the race HUD, the fonts and the car and brand logos redrawn at four times their size, sharp on a large

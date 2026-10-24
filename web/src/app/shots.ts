@@ -11,6 +11,7 @@
 import { exists, removePath, saveRoot, writeFile, type Entry } from './savefs';
 import { downloadBlob, stamp } from './logs';
 import { fmtBytes } from './checks';
+import { dateLocale, t } from './i18n';
 
 export interface ShotsDeps {
   saveDir: string;
@@ -65,14 +66,14 @@ export function decodeTga(b: Uint8Array): ImageData | null {
 }
 
 /** "Today, 14:03", "Yesterday, 22:17", "20 Oct, 21:44" (with the year when it is not this one) */
-export function when(t: number, now = new Date()): string {
-  const d = new Date(t), time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+export function when(at: number, now = new Date()): string {
+  const d = new Date(at), time = d.toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' });
   const day = (x: Date) => Date.UTC(x.getFullYear(), x.getMonth(), x.getDate());
   const ago = Math.round((day(now) - day(d)) / 864e5);
-  if (ago === 0) return `Today, ${time}`;
-  if (ago === 1) return `Yesterday, ${time}`;
+  if (ago === 0) return t('Today, {time}', { time });
+  if (ago === 1) return t('Yesterday, {time}', { time });
   const year = d.getFullYear() !== now.getFullYear() ? { year: 'numeric' as const } : {};
-  return `${d.toLocaleDateString([], { day: 'numeric', month: 'short', ...year })}, ${time}`;
+  return `${d.toLocaleDateString(dateLocale(), { day: 'numeric', month: 'short', ...year })}, ${time}`;
 }
 
 async function fileOf(saveDir: string, name: string): Promise<File> {
@@ -146,7 +147,7 @@ export class ScreenshotsPart {
     const ul = this.root.querySelector<HTMLUListElement>('#shots')!;
     ul.replaceChildren(...this.shots.slice(0, SHOWN).map((s, i) => {
       const b = this.tile(s);
-      b.setAttribute('aria-label', `Screenshot, ${when(s.mtime)}`);
+      b.setAttribute('aria-label', t('Screenshot, {when}', { when: when(s.mtime) }));
       b.title = when(s.mtime);
       b.onclick = () => void this.view(i);
       const li = document.createElement('li'); li.append(b);
@@ -189,19 +190,19 @@ export class ScreenshotsPart {
       url = URL.createObjectURL(ext(s.path) === 'tga' ? await encode(await bitmap(this.deps.saveDir, s.path), 'image/png')
         : await fileOf(this.deps.saveDir, s.path));
     } catch (e) {
-      if (seq === this.seq) this.$('#shot-meta').textContent = `${this.place()}. It cannot be shown here (${e instanceof Error ? e.message : e}): Download keeps it as it is.`;
+      if (seq === this.seq) this.$('#shot-meta').textContent = t('{place}. It cannot be shown here ({error}): Download keeps it as it is.', { place: this.place(), error: e instanceof Error ? e.message : String(e) });
       return;
     }
     if (seq !== this.seq) { URL.revokeObjectURL(url); return; }
     if (this.url) URL.revokeObjectURL(this.url);
     this.url = url;
-    img.alt = `Screenshot, ${when(s.mtime)}`;
+    img.alt = t('Screenshot, {when}', { when: when(s.mtime) });
     img.src = url;
     try { await img.decode(); } catch { /* shown as the browser can */ }
     if (seq === this.seq && img.naturalWidth) this.$('#shot-meta').textContent = `${this.place()} · ${img.naturalWidth} × ${img.naturalHeight} · ${fmtBytes(s.size)}`;
   }
 
-  private place() { return `${this.at() + 1} of ${this.shots.length}`; }
+  private place() { return t('{n} of {total}', { n: this.at() + 1, total: this.shots.length }); }
 
   /** the open one's place in the list, and which way the dialog can go from it */
   private showPlace() {
@@ -223,9 +224,9 @@ export class ScreenshotsPart {
 
   private async remove() {
     const i = this.at(), s = this.shots[i];
-    if (!s || !await this.deps.confirm('Delete this screenshot?', `${s.path} goes from this browser. A backup you downloaded keeps its copy.`, 'Delete', true)) return;
+    if (!s || !await this.deps.confirm(t('Delete this screenshot?'), t('{file} goes from this browser. A backup you downloaded keeps its copy.', { file: s.path }), t('Delete'), true)) return;
     try { await removePath(this.deps.saveDir, s.path); }
-    catch (e) { this.$('#shot-meta').textContent = `It was not deleted: ${e}`; return; }
+    catch (e) { this.$('#shot-meta').textContent = t('It was not deleted: {error}', { error: String(e) }); return; }
     this.shots.splice(i, 1);
     this.render();
     if (!this.shots.length) this.dlg.close();

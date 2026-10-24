@@ -48,6 +48,11 @@ fs.mkdirSync(DIST, { recursive: true });
 // app's manifest and icons, for installing it on a phone's home screen or as a desktop app)
 fs.copyFileSync('index.html', path.join(DIST, 'index.html'));
 for (const f of fs.readdirSync('src/static')) fs.copyFileSync(path.join('src/static', f), path.join(DIST, f));
+// the start page's languages (src/app/lang, i18n.ts): /lang/<language>.json, fetched once a player picks one
+fs.rmSync(path.join(DIST, 'lang'), { recursive: true, force: true });
+fs.mkdirSync(path.join(DIST, 'lang'));
+for (const f of fs.readdirSync('src/app/lang')) if (f.endsWith('.json'))
+  fs.writeFileSync(path.join(DIST, 'lang', f), JSON.stringify(JSON.parse(fs.readFileSync(path.join('src/app/lang', f), 'utf8'))));
 const page = name => `<!doctype html><meta charset=utf-8><title>${name}</title><script type=module src="/test/${name}.js"></script>`;
 for (const name of ['play', 'hostcheck', 'shadercheck', 'aicheck']) fs.writeFileSync(path.join(DEV, 'test', `${name}.html`), page(name));
 // the player's page takes its address's test parameters only from a server that serves this (--dev: shell.ts)

@@ -15,6 +15,8 @@
 //
 // This module is pure (no DOM, no OPFS) so it can be checked under node.
 import { blockedName } from './names.mjs';
+import { fill, LANGUAGES, N, type Vars } from './i18n';
+export { LANGUAGES };
 
 /** bundle.m's K_* kinds.  ic: K_IC, "value ; comment" (the free-roam keys). */
 export type Kind = 'raw' | 'bool' | 'boolInv' | 'enum' | 'num' | 'id' | 'token' | 'int' | 'name' | 'peers'
@@ -47,9 +49,6 @@ export interface KeyDef {
 // on/lan = the server's virtual LAN, off = none; lan_adapter_id, lan_host_name,
 // lan_timing) are 'web' but have no template paragraph: the player's page does
 // not offer the game's LAN races yet (PLAYING.md).
-/** the game's languages (runtime/language.c), the setting's values; english is the default */
-export const LANGUAGES = ['english', 'french', 'german', 'italian', 'spanish', 'dutch', 'swedish', 'danish', 'korean',
-  'chinese', 'japanese', 'russian', 'thai', 'portuguese', 'polish'] as const;
 /** the horns (runtime/horn.c), the setting's values; dual is the default */
 export const HORNS = ['dual', 'single', 'truck', 'train', 'klaxon', 'cucaracha', 'clown', 'trombone'] as const;
 
@@ -489,16 +488,16 @@ function valueOk(kind: Kind, v: string): boolean {
 }
 /** bundle.m kind_text */
 const KIND_TEXT: Partial<Record<Kind, string>> = {
-  path: 'a folder (printable, under 1024 bytes)',
-  text: 'text of 1 to 63 bytes without control characters',
-  wxh: '<width>x<height> (320 to 16384 each)',
-  fixes: 'default, all, none or a list of ticks, timer, particles, trail, audio, rtf, rain (-name removes one)',
-  ifname: 'a network interface name (letters and digits, e.g. en0)',
-  ipv4: 'an IPv4 address a.b.c.d',
-  mac: 'xx:xx:xx:xx:xx:xx (hex, not all zero)',
-  host: "a computer name (letters, digits and '-', at most 63)",
-  parts: 'all, or a list of world, signs, cars, garage, sky, effects, frontend, hud, other',
-  dump: 'on, off or a folder',
+  path: N('a folder (printable, under 1024 bytes)'),
+  text: N('text of 1 to 63 bytes without control characters'),
+  wxh: N('<width>x<height> (320 to 16384 each)'),
+  fixes: N('default, all, none or a list of ticks, timer, particles, trail, audio, rtf, rain (-name removes one)'),
+  ifname: N('a network interface name (letters and digits, e.g. en0)'),
+  ipv4: N('an IPv4 address a.b.c.d'),
+  mac: N('xx:xx:xx:xx:xx:xx (hex, not all zero)'),
+  host: N("a computer name (letters, digits and '-', at most 63)"),
+  parts: N('all, or a list of world, signs, cars, garage, sky, effects, frontend, hud, other'),
+  dump: N('on, off or a folder'),
 };
 
 /** strtod() consuming the whole string (decimal, exponent, hex, inf/nan, leading blanks as C does).
@@ -568,7 +567,10 @@ export function envNameOf(key: string): string {
 }
 
 export interface Checked { ok: true; env: string; value: string }
-export interface Refused { ok: false; reason: string }
+/** reason: why, in English (the log); why and v: the same as written with its {name}s, for the page's language */
+export interface Refused { ok: false; reason: string; why: string; v: Vars }
+/** a refusal of value: why with {value} and v's names */
+const refuse = (why: string, value: string, v: Vars = {}): Refused => ({ ok: false, reason: fill(why, { value, ...v }), why, v: { value, ...v } });
 
 /** bundle.m apply_setting's validation, without the environment step.  null = "key =" (the default). */
 export function checkSetting(key: string, val: string): Checked | Refused | null {
@@ -585,34 +587,34 @@ export function checkSetting(key: string, val: string): Checked | Refused | null
   switch (kind) {
     case 'bool': case 'boolInv': {
       const t = truthy(val), f = falsy(val);
-      if (!t && !f) return { ok: false, reason: `"${val}" is not on/off` };
+      if (!t && !f) return refuse(N('"{value}" is not on/off'), val);
       out = ((kind === 'bool') === t) ? '1' : '0';
       break;
     }
     case 'enum': {
       const e = enumValue(d!.vals!, val);
-      if (e === null) return { ok: false, reason: `"${val}" is not one of ${d!.vals}` };
+      if (e === null) return refuse(N('"{value}" is not one of {vals}'), val, { vals: d!.vals! });
       out = e;
       break;
     }
-    case 'num': if (!isNumber(val)) return { ok: false, reason: `"${val}" is not a number` }; break;
-    case 'int': if (!intIn(d!.vals!, val)) return { ok: false, reason: `"${val}" is not a whole number in ${d!.vals}` }; break;
+    case 'num': if (!isNumber(val)) return refuse(N('"{value}" is not a number'), val); break;
+    case 'int': if (!intIn(d!.vals!, val)) return refuse(N('"{value}" is not a whole number in {vals}'), val, { vals: d!.vals! }); break;
     case 'name': {
       const ok = val.length >= 1 && val.length <= 24 && /^[ -~]+$/.test(val);
-      if (!ok) return { ok: false, reason: `"${val}" is not a name (printable ASCII, at most 24 characters)` };
-      if (blockedName(val)) return { ok: false, reason: `"${val}" is not a name (it reads as a slur)` };
+      if (!ok) return refuse(N('"{value}" is not a name (printable ASCII, at most 24 characters)'), val);
+      if (blockedName(val)) return refuse(N('"{value}" is not a name (it reads as a slur)'), val);
       break;
     }
     case 'peers': {
       const bad = peersBad(val);
-      if (bad !== null) return { ok: false, reason: `"${val}": "${bad}" is not a.b.c.d or a.b.c.d:port (IPv4 numbers, no names)` };
+      if (bad !== null) return refuse(N('"{value}": "{bad}" is not a.b.c.d or a.b.c.d:port (IPv4 numbers, no names)'), val, { bad });
       break;
     }
-    case 'id': if (!(val.length < 32 && /^[0-9]+$/.test(val))) return { ok: false, reason: `"${val}" is not a numeric id` }; break;
-    case 'token': if (!(val.length < 300 && /^[!-~]+$/.test(val))) return { ok: false, reason: `"${val}" is not an asset key or URL (printable ASCII, no spaces)` }; break;
+    case 'id': if (!(val.length < 32 && /^[0-9]+$/.test(val))) return refuse(N('"{value}" is not a numeric id'), val); break;
+    case 'token': if (!(val.length < 300 && /^[!-~]+$/.test(val))) return refuse(N('"{value}" is not an asset key or URL (printable ASCII, no spaces)'), val); break;
     case 'raw': break;
     default:
-      if (!valueOk(kind, val)) return { ok: false, reason: `"${val}" is not ${KIND_TEXT[kind]}` };
+      if (!valueOk(kind, val)) return refuse(N('"{value}" is not {kind}'), val, { kind: KIND_TEXT[kind]! });
       if (kind === 'dump' && (truthy(val) || falsy(val))) out = truthy(val) ? 'on' : 'off';
       break;
   }
@@ -666,17 +668,19 @@ export function parseLines(text: string, notes?: string[]): Line[] {
 }
 
 export type Source = 'environment' | 'settings.ini' | 'default' | 'host' | 'device';
+/** a refusal as written, for t(): its text and the values of its {name}s */
+export interface Why { t: string; v?: Vars }
 export interface Resolved {
   env: Record<string, string>;
   source: Record<string, Source>;
   /** the log lines bundle.m prints (applied, ignored, refused) */
   notes: string[];
-  /** per known key: what the file says, after validation */
-  file: Record<string, { line: number; phys: number; raw: string; value?: string; refused?: string; overridden?: boolean }>;
+  /** per known key: what the file says, after validation (refused: why not, in English; why: the same for t()) */
+  file: Record<string, { line: number; phys: number; raw: string; value?: string; refused?: string; why?: Why; overridden?: boolean }>;
   /** per variable set from settings.ini: the line and key that set it (a table key, or the variable's own name) */
   byEnv: Record<string, { line: number; phys: number; key: string }>;
   /** the lines of keys outside the table (UPPER_CASE variables, foo_bar): what they set, or why not */
-  other: { line: number; phys: number; key: string; env: string; value: string; refused?: string }[];
+  other: { line: number; phys: number; key: string; env: string; value: string; refused?: string; why?: Why }[];
 }
 
 /**
@@ -704,14 +708,26 @@ export function resolveEnv(text: string | null, environment: Record<string, stri
       const rec = d ? (file[d.key] ??= { line: l.line, phys: l.phys, raw: l.value }) : undefined;
       const oth = d ? undefined : { line: l.line, phys: l.phys, key: l.key, env: envNameOf(l.key), value: l.value } as Resolved['other'][number];
       if (oth) other.push(oth);
-      if (d?.scope === 'mac') { notes.push(`settings.ini:${l.line}: ${l.key} is only used by the Mac app, ignored`); if (rec) rec.refused = 'only used by the Mac app'; continue; }
+      if (d?.scope === 'mac') {
+        notes.push(`settings.ini:${l.line}: ${l.key} is only used by the Mac app, ignored`);
+        if (rec) { rec.refused = 'only used by the Mac app'; rec.why = { t: N('only used by the Mac app') }; }
+        continue;
+      }
       const c = checkSetting(l.key, l.value);
       if (c === null) continue;                    // "key =": the default
-      if (!c.ok) { notes.push(`settings.ini:${l.line}: ${l.key} = ${c.reason}, ignored`); if (rec) rec.refused = c.reason; if (oth) oth.refused = c.reason; continue; }
-      if (HOST_FIXED.has(c.env)) { notes.push(`settings.ini:${l.line}: ${l.key} ignored, ${c.env} is fixed in the browser`); if (oth) oth.refused = 'fixed in the browser'; continue; }
+      if (!c.ok) {
+        notes.push(`settings.ini:${l.line}: ${l.key} = ${c.reason}, ignored`);
+        for (const x of [rec, oth]) if (x) { x.refused = c.reason; x.why = { t: c.why, v: c.v }; }
+        continue;
+      }
+      if (HOST_FIXED.has(c.env)) {
+        notes.push(`settings.ini:${l.line}: ${l.key} ignored, ${c.env} is fixed in the browser`);
+        if (oth) { oth.refused = 'fixed in the browser'; oth.why = { t: N('fixed in the browser') }; }
+        continue;
+      }
       if (pageOnly(c.env, c.value, !d)) {
         notes.push(`settings.ini:${l.line}: ${l.key} ignored, ${c.env} names a file or drives the game: only the page sets it`);
-        if (oth) oth.refused = 'only the page sets it';
+        if (oth) { oth.refused = 'only the page sets it'; oth.why = { t: N('only the page sets it') }; }
         continue;
       }
       if (c.env in env) {

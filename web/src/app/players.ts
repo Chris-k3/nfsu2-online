@@ -12,8 +12,9 @@ export interface PlayerCounts {
   queue?: number;
 }
 
+import { t, tn, type Msg } from './i18n';
+
 const EVERY_MS = 15_000;
-const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
 
 /** The Room setting's hash, as roam_core.c rc_room_hash makes it (FNV-1a of the name's UTF-8 without its spaces and
  *  with its capitals A to Z small; 0: no room), for /players?room= */
@@ -31,17 +32,20 @@ export function roomHash(name: string): number {
  *  ('' for none): free roam shows only that room's players, which the line says, with how many are there. */
 export function playersText(c: PlayerCounts, room = ''): string {
   if (!Number.isInteger(c.players) || c.players < 0) return '';
-  if (c.players === 0) return 'On this server now: nobody is playing.';
-  const count = (k: number | null | undefined, what: string) => Number.isInteger(k) && k! >= 0 ? `, ${k} ${what}` : '';
-  const on = count(c.online, 'in Online mode') + count(c.roam, 'in free roam');
+  if (c.players === 0) return t('On this server now: nobody is playing.');
+  const known = (k: number | null | undefined): k is number => Number.isInteger(k) && k! >= 0;
+  const list = [tn(c.players, '{n} player', '{n} players')];
+  if (known(c.online)) list.push(t('{n} in Online mode', { n: c.online }));
+  if (known(c.roam)) list.push(t('{n} in free roam', { n: c.roam }));
   room = room.trim();
-  const inRoom = !room ? '' : Number.isInteger(c.room) && c.room! >= 0
-    ? ` You are in room "${room}": ${c.room === 0 ? 'nobody' : c.room} in free roam there.` : ` You are in room "${room}".`;
+  const inRoom = !room ? '' : ' ' + (!known(c.room) ? t('You are in room "{room}".', { room })
+    : c.room === 0 ? t('You are in room "{room}": nobody in free roam there.', { room }) : t('You are in room "{room}": {n} in free roam there.', { room, n: c.room }));
   const waiting = Number.isInteger(c.queue) && c.queue! > 0 ? c.queue! : 0;
   const full = c.full !== true ? ''
-    : waiting ? ` The server is full and ${waiting} ${waiting === 1 ? 'is' : 'are'} waiting in line for a place. At Play you can wait in line, playing alone until it is your turn, or play offline.`
-    : ' The server is full: playing with others waits until a place frees up.';
-  return `On this server now: ${n(c.players, 'player', 'players')}${on}.${inRoom}${full}`;
+    : ' ' + (waiting ? tn(waiting, 'The server is full and {n} is waiting in line for a place. At Play you can wait in line, playing alone until it is your turn, or play offline.',
+      'The server is full and {n} are waiting in line for a place. At Play you can wait in line, playing alone until it is your turn, or play offline.')
+      : t('The server is full: playing with others waits until a place frees up.'));
+  return t('On this server now: {list}.', { list: list.join(', ') }) + inRoom + full;
 }
 
 /** 1st, 2nd, 3rd, 4th, ..., 11th, 12th, 13th, ..., 21st */
@@ -54,8 +58,10 @@ function ordinal(k: number): string {
  *  about how long that is (once the server can tell). */
 export function queueText(q: { pos: number; of: number; eta?: number }): string {
   const e = q.eta;
-  const wait = e === undefined ? '' : e < 60 ? ' (less than a minute)' : e < 90 * 60 ? ` (about ${Math.round(e / 60)} min)` : ` (about ${Math.round(e / 3600)} h)`;
-  return q.pos <= 1 ? `The server is full. In line for a place: next${wait}.` : `The server is full. In line for a place: ${ordinal(q.pos)} of ${q.of}${wait}.`;
+  const wait = e === undefined ? '' : e < 60 ? t('less than a minute') : e < 90 * 60 ? t('about {n} min', { n: Math.round(e / 60) }) : t('about {n} h', { n: Math.round(e / 3600) });
+  const v = { pos: ordinal(q.pos), n: q.pos, of: q.of, wait };
+  if (q.pos <= 1) return wait ? t('The server is full. In line for a place: next ({wait}).', v) : t('The server is full. In line for a place: next.');
+  return wait ? t('The server is full. In line for a place: {pos} of {of} ({wait}).', v) : t('The server is full. In line for a place: {pos} of {of}.', v);
 }
 
 /** Whether the server answers (any answer but a 5xx from a proxy in front of it), within ms. */
@@ -68,7 +74,7 @@ export async function serverAnswers(ms: number): Promise<boolean> {
  *  room(): the Room setting while free roam is on ('' for none); last(): the newest answer (null before the first,
  *  or from a server without the route); fresh(ms): asked now, whatever the page does (Play: whether the server is
  *  full), within ms, then the newest answer */
-export function watchPlayers(show: (line: string) => void, idle: () => boolean, reached?: (ok: boolean) => void, room: () => string = () => '') {
+export function watchPlayers(show: (line: Msg) => void, idle: () => boolean, reached?: (ok: boolean) => void, room: () => string = () => '') {
   let gone = false, last: PlayerCounts | null = null;
   const get = async (ms: number) => {
     if (gone) return;
@@ -76,8 +82,8 @@ export function watchPlayers(show: (line: string) => void, idle: () => boolean, 
       const name = room(), hash = roomHash(name);
       const r = await fetch(hash ? `/players?room=${hash}` : '/players', { cache: 'no-store', signal: AbortSignal.timeout(ms) });
       reached?.(r.status < 500);
-      if (r.status === 404) { gone = true; last = null; show(''); return; }
-      if (r.ok) { last = await r.json() as PlayerCounts; show(playersText(last, hash ? name : '')); }
+      if (r.status === 404) { gone = true; last = null; show(() => ''); return; }
+      if (r.ok) { const c = last = await r.json() as PlayerCounts, inRoom = hash ? name : ''; show(() => playersText(c, inRoom)); }
     } catch { reached?.(false); }
   };
   const ask = async () => { if (document.visibilityState === 'visible' && idle()) await get(5000); };

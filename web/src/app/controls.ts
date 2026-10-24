@@ -13,6 +13,7 @@ import { familyOf } from '../input/gamepad';
 import { PADF_PLAYSTATION } from '../input/proto';
 import { wheelSection } from './wheel-setup';
 import { levelHorizon, onLevelHorizon, setLevelHorizon } from './touch';
+import { language, N, onLanguage, t } from './i18n';
 
 export type Tab = 'keys' | 'pad' | 'site';
 export type Family = 'xb' | 'ps';
@@ -37,35 +38,39 @@ const SHAPE: Record<string, string> = {
   square: '<path d="M4.2 4.2h5.6v5.6H4.2z"/>',
   triangle: '<path d="M7 3.7l3.2 5.7H3.8z"/>',
 };
-/** the names a screen reader says for the shapes */
+/** the names a screen reader says for the shapes (English, translated where they are drawn) */
 const SPOKEN: Record<string, string> = {
-  up: 'D-pad up', left: 'D-pad left', right: 'D-pad right', cross: 'Cross', circle: 'Circle', square: 'Square', triangle: 'Triangle',
+  up: N('D-pad up'), left: N('D-pad left'), right: N('D-pad right'), cross: N('Cross'), circle: N('Circle'), square: N('Square'), triangle: N('Triangle'),
+  // Xbox's own names, as printed on the controller
+  view: 'View', menu: 'Menu',
 };
+/** text for the drawing's markup */
+const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 /** a row: its middle (px), its button as Xbox and PlayStation name it (a word or a SHAPE), what it does (and a
- *  second line), the point of the drawing its line goes to (none: its group's), and spoken names where a shape
- *  stands for a word */
+ *  second line; English, translated where drawn), the point of the drawing its line goes to (none: its group's),
+ *  and spoken names where a shape stands for a word */
 interface Row { y: number; xb: string; ps: string; does: string; sub?: string; to?: readonly [number, number]; say?: [string, string] }
 const LEFT: Row[] = [
-  { y: 36, xb: 'LT', ps: 'L2', does: 'Brake', sub: 'and reverse', to: [30, -5] },
-  { y: 64, xb: 'LB', ps: 'L1', does: 'Nitrous', to: [20.6, 31.2] },
-  { y: 84, xb: 'LS', ps: 'L3', does: 'Steer', sub: 'press in: horn', to: [47, 54] },
-  { y: 116, xb: 'up', ps: 'up', does: 'Start event' },
-  { y: 130, xb: 'left', ps: 'left', does: 'Map' },
-  { y: 144, xb: 'right', ps: 'right', does: 'Messages' },
+  { y: 36, xb: 'LT', ps: 'L2', does: N('Brake'), sub: N('and reverse'), to: [30, -5] },
+  { y: 64, xb: 'LB', ps: 'L1', does: N('Nitrous'), to: [20.6, 31.2] },
+  { y: 84, xb: 'LS', ps: 'L3', does: N('Steer'), sub: N('press in: horn'), to: [47, 54] },
+  { y: 116, xb: 'up', ps: 'up', does: N('Start event') },
+  { y: 130, xb: 'left', ps: 'left', does: N('Map') },
+  { y: 144, xb: 'right', ps: 'right', does: N('Messages') },
 ];
 const RIGHT: Row[] = [
-  { y: 36, xb: 'RT', ps: 'R2', does: 'Throttle', to: [230, -5] },
-  { y: 54, xb: 'RB', ps: 'R1', does: 'Handbrake', to: [239.4, 31.2] },
-  { y: 76, xb: 'A', ps: 'cross', does: 'Shift up' },
-  { y: 90, xb: 'X', ps: 'square', does: 'Shift down' },
-  { y: 104, xb: 'Y', ps: 'triangle', does: 'Camera' },
-  { y: 118, xb: 'B', ps: 'circle', does: 'Look back' },
+  { y: 36, xb: 'RT', ps: 'R2', does: N('Throttle'), to: [230, -5] },
+  { y: 54, xb: 'RB', ps: 'R1', does: N('Handbrake'), to: [239.4, 31.2] },
+  { y: 76, xb: 'A', ps: 'cross', does: N('Shift up') },
+  { y: 90, xb: 'X', ps: 'square', does: N('Shift down') },
+  { y: 104, xb: 'Y', ps: 'triangle', does: N('Camera') },
+  { y: 118, xb: 'B', ps: 'circle', does: N('Look back') },
 ];
 /** over the middle: View and Menu, their lines straight down */
 const MIDDLE: (Row & { x: number })[] = [
-  { x: 150, y: 12, xb: 'view', ps: 'view', does: 'Respawn', to: [112, 48.5], say: ['View', 'Create'] },
-  { x: 172, y: 12, xb: 'menu', ps: 'menu', does: 'Pause', to: [148, 48.5], say: ['Menu', 'Options'] },
+  { x: 150, y: 12, xb: 'view', ps: 'view', does: N('Respawn'), to: [112, 48.5], say: ['View', 'Create'] },
+  { x: 172, y: 12, xb: 'menu', ps: 'menu', does: N('Pause'), to: [148, 48.5], say: ['Menu', 'Options'] },
 ];
 /** the brackets: x, from y to y, the line's start on it, and the control it goes to */
 const BRACKETS = [{ x: 90.5, y0: 110, y1: 150, from: 123, to: [85, 94] }, { x: 244.5, y0: 70, y1: 124, from: 80, to: [217, 54] }] as const;
@@ -103,38 +108,41 @@ function drawing(): string {
 
 /** what the drawing says, for a screen reader */
 function spoken(f: Family): string {
-  const say = (r: Row) => r.say?.[f === 'xb' ? 0 : 1] ?? SPOKEN[r[f]] ?? r[f];
-  return 'Controller: ' + [...LEFT, ...MIDDLE, ...RIGHT].map(r => `${say(r)}: ${r.does.toLowerCase()}${r.sub ? `, ${r.sub}` : ''}`).join('; ');
+  const say = (r: Row) => r.say?.[f === 'xb' ? 0 : 1] ?? (SPOKEN[r[f]] ? t(SPOKEN[r[f]]) : r[f]);
+  const low = (s: string) => language() === 'english' ? s.toLowerCase() : s;
+  return t('Controller: {list}', { list: [...LEFT, ...MIDDLE, ...RIGHT].map(r => `${say(r)}: ${low(t(r.does))}${r.sub ? `, ${t(r.sub)}` : ''}`).join('; ') });
 }
 
 function padSvg(): string {
   let s = drawing();
+  const does = (r: Row) => esc(t(r.does));
   for (const r of LEFT) {
     const x = 86 - chipW(r);
-    s += chip(x, r) + `<text class="pad-label" x="${x - 5}" y="${r.y + 4}" text-anchor="end">${r.does}</text>`;
-    if (r.sub) s += `<text class="pad-sub" x="${x - 5}" y="${r.y + 18}" text-anchor="end">${r.sub}</text>`;
+    s += chip(x, r) + `<text class="pad-label" x="${x - 5}" y="${r.y + 4}" text-anchor="end">${does(r)}</text>`;
+    if (r.sub) s += `<text class="pad-sub" x="${x - 5}" y="${r.y + 18}" text-anchor="end">${esc(t(r.sub))}</text>`;
     if (r.to) s += line(89, r.y, r.to);
   }
   for (const r of RIGHT) {
-    s += chip(248, r) + `<text class="pad-label" x="${248 + chipW(r) + 5}" y="${r.y + 4}">${r.does}</text>`;
+    s += chip(248, r) + `<text class="pad-label" x="${248 + chipW(r) + 5}" y="${r.y + 4}">${does(r)}</text>`;
     if (r.to) s += line(245, r.y, r.to);
   }
   for (const [i, r] of MIDDLE.entries()) {
-    s += chip(r.x, r) + (i === 0 ? `<text class="pad-label" x="${r.x - 5}" y="${r.y + 4}" text-anchor="end">${r.does}</text>`
-      : `<text class="pad-label" x="${r.x + 19}" y="${r.y + 4}">${r.does}</text>`);
+    s += chip(r.x, r) + (i === 0 ? `<text class="pad-label" x="${r.x - 5}" y="${r.y + 4}" text-anchor="end">${does(r)}</text>`
+      : `<text class="pad-label" x="${r.x + 19}" y="${r.y + 4}">${does(r)}</text>`);
     s += line(r.x + 7, r.y + 7.5, r.to!);
   }
   for (const b of BRACKETS) s += `<path class="pad-line" d="M${b.x} ${b.y0}V${b.y1}"/>` + line(b.x, b.from, b.to);
-  return `<svg class="pad" viewBox="0 0 336 154" role="img" aria-label="${spoken('xb')}">${s}</svg>`;
+  return `<svg class="pad" viewBox="0 0 336 154" role="img" aria-label="${esc(spoken('xb'))}">${s}</svg>`;
 }
 
 /** a key cap with the button's Xbox and PlayStation names */
 function cap(xb: string, ps: string): string {
-  const one = (v: string) => v in SHAPE ? `<svg class="glyph" viewBox="0 0 14 14" role="img" aria-label="${SPOKEN[v]}">${SHAPE[v]}</svg>` : v;
+  const one = (v: string) => v in SHAPE ? `<svg class="glyph" viewBox="0 0 14 14" role="img" aria-label="${esc(t(SPOKEN[v]))}">${SHAPE[v]}</svg>` : v;
   return `<kbd><span class="xb">${one(xb)}</span><span class="ps">${one(ps)}</span></kbd>`;
 }
 
-export interface ControlsSheet { show(tab: Tab, focus?: boolean): void; family(f: Family): void; readonly tab: Tab; readonly fam: Family }
+/** relabel: drawn again in the page's language (i18n.ts onLanguage) */
+export interface ControlsSheet { show(tab: Tab, focus?: boolean): void; family(f: Family): void; relabel(): void; readonly tab: Tab; readonly fam: Family }
 
 /**
  * Wires the sheet in root (its tabs and their panels in the page's markup; the controller's tab is drawn here):
@@ -150,15 +158,34 @@ export function controlsSheet(root: HTMLElement, id: string, opts: { tab?: Tab; 
   }
   for (const t of tabs) { t.id = `${id}-tab-${t.dataset.tab}`; t.setAttribute('aria-controls', `${id}-${t.dataset.tab}`); }
   const pad = panels.find(p => p.dataset.tab === 'pad')!;
-  pad.innerHTML = padSvg() + `<div class="pad-foot">
-    <p class="hint">In menus: D-pad and ${cap('A', 'cross')}, ${cap('B', 'circle')} goes back.</p>
-    <div class="seg" role="radiogroup" aria-label="Button names">
+  const wheel = wheelSection(pad, cap);
+  let svg: SVGElement, radios: HTMLInputElement[] = [];
+  /** the drawing and its foot, in the page's language; the wheel's part after them */
+  const draw = () => {
+    const menus = esc(t('In menus: D-pad and {a}, {b} goes back.')).replace('{a}', cap('A', 'cross')).replace('{b}', cap('B', 'circle'));
+    pad.innerHTML = padSvg() + `<div class="pad-foot">
+    <p class="hint">${menus}</p>
+    <div class="seg" role="radiogroup" aria-label="${esc(t('Button names'))}">
       <label class="opt"><input type="radio" name="${id}-fam" value="xb">Xbox</label>
       <label class="opt"><input type="radio" name="${id}-fam" value="ps">PlayStation</label>
     </div></div>`;
-  const svg = pad.querySelector('svg')!;
-  const radios = [...pad.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
-  wheelSection(pad, cap);
+    pad.append(wheel.box);
+    svg = pad.querySelector('svg')!;
+    radios = [...pad.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+    for (const r of radios) r.onchange = () => { if (r.checked) sheet.family(r.value as Family); };
+    wheel.relabel();
+    requestAnimationFrame(fit);
+  };
+  /** a label too long for the drawing (another language's words) a little smaller, so it stays inside the 336 px;
+   *  measured once the tab shows (a hidden one has no size) */
+  const fit = () => {
+    if (pad.hidden) return;
+    for (const el of svg.querySelectorAll<SVGTextElement>('.pad-label, .pad-sub')) {
+      el.style.fontSize = '';
+      const b = el.getBBox(), over = Math.max(1 - b.x, b.x + b.width - 335);
+      if (b.width && over > 0) el.style.fontSize = `${parseFloat(getComputedStyle(el).fontSize) * (b.width - over) / b.width}px`;
+    }
+  };
 
   let tab: Tab = opts.tab ?? 'keys', fam: Family = opts.fam ?? 'xb', picked = false;
   const sheet: ControlsSheet = {
@@ -168,6 +195,7 @@ export function controlsSheet(root: HTMLElement, id: string, opts: { tab?: Tab; 
       tab = t;
       for (const b of tabs) { const on = b.dataset.tab === t; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; if (on && focus) b.focus(); }
       for (const p of panels) p.hidden = p.dataset.tab !== t;
+      if (t === 'pad') requestAnimationFrame(fit);
     },
     family(f) {
       fam = f;
@@ -175,7 +203,9 @@ export function controlsSheet(root: HTMLElement, id: string, opts: { tab?: Tab; 
       svg.setAttribute('aria-label', spoken(f));
       for (const r of radios) r.checked = r.value === f;
     },
+    relabel() { draw(); sheet.family(fam); },
   };
+  draw();
   for (const b of tabs) b.onclick = () => { picked = true; sheet.show(b.dataset.tab as Tab); };
   // the arrow keys between the tabs, Home and End to the first and last (a tab list's keys)
   root.querySelector<HTMLElement>('[role="tablist"]')!.onkeydown = e => {
@@ -187,15 +217,15 @@ export function controlsSheet(root: HTMLElement, id: string, opts: { tab?: Tab; 
     picked = true;
     sheet.show(tabs[to].dataset.tab as Tab, true);
   };
-  for (const r of radios) r.onchange = () => { if (r.checked) sheet.family(r.value as Family); };
   const level = root.querySelector<HTMLElement>('[data-level]');
   if (level) {
     const sw = level.querySelector<HTMLInputElement>('.switch')!, val = level.querySelector('.val')!;
     sw.id = `${id}-level`; level.querySelector('label')!.htmlFor = sw.id;
     const help = level.querySelector('.set-help')!; help.id = `${id}-level-help`; sw.setAttribute('aria-describedby', help.id);
-    const show = () => { sw.checked = levelHorizon(); val.textContent = sw.checked ? 'On' : 'Off'; };
+    const show = () => { sw.checked = levelHorizon(); val.textContent = sw.checked ? t('On') : t('Off'); };
     sw.onchange = () => setLevelHorizon(sw.checked);
     onLevelHorizon(show);
+    onLanguage(show);
     show();
   }
   if (opts.follow) {

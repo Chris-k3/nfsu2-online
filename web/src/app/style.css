@@ -141,6 +141,25 @@ kbd {
 .problems li.warn { border-color: var(--warn); }
 .problems strong { display: block; }
 .problems p { color: var(--muted); font-size: 14px; line-height: 20px; margin-top: 4px; }
+/* a problem's code after its text: the same in every language (i18n.ts codeOf) */
+.err-code { margin-left: 8px; font: 12px/20px var(--mono); color: var(--edge); white-space: nowrap; }
+
+/* the language list at the top: a button's frame, a globe before the language's name and a chevron after it */
+.lang-pick { position: relative; display: inline-flex; }
+.lang-pick svg {
+  position: absolute; left: 12px; top: 10px; width: 20px; height: 20px; pointer-events: none;
+  fill: none; stroke: var(--muted); stroke-width: 1.6;
+}
+.lang-pick select {
+  appearance: none; height: 40px; padding: 0 36px 0 40px; border: 2px solid var(--edge); border-radius: 12px;
+  background: linear-gradient(45deg, transparent 50%, var(--text) 50%) calc(100% - 20px) 50% / 6px 6px no-repeat,
+    linear-gradient(135deg, var(--text) 50%, transparent 50%) calc(100% - 14px) 50% / 6px 6px no-repeat, #080808;
+  color: var(--text); font: italic 700 16px/24px var(--font); cursor: pointer;
+  field-sizing: content;                       /* as wide as the name shown (shell.ts syncPicker measures it in Firefox) */
+}
+.lang-pick select:hover:not(:disabled) { border-color: var(--lime); }
+.lang-pick select option { background: var(--field); color: var(--text); font-style: normal; }
+.lang-pick select:disabled { cursor: not-allowed; opacity: 0.5; }
 
 /* ------------------------------------------------------- the key sheet */
 /* its tabs (controls.ts): words on a divider, the open one lime and underlined */

@@ -31,6 +31,8 @@ const PAGE = '/', MODULE = '/game.wasm';
 const KEPT = ['/', '/main.js', '/main.css', '/game.json', '/data-manifest',
   '/host/game-worker.js', '/host/io-worker.js', '/host/predownload-worker.js', '/gpu/png-worker.js', '/audio/worklet.js'];
 const LATER = KEPT.slice(4);
+/** the start page's language files (i18n.ts): one is kept once the page fetched it, and kept up to date with the rest */
+const LANG = /^\/lang\/[a-z]+\.json$/;
 const NAV_WAIT_MS = 4000, OFFLINE_MS = 30_000;
 let offlineUntil = 0;
 
@@ -41,7 +43,7 @@ function keyOf(r: Request): string | null {
   if (u.origin !== self.location.origin) return null;
   if (r.mode === 'navigate') return u.pathname === '/' || u.pathname === '/index.html' ? PAGE : null;
   if (u.pathname === MODULE) return /^\?v=[\w-]+$/.test(u.search) ? MODULE + u.search : null;
-  return !u.search && KEPT.includes(u.pathname) ? u.pathname : null;
+  return !u.search && (KEPT.includes(u.pathname) || LANG.test(u.pathname)) ? u.pathname : null;
 }
 
 /** keep a 200 answer, unless the copy has its ETag already; a module replaces the one kept before */
@@ -88,7 +90,7 @@ async function answer(e: FetchEvent, key: string): Promise<Response> {
     offlineUntil = 0;
     e.waitUntil((async () => {
       await keep(cache, key, res.clone(), kept);
-      if (key === PAGE) await refresh(cache, LATER);
+      if (key === PAGE) await refresh(cache, [...LATER, ...(await cache.keys()).map(r => new URL(r.url).pathname).filter(p => LANG.test(p))]);
     })().catch(() => {}));
     return res;
   } catch (err) {

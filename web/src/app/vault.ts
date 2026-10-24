@@ -22,6 +22,7 @@ import { WORDS } from './vault-words';
 import { unzip, zip } from './zip';
 import { coverOf, profileName } from './profile';
 import { isScreenshot, PROFILES_DIR } from './savefs';
+import { fill, N, type Vars } from './i18n';
 
 export const PREFIX = 'nfsu2-xyz';
 export const PHRASE_WORDS = 8;
@@ -34,7 +35,11 @@ const SALT = 'nfsu2-xyz keyphrase saves v1', AAD = 'nfsu2-xyz keyphrase saves v1
 const WORD_SET = new Set(WORDS);
 const enc = new TextEncoder();
 
-export class VaultError extends Error {}
+/** A failure of the cloud saves: its message in English (the log, the tests); why and v: the same as written, for the
+ *  page's language; code: its fixed name, the same in every language. */
+export class VaultError extends Error {
+  constructor(public why: string, public code = 'VAULT', public v?: Vars) { super(fill(why, v)); }
+}
 
 /** A new keyphrase: the prefix and PHRASE_WORDS random words. */
 export function newPhrase(): string {
@@ -47,13 +52,14 @@ export function newPhrase(): string {
 }
 
 /** A keyphrase as typed or pasted (any case, any separators, the prefix optional), or what is wrong with it. */
-export function readPhrase(text: string): { phrase: string } | { bad: string } {
+export function readPhrase(text: string): { phrase: string } | { bad: string; why: { t: string; v?: Vars } } {
+  const bad = (t: string, v?: Vars) => ({ bad: fill(t, v), why: { t, v } });
   let w = text.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
   if (w[0] === 'nfsu2' && w[1] === 'xyz') w = w.slice(2);
-  if (!w.length) return { bad: 'Type or paste your keyphrase.' };
+  if (!w.length) return bad(N('Type or paste your keyphrase.'));
   const unknown = w.find(x => !WORD_SET.has(x));
-  if (unknown) return { bad: `"${unknown}" is not a keyphrase word: check its spelling.` };
-  if (w.length !== PHRASE_WORDS) return { bad: `A keyphrase has ${PHRASE_WORDS} words after ${PREFIX}; this has ${w.length}.` };
+  if (unknown) return bad(N('"{word}" is not a keyphrase word: check its spelling.'), { word: unknown });
+  if (w.length !== PHRASE_WORDS) return bad(N('A keyphrase has {n} words after {prefix}; this has {got}.'), { n: PHRASE_WORDS, prefix: PREFIX, got: w.length });
   return { phrase: [PREFIX, ...w].join('-') };
 }
 
@@ -79,10 +85,10 @@ export async function seal(key: CryptoKey, plain: Uint8Array): Promise<Uint8Arra
 }
 
 export async function unseal(key: CryptoKey, box: Uint8Array): Promise<Uint8Array> {
-  if (box.length < 13 + 16 || box[0] !== 1) throw new VaultError('what the server holds for this keyphrase is not a keyphrase\'s saves');
+  if (box.length < 13 + 16 || box[0] !== 1) throw new VaultError(N('what the server holds for this keyphrase is not a keyphrase\'s saves'), 'VAULT-NOT-SAVES');
   try {
     return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: box.slice(1, 13), additionalData: enc.encode(AAD) }, key, box.slice(13)));
-  } catch { throw new VaultError('these saves do not open with this keyphrase'); }
+  } catch { throw new VaultError(N('these saves do not open with this keyphrase'), 'VAULT-WRONG-KEY'); }
 }
 
 export interface SaveFile { path: string; data: Uint8Array; mtime?: number }
@@ -98,7 +104,7 @@ async function bytesOf(s: ReadableStream<Uint8Array>, max = Infinity): Promise<U
     for (;;) {
       const { done, value } = await rd.read();
       if (done) break;
-      if ((n += value.length) > max) throw new VaultError('these saves are larger than a keyphrase keeps');
+      if ((n += value.length) > max) throw new VaultError(N('these saves are larger than a keyphrase keeps'), 'VAULT-TOO-LARGE');
       parts.push(value);
     }
   } catch (e) { void rd.cancel().catch(() => {}); throw e; }
@@ -117,7 +123,7 @@ export async function pack(files: SaveFile[]): Promise<Uint8Array> {
 /** pack()'s zip again (at most MAX_PLAIN: what restores as a backup would) */
 export async function unpack(packed: Uint8Array): Promise<Uint8Array> {
   try { return await bytesOf(new Blob([packed as BlobPart]).stream().pipeThrough(new DecompressionStream('deflate-raw')), MAX_PLAIN); }
-  catch (e) { throw e instanceof VaultError ? e : new VaultError(`these saves are damaged (${e instanceof Error ? e.message : e})`); }
+  catch (e) { throw e instanceof VaultError ? e : new VaultError(N('these saves are damaged ({error})'), 'VAULT-DAMAGED', { error: e instanceof Error ? e.message : String(e) }); }
 }
 
 /** What the files hold, whatever their times: SHA-256 over their paths and bytes, in path order. */
@@ -157,14 +163,14 @@ function remoteOf(r: Response): Remote | null {
 }
 
 function failure(r: Response): VaultError {
-  return new VaultError(r.status === 429 ? 'the server asks this address to wait a minute (too many requests)'
-    : r.status === 507 ? 'the server has no room for more saves now'
-    : r.status === 503 ? 'the server takes no more new cloud saves for now: try again in an hour'
-    : r.status === 413 ? 'these saves are larger than the server takes'
-    : `the server answered ${r.status}`);
+  return new VaultError(r.status === 429 ? N('the server asks this address to wait a minute (too many requests)')
+    : r.status === 507 ? N('the server has no room for more saves now')
+    : r.status === 503 ? N('the server takes no more new cloud saves for now: try again in an hour')
+    : r.status === 413 ? N('these saves are larger than the server takes')
+    : N('the server answered {status}'), `VAULT-HTTP-${r.status}`, { status: r.status });
 }
 
-const incomplete = () => new VaultError('the server\'s answer is incomplete');
+const incomplete = () => new VaultError(N('the server\'s answer is incomplete'), 'VAULT-INCOMPLETE');
 
 /** /vault for one keyphrase's token. */
 export class VaultApi {
@@ -251,16 +257,20 @@ export type SyncState =
    * version has no profile while here are some ('bare'); the keyphrase's version is older than the one here ('older')
    */
   | { s: 'conflict'; why: 'both' | 'empty' | 'bare' | 'older'; theirs: Remote | null }
-  /** the last try failed: the next save, Play or Sync now tries again */
-  | { s: 'error'; msg: string }
+  /** the last try failed: the next save, Play or Sync now tries again (msg: why, in English; why: the same for t(); code:
+   *  its fixed name) */
+  | { s: 'error'; msg: string; why: { t: string; v?: Vars }; code: string }
   /** the server does not have the keyphrase (deleted in another browser, two years unused, lost): nothing is sent */
   | { s: 'gone' };
 
 /** a failure's words for the player */
-export function failureText(e: unknown): string {
-  return e instanceof VaultError ? e.message : e instanceof TypeError ? 'the server does not answer'
-    : e instanceof DOMException && (e.name === 'TimeoutError' || e.name === 'AbortError') ? 'the server did not answer in time'
-    : String(e instanceof Error ? e.message : e);
+export function failureText(e: unknown): string { return failureOf(e).msg; }
+/** the same as written (why, v: for t()), and its fixed name */
+export function failureOf(e: unknown): { msg: string; why: { t: string; v?: Vars }; code: string } {
+  const of = (t: string, code: string, v?: Vars) => ({ msg: fill(t, v), why: { t, v }, code });
+  return e instanceof VaultError ? of(e.why, e.code, e.v) : e instanceof TypeError ? of(N('the server does not answer'), 'VAULT-NO-ANSWER')
+    : e instanceof DOMException && (e.name === 'TimeoutError' || e.name === 'AbortError') ? of(N('the server did not answer in time'), 'VAULT-TIMEOUT')
+    : of(String(e instanceof Error ? e.message : e), 'VAULT-ERROR');
 }
 
 export class VaultSync {
@@ -292,7 +302,7 @@ export class VaultSync {
     const p = this.queue.then(async () => {
       this.set({ s: 'working', what });
       try { return await job(); }
-      catch (e) { this.set({ s: 'error', msg: failureText(e) }); throw e; }
+      catch (e) { this.set({ s: 'error', ...failureOf(e) }); throw e; }
       finally { if (this.state.s === 'working') this.set(this.rest()); }
     });
     this.queue = p.catch(() => {});
@@ -301,7 +311,7 @@ export class VaultSync {
 
   private async boxOf(k: Keys, files: SaveFile[]): Promise<Uint8Array> {
     const box = await seal(k.key, await pack(files));
-    if (box.length > MAX_BOX) throw new VaultError(`these saves pack into ${Math.ceil(box.length / 1024)} KB, more than the server takes (${MAX_BOX >> 10} KB)`);
+    if (box.length > MAX_BOX) throw new VaultError(N('these saves pack into {kb} KB, more than the server takes ({max} KB)'), 'VAULT-TOO-LARGE', { kb: Math.ceil(box.length / 1024), max: MAX_BOX >> 10 });
     return box;
   }
 
@@ -312,7 +322,7 @@ export class VaultSync {
   /** The server has no version of the keyphrase: one that keeps no keyphrase saves at all now says so; else the link
    *  stays (the phrase in the box, the next sync looks again), marked gone, and sends nothing by itself. */
   private async gone() {
-    if (!await vaultAvailable(this.d.fetch)) throw new VaultError('the server keeps no cloud saves now');
+    if (!await vaultAvailable(this.d.fetch)) throw new VaultError(N('the server keeps no cloud saves now'), 'VAULT-OFF');
     if (this.link) this.setLink({ ...this.link, gone: true, earlier: null });
     this.set({ s: 'gone' });
   }
@@ -324,7 +334,7 @@ export class VaultSync {
 
   /** A new keyphrase for the saves here, their first version sent: the keyphrase. */
   create(): Promise<string> {
-    return this.run('Making keyphrase', async () => {
+    return this.run(N('Making keyphrase'), async () => {
       for (;;) {
         const phrase = newPhrase(), k = await this.keysFor(phrase), files = await this.d.files();
         const r = await this.api(k).put(await this.boxOf(k, files), null);
@@ -337,7 +347,7 @@ export class VaultSync {
 
   /** What a keyphrase holds (its zip, for the player to look at before it replaces the saves here), or null: none. */
   peek(phrase: string, earlier = false): Promise<{ zip: Uint8Array; remote: Remote } | null> {
-    return this.run('Loading', async () => {
+    return this.run(N('Loading'), async () => {
       const k = await this.keysFor(phrase), r = await this.api(k).get(null, earlier);
       if (!r || 'same' in r) return null;
       return { zip: await unpack(await unseal(k.key, r.box)), remote: r.remote };
@@ -346,7 +356,7 @@ export class VaultSync {
 
   /** The saves here are a keyphrase's version now (the player restored what peek() gave): this browser follows it. */
   adopt(phrase: string, remote: Remote): Promise<void> {
-    return this.run('Linking', async () => {
+    return this.run(N('Linking'), async () => {
       const files = await this.d.files();
       this.linked(phrase, remote, await contentHash(files), files);
     });
@@ -368,7 +378,7 @@ export class VaultSync {
   /** Another browser's newer version, taken when the saves here did not change since they synced (timeoutMs: the server's answer, at most). */
   pull(o: { timeoutMs?: number } = {}): Promise<void> {
     if (!this.link || this.state.s === 'conflict') return Promise.resolve();
-    return this.run('Checking', async () => {
+    return this.run(N('Checking'), async () => {
       let l = this.link!;
       const k = await this.keysFor(l.phrase), r = await this.api(k, o.timeoutMs).get(l.rev);
       if (!r) return this.gone();
@@ -390,7 +400,7 @@ export class VaultSync {
    */
   push(o: { playing?: boolean } = {}): Promise<void> {
     if (!this.link || this.link.gone || this.state.s === 'conflict') return Promise.resolve();
-    return this.run('Syncing', async () => {
+    return this.run(N('Syncing'), async () => {
       const l = this.link!, files = await this.d.files();
       if (o.playing && !wholeProfiles(files)) return;
       const hash = await contentHash(files);
@@ -407,7 +417,7 @@ export class VaultSync {
   keepMine(): Promise<void> {
     const st = this.state;
     if (!this.link || st.s !== 'conflict') return Promise.resolve();
-    return this.run('Syncing', async () => {
+    return this.run(N('Syncing'), async () => {
       const l = this.link!, files = await this.d.files(), hash = await contentHash(files), k = await this.keysFor(l.phrase);
       const box = await this.boxOf(k, files), api = this.api(k);
       let r = await api.put(box, st.theirs?.rev ?? l.rev);
@@ -421,7 +431,7 @@ export class VaultSync {
   /** The keyphrase gone from the server: the saves here sent under it again (a new keyphrase there). */
   resend(): Promise<void> {
     if (!this.link?.gone) return Promise.resolve();
-    return this.run('Syncing', async () => {
+    return this.run(N('Syncing'), async () => {
       const l = this.link!, files = await this.d.files(), hash = await contentHash(files), k = await this.keysFor(l.phrase);
       const r = await this.api(k).put(await this.boxOf(k, files), null);
       if ('saved' in r) return this.linked(l.phrase, r.saved, hash, files);
@@ -434,7 +444,7 @@ export class VaultSync {
   /** A conflict settled for the keyphrase's version: it replaces the saves here. */
   takeTheirs(): Promise<void> {
     if (!this.link || this.state.s !== 'conflict') return Promise.resolve();
-    return this.run('Loading', async () => {
+    return this.run(N('Loading'), async () => {
       const l = this.link!, k = await this.keysFor(l.phrase), r = await this.api(k).get();
       if (!r) return this.gone();
       if ('box' in r) await this.take(l.phrase, k, r.box, r.remote);
@@ -443,13 +453,13 @@ export class VaultSync {
 
   /** This browser stops syncing (after what it is doing); the saves stay here and on the server. */
   forget(): Promise<void> {
-    return this.run('Stopping', async () => this.setLink(null));
+    return this.run(N('Stopping'), async () => this.setLink(null));
   }
 
   /** The keyphrase and its versions deleted from the server, and this browser unlinked. */
   remove(): Promise<void> {
     if (!this.link) return Promise.resolve();
-    return this.run('Deleting', async () => {
+    return this.run(N('Deleting'), async () => {
       const k = await this.keysFor(this.link!.phrase);
       await this.api(k).remove();
       this.setLink(null);

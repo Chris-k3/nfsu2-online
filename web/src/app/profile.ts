@@ -32,6 +32,8 @@
 // Pure (no DOM, no OPFS) so it can be checked under node; turnOnAutosave and
 // renameProfile take the save folder's file functions.
 
+import { fill, N, t, type Vars } from './i18n';
+
 export const PROFILE_SIZE = 54966;
 const PAYLOAD = 54930, VERSION = 0x10D;
 const B = 36;                                        // the payload's start in the file
@@ -64,32 +66,35 @@ const lowerAscii = (s: string) => s.replace(/[A-Z]/g, c => String.fromCharCode(c
  */
 export function readSaveMode(file: Uint8Array, name: string): { mode: SaveMode } | { bad: string } {
   const bad = checkProfile(file, name);
-  if (bad) return { bad };
+  if (bad) return { bad: fill(bad.t, bad.v) };
   const a = file[AUTOSAVE], p = file[PROMPT];
   if (a > 1 || p > 1) return { bad: `unexpected Save bytes ${a}, ${p}` };
   return { mode: a ? 'autosave' : p ? 'prompt' : 'off' };
 }
 
+/** why a check refuses a file, as written (English with {name}s for v): filled for the log, translated for the page */
+interface Why { t: string; v?: Vars }
+
 /** Why a file is not a profile the game saved under this name (readSaveMode's checks but the Save bytes), or null. */
-function checkProfile(file: Uint8Array, name: string): string | null {
+function checkProfile(file: Uint8Array, name: string): Why | null {
   const bad = checkFile(file);
   if (bad) return bad;
   const inside = nameInside(file);
-  if (lowerAscii(inside) !== lowerAscii(name)) return `the name inside is "${inside}"`;
+  if (lowerAscii(inside) !== lowerAscii(name)) return { t: N('the name inside is "{name}"'), v: { name: inside } };
   return null;
 }
 
 /** checkProfile's checks of the file itself: SPEC §3.5's (the game loads one whose checksums are stale, though). */
-function checkFile(file: Uint8Array): string | null {
-  return checkShape(file) ?? (sealedRight(file) ? null : 'its checksums do not match (edited outside the game?)');
+function checkFile(file: Uint8Array): Why | null {
+  return checkShape(file) ?? (sealedRight(file) ? null : { t: N('its checksums do not match (edited outside the game?)') });
 }
 
 /** checkFile's checks but the checksums: the container, its block sizes and the version. */
-function checkShape(file: Uint8Array): string | null {
-  if (!isProfileFile(file)) return 'not a profile file (no "20CM")';
-  if (file.length !== PROFILE_SIZE) return `${file.length} bytes, not ${PROFILE_SIZE}`;
-  if (u32(file, 4) !== file.length || u32(file, 8) !== 8 || u32(file, 12) !== PAYLOAD) return 'unexpected block sizes';
-  if (u32(file, 28) !== VERSION || u32(file, 32) !== PAYLOAD) return `saved by another version of the game (version ${u32(file, 28)}, not ${VERSION})`;
+function checkShape(file: Uint8Array): Why | null {
+  if (!isProfileFile(file)) return { t: N('not a profile file (no "20CM")') };
+  if (file.length !== PROFILE_SIZE) return { t: N('{n} bytes, not {size}'), v: { n: file.length, size: PROFILE_SIZE } };
+  if (u32(file, 4) !== file.length || u32(file, 8) !== 8 || u32(file, 12) !== PAYLOAD) return { t: N('unexpected block sizes') };
+  if (u32(file, 28) !== VERSION || u32(file, 32) !== PAYLOAD) return { t: N('saved by another version of the game (version {got}, not {want})'), v: { got: u32(file, 28), want: VERSION } };
   return null;
 }
 
@@ -115,9 +120,9 @@ export const isProfileFile = (file: Uint8Array) => file.length >= 4 && file[0] =
  */
 export function profileName(file: Uint8Array): { name: string; edited: boolean } | { bad: string } {
   const bad = checkShape(file);
-  if (bad) return { bad };
+  if (bad) return { bad: t(bad.t, bad.v) };
   const name = nameInside(file);
-  if (!isProfileName(name)) return { bad: `the name inside, "${name}", is not one the game makes (1 to ${NAME_MAX} letters and digits)` };
+  if (!isProfileName(name)) return { bad: t('the name inside, "{name}", is not one the game makes (1 to {n} letters and digits)', { name, n: NAME_MAX }) };
   return { name, edited: !sealedRight(file) };
 }
 
@@ -270,7 +275,7 @@ export interface RenameFiles extends SaveFiles {
  */
 export async function renameProfile(fs: RenameFiles, profilesDir: string, from: string, to: string):
     Promise<{ files: number } | { refused: string }> {
-  if (!isProfileName(to)) return { refused: `A profile's name is 1 to ${NAME_MAX} letters and digits, as in the game.` };
+  if (!isProfileName(to)) return { refused: t('A profile\'s name is 1 to {n} letters and digits, as in the game.', { n: NAME_MAX }) };
   if (to === from) return { files: 0 };
   const folders = new Map<string, string[]>();      // each folder in profilesDir: its files
   for (const { path } of await fs.listFiles()) {
@@ -280,17 +285,17 @@ export async function renameProfile(fs: RenameFiles, profilesDir: string, from: 
   const same = (a: string, b: string) => lowerAscii(a) === lowerAscii(b);
   const own = (folder: string, path: string) => { const p = path.split('/'); return p.length === 3 && same(p[2], folder); };
   const main = folders.get(from)?.find(path => own(from, path));
-  if (!main) return { refused: `There is no profile ${from} in this browser.` };
+  if (!main) return { refused: t('There is no profile {name} in this browser.', { name: from }) };
   const file = await fs.readBytes(main);
   const bad = checkProfile(file, from);
-  if (bad) return { refused: `${from} cannot be renamed here: ${bad}.` };
+  if (bad) return { refused: t('{name} cannot be renamed here: {why}.', { name: from, why: t(bad.t, bad.v) }) };
   const moves: [string, string][] = [[from, to]];
   for (const f of folders.keys()) { const c = coverOf(f); if (c && same(c.profile, from)) moves.push([f, `${to} ${c.cover}`]); }
   const moving = new Set(moves.map(m => m[0]));
   for (const f of folders.keys()) {
     if (moving.has(f)) continue;
-    if (same(f, to)) return { refused: `There is a profile ${f} already.` };
-    if (same(coverOf(f)?.profile ?? '', to)) return { refused: `There is a cover shoot ${f} of that name already.` };
+    if (same(f, to)) return { refused: t('There is a profile {name} already.', { name: f }) };
+    if (same(coverOf(f)?.profile ?? '', to)) return { refused: t('There is a cover shoot {name} of that name already.', { name: f }) };
   }
   let files = 0;
   try {

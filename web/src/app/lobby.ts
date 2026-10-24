@@ -3,6 +3,8 @@
 // the game's menus (the race and its results stay the game's own).  The game sends its state as JSON when it
 // changes, "{}" for nothing to show.
 
+import { language, N, t, tn } from './i18n';
+
 /** what the game sends (roam_game.c mp_panel) */
 interface LobbyState {
   /** spot: a multiplayer-only spot, Enter opens a lobby; join: a lobby here to join; full: the lobby here is full,
@@ -16,6 +18,36 @@ interface LobbyState {
    *  even: the race evens out the cars (their engines) */
   names?: string[]; me?: number; max?: number; t?: number; closes?: number; fee?: number; even?: number;
   why?: string; step?: string; text?: string;
+}
+
+// The game's own English in the state (roam_game.c race_kind, mpw_text, mp_note; mprace.c's steps), translated here:
+// in English the page shows it as the game sent it.
+const GAME_TEXT = [
+  N('race'), N('URL race'), N('circuit'), N('sprint'), N('Street X'), N('drag'), N('drift'),
+  N('you won it in your career'), N('not open in your career yet'), N('not open in your career'), N('sign with a sponsor first'),
+  N('your sponsor\'s contract has no place for it'), N('it opens after more wins'), N('it takes an SUV'),
+  N('Back to free roam'), N('Leaving free roam'), N('Setting up the race'), N('Looking for the host\'s race'), N('Starting the race'),
+  N('Waiting for the others'), N('Loading the race'),
+  N('Multiplayer races take a car of your own: buy one in your career first'), N('You are no longer in the race'), N('The race is full'),
+  N('The race is off: its host is gone'), N('The race is off: you are not in it'), N('The race could not start'), N('The race did not take you'),
+  N('Everyone else left: the race waits for players again'), N('Multiplayer race: you quit it'), N('Multiplayer race: not finished'),
+];
+const game = (s: string) => language() === 'english' || !GAME_TEXT.includes(s) ? s : t(s);
+/** a note the game sent (mp_note): its fixed ones, and the ones with a name or a number in them */
+function noteText(s: string): string {
+  if (language() === 'english') return s;
+  let engine = '';
+  const e = / \(your engine ([+-]\d+)% to even out the cars\)$/.exec(s);
+  if (e) { s = s.slice(0, e.index); engine = ' ' + t('(your engine {pct}% to even out the cars)', { pct: e[1] }); }
+  const forms: [RegExp, (m: RegExpExecArray) => string][] = [
+    [/^(.+) called off the race$/, m => t('{name} called off the race', { name: m[1] })],
+    [/^The multiplayer race did not happen: (.*)$/, m => t('The multiplayer race did not happen: {why}', { why: m[1] })],
+    [/^Multiplayer race: (\d+)(st|nd|rd|th) place, \$(\d+)$/, m => t('Multiplayer race: {pos} place, ${prize}', { pos: m[1] + m[2], n: m[1], prize: m[3] })],
+    [/^Multiplayer race: (\d+)(st|nd|rd|th) place$/, m => t('Multiplayer race: {pos} place', { pos: m[1] + m[2], n: m[1] })],
+    [/^Multiplayer race: you quit it, \$(\d+) fee$/, m => t('Multiplayer race: you quit it, ${fee} fee', { fee: m[1] })],
+  ];
+  for (const [re, f] of forms) { const m = re.exec(s); if (m) return f(m) + engine; }
+  return game(s) + engine;
 }
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string) => {
@@ -47,6 +79,9 @@ export class LobbyPanel {
   /** gone with the game */
   clear() { this.show('{}'); }
 
+  /** the same state again, in the page's language */
+  redraw() { const j = this.last; this.last = ''; this.show(j || '{}'); }
+
   /** the panel's place: under the game's Bank box, its right edge on the box's (x 299, y -198 to -168 in the HUD's
    *  units from the middle of the picture; one unit is u px), out to the edge of a wide HUD with hud = wide, as the
    *  radar's side (shell.ts placeNotices); v: the game's picture on the page */
@@ -61,9 +96,9 @@ export class LobbyPanel {
   }
 
   private title(s: LobbyState, host?: string) {
-    const k = s.kind ?? 'race';
-    const head = el('div', 'lobby-title', host ? `${host}'s ${k}` : `Multiplayer ${k}`);
-    const sub = [s.track, s.laps ? `${s.laps} laps` : ''].filter(Boolean).join(' · ');
+    const kind = game(s.kind ?? 'race');
+    const head = el('div', 'lobby-title', host ? t('{host}\'s {kind}', { host, kind }) : t('Multiplayer {kind}', { kind }));
+    const sub = [s.track, s.laps ? tn(s.laps, '{n} lap', '{n} laps') : ''].filter(Boolean).join(' · ');
     return sub ? [head, el('div', 'lobby-sub', sub)] : [head];
   }
 
@@ -74,8 +109,8 @@ export class LobbyPanel {
     for (let i = 0; i < n; i++) {
       const li = el('li', i < names.length ? 'taken' : 'open');
       li.append(el('span', 'lobby-n', String(i + 1)));
-      li.append(el('span', 'lobby-name', i < names.length ? names[i] : 'open'));
-      if (i < names.length && (i === 0 || i === s.me)) li.append(el('span', 'lobby-tag', i === 0 ? 'host' : 'you'));
+      li.append(el('span', 'lobby-name', i < names.length ? names[i] : t('open')));
+      if (i < names.length && (i === 0 || i === s.me)) li.append(el('span', 'lobby-tag', i === 0 ? t('host') : t('you')));
       ol.append(li);
     }
     return ol;
@@ -90,37 +125,37 @@ export class LobbyPanel {
   }
 
   private drawPanel(s: LobbyState) {
-    const p = this.panel, names = s.names ?? [], host = names[0] ?? 'A player';
+    const p = this.panel, names = s.names ?? [], host = names[0] ?? t('A player');
     const kids: HTMLElement[] = [];
     p.dataset.v = s.v ?? '';
     switch (s.v) {
       case 'spot':
-        kids.push(...this.title(s), el('div', 'lobby-why', `Multiplayer only here: ${s.why ?? 'not open in your career'}`),
-          this.act('Enter', 'Open a lobby'));
+        kids.push(...this.title(s), el('div', 'lobby-why', t('Multiplayer only here: {why}', { why: game(s.why ?? 'not open in your career') })),
+          this.act('Enter', t('Open a lobby')));
         break;
       case 'join':
-        kids.push(...this.title(s, host), this.places(s), this.act('Enter', 'Join'));
+        kids.push(...this.title(s, host), this.places(s), this.act('Enter', t('Join')));
         break;
       case 'full':
-        kids.push(...this.title(s, host), this.places(s), el('div', 'lobby-why', 'This lobby is full.'), this.act('Enter', 'Open another'));
+        kids.push(...this.title(s, host), this.places(s), el('div', 'lobby-why', t('This lobby is full.')), this.act('Enter', t('Open another')));
         break;
       case 'lobby': {
         const mine = s.me === 0;
         kids.push(...this.title(s, mine ? undefined : host), this.places(s, s.st === 'asked'));
-        if (s.st === 'count') kids.push(el('div', 'lobby-count', `Starting in ${s.t ?? 0}`));
-        else if (s.st === 'asked') kids.push(this.act(null, `Joining ${host}'s ${s.kind ?? 'race'}…`));
-        else if (mine && names.length >= 2) kids.push(this.act('Enter', 'Start the race'), el('div', 'lobby-hint', 'Drive away to call it off'));
-        else if (mine) kids.push(this.act(null, 'Waiting for players to drive up and join…'),
-          el('div', 'lobby-hint', s.closes !== undefined ? `Closes in ${s.closes} s if nobody joins` : 'Drive away to call it off'));
-        else kids.push(this.act(null, `Waiting for ${host} to start`), el('div', 'lobby-hint', 'Drive away to leave'));
+        if (s.st === 'count') kids.push(el('div', 'lobby-count', t('Starting in {n}', { n: s.t ?? 0 })));
+        else if (s.st === 'asked') kids.push(this.act(null, t('Joining {host}\'s {kind}…', { host, kind: game(s.kind ?? 'race') })));
+        else if (mine && names.length >= 2) kids.push(this.act('Enter', t('Start the race')), el('div', 'lobby-hint', t('Drive away to call it off')));
+        else if (mine) kids.push(this.act(null, t('Waiting for players to drive up and join…')),
+          el('div', 'lobby-hint', s.closes !== undefined ? t('Closes in {n} s if nobody joins', { n: s.closes }) : t('Drive away to call it off')));
+        else kids.push(this.act(null, t('Waiting for {host} to start', { host })), el('div', 'lobby-hint', t('Drive away to leave')));
         break;
       }
       case 'note':
-        kids.push(el('div', 'lobby-note', s.text ?? ''));
+        kids.push(el('div', 'lobby-note', noteText(s.text ?? '')));
         break;
     }
-    if (s.v === 'join' && s.even) kids.push(el('div', 'lobby-hint', 'The cars are evened out: slower ones get more engine power, faster ones a little less'));
-    if (s.v === 'join' && s.fee) kids.push(el('div', 'lobby-hint', `Quitting the race costs $${s.fee}`));
+    if (s.v === 'join' && s.even) kids.push(el('div', 'lobby-hint', t('The cars are evened out: slower ones get more engine power, faster ones a little less')));
+    if (s.v === 'join' && s.fee) kids.push(el('div', 'lobby-hint', t('Quitting the race costs ${fee}', { fee: s.fee })));
     p.replaceChildren(...kids);
   }
 
@@ -128,7 +163,7 @@ export class LobbyPanel {
     const card = el('div', 'lobby-card');
     card.append(...this.title(s, undefined), this.places(s));
     const step = el('div', 'lobby-step');
-    step.append(el('span', 'lobby-spin'), el('span', '', `${s.step || 'Loading'}…`));
+    step.append(el('span', 'lobby-spin'), el('span', '', `${s.step ? game(s.step) : t('Loading')}…`));
     card.append(step);
     this.cover.replaceChildren(card);
   }

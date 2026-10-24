@@ -19,7 +19,8 @@
 // While any of them is given, the start page says whether it is in effect.
 
 import registryDefaults from '../../../app/registry-defaults.txt';
-import { checkBrowser, checkGpu, checkIsolation, checkStorage, firefoxVersion, fmtBytes, type Check } from './checks';
+import { check, checkBrowser, checkGpu, checkIsolation, checkStorage, firefoxVersion, fmtBytes, type Check } from './checks';
+import { codeOf, dateLocale, language as pageLanguage, lastLanguage, LANGUAGES, listOf, live, LOCALE, N, NATIVE, onLanguage, setLanguage, t, T, tn, tvars, type Msg } from './i18n';
 import { loadGame, serverRev, type Loaded } from './loader';
 import { claimInstance } from './instance';
 import { LogRing, downloadBlob, stamp } from './logs';
@@ -96,7 +97,7 @@ const checks = new Map<string, Check>();
 let instance: ReturnType<typeof claimInstance>;
 let settingsText: string | null = null;
 let starting = false;                    // Play pressed, the session not there yet
-let fatal: string | null = null;         // why the running game had to be stopped
+let fatal: { what: string; code?: string } | null = null;   // why the running game had to be stopped (English, for t())
 let fps: FpsOverlay;
 let lobbyPanel: LobbyPanel;
 let settings: SettingsPanel;
@@ -118,12 +119,19 @@ function setProgress(f: number) {
 }
 
 // --------------------------------------------------------------- status --
-function setPhase(p: Phase, title: string, sub: string) {
+/** the headline and the line under it (in the page's language, again when it changes); code: a problem's */
+function setPhase(p: Phase, title: Msg, sub: Msg, code?: string) {
   phase = p;
   document.body.dataset.phase = p;
-  $('#status').textContent = title;
-  $('#status-sub').textContent = sub;
+  live($('#status'), title);
+  setSub(sub, code);
   updatePlay();
+}
+/** the line under the headline alone; subSeq counts what it showed (an answer that comes later may add to it) */
+let subSeq = 0;
+function setSub(sub: Msg, code?: string) {
+  subSeq++;
+  live($('#status-sub'), sub, code);
 }
 function setCheck(c: Check) {
   checks.set(c.id, c);
@@ -132,25 +140,34 @@ function setCheck(c: Check) {
 }
 const ORDER = ['browser', 'isolation', 'gpu', 'storage', 'module'];
 let problemsShown = '';
-/** Only what is wrong (a failed check) or worth knowing (another browser, a GPU without BC); the storage warning goes with the saves. */
+const problemsLogged = new Set<string>();
+/** a check's label and detail in the page's language */
+const label = (c: Check) => tvars(c.tl ?? c.label, c.v), detail = (c: Check) => tvars(c.td ?? c.detail, c.v);
+/** Only what is wrong (a failed check) or worth knowing (another browser, a GPU without BC); the storage warning goes with
+ *  the saves.  Each with its code, and in the log once, in English. */
 function renderProblems() {
   const shown = ORDER.map(id => checks.get(id))
     .filter((c): c is Check => !!c && (c.state === 'fail' || (c.state === 'warn' && (c.id === 'browser' || c.id === 'gpu'))));
-  const key = shown.map(c => `${c.id}:${c.state}:${c.detail}`).join('|');
+  const key = pageLanguage() + '|' + shown.map(c => `${c.id}:${c.state}:${c.detail}`).join('|');
   if (key !== problemsShown) {          // the list is a live region: rebuilt only when it changes
     problemsShown = key;
     $('#problems').replaceChildren(...shown.map(c => {
       const li = document.createElement('li'); li.dataset.id = c.id; li.className = c.state;
-      const t = document.createElement('strong'); t.textContent = c.label;
-      const p = document.createElement('p'); p.textContent = c.detail;
-      li.append(t, p);
+      const s = document.createElement('strong'); s.textContent = label(c);
+      const p = document.createElement('p'); p.textContent = detail(c);
+      if (c.code) p.append(codeOf(c.code));
+      li.append(s, p);
       return li;
     }));
   }
   const st = checks.get('storage');
+  for (const c of [...shown, ...(st?.state === 'warn' ? [st] : [])]) {
+    const k = `${c.id}:${c.state}:${c.detail}`;
+    if (!problemsLogged.has(k)) { problemsLogged.add(k); log.add(`[app] ${c.state === 'fail' ? 'problem' : 'warning'} ${c.code ?? c.id}: ${c.label}: ${c.detail}`); }
+  }
   const note = $('#storage-note');
   note.hidden = st?.state !== 'warn';
-  note.textContent = st?.state === 'warn' ? st.detail : '';
+  if (st?.state === 'warn') live(note, () => detail(st), st.code); else live(note, () => '');
 }
 function blocking(): Check | undefined { return ORDER.map(id => checks.get(id)).find(c => c?.state === 'fail'); }
 
@@ -159,23 +176,23 @@ function evaluate() {
   if (phase === 'starting' || phase === 'playing') return;
   const bad = blocking();
   if (bad) {
-    setPhase('error', 'Not ready', bad.id === 'module' ? 'The game did not load. It is tried again by itself, or press Retry.' : 'Fix the problem below, then reload this page.');
+    setPhase('error', T('Not ready'), bad.id === 'module' ? T('The game did not load. It is tried again by itself, or press Retry.') : T('Fix the problem below, then reload this page.'));
     return;
   }
   if (!instance.owner) {
-    setPhase('waiting', 'Open elsewhere', 'This browser is already running the game in another tab. Switch to that tab, or close it: this page takes over when it does.');
+    setPhase('waiting', T('Open elsewhere'), T('This browser is already running the game in another tab. Switch to that tab, or close it: this page takes over when it does.'));
     return;
   }
   const pending = ORDER.map(id => checks.get(id)).find(c => c?.state === 'pending');
   if (!loaded) {
     // downloading (again, after a failure): the headline says so, the progress fills in the line below
-    if (pending?.id === 'module' && phase !== 'boot' && phase !== 'exited') setPhase('boot', 'Loading', 'Loading the game.');
+    if (pending?.id === 'module' && phase !== 'boot' && phase !== 'exited') setPhase('boot', T('Loading'), T('Loading the game.'));
     return;
   }
-  if (pending) { if (phase !== 'exited') setPhase('boot', 'Loading', `${pending.label}: ${pending.detail}`); return; }
+  if (pending) { if (phase !== 'exited') setPhase('boot', T('Loading'), () => `${label(pending)}: ${detail(pending)}`); return; }
   if (phase === 'exited') { updatePlay(); return; }
-  const press = touchFirst() ? 'Press Play to start.' : 'Press Play or Enter to start.';
-  setPhase('ready', 'Ready', offline ? `Offline: the game runs from this PC, without free roam or Online. ${press}` : press);
+  const press = touchFirst() ? N('Press Play to start.') : N('Press Play or Enter to start.');
+  setPhase('ready', T('Ready'), offline ? () => t('Offline: the game runs from this PC, without free roam or Online. {press}', { press: t(press) }) : T(press));
 }
 
 function updatePlay() {
@@ -211,7 +228,7 @@ function stageCanvas(): HTMLCanvasElement {
   const stage = $('#stage');
   stage.querySelector('canvas')?.remove();
   const c = document.createElement('canvas');
-  c.id = 'game'; c.tabIndex = 0; c.setAttribute('aria-label', 'The game');
+  c.id = 'game'; c.tabIndex = 0; c.setAttribute('aria-label', t('The game'));
   stage.prepend(c);
   return c;
 }
@@ -237,28 +254,29 @@ async function askRoam(): Promise<boolean> {
   const name = (r.source.NFSU2_ROAM_NAME === 'settings.ini' ? r.env.NFSU2_ROAM_NAME : '') || (await newestProfile())?.name || '';
   const p = (text: string) => Object.assign(document.createElement('p'), { textContent: text });
   const body = document.createElement('div');
-  body.append(p('Other players on this server can drive in your career\'s free roam with you. You see their cars with their names over them, they see yours, and you can challenge each other to outruns. Races, traffic and money stay your own.'),
-    p('With this on, everyone on this server sees your picked name and whether you\'re driving or in the menus. Players near you also see your car and where it is.'));
+  body.append(p(t('Other players on this server can drive in your career\'s free roam with you. You see their cars with their names over them, they see yours, and you can challenge each other to outruns. Races, traffic and money stay your own.')),
+    p(t('With this on, everyone on this server sees your picked name and whether you\'re driving or in the menus. Players near you also see your car and where it is.')));
   const c = players?.last();
   if (c?.full === true) {
     const n = Number.isInteger(c.queue) && c.queue! > 0 ? c.queue! : 0;
-    body.append(p(`The server is full right now${n ? `: ${n} ${n === 1 ? 'player is' : 'players are'} waiting in line for a place` : ''}. ` +
-      'With this on, you wait in line too and drive alone until it is your turn; then the others join you by themselves.'));
+    const turn = t('With this on, you wait in line too and drive alone until it is your turn; then the others join you by themselves.');
+    body.append(p(`${n ? tn(n, 'The server is full right now: {n} player is waiting in line for a place.', 'The server is full right now: {n} players are waiting in line for a place.')
+      : t('The server is full right now.')} ${turn}`));
   }
   let field: HTMLInputElement | null = null;
   if (name) {
     const row = document.createElement('p'); row.className = 'dlg-field';
-    const label = Object.assign(document.createElement('label'), { className: 'set-label', htmlFor: 'roam-ask-name', textContent: 'Your name' });
+    const label = Object.assign(document.createElement('label'), { className: 'set-label', htmlFor: 'roam-ask-name', textContent: t('Your name') });
     const f = field = Object.assign(document.createElement('input'), { type: 'text', id: 'roam-ask-name', value: name, maxLength: 24, autocomplete: 'off', spellcheck: false });
     // a name the setting refuses keeps the question open (Not now and Esc still close it)
-    f.oninput = () => { const v = f.value.trim(), c = v ? checkSetting('roam_name', v) : null; f.setCustomValidity(c && !c.ok ? `${c.reason}.` : ''); };
+    f.oninput = () => { const v = f.value.trim(), c = v ? checkSetting('roam_name', v) : null; f.setCustomValidity(c && !c.ok ? t('{Error}.', { Error: tvars(c.why, c.v) }) : ''); };
     // Enter in the field turns it on (the form's first button, which Enter would press, is Not now)
     f.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); $<HTMLButtonElement>('#confirm-ok').click(); } };
     row.append(label, f);
     body.append(row);
   }
-  body.append(p('You can change this any time under Online on the start page.'));
-  const answer = confirmBox('Free roam with others?', body, 'Turn on', false, '', 'Not now');
+  body.append(p(t('You can change this any time under Online on the start page.')));
+  const answer = confirmBox(t('Free roam with others?'), body, t('Turn on'), false, '', t('Not now'));
   $<HTMLButtonElement>('#confirm-ok').focus();
   const on = await answer;
   let text = putKey(settingsText ?? TEMPLATE, 'roam', on ? 'on' : 'off').text;
@@ -285,10 +303,11 @@ async function askFull(c: PlayerCounts | null): Promise<boolean> {
   const n = Number.isInteger(c.queue) && c.queue! > 0 ? c.queue! : 0;
   const p = (text: string) => Object.assign(document.createElement('p'), { textContent: text });
   const body = document.createElement('div');
-  body.append(p(n ? `Every place on this server is taken, and ${n} ${n === 1 ? 'player is' : 'players are'} waiting in line for one.` : 'Every place on this server is taken.'),
-    p('Wait in line: the game starts now and you play alone. You join free roam and Online by yourself when it is your turn; the top of the screen shows your place in line.'),
-    p('Play offline: this game runs without free roam or Online, and waits for nothing. Your settings stay as they are.'));
-  const answer = choiceBox('The server is full', body, 'Wait in line', 'Play offline');
+  body.append(p(n ? tn(n, 'Every place on this server is taken, and {n} player is waiting in line for one.', 'Every place on this server is taken, and {n} players are waiting in line for one.')
+      : t('Every place on this server is taken.')),
+    p(t('Wait in line: the game starts now and you play alone. You join free roam and Online by yourself when it is your turn; the top of the screen shows your place in line.')),
+    p(t('Play offline: this game runs without free roam or Online, and waits for nothing. Your settings stay as they are.')));
+  const answer = choiceBox(t('The server is full'), body, t('Wait in line'), t('Play offline'));
   $<HTMLButtonElement>('#confirm-ok').focus();
   const alone = await answer === 'cancel';
   log.add(`[app] the server is full${n ? ` (${n} in line)` : ''}: ${alone ? 'this game plays offline' : 'the game waits in line for a place'} (asked at Play)`);
@@ -342,12 +361,12 @@ async function startGame() {
   untrack = trackCanvasSize(canvas);
   awake = keepScreenOn(logLine);
   $('#stage-menu').hidden = !touchFirst();
-  setPhase('starting', 'Starting', full ? 'Going full screen and starting the game.' : 'Starting the game.');
+  setPhase('starting', T('Starting'), full ? T('Going full screen and starting the game.') : T('Starting the game.'));
   let fsNote = '';
   if (full) {
     const fs = await enterFullscreen(stage);
-    if (!fs.ok) fsNote = `Full screen was not allowed here; ${menuName()} has it.`;
-    else if (!fs.locked && !touchFirst()) fsNote = 'Esc leaves full screen in this browser (no keyboard lock).';
+    if (!fs.ok) fsNote = t('Full screen was not allowed here; {menu} has it.', { menu: menuName() });
+    else if (!fs.locked && !touchFirst()) fsNote = t('Esc leaves full screen in this browser (no keyboard lock).');
   }
   const size = await settledSize(canvas);
   await Promise.race([refreshMeasured, new Promise(r => setTimeout(r, 2000))]);
@@ -372,7 +391,7 @@ async function startGame() {
     if (r.env.NOMOVIES !== '1' && !await moviesKept(language(r)).catch(() => false)) {
       r.env.NOMOVIES = '1';
       log.add('[app] offline: not every movie is on this PC, so the movies are off for this game');
-      offlineNote = 'Offline: the movies are off for this game. ';
+      offlineNote = t('Offline: the movies are off for this game.') + ' ';
     }
   }
   // the log is for sharing when asking for help: it names neither the server (a private server's address) nor
@@ -434,12 +453,12 @@ async function startGame() {
     log.add(`[app] the game could not start: ${e}`);
     void audio?.close().catch(() => {});
     endStage();
-    setPhase('exited', 'Did not start', `The game could not start: ${e}`);
+    setPhase('exited', T('Did not start'), T('The game could not start: {error}', { error: String(e) }), 'GAME-START');
     $('#log-btn').hidden = $('#report').hidden = false;
     download.resume();
     return;
   }
-  setPhase('playing', 'Playing', '');
+  setPhase('playing', T('Playing'), () => '');
   document.body.dataset.phase = 'playing';
   away = new AwayCheck(session, awayLimits(), awayLine, logLine);
   // a phone's render scale (device.ts): whether it has room for all its pixels, for its next game
@@ -450,9 +469,10 @@ async function startGame() {
   const st = session;
   const waitStatus = setInterval(() => { if (st.status) { fps.reader = st.status; clearInterval(waitStatus); } }, 100);
   fps.set((r.env.NFSU2_FPS_COUNTER as FpsMode) in { off: 1, on: 1, detailed: 1 } ? r.env.NFSU2_FPS_COUNTER as FpsMode : 'off');
-  const opens = `${cap(menuKey())} opens the menu`;
-  const hint = offlineNote + (fsNote || (full ? (touchFirst() ? `${opens}.` : `${opens}. Hold Esc to leave full screen.`) : `${opens}: full screen, controls, quit.`));
-  if (autosaved.length) toast(`Autosave is now on for ${autosaved.join(', ')}: the game saves by itself (Options, Gameplay, Save). ${hint}`, 9000);
+  const key = cap(menuKey());
+  const hint = offlineNote + (fsNote || (full ? (touchFirst() ? t('{key} opens the menu.', { key }) : t('{key} opens the menu. Hold Esc to leave full screen.', { key }))
+    : t('{key} opens the menu: full screen, controls, quit.', { key })));
+  if (autosaved.length) toast(t('Autosave is now on for {names}: the game saves by itself (Options, Gameplay, Save). {hint}', { names: listOf(autosaved), hint }), 9000);
   else toast(hint, 6000);
   void st.exited.then(code => { clearInterval(waitStatus); onExit(st, code); });
   // Chrome may keep the sound off until a click or a key press (its autoplay
@@ -460,8 +480,8 @@ async function startGame() {
   setTimeout(() => {
     if (session !== st || !st.audio || st.audio.state() === 'running' || r.env.NOSOUND === '1') return;
     log.add(`[app] the AudioContext is ${st.audio.state()} after Play`);
-    toast(touchFirst() ? 'No sound yet: tap the game to turn it on (a controller button cannot).'
-      : 'No sound yet: click the game or press a key to turn it on (a controller button cannot).', 8000);
+    toast(touchFirst() ? t('No sound yet: tap the game to turn it on (a controller button cannot).')
+      : t('No sound yet: click the game or press a key to turn it on (a controller button cannot).'), 8000);
   }, 3000);
 }
 
@@ -471,7 +491,7 @@ function setReach(ok: boolean) {
   if (offline === !ok) return;
   offline = !ok;
   log.add(ok ? '[app] the server answers again' : '[app] the server does not answer: offline');
-  if (!ok) settings.setStatus('Not connected to the server: free roam and Online need it.');
+  if (!ok) settings.setStatus(T('Not connected to the server: free roam and Online need it.'));
   evaluate();
   // the page may have started from offline mode's copies while the server was away (a deploy restarts it)
   if (ok) void checkNewer();
@@ -496,29 +516,49 @@ function browserBrief(): string {
   const os = /CrOS/.test(ua) ? 'ChromeOS' : /Windows/.test(ua) ? 'Windows' : /Mac OS X|Macintosh/.test(ua) ? 'macOS' : /Android/.test(ua) ? 'Android' : /Linux/.test(ua) ? 'Linux' : 'another system';
   return `${f !== null ? `Firefox ${f}` : c ? `Chrome ${c[1]}` : 'another browser'} on ${os}`;
 }
-/** a subsystem the game cannot do without failed: the running game is stopped */
-function stopFatal(what: string) {
+/** a subsystem the game cannot do without failed: the running game is stopped (what: English, for t(); code: its name) */
+function stopFatal(what: string, code?: string) {
   const s = session;
   if (!s || s.ended) return;
-  fatal = what;
+  fatal = { what, code };
   log.add(`[app] ${what}: stopping the game`);
   s.terminate();
 }
 
 function toggleFullscreen() {
   if (isFullscreen()) exitFullscreen();
-  else void enterFullscreen($('#stage')).then(r => { if (!r.ok) toast('Full screen was not allowed.', 4000); });
+  else void enterFullscreen($('#stage')).then(r => { if (!r.ok) toast(t('Full screen was not allowed.'), 4000); });
 }
 
 /** how the page's menu opens here, for the hints: F9, the ☰ button on a touch screen, Home on a controller */
 function menuKey(): string {
-  return (touchFirst() ? 'the ☰ button' : 'F9') + (padSeen() ? ' or Home on the controller' : '');
+  if (touchFirst()) return padSeen() ? t('the ☰ button or Home on the controller') : t('the ☰ button');
+  return padSeen() ? t('F9 or Home on the controller') : 'F9';
 }
 /** "the menu (F9)", with what opens it here */
 function menuName(): string {
-  return `the menu (${touchFirst() ? '☰' : 'F9'}${padSeen() ? ', or Home on the controller' : ''})`;
+  const key = touchFirst() ? '☰' : 'F9';
+  return padSeen() ? t('the menu ({key}, or Home on the controller)', { key }) : t('the menu ({key})', { key });
 }
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
+
+/** The page in the game's language (settings.ini language, the page address's on a development server): English until
+ *  the player picks another, in Settings or in the list at the top.  A tab that does not own the saves follows the file. */
+function applyLanguage() {
+  void setLanguage(language(resolveEnv(settingsText ?? settings.text, ENVIRONMENT, {}, DEVICE)), logLine);
+  syncPicker();
+}
+/** the list at the top shows the language the file asks for (disabled where another tab owns the saves) */
+function syncPicker() {
+  const pick = $<HTMLSelectElement>('#lang-pick');
+  pick.value = language(resolveEnv(settingsText ?? settings.text, ENVIRONMENT, {}, DEVICE));
+  pick.disabled = !instance.owner;
+  // as wide as the name shown (CSS field-sizing where the browser has it; Firefox measures it here)
+  if (!CSS.supports?.('field-sizing', 'content')) {
+    const g = document.createElement('canvas').getContext('2d'), cs = getComputedStyle(pick);
+    if (g) { g.font = cs.font; pick.style.width = `${Math.ceil(g.measureText(pick.selectedOptions[0]?.textContent ?? '').width) + 80}px`; }
+  }
+}
 
 /** the controller's share of the page while a game runs (gamepad.ts): Home, or both sticks pressed in, opens or
  *  closes the menu (not over another dialog), and an open dialog of the page takes the controller (padnav.ts) */
@@ -572,20 +612,21 @@ function onExit(s: GameSession, code: number) {
   $('#log-btn').hidden = false;
   // a crash, or a game stopped for want of a subsystem: where to send the log (not a normal close or a Stop)
   $('#report').hidden = !fatal && (code === 0 || code === -1);
-  const mins = seconds >= 120 ? `${Math.floor(seconds / 60)} min` : `${seconds.toFixed(0)} s`;
-  if (fatal) setPhase('exited', 'Did not start', `The game was stopped: ${fatal}. Download the log to see why; ` +
-    (firefoxVersion() !== null ? 'about:support, Graphics, shows what Firefox thinks of the graphics.' : 'chrome://gpu shows what Chrome thinks of the graphics.'));
+  const mins = () => seconds >= 120 ? t('{n} min', { n: Math.floor(seconds / 60) }) : t('{n} s', { n: seconds.toFixed(0) });
+  const f = fatal;
+  if (f) setPhase('exited', T('Did not start'), () => t('The game was stopped: {what}. Download the log to see why; {where}', { what: t(f.what),
+    where: firefoxVersion() !== null ? t('about:support, Graphics, shows what Firefox thinks of the graphics.') : t('chrome://gpu shows what Chrome thinks of the graphics.') }), f.code);
   else {
-    const base = code === 0 ? `The game closed normally after ${mins}.` : code === -1 ? `The game was stopped after ${mins}.`
-      : `The game stopped with error code ${code} after ${mins}.`;
+    const base = () => code === 0 ? t('The game closed normally after {time}.', { time: mins() }) : code === -1 ? t('The game was stopped after {time}.', { time: mins() })
+      : t('The game stopped with error code {code} after {time}.', { code, time: mins() });
     // what is kept: the game's last profile save, never a claim it did not make
     const sv = saved;
-    setPhase('exited', code === 0 ? 'See you' : 'Stopped', !sv ? base : code === 0 ? `${base} Progress saved in this browser at ${when(sv.at)} (${sv.name}).`
-      : `${base} Your progress up to the last save, at ${when(sv.at)} (${sv.name}), is kept.`);
+    setPhase('exited', code === 0 ? T('See you') : T('Stopped'), !sv ? base : code === 0 ? () => t('{base} Progress saved in this browser at {when} ({name}).', { base: base(), when: when(sv.at), name: sv.name })
+      : () => t('{base} Your progress up to the last save, at {when} ({name}), is kept.', { base: base(), when: when(sv.at), name: sv.name }));
+    const seq = subSeq;
     if (!sv) void newestProfile().then(p => {
-      const sub = $('#status-sub');
-      if (phase === 'exited' && !session && sub.textContent === base)
-        sub.textContent = `${base} ${p ? `Nothing was saved during this game; the last save is from ${when(p.mtime)} (${p.name}).` : 'No profile is saved in this browser yet.'}`;
+      if (phase === 'exited' && !session && subSeq === seq)
+        setSub(() => `${base()} ${p ? t('Nothing was saved during this game; the last save is from {when} ({name}).', { when: when(p.mtime), name: p.name }) : t('No profile is saved in this browser yet.')}`);
     });
   }
   void saves.refresh();               // new or changed profiles
@@ -600,25 +641,26 @@ function onSaved(path: string) {
   if (p.length !== 3 || p[0] !== PROFILES_DIR || p[2].toLowerCase() !== p[1].toLowerCase()) return;
   saved = { name: p[1], at: Date.now(), count: (saved?.count ?? 0) + 1 };
   log.add(`[app] the game saved profile ${p[1]} (${saved.count} this game)`);
-  if (session) toast(`Progress saved (${p[1]}).`, 2500);
+  if (session) toast(t('Progress saved ({name}).', { name: p[1] }), 2500);
   vault.saved();
-  if ($<HTMLDialogElement>('#menu').open) $('#menu-save').textContent = `Last saved at ${when(saved.at)} (${saved.name}).`;
+  if ($<HTMLDialogElement>('#menu').open) $('#menu-save').textContent = t('Last saved at {when} ({name}).', { when: when(saved.at), name: saved.name });
 }
 /** the newest profile in this browser (listProfiles sorts by time), or null */
 async function newestProfile() { return (await listProfiles(SAVE).catch(() => []))[0] ?? null; }
 /** a save's time: the clock today, the day too before today */
-function when(t: number): string {
-  const d = new Date(t), time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  return d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString([], { day: 'numeric', month: 'short' })}, ${time}`;
+function when(at: number): string {
+  const d = new Date(at), time = d.toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' });
+  return d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString(dateLocale(), { day: 'numeric', month: 'short' })}, ${time}`;
 }
 
-/** a short message at the bottom of the start page (a status region: read out too) */
+/** a short message at the bottom of the start page (a status region: read out too); a Msg is drawn again in the
+ *  page's language when that changes (a message about the change itself) */
 let pageToastTimer: ReturnType<typeof setTimeout> | undefined;
-function pageToast(msg: string) {
-  const t = $('#page-toast');
-  t.textContent = msg;
+function pageToast(msg: string | Msg) {
+  const el = $('#page-toast');
+  live(el, typeof msg === 'string' ? () => msg : msg);
   clearTimeout(pageToastTimer);
-  pageToastTimer = setTimeout(() => { t.textContent = ''; }, 5000);
+  pageToastTimer = setTimeout(() => live(el, () => ''), 5000);
 }
 
 /** the controls sheet of the start page, in a dialog (F9, Controls, while the game runs), at the page's tab and
@@ -644,7 +686,7 @@ function notice(text: string, who?: string) {
   if (who && !FRIEND_NOTICES) return;
   const box = $('#notices'), line = document.createElement('div');
   if (who && text.startsWith(who)) { const b = document.createElement('b'); b.textContent = who; line.append(b, text.slice(who.length)); }
-  else line.textContent = text;
+  else line.textContent = t(text);                 // the page's own (net/index.ts), English in the log
   placeNotices();
   box.append(line);
   while (box.childElementCount > 4) box.firstElementChild!.remove();
@@ -714,16 +756,16 @@ function toast(msg: string, ms: number) {
 /** F12: the next frame the renderer draws, as a PNG beside the saves (Saves on the start page shows it) */
 async function screenshot() {
   const r = session?.renderer;
-  if (!r?.dump) { toast('No screenshot: the picture is not there yet.', 2500); return; }
+  if (!r?.dump) { toast(t('No screenshot: the picture is not there yet.'), 2500); return; }
   try {
     const png = await r.dump('screenshot');
     if (!png.size) throw new Error('the game ended first');
     const name = await saveScreenshot(SAVE, png);
     log.add(`[app] screenshot ${name}, ${fmtBytes(png.size)}`);
-    toast('Screenshot saved: Saves on the start page shows it.', 2500);
+    toast(t('Screenshot saved: Saves on the start page shows it.'), 2500);
   } catch (e) {
     log.add(`[app] the screenshot failed: ${e}`);
-    toast(`The screenshot failed: ${e instanceof Error ? e.message : e}`, 4000);
+    toast(t('The screenshot failed: {error}', { error: e instanceof Error ? e.message : String(e) }), 4000);
   }
 }
 
@@ -731,23 +773,26 @@ async function screenshot() {
 function openMenu() {
   const m = $<HTMLDialogElement>('#menu');
   if (m.open) { m.close(); return; }
-  m.querySelector<HTMLButtonElement>('[data-act="fullscreen"]')!.textContent = isFullscreen() ? 'Leave full screen' : 'Full screen';
-  m.querySelector<HTMLButtonElement>('[data-act="fps"]')!.textContent = `Frame-rate counter: ${fps.mode}`;
+  m.querySelector<HTMLButtonElement>('[data-act="fullscreen"]')!.textContent = isFullscreen() ? t('Leave full screen') : t('Full screen');
+  m.querySelector<HTMLButtonElement>('[data-act="fps"]')!.textContent = fpsLabel(fps.mode);
   const solid = m.querySelector<HTMLButtonElement>('[data-act="solid"]')!;
   solid.hidden = solidCars === null || !session?.net?.solid;
-  solid.textContent = `Ghost mode: ${solidCars ? 'off' : 'on'}`;
+  solid.textContent = ghostLabel();
   m.querySelector<HTMLButtonElement>('[data-act="quit"]')!.textContent = quitLabel();
   const line = $('#menu-save');
-  if (saved) line.textContent = `Last saved at ${when(saved.at)} (${saved.name}).`;
+  if (saved) line.textContent = t('Last saved at {when} ({name}).', { when: when(saved.at), name: saved.name });
   else {
-    line.textContent = 'Nothing saved during this game yet.';
+    line.textContent = t('Nothing saved during this game yet.');
     void newestProfile().then(p => {
-      if (!saved && m.open) line.textContent = p ? `Nothing saved during this game yet. Last save: ${when(p.mtime)} (${p.name}).` : 'No profile is saved in this browser yet.';
+      if (!saved && m.open) line.textContent = p ? t('Nothing saved during this game yet. Last save: {when} ({name}).', { when: when(p.mtime), name: p.name }) : t('No profile is saved in this browser yet.');
     });
   }
   $('#stage').classList.add('cursor');
   m.showModal();
 }
+/** the menu's frame-rate counter and Ghost mode buttons, with what they are at now */
+const fpsLabel = (mode: string) => t('Frame-rate counter: {mode}', { mode: t(mode === 'on' ? N('on') : mode === 'detailed' ? N('detailed') : N('off')) });
+const ghostLabel = () => solidCars ? t('Ghost mode: off') : t('Ghost mode: on');
 async function menuAction(act: string) {
   const m = $<HTMLDialogElement>('#menu');
   switch (act) {
@@ -756,12 +801,12 @@ async function menuAction(act: string) {
       m.close();
       toggleFullscreen();
       break;
-    case 'fps': fps.cycle(); m.querySelector<HTMLButtonElement>('[data-act="fps"]')!.textContent = `Frame-rate counter: ${fps.mode}`; break;
+    case 'fps': fps.cycle(); m.querySelector<HTMLButtonElement>('[data-act="fps"]')!.textContent = fpsLabel(fps.mode); break;
     case 'solid': {
       if (solidCars === null || !session?.net?.solid) break;
       solidCars = !solidCars;
       session.net.solid(solidCars);
-      m.querySelector<HTMLButtonElement>('[data-act="solid"]')!.textContent = `Ghost mode: ${solidCars ? 'off' : 'on'}`;
+      m.querySelector<HTMLButtonElement>('[data-act="solid"]')!.textContent = ghostLabel();
       // and in settings.ini for the next game, as Settings, Online, Ghost mode would
       const text = putKey(settingsText ?? TEMPLATE, 'roam_collide', solidCars ? 'on' : 'off').text;
       try { await writeFile(SAVE, 'settings.ini', text); settingsText = text; void settings.refresh(); }
@@ -774,7 +819,7 @@ async function menuAction(act: string) {
       m.close();
       if (!inLine || !session?.net?.offline) break;
       session.net.offline();
-      toast('Playing offline: you left the line. Free roam and Online stay off until the next game.', 5000);
+      toast(t('Playing offline: you left the line. Free roam and Online stay off until the next game.'), 5000);
       break;
     case 'log': downloadLog(); break;
     case 'quit': {
@@ -783,17 +828,17 @@ async function menuAction(act: string) {
       if (!s) break;
       const stage = quitStage(s);
       if (stage === 0) {
-        if (s.requestQuit()) { quitAt = { s, t: performance.now(), forced: false }; toast('Quitting: the game saves and closes.', 5000); break; }
+        if (s.requestQuit()) { quitAt = { s, t: performance.now(), forced: false }; toast(t('Quitting: the game saves and closes.'), 5000); break; }
       } else if (stage === 1) {
         // the game's own second-request rule: open save files are finished, then it exits
-        if (await confirmBox('Close the game now?', 'The game has not closed yet (a loading screen ignores Quit). Closing now finishes any save in progress first.', 'Close now', true, 'quit') && session === s) {
-          if (s.requestQuit()) { quitAt = { s, t: performance.now(), forced: true }; toast('Closing the game.', 4000); break; }
+        if (await confirmBox(t('Close the game now?'), t('The game has not closed yet (a loading screen ignores Quit). Closing now finishes any save in progress first.'), t('Close now'), true, 'quit') && session === s) {
+          if (s.requestQuit()) { quitAt = { s, t: performance.now(), forced: true }; toast(t('Closing the game.'), 4000); break; }
         } else break;
       }
       // the game cannot be asked (any more), or it did not close when asked twice
-      if (await confirmBox('Stop the game now?', s.canQuit()
-          ? 'The game did not close when asked. Stopping it ends it at once: progress since it last saved is lost.'
-          : 'The game cannot be asked to quit, so it is stopped at once. Progress since it last saved is lost.', 'Stop the game', true, 'quit') && session === s) s.terminate();
+      if (await confirmBox(t('Stop the game now?'), s.canQuit()
+          ? t('The game did not close when asked. Stopping it ends it at once: progress since it last saved is lost.')
+          : t('The game cannot be asked to quit, so it is stopped at once. Progress since it last saved is lost.'), t('Stop the game'), true, 'quit') && session === s) s.terminate();
       break;
     }
   }
@@ -815,12 +860,12 @@ function quitStage(s: GameSession): 0 | 1 | 2 {
   return quitAt.forced && performance.now() - quitAt.t > STOP_AFTER_MS ? 2 : 1;
 }
 function quitLabel(): string {
-  if (!session) return 'Quit game';
-  return ['Quit game', 'Close the game now', 'Stop the game'][quitStage(session)];
+  if (!session) return t('Quit game');
+  return [t('Quit game'), t('Close the game now'), t('Stop the game')][quitStage(session)];
 }
 
 // ------------------------------------------------------------- helpers --
-function confirmBox(title: string, body: Node | string, ok: string, danger = false, about = '', cancel = 'Cancel'): Promise<boolean> {
+function confirmBox(title: string, body: Node | string, ok: string, danger = false, about = '', cancel = t('Cancel')): Promise<boolean> {
   return choiceBox(title, body, ok, cancel, danger, about).then(v => v === 'ok');
 }
 /** the same, with which way it closed: 'ok', 'cancel' (the cancel button), '' (Esc) */
@@ -846,17 +891,18 @@ async function loadModule() {
   clearTimeout(moduleTimer);
   if (moduleLoading || loaded) return;
   moduleLoading = true;
-  setCheck({ id: 'module', label: 'Game module', state: 'pending', detail: moduleFails ? `Loading again (attempt ${moduleFails + 1}).` : 'Loading.' });
+  setCheck(moduleFails ? check('module', N('Game module'), 'pending', N('Loading again (attempt {n}).'), undefined, { n: moduleFails + 1 })
+    : check('module', N('Game module'), 'pending', N('Loading.')));
   try {
     loaded = await loadGame((got, total) => {
       setProgress(total ? got / total : 0);
-      if (phase === 'boot') $('#status-sub').textContent = `Loading the game: ${fmtBytes(got)} of ${fmtBytes(total)}.`;
+      if (phase === 'boot') setSub(T('Loading the game: {got} of {total}.', { got: fmtBytes(got), total: fmtBytes(total) }));
     });
     setProgress(1);
     log.add(`[app] game module ${loaded.info.rev}: ${fmtBytes(loaded.info.size)} in ${loaded.ms.toFixed(0)} ms, ${loaded.transferred} bytes transferred${moduleFails ? `, after ${moduleFails} failed attempts` : ''}`);
     moduleFails = 0;
     moduleLoading = false;
-    setCheck({ id: 'module', label: `Game module ${loaded.info.rev}`, state: 'ok', detail: `${fmtBytes(loaded.info.size)}, ready.` });
+    setCheck(check('module', N('Game module {rev}'), 'ok', N('{size}, ready.'), undefined, { rev: loaded.info.rev, size: fmtBytes(loaded.info.size) }));
     keepForOffline();
     afterUpdate();
     void checkNewer();
@@ -866,7 +912,7 @@ async function loadModule() {
     log.add(`[app] the game module did not load (attempt ${moduleFails}): ${e}; next try in ${wait} s`);
     moduleLoading = false;
     setProgress(0);
-    setCheck({ id: 'module', label: 'Game module', state: 'fail', detail: `The game did not load (${e}). Trying again in ${wait} s, or press Retry.` });
+    setCheck(check('module', N('Game module'), 'fail', N('The game did not load ({error}). Trying again in {n} s, or press Retry.'), 'MODULE-LOAD', { error: String(e), n: wait }));
     moduleTimer = setTimeout(() => void loadModule(), wait * 1000);
   }
 }
@@ -915,7 +961,7 @@ async function checkNewer() {
   const playing = !!session || starting;
   if (!playing && calm() && await reloadFor(rev, 'nothing on the page to lose', true)) return;
   log.add(`[app] the server has game ${rev} now, this page ${loaded.info.rev}: ${playing ? 'said over the game, offered when it ends' : 'Reload offered'}`);
-  if (playing) toast('A new version of the game is on the server. Quit when it suits you: the start page offers it, and your saves stay.', 10000);
+  if (playing) toast(t('A new version of the game is on the server. Quit when it suits you: the start page offers it, and your saves stay.'), 10000);
   showNewer();
 }
 /** nothing on the start page a reload would lose, and no tool driving it */
@@ -955,11 +1001,11 @@ function afterUpdate() {
 /** the offer (once a game has run here, with a word on its log: only in this page, a reload clears it), or that
  *  this page is the new version */
 function showNewer() {
-  const line = $('#newer');
-  line.textContent = newer ? (byPlay() ? 'A new version of the game is on the server: Play reloads this page with it. Your saves and settings stay.'
-    : 'A new version of the game is on the server. Reload this page to play it: your saves and settings stay.') +
-    (lastExit ? ' Download the log first if you want to keep it: the reload clears it.' : '')
-    : updated ? 'This page reloaded for the new version of the game. Your saves and settings stayed.' : '';
+  const line = $('#newer'), byP = byPlay(), log = !!lastExit, n = newer, u = updated;
+  live(line, () => n ? (byP ? t('A new version of the game is on the server: Play reloads this page with it. Your saves and settings stay.')
+    : t('A new version of the game is on the server. Reload this page to play it: your saves and settings stay.')) +
+    (log ? ' ' + t('Download the log first if you want to keep it: the reload clears it.') : '')
+    : u ? t('This page reloaded for the new version of the game. Your saves and settings stayed.') : '');
   line.hidden = !newer && !updated;
   $('#reload').hidden = !newer;
 }
@@ -988,13 +1034,13 @@ function showOverrides(given: string[], dev: boolean) {
   o.hidden = !given.length;
   if (!given.length) return;
   if (!dev) {
-    o.textContent = `This page's address carries test settings (${given.join(', ')}). They work only on a development server and are ignored here: the game runs with your own settings.`;
+    live(o, T('This page\'s address carries test settings ({names}). They work only on a development server and are ignored here: the game runs with your own settings.', { names: given.join(', ') }));
     return;
   }
   const env = Object.entries(ENVIRONMENT).map(([k, v]) => `${k}=${v}`);
-  o.textContent = `Test settings from this page's address (development server): save folder "${SAVE}"` +
-    (env.length ? `; ${env.join(', ')} (wins over Settings)` : '') +
-    ['fresh', 'reg', 'script', 'artifacts', 'dumpscale', 'away'].filter(k => q.has(k)).map(k => `; ${k}`).join('') + '.';
+  live(o, () => t('Test settings from this page\'s address (development server): save folder "{folder}"', { folder: SAVE }) +
+    (env.length ? t('; {vars} (wins over Settings)', { vars: env.join(', ') }) : '') +
+    ['fresh', 'reg', 'script', 'artifacts', 'dumpscale', 'away'].filter(k => q.has(k)).map(k => `; ${k}`).join('') + '.');
 }
 
 export async function boot() {
@@ -1007,16 +1053,24 @@ export async function boot() {
   lobbyPanel = new LobbyPanel($('#lobby'), $('#lobby-cover'), logLine);
   // made here once: a closure made per game (in startGame) would keep that game's scope reachable
   fps.extra = () => session?.stats() ?? {};
+  // the language this browser showed last, at once (settings.ini says which it is: applyLanguage, once it is read)
+  void setLanguage(lastLanguage(), logLine);
   settings = new SettingsPanel($('#settings'), {
     // another language or texture pack counts other files as the game data (its pack); a keyphrase sends the file
-    saveDir: SAVE, environment: ENVIRONMENT, defaults: DEVICE, onSaved: t => {
-      const was = language() + '/' + texpack(); settingsText = t;
+    saveDir: SAVE, environment: ENVIRONMENT, defaults: DEVICE, onSaved: text => {
+      const was = language() + '/' + texpack(); settingsText = text;
       if (language() + '/' + texpack() !== was) void saves.refresh();
       vault?.changed(); players?.now();
+      applyLanguage();
     },
+    onLoaded: applyLanguage,
     // the tab that owns the saves is the one whose Play reads the file: another tab only looks
     readOnly: () => !instance.owner, say: pageToast,
   }, $('#online'));
+  // the language picker at the top: the same setting as Settings, Game, Language
+  const pick = $<HTMLSelectElement>('#lang-pick');
+  pick.replaceChildren(...LANGUAGES.map(l => Object.assign(document.createElement('option'), { value: l, textContent: NATIVE[l], lang: LOCALE[l] })));
+  pick.onchange = () => void settings.set('language', pick.value);
   // who plays on this server now (Online): only while no game runs here; with free roam on in a room, that room too
   players = watchPlayers(line => settings.setStatus(line), () => !session && !starting, setReach,
     () => { const e = resolved().env; return e.NFSU2_ROAM === '1' ? e.NFSU2_ROAM_ROOM ?? '' : ''; });
@@ -1048,7 +1102,7 @@ export async function boot() {
     if (session && (e.code === 'F8' || e.code === 'F9' || e.code === 'F12')) {
       e.preventDefault(); e.stopImmediatePropagation();
       if (e.repeat) return;
-      if (e.code === 'F8') toast(`Frame-rate counter: ${fps.cycle()}`, 1500); else if (e.code === 'F9') openMenu(); else void screenshot();
+      if (e.code === 'F8') toast(fpsLabel(fps.cycle()), 1500); else if (e.code === 'F9') openMenu(); else void screenshot();
       return;
     }
     // Enter plays only when nothing else has the focus (or Play itself does): a
@@ -1060,11 +1114,17 @@ export async function boot() {
     }
   }, { capture: true });
   window.addEventListener('beforeunload', e => { if (session) { e.preventDefault(); e.returnValue = ''; } });
-  document.addEventListener('fullscreenchange', () => { if (!isFullscreen() && session) toast(`Full screen left. ${cap(menuName())} has it.`, 3000); });
+  document.addEventListener('fullscreenchange', () => { if (!isFullscreen() && session) toast(t('Full screen left. {menu} has it.', { menu: cap(menuName()) }), 3000); });
   noPinchZoom();
   // the menu's button on the game: on a touch screen from the start, elsewhere from the first touch
   markTouch();
   keySheet = controlsSheet($('#keys'), 'keys', { follow: true });
+  // what the page drew itself, again in the language picked (the markup and the live texts redraw themselves)
+  onLanguage(() => {
+    renderProblems(); evaluate(); settings.render(); void saves.refresh(); vault.refresh(); keySheet.relabel(); lobbyPanel.redraw(); touch.relabel();
+    helpSheet = null; $('#help-body').replaceChildren();
+    syncPicker();
+  });
   const stageMenu = $<HTMLButtonElement>('#stage-menu');
   stageMenu.onpointerdown = e => e.preventDefault();     // the canvas keeps the focus (and with it the keyboard)
   stageMenu.onclick = () => { if (session) openMenu(); };
@@ -1076,10 +1136,10 @@ export async function boot() {
 
   setCheck(checkBrowser());
   setCheck(checkIsolation());
-  setCheck({ id: 'gpu', label: 'WebGPU', state: 'pending', detail: 'Asking for a graphics adapter.' });
-  setCheck({ id: 'storage', label: 'Browser storage', state: 'pending', detail: 'Checking.' });
-  setCheck({ id: 'module', label: 'Game module', state: 'pending', detail: 'Loading.' });
-  setPhase('boot', 'Loading', 'Loading the game.');
+  setCheck(check('gpu', 'WebGPU', 'pending', N('Asking for a graphics adapter.')));
+  setCheck(check('storage', N('Browser storage'), 'pending', N('Checking.')));
+  setCheck(check('module', N('Game module'), 'pending', N('Loading.')));
+  setPhase('boot', T('Loading'), T('Loading the game.'));
   setProgress(0);
 
   showOverrides(given, dev);
@@ -1089,14 +1149,14 @@ export async function boot() {
   void settings.refresh();
   void saves.refresh();
   void vault.start();
-  void instance.whenOwner.then(async () => { await loadSettings(); evaluate(); void settings.refresh(); void saves.refresh(); vault.ownerNow(); });
+  void instance.whenOwner.then(async () => { await loadSettings(); evaluate(); void settings.refresh(); void saves.refresh(); vault.ownerNow(); syncPicker(); });
   void checkGpu().then(setCheck);
   // Firefox's answer to its storage prompt comes later: the check again then
   void checkStorage().then(({ answer, ...c }) => { setCheck(c); void answer?.then(setCheck); });
   refreshMeasured = measureRefresh(60).then(r => { displayHz = r.hz; log.add(`[app] display refresh ${r.raw.toFixed(1)} Hz -> ${r.hz}`); });
 
   if (crossOriginIsolated) await loadModule();
-  else setCheck({ id: 'module', label: 'Game module', state: 'fail', detail: 'Not loaded: the page is not isolated (see above).' });
+  else setCheck(check('module', N('Game module'), 'fail', N('Not loaded: the page is not isolated (see above).'), 'MODULE-NOT-ISOLATED'));
   evaluate();
   (window as any).__nfsu2 = {
     get phase() { return phase; }, get lastExit() { return lastExit; }, get fps() { return { game: fps.gameFps, page: fps.pageFps, source: $('#fps').dataset.source }; },

@@ -1,9 +1,22 @@
 // What this browser and this page need before the game can start, each with
 // a message that says what to do when it is missing.  The start page shows
-// only the ones that fail or warn.
+// only the ones that fail or warn, in the page's language (i18n.ts), each
+// problem with its code: the same in every language, so a screenshot says
+// which one it is.
+
+import { fill, N, type Vars } from './i18n';
 
 export type CheckState = 'pending' | 'ok' | 'warn' | 'fail';
-export interface Check { id: string; label: string; state: CheckState; detail: string }
+/**
+ * label and detail in English, filled in (the log, the tests); tl and td: the same as written, with {name}s for v,
+ * which the page shows in its language; code: a failure's or warning's fixed name (GPU-ADAPTER-WIN)
+ */
+export interface Check { id: string; label: string; state: CheckState; detail: string; code?: string; tl?: string; td?: string; v?: Vars }
+
+/** a check whose label and detail are English with {name}s for v */
+export function check(id: string, label: string, state: CheckState, detail: string, code?: string, v?: Vars): Check {
+  return { id, label: fill(label, v), state, detail: fill(detail, v), code, tl: label, td: detail, v };
+}
 
 export const MIN_CHROME = 140;
 /** Atomics.waitAsync (the renderer's and the network's doorbells) is in Firefox from 145 */
@@ -26,9 +39,8 @@ export function firefoxVersion(): number | null {
 
 /** what the messages call this browser: Firefox, Chrome (any Chromium browser) or the browser */
 export function browserName(): string {
-  return firefoxVersion() !== null ? 'Firefox' : chromeVersion() ? 'Chrome' : 'the browser';
+  return firefoxVersion() !== null ? 'Firefox' : chromeVersion() ? 'Chrome' : N('the browser');
 }
-const upper = (s: string) => s[0].toUpperCase() + s.slice(1);
 
 /**
  * Which browser this is: a warning at most, never a reason to stop.  What the
@@ -38,41 +50,41 @@ const upper = (s: string) => s[0].toUpperCase() + s.slice(1);
 export function checkBrowser(): Check {
   const f = firefoxVersion();
   if (f !== null) {
-    if (f < MIN_FIREFOX) return { id: 'browser', label: `Firefox ${f}`, state: 'warn', detail: `Only the latest Firefox is tested (${MIN_FIREFOX} or newer). Update Firefox (Help, About Firefox) if something does not work.` };
-    return { id: 'browser', label: `Firefox ${f}`, state: 'ok', detail: 'A tested browser.' };
+    if (f < MIN_FIREFOX) return check('browser', 'Firefox {v}', 'warn', N('Only the latest Firefox is tested ({min} or newer). Update Firefox (Help, About Firefox) if something does not work.'), 'BROWSER-FIREFOX-OLD', { v: f, min: MIN_FIREFOX });
+    return check('browser', 'Firefox {v}', 'ok', N('A tested browser.'), undefined, { v: f });
   }
   const c = chromeVersion();
-  const label = 'Browser';
-  if (!c) return { id: 'browser', label, state: 'warn', detail: 'Only Google Chrome and Firefox are tested. This browser may work if every other check passes.' };
-  if (c.major < MIN_CHROME) return { id: 'browser', label: `Chrome ${c.major}`, state: 'warn', detail: `Only the latest Chrome is tested (${MIN_CHROME} or newer). Update Chrome (Help, About Google Chrome) if something does not work.` };
-  if (c.brand !== 'Google Chrome') return { id: 'browser', label: `${c.brand} ${c.major}`, state: 'warn', detail: 'Only Google Chrome and Firefox are tested. This browser may work if every other check passes.' };
-  return { id: 'browser', label: `Chrome ${c.major}`, state: 'ok', detail: 'A tested browser.' };
+  const other = N('Only Google Chrome and Firefox are tested. This browser may work if every other check passes.');
+  if (!c) return check('browser', N('Browser'), 'warn', other, 'BROWSER-OTHER');
+  if (c.major < MIN_CHROME) return check('browser', 'Chrome {v}', 'warn', N('Only the latest Chrome is tested ({min} or newer). Update Chrome (Help, About Google Chrome) if something does not work.'), 'BROWSER-CHROME-OLD', { v: c.major, min: MIN_CHROME });
+  if (c.brand !== 'Google Chrome') return check('browser', '{brand} {v}', 'warn', other, 'BROWSER-CHROMIUM', { brand: c.brand, v: c.major });
+  return check('browser', 'Chrome {v}', 'ok', N('A tested browser.'), undefined, { v: c.major });
 }
 
 export function checkIsolation(): Check {
-  const label = 'Secure, isolated page';
+  const label = N('Secure, isolated page');
   if (!isSecureContext) {
-    return { id: 'isolation', label, state: 'fail',
-      detail: `This address is not secure, so ${browserName()} turns off what the game needs. Open the server's https:// address instead.` };
+    return check('isolation', label, 'fail', N('This address is not secure, so {browser} turns off what the game needs. Open the server\'s https:// address instead.'),
+      'PAGE-NOT-SECURE', { browser: browserName() });
   }
   if (!crossOriginIsolated || typeof SharedArrayBuffer === 'undefined') {
-    return { id: 'isolation', label, state: 'fail', detail: 'The page is not cross-origin isolated (no SharedArrayBuffer). Open it from the NFSU2 web server, not another server.' };
+    return check('isolation', label, 'fail', N('The page is not cross-origin isolated (no SharedArrayBuffer). Open it from the NFSU2 web server, not another server.'), 'PAGE-NOT-ISOLATED');
   }
   try { new WebAssembly.Memory({ initial: 1, maximum: 65536, shared: true }); }
-  catch (e) { return { id: 'isolation', label, state: 'fail', detail: `Shared 4 GB WebAssembly memory is not available: ${e}` }; }
+  catch (e) { return check('isolation', label, 'fail', N('Shared 4 GB WebAssembly memory is not available: {error}'), 'PAGE-NO-MEMORY', { error: String(e) }); }
   if (typeof (Atomics as { waitAsync?: unknown }).waitAsync !== 'function') {
-    return { id: 'isolation', label, state: 'fail', detail: `This browser is too old for the game (no Atomics.waitAsync). Update ${browserName()}.` };
+    return check('isolation', label, 'fail', N('This browser is too old for the game (no Atomics.waitAsync). Update {browser}.'), 'PAGE-NO-WAITASYNC', { browser: browserName() });
   }
-  return { id: 'isolation', label, state: 'ok', detail: 'HTTPS or localhost, cross-origin isolated, threads and 4 GB memory available.' };
+  return check('isolation', label, 'ok', N('HTTPS or localhost, cross-origin isolated, threads and 4 GB memory available.'));
 }
 
 export async function checkGpu(): Promise<Check & { adapter?: string }> {
   const label = 'WebGPU';
   const gpu = (navigator as any).gpu as GPU | undefined;
   const ff = firefoxVersion() !== null;
-  if (!gpu) return { id: 'gpu', label, state: 'fail', detail: ff
-    ? 'WebGPU is off in this Firefox. Update Firefox (it has WebGPU on Windows and macOS); where it is still off, as on Linux and Android, set dom.webgpu.enabled to true in about:config, or play in Chrome.'
-    : 'WebGPU is off in this browser. Update Chrome; on Linux enable it in chrome://flags (#enable-unsafe-webgpu).' };
+  if (!gpu) return ff
+    ? check('gpu', label, 'fail', N('WebGPU is off in this Firefox. Update Firefox (it has WebGPU on Windows and macOS); where it is still off, as on Linux and Android, set dom.webgpu.enabled to true in about:config, or play in Chrome.'), 'GPU-OFF-FIREFOX')
+    : check('gpu', label, 'fail', N('WebGPU is off in this browser. Update Chrome; on Linux enable it in chrome://flags (#enable-unsafe-webgpu).'), 'GPU-OFF');
   let ad: GPUAdapter | null = null;
   try { ad = await gpu.requestAdapter({ powerPreference: 'high-performance' }); } catch { /* reported below */ }
   // Chrome on Linux runs WebGPU on Vulkan while the rest of it stays on OpenGL, so
@@ -80,26 +92,25 @@ export async function checkGpu(): Promise<Check & { adapter?: string }> {
   const linux = /Linux/.test(navigator.userAgent) && !/Android/.test(navigator.userAgent);
   // and on Windows on Direct3D 12 only: the D3D11 adapters are compatibility mode, blocklisted
   const windows = /Windows/.test(navigator.userAgent);
-  if (!ad) return { id: 'gpu', label, state: 'fail', detail: ff
-    ? 'Firefox found no usable graphics adapter (its blocklist may turn WebGPU off for this graphics driver). Check about:support, Graphics, or play in Chrome.'
+  if (!ad) return ff
+    ? check('gpu', label, 'fail', N('Firefox found no usable graphics adapter (its blocklist may turn WebGPU off for this graphics driver). Check about:support, Graphics, or play in Chrome.'), 'GPU-ADAPTER-FIREFOX')
     : linux
-      ? 'Chrome found no usable graphics adapter. On Linux Chrome runs WebGPU on Vulkan, so most likely the Vulkan driver for your graphics is missing: install it (mesa-vulkan-drivers on Debian, Ubuntu and Fedora), then restart Chrome. Where chrome://gpu says WebGPU is disabled, also enable it in chrome://flags (#enable-unsafe-webgpu).'
+      ? check('gpu', label, 'fail', N('Chrome found no usable graphics adapter. On Linux Chrome runs WebGPU on Vulkan, so most likely the Vulkan driver for your graphics is missing: install it (mesa-vulkan-drivers on Debian, Ubuntu and Fedora), then restart Chrome. Where chrome://gpu says WebGPU is disabled, also enable it in chrome://flags (#enable-unsafe-webgpu).'), 'GPU-ADAPTER-LINUX')
       : windows
-        ? 'Chrome found no usable graphics adapter. On Windows Chrome runs WebGPU on Direct3D 12, which older graphics (Intel HD 4000 and older, for one) do not have: the game cannot run on them. On newer graphics, update the graphics driver, then restart Chrome. Dawn Info in chrome://gpu says why each adapter is blocked.'
-        : 'Chrome found no usable graphics adapter (blocklisted driver or GPU process crash). Check chrome://gpu.' };
+        ? check('gpu', label, 'fail', N('Chrome found no usable graphics adapter. On Windows Chrome runs WebGPU on Direct3D 12, which older graphics (Intel HD 4000 and older, for one) do not have: the game cannot run on them. On newer graphics, update the graphics driver, then restart Chrome. Dawn Info in chrome://gpu says why each adapter is blocked.'), 'GPU-ADAPTER-WIN')
+        : check('gpu', label, 'fail', N('Chrome found no usable graphics adapter (blocklisted driver or GPU process crash). Check chrome://gpu.'), 'GPU-ADAPTER');
   let info = ad.info ? [ad.info.vendor, ad.info.architecture, ad.info.description].filter(Boolean).join(' ') : '';
   const ffg = ff && windows && !info ? firefoxGraphics() : null;
   if (ffg) info = ffg.name;
+  const named = info ? 'WebGPU, {info}' : label;
   // no BC (PowerVR, Mali): the renderer unpacks the textures (web/src/gpu/dxt.ts), so it plays
   if (!ad.features.has('texture-compression-bc')) {
-    return { id: 'gpu', label: `WebGPU${info ? ', ' + info : ''}`, state: 'warn', adapter: info,
-      detail: 'This GPU cannot read the game\'s compressed textures, so they are unpacked as the game loads. That needs about 200 MB more memory, and loading screens may pause for a moment.' };
+    return { ...check('gpu', named, 'warn', N('This GPU cannot read the game\'s compressed textures, so they are unpacked as the game loads. That needs about 200 MB more memory, and loading screens may pause for a moment.'), 'GPU-NO-BC', { info }), adapter: info };
   }
   if (ffg?.integrated) {
-    return { id: 'gpu', label: `WebGPU, ${info}`, state: 'warn', adapter: info,
-      detail: 'Firefox runs the game on the integrated graphics. If this computer also has a graphics card (NVIDIA or AMD), the game runs much better there: in Windows Settings, System, Display, Graphics, set Firefox to High performance, then restart Firefox. Firefox gives the game the graphics its own windows use; Chrome picks the faster one itself.' };
+    return { ...check('gpu', named, 'warn', N('Firefox runs the game on the integrated graphics. If this computer also has a graphics card (NVIDIA or AMD), the game runs much better there: in Windows Settings, System, Display, Graphics, set Firefox to High performance, then restart Firefox. Firefox gives the game the graphics its own windows use; Chrome picks the faster one itself.'), 'GPU-INTEGRATED-FIREFOX', { info }), adapter: info };
   }
-  return { id: 'gpu', label: `WebGPU${info ? ', ' + info : ''}`, state: 'ok', adapter: info, detail: 'Adapter with BC texture compression.' };
+  return { ...check('gpu', named, 'ok', N('Adapter with BC texture compression.'), undefined, { info }), adapter: info };
 }
 
 /**
@@ -134,18 +145,19 @@ function firefoxGraphics(): { name: string; integrated: boolean } | null {
  * safety net (docs/web/PLAYING.md).
  */
 export async function checkStorage(): Promise<Check & { answer?: Promise<Check> }> {
-  const label = 'Browser storage';
+  const label = N('Browser storage');
   try { await navigator.storage.getDirectory(); }
-  catch { return { id: 'storage', label, state: 'fail', detail: 'This browser window cannot store files (a guest or private window?). Saves need the origin private file system.' }; }
-  const verdict = (persisted: boolean): Check => ({ id: 'storage', label, state: 'ok',
-    detail: persisted ? 'Saves and cached game data are kept for good.'
-      : `Saves and cached game data are kept until the disk is nearly full, when ${browserName()} may clear them.` });
+  catch { return check('storage', label, 'fail', N('This browser window cannot store files (a guest or private window?). Saves need the origin private file system.'), 'STORAGE-NONE'); }
+  const verdict = (persisted: boolean): Check => persisted
+    ? check('storage', label, 'ok', N('Saves and cached game data are kept for good.'))
+    : check('storage', label, 'ok', N('Saves and cached game data are kept until the disk is nearly full, when {browser} may clear them.'), undefined, { browser: browserName() });
   const ask = (async () => await navigator.storage.persisted() || await navigator.storage.persist())()
     .catch(() => false);                 // not decisive
   const quick = await Promise.race([ask, new Promise<null>(res => setTimeout(() => res(null), 500))]);
   if (quick !== null) return verdict(quick);
-  return { id: 'storage', label, state: 'warn', answer: ask.then(verdict),
-    detail: `${upper(browserName())} asks, by the address bar, whether this site may keep its data for good: allow it, so that your saves stay when the disk runs low.` };
+  const b = browserName();
+  return { ...check('storage', label, 'warn', N('{Browser} asks, by the address bar, whether this site may keep its data for good: allow it, so that your saves stay when the disk runs low.'),
+    'STORAGE-ASK', { Browser: b === 'the browser' ? N('The browser') : b }), answer: ask.then(verdict) };
 }
 
 export function fmtBytes(n: number): string {

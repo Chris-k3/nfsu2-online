@@ -4,6 +4,7 @@
 // module and every exit terminates all of its workers.
 
 import { startProcess, type GameProcess } from '../host/process';
+import { N } from './i18n';
 import { HostKind } from '../host/abi';
 import {
   attachAudio, attachInput, attachNet, attachRenderer,
@@ -43,7 +44,8 @@ export interface SessionOptions {
   padPage?: PadPage;
   log(line: string): void;
   /** a subsystem the game cannot do without (the renderer) failed to attach */
-  onFatal(what: string): void;
+  /** what: English (the log; the page translates it); code: its fixed name, the same in every language */
+  onFatal(what: string, code?: string): void;
 }
 
 export class GameSession {
@@ -94,7 +96,7 @@ export class GameSession {
     })).then(r => {
       s.renderer = r;
       // without a picture there is no game to play: say so instead of a black screen
-      if (!r && !s.detached) o.onFatal('the graphics (WebGPU renderer) could not start');
+      if (!r && !s.detached) o.onFatal(N('the graphics (WebGPU renderer) could not start'), 'GPU-RENDERER');
     });
     void attach('audio', () => attachAudio(s.proc, { ...common, context: o.audio })).then(a => {
       s.audio = a;

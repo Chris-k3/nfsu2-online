@@ -5,13 +5,14 @@
 
 import { familyOf } from '../input/gamepad';
 import { guessMap, loadMap, saveMap, WheelLearn, wheelOf, type LearnStep } from '../input/wheel';
+import { N, t } from './i18n';
 
 const STEPS: Record<LearnStep, string> = {
-  rest: 'Centre the wheel, then let go of it and of the pedals.',
-  steer: 'Turn the wheel right to where the car should steer all the way, and hold it there. A quarter turn suits this game.',
-  gas: 'Let go of the wheel. Press the gas pedal all the way down and hold it.',
-  brake: 'Let go of the gas. Press the brake pedal all the way down and hold it.',
-  done: 'Done: the wheel is set up in this browser.',
+  rest: N('Centre the wheel, then let go of it and of the pedals.'),
+  steer: N('Turn the wheel right to where the car should steer all the way, and hold it there. A quarter turn suits this game.'),
+  gas: N('Let go of the wheel. Press the gas pedal all the way down and hold it.'),
+  brake: N('Let go of the gas. Press the brake pedal all the way down and hold it.'),
+  done: N('Done: the wheel is set up in this browser.'),
 };
 
 /** the wheel the sheet is about: the first connected one the browser has no standard mapping for, or null */
@@ -20,39 +21,52 @@ function connectedWheel(): Gamepad | null {
   catch { return null; }
 }
 
+const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
 /**
  * The wheel's part of the Controller tab, after the drawing (hidden with no wheel; the drawing hides while one is
- * there).  cap: a key cap with a button's Xbox and PlayStation names (the sheet shows its family's).
+ * there): box, which the sheet puts after the drawing each time it draws it; relabel draws it again in the page's
+ * language.  cap: a key cap with a button's Xbox and PlayStation names (the sheet shows its family's).
  */
 export function wheelSection(pad: HTMLElement, cap: (xb: string, ps: string) => string) {
   const box = document.createElement('div');
   box.className = 'wheel';
   box.hidden = true;
-  box.innerHTML = `<p class="wheel-name"></p>
+  const $ = <T extends HTMLElement>(s: string) => box.querySelector<T>(s)!;
+  let learnBox: HTMLElement, step: HTMLElement, fill: HTMLElement, learnBtn: HTMLButtonElement, guessBtn: HTMLButtonElement;
+  /** what a set-up going on shows now (its step), and the line under the list ('' for the usual one) */
+  let stepText = '', stateText = '';
+
+  function draw() {
+    const row = (dt: string, dd: string) => `<div><dt>${dt}</dt><dd>${esc(t(dd))}</dd></div>`;
+    box.innerHTML = `<p class="wheel-name"></p>
     <dl class="keys">
-      <div><dt>Wheel and pedals</dt><dd>Steer, throttle, brake and reverse</dd></div>
-      <div><dt>Left and right paddles</dt><dd>Shift down, shift up</dd></div>
-      <div><dt>${cap('A', 'cross')} ${cap('X', 'square')}</dt><dd>Nitrous, handbrake</dd></div>
-      <div><dt>${cap('B', 'circle')} ${cap('Y', 'triangle')}</dt><dd>Look back, camera</dd></div>
-      <div><dt>${cap('view', 'Share')} ${cap('menu', 'Options')}</dt><dd>Respawn, pause</dd></div>
-      <div><dt>${cap('up', 'up')} ${cap('left', 'left')} ${cap('right', 'right')}</dt><dd>Start event, map, messages</dd></div>
+      ${row(esc(t('Wheel and pedals')), N('Steer, throttle, brake and reverse'))}
+      ${row(esc(t('Left and right paddles')), N('Shift down, shift up'))}
+      ${row(`${cap('A', 'cross')} ${cap('X', 'square')}`, N('Nitrous, handbrake'))}
+      ${row(`${cap('B', 'circle')} ${cap('Y', 'triangle')}`, N('Look back, camera'))}
+      ${row(`${cap('view', 'Share')} ${cap('menu', 'Options')}`, N('Respawn, pause'))}
+      ${row(`${cap('up', 'up')} ${cap('left', 'left')} ${cap('right', 'right')}`, N('Start event, map, messages'))}
     </dl>
     <div class="pad-foot">
       <p class="hint wheel-state"></p>
       <div class="row">
-        <button type="button" class="text-btn" data-wheel="guess" hidden>Use the guess</button>
-        <button type="button" class="btn" data-wheel="learn">Set up the wheel</button>
+        <button type="button" class="text-btn" data-wheel="guess" hidden>${esc(t('Use the guess'))}</button>
+        <button type="button" class="btn" data-wheel="learn">${esc(t('Set up the wheel'))}</button>
       </div>
     </div>
-    <div class="wheel-learn" hidden>
+    <div class="wheel-learn"${learn ? '' : ' hidden'}>
       <p class="wheel-step" aria-live="polite"></p>
       <div class="bar"><div class="bar-fill"></div></div>
-      <button type="button" class="text-btn" data-wheel="cancel">Cancel</button>
+      <button type="button" class="text-btn" data-wheel="cancel">${esc(t('Cancel'))}</button>
     </div>`;
-  pad.append(box);
-  const $ = <T extends HTMLElement>(s: string) => box.querySelector<T>(s)!;
-  const learnBox = $('.wheel-learn'), step = $('.wheel-step'), fill = $('.bar-fill');
-  const learnBtn = $<HTMLButtonElement>('[data-wheel="learn"]'), guessBtn = $<HTMLButtonElement>('[data-wheel="guess"]');
+    learnBox = $('.wheel-learn'); step = $('.wheel-step'); fill = $('.bar-fill');
+    learnBtn = $<HTMLButtonElement>('[data-wheel="learn"]'); guessBtn = $<HTMLButtonElement>('[data-wheel="guess"]');
+    if (learn) { step.textContent = t(stepText); learnBtn.disabled = true; }
+    learnBtn.onclick = start;
+    $<HTMLButtonElement>('[data-wheel="cancel"]').onclick = () => stop();
+    guessBtn.onclick = () => { saveMap(id, null); stateText = ''; refresh(); };
+  }
 
   let id = '', learn: WheelLearn | null = null, raf = 0;
 
@@ -66,27 +80,28 @@ export function wheelSection(pad: HTMLElement, cap: (xb: string, ps: string) => 
     if (!g) return;
     $('.wheel-name').textContent = familyOf(g.id).name;
     const kept = !!loadMap(g.id);
-    $('.wheel-state').textContent = kept ? 'Set up in this browser.'
-      : 'How it steers and brakes is a guess from how the browser reports it. Wrong? Set it up.';
+    $('.wheel-state').textContent = stateText ? t(stateText) : kept ? t('Set up in this browser.')
+      : t('How it steers and brakes is a guess from how the browser reports it. Wrong? Set it up.');
     guessBtn.hidden = !kept;
-    learnBtn.textContent = kept ? 'Set up again' : 'Set up the wheel';
+    learnBtn.textContent = kept ? t('Set up again') : t('Set up the wheel');
   }
 
+  /** the set-up ends; msg: what the line under the list says then */
   function stop(msg?: string) {
     cancelAnimationFrame(raf);
     learn = null;
     learnBox.hidden = true;
     learnBtn.disabled = false;
+    stateText = msg ?? '';
     refresh();
-    if (msg) $('.wheel-state').textContent = msg;
   }
 
   function tick() {
     // the tab or the dialog closed: no set-up behind the player's back
     if (!learn || !(box.checkVisibility?.() ?? box.offsetParent !== null)) { stop(); return; }
     const g = navigator.getGamepads?.().find(p => !!p?.connected && p.id === id);
-    if (!g) { stop('The wheel went away before its set-up was done.'); return; }
-    if (learn.feed(Array.from(g.axes), performance.now())) step.textContent = STEPS[learn.step];
+    if (!g) { stop(N('The wheel went away before its set-up was done.')); return; }
+    if (learn.feed(Array.from(g.axes), performance.now())) { stepText = STEPS[learn.step]; step.textContent = t(stepText); }
     fill.style.width = `${Math.round(learn.progress * 100)}%`;
     if (learn.step === 'done') {
       saveMap(id, learn.map());
@@ -96,23 +111,24 @@ export function wheelSection(pad: HTMLElement, cap: (xb: string, ps: string) => 
     raf = requestAnimationFrame(tick);
   }
 
-  learnBtn.onclick = () => {
+  function start() {
     const g = connectedWheel();
     if (!g) { refresh(); return; }
     id = g.id;
     const info = wheelOf(g.id)!;
     learn = new WheelLearn(loadMap(g.id) ?? guessMap(info, Array.from(g.axes), g.buttons.length));
-    step.textContent = STEPS.rest;
+    stateText = '';
+    stepText = STEPS.rest;
+    step.textContent = t(stepText);
     fill.style.width = '0%';
     learnBox.hidden = false;
     learnBtn.disabled = true;
     raf = requestAnimationFrame(tick);
-  };
-  $<HTMLButtonElement>('[data-wheel="cancel"]').onclick = () => stop();
-  guessBtn.onclick = () => { saveMap(id, null); refresh(); };
+  }
 
-  addEventListener('gamepadconnected', refresh);
-  addEventListener('gamepaddisconnected', refresh);
+  draw();
+  addEventListener('gamepadconnected', () => { stateText = ''; refresh(); });
+  addEventListener('gamepaddisconnected', () => { stateText = ''; refresh(); });
   refresh();
-  return { refresh };
+  return { box, refresh, relabel() { draw(); refresh(); } };
 }
