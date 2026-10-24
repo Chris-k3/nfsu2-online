@@ -10,7 +10,7 @@ import type { InputSubsystem, NetSubsystem } from './contract';
 import { t } from './i18n';
 
 export interface AwayLimits { inputMs: number; hiddenMs: number; warnMs: number }
-export const AWAY_LIMITS: AwayLimits = { inputMs: 20 * 60_000, hiddenMs: 10 * 60_000, warnMs: 60_000 };
+export const AWAY_LIMITS: AwayLimits = { inputMs: 12 * 60_000, hiddenMs: 8 * 60_000, warnMs: 2 * 60_000 };
 
 const TICK_MS = 1000;
 const span = (ms: number) => ms >= 60_000 ? `${Math.round(ms / 60_000)} min` : `${Math.round(ms / 1000)} s`;
