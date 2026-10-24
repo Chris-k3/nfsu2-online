@@ -6152,6 +6152,55 @@ int roam_game_pool_grow(uint32_t size){
     if (x && size <= base + xn) return 0;
     return 1;
 }
+/* No room in the Cars pool for a load.  A step of a load sizes what it reads
+ * (a ride's textures 0x63AD8A, its models 0x63A2A2, ...: 0x48D420 counts
+ * what does not fit into the largest free block) and calls the purge (0x63A1B0
+ * with phase 1 allowed) until it fits or nothing more can go.  The purge
+ * frees a ride nobody uses, and when there is none (phase 1) it takes the
+ * textures off the rides it holds, the ones on cars too, and has their car
+ * type's render infos made again: a car keeps a texture only another ride
+ * holds (a car type shown twice), which goes with that ride, and draws with
+ * it freed -- "memory access out of bounds" in its shadow or a part
+ * (0x620AE0; overrides.c sub_00639f20 for the purge's lost references).  With
+ * friends' cars that is no rare case: a few dozen in use, many of them loading
+ * at once (the server's hub relinks a dozen as the player drives) where
+ * pool_room checked room for one, and an hour of rides of all sizes coming and
+ * going breaks the pool's free memory into pieces.  So in free roam, at a
+ * load's memory check, a ride nobody uses goes first, as the game does, and
+ * then the pool gets a block more (POOL_MORE, from the main pool, as a track
+ * load adds its part: 0x610750), up to POOL_MORE_N of them; past that the
+ * game's own purge.  The blocks stay in the pool.  roam.c: 1 = done here.
+ * NFSU2_TEST_CARPOOL_FIXED=1 (test aid): the game's way. */
+#define FN_BMALLOC      0x00440820u   /* cdecl (size, flags) -> memory */
+#define FN_POOL_ADD     0x00440090u   /* cdecl (pool, memory, size) */
+#define POOL_MORE       (16u << 20)
+#define POOL_MORE_N     6
+static int g_pool_more;
+int roam_game_purge(CPU *c, uint32_t ret){
+    static int fixed = -1;
+    if (fixed < 0) fixed = rh_opt("NFSU2_TEST_CARPOOL_FIXED") ? 1 : 0;
+    if (!g_inited || !O.on || fixed) return 0;
+    switch (ret){                                  /* the load steps' memory checks (not Load's wait for a ride's place, 0x63AEBD) */
+    case 0x0063a2bfu: case 0x0063a2ebu: case 0x0063a8d9u: case 0x0063a9cau: case 0x0063ab18u: case 0x0063ac8cu: case 0x0063ad9cu: break;
+    default: return 0;
+    }
+    if (gcall1(c, FN_LOADER_PURGE, G_CARLOADER, 0) & 0xffu) return 1;
+    if (g_pool_more >= POOL_MORE_N){
+        static long said;
+        if (!said || rh_frame() - said > 3600){ said = rh_frame();
+            rlog("[roam] f=%ld car pool: no room for a load after %d blocks more: the game's purge\n", rh_frame(), g_pool_more); }
+        return 0;
+    }
+    uint32_t a[2] = { POOL_MORE, 0x2000u }, mem = rh_call(c, FN_BMALLOC, 0, 0, 2, a);
+    if (!mem) return 0;
+    uint32_t b[3] = { 4u, mem, POOL_MORE };
+    rh_call(c, FN_POOL_ADD, 0, 0, 3, b);
+    g_pool_more++;
+    rlog("[roam] f=%ld car pool: no room for a load (from 0x%08x): %u MB more (%d of %d)\n", rh_frame(), ret, POOL_MORE >> 20,
+         g_pool_more, POOL_MORE_N);
+    pool_log("more");
+    return 1;
+}
 uint32_t roam_game_pool(uint32_t name, uint32_t count){
     for (unsigned i = 0; i < sizeof g_pools / sizeof g_pools[0]; i++){
         if (name != g_pools[i].name || count >= g_pools[i].count || !env_int("NFSU2_ROAM", 0, 0, 1)) continue;

@@ -651,8 +651,10 @@ void sub_005f4650(CPU *c){
     sub_005f4650_orig(c);
 }
 void sub_0063a1b0_orig(CPU *c);   /* CarLoader: unload unused entries (purge) */
+int roam_game_purge(CPU *c, uint32_t ret);
 void sub_0063a1b0(CPU *c){
     if (probe()) fprintf(stderr, "[roam] f=%ld CarLoader purge(%u) from 0x%08x\n", autotest_frame(), MR32(c->esp + 4u), MR32(c->esp));
+    if (MR8(c->esp + 4u) && roam_game_purge(c, MR32(c->esp))){ c->eax = 1; POP32(c->eip); c->esp += 4u; return; }
     sub_0063a1b0_orig(c);
 }
 
