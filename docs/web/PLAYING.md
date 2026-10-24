@@ -162,7 +162,8 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
 - **Links:** settings in a page address (`?env=...`) work only on a development server (one started with `--dev`).
   On yours a link cannot change your game; the start page says so when an address carries them.
 - **The look:** the game looks as it did originally. Any graphics enhancement will be a separate setting, off
-  unless you turn it on.
+  unless you turn it on. One fix is always on: a car's shadow lies 1.5 cm above the road instead of 4, so its edge
+  no longer cuts into the bottom of the tyres (TerminatorVasya's [Shadow Fix](https://nfsmods.xyz/mod/7328)).
 - **The European cars:** the Peugeot 106 and the Vauxhall Corsa 1.8, which only the European release sold, are in the
   car lot and on every car select (Quick Race, Customize, LAN and Online), and AI racers drive them too. The North
   American game has their files but hid them.
