@@ -47,8 +47,8 @@ export interface SessionOptions {
   /** the page's own use of the controller: its menu (Home) and dialogs */
   padPage?: PadPage;
   log(line: string): void;
-  /** a subsystem the game cannot do without (the renderer) failed to attach */
-  /** what: English (the log; the page translates it); code: its fixed name, the same in every language */
+  /** a subsystem the game cannot do without (the renderer) failed to attach, or stopped working;
+   *  what: English (the log; the page translates it); code: its fixed name, the same in every language */
   onFatal(what: string, code?: string): void;
 }
 
@@ -97,10 +97,12 @@ export class GameSession {
     // not awaited one by one: a subsystem waiting for its registration must not hold up the others
     void attach('renderer', () => attachRenderer(s.proc, o.canvas, {
       ...common, width: o.canvas.width, height: o.canvas.height, displayHz: o.displayHz, artifacts: o.artifacts, dumpScale: o.dumpScale,
+      // a frozen picture otherwise: the game stops and the page says why
+      onLost: () => { if (!s.detached) o.onFatal(N('the graphics stopped working'), 'GPU-LOST'); },
     })).then(r => {
       s.renderer = r;
       // without a picture there is no game to play: say so instead of a black screen
-      if (!r && !s.detached) o.onFatal(N('the graphics (WebGPU renderer) could not start'), 'GPU-RENDERER');
+      if (!r && !s.detached) o.onFatal(N('the graphics could not start'), 'GPU-RENDERER');
     });
     void attach('audio', () => attachAudio(s.proc, { ...common, context: o.audio })).then(a => {
       s.audio = a;

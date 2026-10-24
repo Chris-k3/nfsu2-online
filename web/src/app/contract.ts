@@ -25,6 +25,9 @@ export interface RendererOptions extends CommonOptions {
   artifacts?: string;
   /** tests: scale of those dumps */
   dumpScale?: number;
+  /** the GPU device was lost while the game ran (a graphics driver reset, the browser's graphics process
+   *  crashed): nothing is drawn from then on */
+  onLost?(): void;
 }
 
 export interface AudioOptions extends CommonOptions {

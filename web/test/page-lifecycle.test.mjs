@@ -213,8 +213,11 @@ function fakeGpu() {
       return {
         features: new Set(['texture-compression-bc']), limits: { maxBufferSize: 1 << 28, maxStorageBufferBindingSize: 1 << 27 }, info: {},
         async requestDevice() {
-          const d = Object.assign(new Target(), { destroyed: false, features: new Set(['texture-compression-bc']), lost: new Promise(() => {}) });
-          d.destroy = () => { d.destroyed = true; };
+          let lose;
+          const d = Object.assign(new Target(), { destroyed: false, features: new Set(['texture-compression-bc']), lost: new Promise(r => { lose = r; }) });
+          // as a browser does: destroy() loses the device too, reason 'destroyed'
+          d.lose = (reason, message = '') => lose({ reason, message });
+          d.destroy = () => { d.destroyed = true; d.lose('destroyed'); };
           rec.devices.push(d);
           return d;
         },
@@ -236,6 +239,31 @@ test('renderer: a game that ends before it registers its graphics block ends the
   assert.equal(rec.devices[0].destroyed, true);
   assert.equal(rec.unconfigured, 1);
   assert.equal(rec.devices[0].count(), 0, 'no uncapturederror listener left');
+});
+
+test('renderer: a lost device says so (the page stops the game); its own destroy() does not', async () => {
+  const { rec, canvas } = fakeGpu();
+  const proc = fakeProc(), logs = [];
+  let lost = 0;
+  const p = attachRenderer(proc, canvas, { log: l => logs.push(l), onLost: () => lost++ });
+  await tick(10);
+  rec.devices[0].lose('unknown', 'GPU process crashed');
+  await tick();
+  assert.equal(lost, 1);
+  assert.match(logs.join('\n'), /\[gpu\] device lost: unknown GPU process crashed/);
+  proc.exit(-1);
+  await assert.rejects(p, /before it registered its graphics/);
+  assert.equal(lost, 1, 'not again for the destroy');
+
+  const second = fakeGpu(), proc2 = fakeProc();
+  let lost2 = 0;
+  const p2 = attachRenderer(proc2, second.canvas, { log: () => {}, onLost: () => lost2++ });
+  await tick(10);
+  proc2.exit(-1);
+  await assert.rejects(p2, /before it registered its graphics/);
+  await tick();
+  assert.equal(second.rec.devices[0].destroyed, true);
+  assert.equal(lost2, 0, 'giving the device back is no loss');
 });
 
 test('renderer: a block the game marked detached (it stopped waiting) refuses a late renderer', async () => {

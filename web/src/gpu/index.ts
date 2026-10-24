@@ -49,6 +49,9 @@ export interface RendererOptions {
   /** diagnostics: a slower GPU, from a pass of this many iterations of busy work for each pixel
    *  of a 512x512 target in every frame (tests frame pacing on GPUs slower than this one) */
   gpuBurn?: number;
+  /** the GPU device was lost (the graphics driver reset, the browser's graphics process crashed): nothing
+   *  is drawn from then on, and only a new game process can show the game again (see detach) */
+  onLost?: () => void;
   log?: (s: string) => void;
 }
 
@@ -125,7 +128,11 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
     if (errors <= 20) log(`[gpu] WebGPU error: ${(e as GPUUncapturedErrorEvent).error.message}`);
   };
   device.addEventListener('uncapturederror', onError);
-  device.lost.then(i => { if (i.reason !== 'destroyed') log(`[gpu] device lost: ${i.reason} ${i.message}`); });
+  device.lost.then(i => {
+    if (i.reason === 'destroyed') return;            // our own destroy(): detach, or giving up before it
+    log(`[gpu] device lost: ${i.reason} ${i.message}`);
+    opts.onLost?.();
+  });
   // Until the renderer holds the control block, every way out gives the device
   // and the canvas back (a game stopped before it registered its blocks included).
   let configured: GPUCanvasContext | null = null;

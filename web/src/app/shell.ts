@@ -19,7 +19,7 @@
 // While any of them is given, the start page says whether it is in effect.
 
 import registryDefaults from '../../../app/registry-defaults.txt';
-import { check, checkBrowser, checkGpu, checkIsolation, checkStorage, firefoxVersion, fmtBytes, type Check } from './checks';
+import { browserName, check, checkBrowser, checkGpu, checkIsolation, checkStorage, firefoxVersion, fmtBytes, type Check } from './checks';
 import { codeOf, dateLocale, language as pageLanguage, lastLanguage, LANGUAGES, listOf, live, LOCALE, N, NATIVE, onLanguage, setLanguage, t, T, tn, tvars, type Msg } from './i18n';
 import { loadGame, serverRev, type Loaded } from './loader';
 import { claimInstance } from './instance';
@@ -622,8 +622,9 @@ function onExit(s: GameSession, code: number) {
   $('#report').hidden = !fatal && (code === 0 || code === -1);
   const mins = () => seconds >= 120 ? t('{n} min', { n: Math.floor(seconds / 60) }) : t('{n} s', { n: seconds.toFixed(0) });
   const f = fatal;
-  if (f) setPhase('exited', T('Did not start'), () => t('The game was stopped: {what}. Download the log to see why; {where}', { what: t(f.what),
-    where: firefoxVersion() !== null ? t('about:support, Graphics, shows what Firefox thinks of the graphics.') : t('chrome://gpu shows what Chrome thinks of the graphics.') }), f.code);
+  // the graphics: a restart of the browser, then a newer driver (where to send the log is under it)
+  if (f) setPhase('exited', s.renderer ? T('Stopped') : T('Did not start'), () => t('The game was stopped: {what}. Restart {browser}, then press Play. If it happens again, update the graphics driver.',
+    { what: t(f.what), browser: t(browserName()) }), f.code);
   else {
     const base = () => code === 0 ? t('The game closed normally after {time}.', { time: mins() }) : code === -1 ? t('The game was stopped after {time}.', { time: mins() })
       : t('The game stopped with error code {code} after {time}.', { code, time: mins() });
@@ -1169,7 +1170,7 @@ export async function boot() {
 
   setCheck(checkBrowser());
   setCheck(checkIsolation());
-  setCheck(check('gpu', 'WebGPU', 'pending', N('Asking for a graphics adapter.')));
+  setCheck(check('gpu', N('Graphics (WebGPU)'), 'pending', N('Checking.')));
   setCheck(check('storage', N('Browser storage'), 'pending', N('Checking.')));
   setCheck(check('module', N('Game module'), 'pending', N('Loading.')));
   setPhase('boot', T('Loading'), T('Loading the game.'));

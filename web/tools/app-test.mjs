@@ -743,7 +743,7 @@ try {
       gameGaveUp: /no renderer attached after \d+ ms/.test(tail), refused: /renderer could not attach: Error: (the game stopped waiting for a renderer|this game process takes no renderer any more)/.test(tail),
       attachedLines: (tail.match(/\[gpu\] renderer attached:/g) ?? []).length, bugReport: await p.locator('#report').isVisible() };
     report('slowgpu', r.phase === 'exited' && r.gameGaveUp && r.refused && r.attachedLines === 0 && r.headline === 'Did not start' &&
-      /graphics \(WebGPU renderer\) could not start/.test(r.sub) && r.bugReport, r);
+      /the graphics could not start\. Restart Chrome, then press Play/.test(r.sub) && r.bugReport, r);
     await c2.close();
   }
 

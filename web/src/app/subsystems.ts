@@ -18,7 +18,7 @@ export type {
 } from './contract';
 
 export const attachRenderer: AttachRenderer = async (proc, canvas, o) => {
-  const r = await gpuAttach(proc, canvas, { log: o.log, artifacts: o.artifacts, dumpScale: o.dumpScale });
+  const r = await gpuAttach(proc, canvas, { log: o.log, artifacts: o.artifacts, dumpScale: o.dumpScale, onLost: o.onLost });
   return {
     detach: () => r.detach(),
     imageRect: () => r.imageRect(),
