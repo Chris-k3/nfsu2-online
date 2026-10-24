@@ -23,6 +23,10 @@ const text = (m, p, k) => Buffer.from(m.buffer, TEXT, 2 * 3 * TAG).subarray((p *
 const lines = (m, p) => [0, 1, 2].map(k => text(m, p, k));
 const handle = name => ({ kind: 'file', name, getFile: async () => ({ size: 1, arrayBuffer: async () => new ArrayBuffer(1) }) });
 const bad = () => { throw new Error('bad file'); };
+const storage = (kept = {}) => {
+  globalThis.localStorage = { getItem: k => kept[k] ?? null, setItem: (k, v) => { kept[k] = String(v); } };
+  return kept;
+};
 
 function setup(names, decode = async () => pcm(RING * 2)) {
   mock.timers.reset();
@@ -154,6 +158,23 @@ test('a folder of 0, 1, 27, 28 or 10 000 files plays, and choosing it reads at m
   }
 });
 
+const dir = (name, ...items) => ({ kind: 'directory', name, values: async function* () { yield* items; }, isSameEntry: async () => false });
+
+test('subfolders are walked by name: nesting, empty ones, the same name in two, a loop, one that cannot be listed; no file is opened', async () => {
+  const opened = [], file = name => ({ ...handle(name), getFile: async () => { opened.push(name); } });
+  const back = dir('Back', file('never.mp3'));
+  const root = dir('Music', file('b.mp3'), dir('Rock', file('x.mp3'), dir('Deep', file('z.mp3'))), dir('Empty'), dir('Pop', file('x.mp3')),
+    { kind: 'directory', name: 'Locked', values() { throw new DOMException('no', 'NotAllowedError'); } }, back);
+  root.isSameEntry = async o => o === back;
+  globalThis.showDirectoryPicker = async () => root;
+  const got = await pickMusic();
+  delete globalThis.showDirectoryPicker;
+  assert.deepEqual(got.paths, ['b.mp3', 'Rock/x.mp3', 'Rock/Deep/z.mp3', 'Pop/x.mp3']);
+  const s = setup([]);
+  s.radio.setFolder(got);
+  assert.deepEqual([s.radio.trackPaths, opened], [['b.mp3', 'Pop/x.mp3', 'Rock/x.mp3', 'Rock/Deep/z.mp3'], []]);
+});
+
 test('without the directory picker a file input picks the folder; the files are not opened, a cancel picks nothing', async () => {
   delete globalThis.showDirectoryPicker;
   const file = path => ({ name: path.split('/').pop(), webkitRelativePath: path, size: 1 });
@@ -164,7 +185,7 @@ test('without the directory picker a file input picks the folder; the files are 
     return input;
   } };
   const got = await pickMusic();
-  assert.deepEqual([got.name, got.files.map(f => f.name), await got.files[0].getFile()], ['Music', ['b.mp3'], list[0]]);
+  assert.deepEqual([got.name, got.paths, await got.files[1].getFile()], ['Music', ['b.mp3', 'Rock/x.mp3'], list[1]]);
   chosen = null;
   assert.equal(await pickMusic(), null);
   delete globalThis.document;
@@ -173,3 +194,31 @@ test('without the directory picker a file input picks the folder; the files are 
   await s.started();
   assert.deepEqual([s.radio.on, s.radio.folder], [true, 'Music']);
 });
+
+test('each place is offered the first track whose mode suits it; Off is never chosen; a place with none is answered with nothing', async () => {
+  storage();
+  const s = setup(['a.mp3', 'b.mp3', 'c.mp3']);
+  for (const [n, v] of Object.entries({ 'a.mp3': 'racing', 'b.mp3': 'menu', 'c.mp3': 'off' })) s.radio.setMode(n, v);
+  await s.started();
+  assert.deepEqual([text(s.memory, 0, 1), text(s.memory, 1, 1)], ['b', 'a']);
+  s.radio.setMode('a.mp3', 'off'); await settle();
+  assert.equal(s.w[W.places], 1);
+  await s.game(1, 1);
+  assert.deepEqual([s.w[W.failed_seq], s.w[W.on] & 1], [1, 1]);
+});
+
+test('modes are kept by path, a damaged value is not believed, a track not in the folder is forgotten, keys of earlier versions work', async () => {
+  const kept = storage({ 'nfsu2.radio.modes': '{"b.mp3":"off","x.mp3":"menu","gone.mp3":"off"}' });
+  const s = setup([]);
+  s.radio.setFolder({ files: ['b.mp3', 'x.mp3', 'x.mp3'].map(handle), paths: ['b.mp3', 'Rock/x.mp3', 'Pop/x.mp3'], name: 'Music' });
+  assert.deepEqual(['b.mp3', 'Pop/x.mp3', 'Rock/x.mp3'].map(p => s.radio.mode(p)), ['off', 'all', 'all']);
+  s.radio.setMode('Rock/x.mp3', 'racing');
+  s.radio.setMode('Pop/x.mp3', 'menu');
+  s.radio.setMode('Pop/x.mp3', 'all');
+  assert.deepEqual(JSON.parse(kept['nfsu2.radio.modes']), { 'b.mp3': 'off', 'Rock/x.mp3': 'racing' });
+  for (const damaged of ['null', '[]', '7', '{"a.mp3":"loud"}', '{broken']) {
+    kept['nfsu2.radio.modes'] = damaged;
+    assert.equal(setup(['a.mp3']).radio.mode('a.mp3'), 'all', damaged);
+  }
+});
+

@@ -42,7 +42,7 @@ import { crewList, crewsOf, crewsValue, rgbsValue, rgbWords, type Crew } from '.
 import { SavesPanel } from './saves-ui';
 import { saveScreenshot } from './shots';
 import { forgetLink, VaultPanel } from './vault-ui';
-import { Radio, radioWasOn } from '../radio';
+import { Radio, MODES, radioWasOn, type Mode } from '../radio';
 import { canPickMusic, pickMusic } from '../radio-folder';
 import { RadioLink } from './radio-link';
 import { FpsOverlay, FPS_MODES, type FpsMode } from './overlay';
@@ -859,7 +859,7 @@ async function screenshot() {
 // ----------------------------------------------------------- page menu --
 function openMenu() {
   const m = $<HTMLDialogElement>('#menu');
-  if (m.open) { m.close(); return; }                // (its Crews popup too: the menu's close)
+  if (m.open) { $<HTMLDialogElement>('#playlist').close(); m.close(); return; }                // (its Crews popup too: the menu's close)
   const fsButton = m.querySelector<HTMLButtonElement>('[data-act="fullscreen"]')!;
   fsButton.textContent = isFullscreen() ? t('Leave full screen') : t('Full screen');
   fsButton.hidden = !canFullscreen() && fromHomeScreen();         // from an iPhone's Home Screen: already without bars
@@ -931,6 +931,39 @@ async function radioClick(act: 'radio' | 'radio-folder') {
   const r = theRadio();
   try { await (act === 'radio-folder' ? r.chooseFolder(pickMusic) : r.on ? r.turnOff() : r.turnOn(pickMusic)); } catch (e) { log.add(`[radio] ${act}: ${e}`); }
 }
+const MODE_WORDS: Record<Mode, string> = { menu: N('Menu'), racing: N('Race'), all: N('All'), off: N('Off') };
+/** The Playlist window lists the folder's tracks with their modes; drawn once for a folder, one change listener for all rows. */
+let playlistDrawn: readonly string[] | null = null;
+function openPlaylist() {
+  const body = $('#playlist-body'), paths = radio?.trackPaths ?? [], make = (tag: string, props: object) => Object.assign(document.createElement(tag), props);
+  if (playlistDrawn !== paths) {
+    playlistDrawn = paths;
+    const rows = document.createDocumentFragment();
+    let folder = '';
+    paths.forEach((name, i) => {
+      const at = name.lastIndexOf('/'), dir = name.slice(0, Math.max(0, at));
+      if (dir !== folder) rows.append(make('div', { className: 'track-folder', textContent: folder = dir }));
+      const seg = make('div', { className: 'seg' });
+      seg.setAttribute('role', 'radiogroup'); seg.setAttribute('aria-label', name);
+      for (const m of MODES) {
+        const opt = make('label', { className: 'opt' }), input = make('input', { type: 'radio', name: `mode${i}`, value: m, checked: radio?.mode(name) === m });
+        input.dataset.track = String(i);
+        opt.append(input, t(MODE_WORDS[m]));
+        seg.append(opt);
+      }
+      const row = make('div', { className: 'track' });
+      row.append(make('span', { textContent: name.slice(at + 1), title: name }), seg);
+      rows.append(row);
+    });
+    body.replaceChildren(rows);
+    if (!paths.length) body.textContent = t('No music yet: pick a folder first.');
+  }
+  $<HTMLDialogElement>('#playlist').showModal();
+}
+function setTrackMode(e: Event) {
+  const r = e.target as HTMLInputElement, name = playlistDrawn?.[Number(r.dataset.track)];
+  if (name !== undefined) radio?.setMode(name, r.value as Mode);
+}
 async function menuAction(act: string) {
   const m = $<HTMLDialogElement>('#menu');
   switch (act) {
@@ -954,6 +987,7 @@ async function menuAction(act: string) {
     }
     case 'crews': openCrews(); break;
     case 'radio-folder': case 'radio': await radioClick(act); showRadio(m); break;
+    case 'playlist': openPlaylist(); break;
     case 'help': m.close(); openHelp(); break;
     case 'offline':
       m.close();
@@ -1240,6 +1274,7 @@ export async function boot() {
   $<HTMLButtonElement>('#reload').onclick = () => void reload();
   $<HTMLButtonElement>('#log-btn').onclick = downloadLog;
   $('#menu').addEventListener('click', e => { const a = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-act]'); if (a) void menuAction(a.dataset.act!); });
+  $('#playlist-body').addEventListener('change', setTrackMode);
   $('#menu').addEventListener('close', () => {
     const pop = $<HTMLDialogElement>('#crews-pop'); if (pop.open) pop.close();      // the menu's Crews go with it
     $('#stage').classList.remove('cursor'); $('#stage').querySelector('canvas')?.focus();

@@ -1,14 +1,22 @@
 // The radio: the game's own EA Trax plays the music files of a folder on this device.  The game asks for a track when it starts a song
 // (runtime/radio.c, through RadioLink); this decodes the next one of the place the song is for (0 menus, 1 driving) and hands the sound over.
-// Each place has its own queue.  Nothing here runs until the radio is used.
+// Each track has a mode (Menu, Race, All, Off) and each place its own queue.  Nothing here runs until the radio is used.
 import type { Lines, Place, RadioLink } from './app/radio-link';
-import { keptFolder, keepFolder, reopenFolder, sortedTracks, type Folder, type Picked } from './radio-folder';
+import { keptFolder, keepFolder, reopenFolder, sortedTracks, subfolderOf, type Folder, type Picked } from './radio-folder';
 import { plaqueTags, tagsOf } from './radio-tags';
 
+export type Mode = 'menu' | 'racing' | 'all' | 'off';
+export const MODES: readonly Mode[] = ['menu', 'racing', 'all', 'off'];
 export type PickFolder = () => Promise<Picked | null>;
-const ON_KEY = 'nfsu2.radio.on';   // '1': left on
+const MODES_KEY = 'nfsu2.radio.modes', ON_KEY = 'nfsu2.radio.on';   // {path in the folder: mode} without the All ones; '1': left on
 export const radioWasOn = () => { try { return localStorage.getItem(ON_KEY) === '1'; } catch { return false; } };
 const keepRadioOn = (on: boolean) => { try { localStorage.setItem(ON_KEY, on ? '1' : '0'); } catch { /* a private window keeps nothing */ } };
+const readModes = (): Map<string, Mode> => {
+  try {
+    const kept = Object.entries(JSON.parse(localStorage.getItem(MODES_KEY) ?? '{}') ?? {});
+    return new Map(kept.filter(([, m]) => m !== 'all' && MODES.includes(m as Mode)) as [string, Mode][]);
+  } catch { return new Map(); }
+};
 
 const RATE = 44100, CHUNK = 1 << 15, STEP_MS = 50, TAGS_KEPT = 16;   // the game mixer's rate; frames handed over at a time
 const MAX_FILE_BYTES = 160 << 20, MAX_FRAMES = RATE * 15 * 60;       // longer is a mix, not a song; a whole file is decoded into memory
@@ -17,8 +25,10 @@ const skipLine = (i: number, why: unknown) => `skips #${i + 1}: ${why}`;
 
 export class Radio {
   private files: FileSystemFileHandle[] = [];
+  private paths: string[] = [];           // files[i] is at paths[i] in the folder ("Album/a.mp3")
   private name = '';
   private handle: Folder | null = null;
+  private modes = readModes();
   private timer: ReturnType<typeof setInterval> | null = null;
   private epoch = 0;                      // counts starts and stops: work begun before a stop or restart gives up
   private live = false;                   // the game has been told the radio is on
@@ -36,7 +46,25 @@ export class Radio {
 
   get folder() { return this.name; }
   get on() { return this.timer !== null; }
+  /** The tracks as paths in the folder ("a.mp3", "Album/a.mp3") in playlist order; the same array until another folder is chosen. */
+  get trackPaths() { return this.paths; }
+  mode(name: string): Mode { return this.modes.get(name) ?? 'all'; }
+  private suits(name: string, place: Place) { const m = this.mode(name); return m === 'all' || m === (place ? 'racing' : 'menu'); }
+  private saveModes() { try { localStorage.setItem(MODES_KEY, JSON.stringify(Object.fromEntries(this.modes))); } catch { /* a private window keeps nothing */ } }
   private fail = (e: unknown) => this.stop(`error: ${e}`);
+
+  /** A track that no longer suits the place it plays in gives way to the next one that does; the others count from the next song on. */
+  setMode(name: string, mode: Mode) {
+    const was = this.mode(name); if (was === mode) return;
+    if (mode === 'all') this.modes.delete(name); else this.modes.set(name, mode);
+    this.saveModes();
+    const epoch = this.epoch, p = this.playing, gone = this.on && p && this.paths[p.index] === name && !this.suits(name, p.place);
+    this.log(`player sets #${this.paths.indexOf(name) + 1} from ${was} to ${mode}${gone ? `: it no longer suits ${p.place ? 'driving' : 'menus'}, the next track plays` : ''}`);
+    if (!this.on) return;
+    void this.offer(epoch).then(() => {
+      if (gone && this.playing === p && epoch === this.epoch) { this.song = null; this.port()?.cut(); }
+    }).catch(this.fail);
+  }
 
   /** After a reload: opens the remembered folder when the browser still allows it, else the player's next click on Radio asks. */
   private async restore() {
@@ -56,13 +84,17 @@ export class Radio {
     if (found && this.handle === handle) this.setFiles(found);
   }
 
-  private setFiles(files: readonly FileSystemFileHandle[]) {
-    this.files = sortedTracks(files);
+  private setFiles(p: { files: readonly FileSystemFileHandle[]; paths?: readonly string[] }) {
+    ({ files: this.files, paths: this.paths } = sortedTracks(p.files, p.paths));
     this.next = [0, 0]; this.tags = new Map();
+    if (!this.paths.length) return;
+    const gone = [...this.modes.keys()].filter(k => !this.paths.includes(k));
+    gone.forEach(k => this.modes.delete(k));
+    if (gone.length) this.saveModes();
   }
 
   setFolder(p: Picked) {
-    this.setFiles(p.files);
+    this.setFiles(p);
     this.name = p.name;
     this.handle = p.handle ?? null;
     if (p.handle) void keepFolder(p.handle);
@@ -90,14 +122,21 @@ export class Radio {
   /** A game starts and the radio was left on. */
   async resume() { await this.restored; await this.start(); }
 
-  /** The next track of the place from where its queue stands. */
-  private choose(place: Place): number { return this.next[place] % this.files.length; }
+  /** The next track of the place from where its queue stands, the first whose mode suits it (-1: none). */
+  private choose(place: Place): number {
+    const n = this.files.length;
+    for (let k = 0; k < n; k++) {
+      const i = (this.next[place] + k) % n;
+      if (this.suits(this.paths[i], place)) return i;
+    }
+    return -1;
+  }
 
   /** Shows the game the tags of the next track of each place (the same track is read once). */
   private async offer(epoch = this.epoch) {
     const link = this.port(), files = this.files, picks: Pair = [this.choose(0), this.choose(1)];
     if (!link) return;
-    const lines = await Promise.all(picks.map(i => this.tagsFor(files, i)));
+    const lines = await Promise.all(picks.map(i => i < 0 ? null : this.tagsFor(files, i)));
     if (epoch !== this.epoch || files !== this.files) return;
     this.offered = picks;
     link.setPlaces([lines[0], lines[1]]);
@@ -107,7 +146,7 @@ export class Radio {
     let t = this.tags.get(i);
     if (!t) {
       if (this.tags.size >= TAGS_KEPT) this.tags.clear();
-      t = tagsOf(files[i]).then(l => plaqueTags(l, this.name));
+      t = tagsOf(files[i]).then(l => plaqueTags(l, subfolderOf(this.paths[i]) || this.name));
       this.tags.set(i, t);
     }
     return t;
@@ -144,19 +183,20 @@ export class Radio {
     const place = want.place, where = place ? 'driving' : 'menus';
     this.seq = want.seq; this.song = null; this.playing = null;
     let i = this.offered[place];
-    for (let tried = 0; tried < this.files.length && this.bad < this.files.length; tried++, i = this.choose(place)) {
+    for (let tried = 0; i >= 0 && tried < this.files.length && this.bad < this.files.length; tried++, i = this.choose(place)) {
       this.next[place] = i + 1;
       const got = await this.load(link, want.seq, i, epoch);
       if (got === 'stale') return;
       if (got === 'played') {
-        this.log(`plays #${i + 1} in ${where}`);
+        this.log(`plays #${i + 1} (${this.mode(this.paths[i])}) in ${where}`);
         this.playing = { index: i, place };
         void this.offer(epoch).catch(this.fail);
         return;
       }
     }
     link.fail(want.seq);
-    this.stop('no file of the folder plays');
+    if (i >= 0) this.stop('no file of the folder plays');
+    else { this.log(`silence: no track fits ${where}`); void this.offer(epoch).catch(this.fail); }
   }
 
   /** A failure of reading, decoding or handing over the sound is the file's ("skipped": the next one plays); the runtime having no rings

@@ -1,23 +1,49 @@
 // The music folder: a directory the player picks with the browser's directory picker (Chrome, Edge) or with a file input that takes
-// a folder (Firefox, Safari), and the audio files in it, by name only (a file is opened when it is played).
+// a folder (Firefox, Safari), and the audio files in it and in its subfolders, by name only (a file is opened when it is played).
 const AUDIO = /\.(mp3|ogg|oga|opus|wav|flac|m4a)$/i;
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+const MAX_DEPTH = 8, MAX_FOLDERS = 2000;   // a folder tree deeper or wider than this is not a music library
 
 export type Folder = FileSystemDirectoryHandle & {
   queryPermission(o: { mode: 'read' }): Promise<PermissionState>;
   requestPermission(o: { mode: 'read' }): Promise<PermissionState>;
 };
-type Files = FileSystemFileHandle[];
-/** handle: the folder itself, when the browser gives one to keep. */
-export type Picked = { files: Files; name: string; handle?: Folder };
+type Dir = FileSystemDirectoryHandle & { values(): AsyncIterable<FileSystemHandle> };
+type Found = { files: FileSystemFileHandle[]; paths: string[] };
+/** files[i] is at paths[i] relative to the folder ("a.mp3", "Album/a.mp3"); handle: the folder itself, when the browser gives one to keep. */
+export type Picked = Found & { name: string; handle?: Folder };
 
-/** The files in the order of the playlist: by name. */
-export const sortedTracks = (files: readonly FileSystemFileHandle[]): Files => [...files].sort((a, b) => collator.compare(a.name, b.name));
+const dirOf = (path: string) => path.slice(0, Math.max(0, path.lastIndexOf('/')));
+/** The name of the subfolder a track is in ('' for the folder itself). */
+export const subfolderOf = (path: string) => dirOf(path).split('/').pop()!;
+const byPath = (a: string, b: string) => {
+  const da = dirOf(a), db = dirOf(b);
+  return da === db ? collator.compare(a, b) : !da ? -1 : !db ? 1 : collator.compare(da, db);
+};
 
-/** The audio files of the folder itself. */
-async function filesIn(root: FileSystemDirectoryHandle): Promise<Files> {
-  const out: Files = [];
-  for await (const e of (root as FileSystemDirectoryHandle & { values(): AsyncIterable<FileSystemHandle> }).values()) if (e.kind === 'file' && AUDIO.test(e.name)) out.push(e as FileSystemFileHandle);
+/** The files in the order of the playlist: the folder's own first, then each subfolder by name, the files of each by name. */
+export function sortedTracks(files: readonly FileSystemFileHandle[], paths?: readonly string[]): Found {
+  const keys = files.map((f, i) => paths?.[i] ?? f.name), order = keys.map((_, i) => i).sort((a, b) => byPath(keys[a], keys[b]));
+  return { files: order.map(i => files[i]), paths: order.map(i => keys[i]) };
+}
+
+/** The audio files of the folder and of its subfolders; a folder that is its own ancestor or deeper than MAX_DEPTH is not entered,
+ *  a subfolder that cannot be listed is left out. */
+async function filesIn(root: FileSystemDirectoryHandle): Promise<Found> {
+  const out: Found = { files: [], paths: [] };
+  let folders = 0;
+  const walk = async (d: Dir, prefix: string, above: Dir[]): Promise<void> => {
+    for await (const e of d.values()) {
+      if (e.kind === 'file' && AUDIO.test(e.name)) {
+        out.files.push(e as FileSystemFileHandle);
+        out.paths.push(prefix + e.name);
+      } else if (e.kind === 'directory' && above.length < MAX_DEPTH && ++folders <= MAX_FOLDERS) {
+        const chain = [...above, d], same = await Promise.all(chain.map(a => a.isSameEntry?.(e as Dir))).catch(() => []);
+        if (!same.some(Boolean)) await walk(e as Dir, `${prefix}${e.name}/`, chain).catch(() => {});
+      }
+    }
+  };
+  await walk(root as Dir, '', []);
   return out;
 }
 
@@ -30,14 +56,14 @@ export async function pickMusic(): Promise<Picked | null> {
   if (!pick) return pickFromInput();
   try {
     const dir = await pick.call(globalThis, { mode: 'read' });
-    return { files: await filesIn(dir), name: dir.name, handle: dir as Folder };
+    return { ...await filesIn(dir), name: dir.name, handle: dir as Folder };
   } catch (e) {
     if (e instanceof DOMException && e.name === 'AbortError') return null;
     throw e;
   }
 }
 
-/** For a browser without a directory picker: a file input that takes a folder (webkitRelativePath "Folder/a.mp3").
+/** For a browser without a directory picker: a file input that takes a folder (webkitRelativePath "Folder/Sub/a.mp3").
  *  It cannot be asked again after a reload, so the folder is not kept. */
 function pickFromInput(): Promise<Picked | null> {
   if (typeof document === 'undefined') return Promise.resolve(null);
@@ -45,11 +71,13 @@ function pickFromInput(): Promise<Picked | null> {
     const input = Object.assign(document.createElement('input'), { type: 'file', webkitdirectory: true, multiple: true });
     input.addEventListener('cancel', () => resolve(null));
     input.addEventListener('change', () => {
-      const list = Array.from(input.files ?? []), picked: Picked = { files: [], name: '' };
+      const list = Array.from(input.files ?? []), picked: Picked = { files: [], paths: [], name: '' };
       for (const f of list) {
         const parts = (f.webkitRelativePath || f.name).split('/');
         picked.name ||= parts.length > 1 ? parts[0] : '';
-        if (parts.length <= 2 && AUDIO.test(f.name)) picked.files.push({ kind: 'file', name: f.name, getFile: async () => f } as unknown as FileSystemFileHandle);
+        if (!AUDIO.test(f.name)) continue;
+        picked.files.push({ kind: 'file', name: f.name, getFile: async () => f } as unknown as FileSystemFileHandle);
+        picked.paths.push(parts.length > 1 ? parts.slice(1).join('/') : f.name);
       }
       resolve(list.length ? picked : null);
     });
@@ -83,7 +111,7 @@ export const keptFolder = () => inStore<Folder>('readonly', s => s.get('folder')
 export const keepFolder = (handle: Folder) => inStore('readwrite', s => s.put(handle, 'folder'));
 
 /** The folder's files when the browser allows it (ask: it may show its question, which needs a click), else null. */
-export async function reopenFolder(handle: Folder, ask: boolean): Promise<Files | null> {
+export async function reopenFolder(handle: Folder, ask: boolean): Promise<Found | null> {
   const state = await handle[ask ? 'requestPermission' : 'queryPermission']({ mode: 'read' });
   return state === 'granted' ? filesIn(handle) : null;
 }

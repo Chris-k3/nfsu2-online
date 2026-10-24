@@ -40,12 +40,12 @@ export class RadioLink {
     if (((now & 1) === 1) !== on) Atomics.compareExchange(w, W.on, now, now + 1);
   }
 
-  /** The next track of each place (0 menus, 1 driving) with its tags. */
-  setPlaces(next: readonly [Lines, Lines]) {
+  /** The next track of each place (0 menus, 1 driving) with its tags, null: no track suits the place. */
+  setPlaces(next: readonly [Lines | null, Lines | null]) {
     const w = this.words(), bytes = new Uint8Array(this.memory.buffer, this.ptr + CTL + TEXT, PLACES * 3 * TAG), s0 = Atomics.load(w, W.tag_seq) & ~1;
     Atomics.store(w, W.tag_seq, s0 + 1);
-    next.forEach((t, p) => [t.artist, t.title, t.album].forEach((line, k) => ascii(line, bytes.subarray((p * 3 + k) * TAG, (p * 3 + k + 1) * TAG))));
-    Atomics.store(w, W.places, 3);
+    next.forEach((t, p) => [t?.artist, t?.title, t?.album].forEach((line, k) => ascii(line ?? '', bytes.subarray((p * 3 + k) * TAG, (p * 3 + k + 1) * TAG))));
+    Atomics.store(w, W.places, next.reduce((mask, t, p) => mask | (t ? 1 << p : 0), 0));
     Atomics.store(w, W.tag_seq, s0 + 2);
   }
 
@@ -63,6 +63,9 @@ export class RadioLink {
     return true;
   }
   fail(seq: number) { Atomics.store(this.words(), W.failed_seq, seq); }
+
+  /** Ends the track where the game has read it: the runtime sees the end of the stream and the game goes on to its next song. */
+  cut() { const w = this.words(), at = Atomics.load(w, W.read); Atomics.store(w, W.written, at); Atomics.store(w, W.total, at); }
 
   /** Frames the rings take now (the counters wrap at 32 bits, their difference does not). */
   room(): number {
