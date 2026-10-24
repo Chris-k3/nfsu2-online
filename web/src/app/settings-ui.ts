@@ -59,6 +59,7 @@ const GROUPS: Group[] = [
   { title: N('Game'), more: N('More game settings'), items: [
     { key: 'language', label: N('Language'), help: N('The game\'s menus and subtitles, the voices in languages with a dub, and this page.'), c: { t: 'select', opts: LANGUAGE_OPTS } },
     { key: 'movies', label: N('Movies'), help: N('Intro, story and FMV movies.'), c: { t: 'switch' } },
+    { key: 'subtitles', label: N('Subtitles'), help: N('The movies\' lines as text. English\'s are VileStuff\'s English Subtitles Fixed, with who says each line.'), link: { text: N('English Subtitles Fixed'), href: 'https://nfsmods.xyz/mod/5286' }, c: { t: 'switch' } },
     { key: 'autosave', label: N('Autosave'), help: N('Sets each profile\'s Save option in the game to Autosave once, so races, purchases and changes are saved without asking. Prompt or Off chosen afterwards in the game\'s Options, Gameplay stays.'), c: { t: 'switch' } },
     { key: 'intro', label: N('Startup movies'), help: N('The EA and THX logos, the PSA and the intro. Skippable: Enter, Esc, Space, a left click, or A, B or Start ends each one. Original: as in the game, where only the intro ends early.'), c: { t: 'seg', opts: [['skippable', N('Skippable')], ['original', N('Original')], ['off', N('Off')]] }, more: true },
     { key: 'sound', label: N('Sound'), help: N('All sound output.'), c: { t: 'switch' }, more: true },

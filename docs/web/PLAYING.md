@@ -140,19 +140,23 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
 | Group | Settings |
 |---|---|
 | Online | its own section under Saves: how many play on this server now, free roam with others, your name (in free roam and online), crews (with their colours), your horn, room, ghost mode, the game's Online mode (on by default); more: the free-roam network |
-| Game | language, movies, autosave; more: startup movies (skippable, original or off), sound, pause or keep running in the background, sound output latency |
+| Game | language, movies, subtitles, autosave; more: startup movies (skippable, original or off), sound, pause or keep running in the background, sound output latency |
 | Display | full screen on Play (off: the game plays in the browser window; on by default on phones), resolution scale (phones start at 75%, 100% once one shows it has the room), frame rate (auto follows the screen: 120 on a 120 Hz display, 240 on a 240 Hz one; 30, 60, 120 or 240, where 30 keeps a phone that cannot hold 60 steady; Online and LAN races at most 120); more: menus and HUD (original or upscaled), HUD layout, movie framing, cutscene bars, other cars' headlights (players, all cars, off), frame-rate counter |
 | Controller | rumble; more: controller on or off, menu buttons, dead zones |
 
 - **Language:** English, French, German, Italian, Spanish, Dutch, Swedish, Danish, Korean, Chinese, Japanese, Russian,
-  Thai, Portuguese (Brazil) or Polish, for the menus and all the game's text, and the movies' subtitles in all but
-  English, French, German, Italian and Spanish. Where the server has the [language packs](VPS.md#languages), French, German, Italian, Spanish, Japanese and Russian also play with their dubbed voices and movies,
+  Thai, Portuguese (Brazil) or Polish, for the menus and all the game's text. Where the server has the [language packs](VPS.md#languages), French, German, Italian, Spanish, Japanese and Russian also play with their dubbed voices and movies,
   Chinese, Japanese and Thai with their full text, and Portuguese and Polish with their text at all (without the
   packs they play in English, with English voices). Your browser fetches only your language's files: the dubbed
   voices are about 50 MB (Russian 94 MB), and the dubbed movies are smaller than the English ones they replace.
   The start page follows the same choice (the list at its top sets it too): its text, settings and messages in
   that language, English until you pick another. Its problems and errors carry a short code (`GPU-ADAPTER-WIN`),
   the same in every language, to quote when you ask for help; the log stays English.
+- **Subtitles:** on by default: the movies' lines as text (the PSA, the tutorials and the story) in every language
+  but French, German, Italian and Spanish, whose movies are dubbed. English's are VileStuff's
+  [English Subtitles Fixed](https://nfsmods.xyz/mod/5286), with who says each line, where the server has its
+  [language pack](VPS.md#languages) (without it English has none: the game's own English lines stop at their first
+  apostrophe).
 - **Menus and HUD:** Original (the default) is the game's own. Upscaled shows LunicAura106's
   [Upscaled HUD](https://nfsmods.xyz/mod/4319) where the server has its [texture pack](VPS.md#texture-packs): the
   menus, the race HUD, the fonts and the car and brand logos redrawn at four times their size, sharp on a large

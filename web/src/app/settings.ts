@@ -142,6 +142,8 @@ export const KEYS: readonly KeyDef[] = [
   // the game's language (runtime/language.c; the page fetches ahead only its language pack: datacache.ts).  Not in
   // bundle.m's table: there a lower-case key, so it reaches the runtime as NFSU2_LANGUAGE all the same
   { key: 'language', env: 'NFSU2_LANGUAGE', kind: 'enum', vals: LANGUAGES.join('|'), scope: 'web' },
+  // the movies' subtitles (runtime/language.c).  Not in bundle.m's table either
+  { key: 'subtitles', env: 'NFSU2_SUBTITLES', kind: 'bool', scope: 'web' },
   // the player's horn, which the others hear too (runtime/horn.c).  Not in bundle.m's table either: NFSU2_HORN there
   { key: 'horn', env: 'NFSU2_HORN', kind: 'enum', vals: HORNS.join('|'), scope: 'web' },
   // the menus' and HUD's textures: a texture pack in place of the game's (runtime/web/texrep_web.c; the page fetches
@@ -187,12 +189,18 @@ export const TEMPLATE = `# NFSU2 settings, read at every launch.
 
 # The game's language: english, french, german, italian, spanish, dutch,
 # swedish, danish, korean, chinese, japanese, russian, thai, portuguese
-# (Brazil's) or polish.  All but English, French, German, Italian and Spanish
-# show the movies' subtitles.  French, German, Italian, Spanish, Japanese and
+# (Brazil's) or polish.  French, German, Italian, Spanish, Japanese and
 # Russian come with their dubbed voices and movies where the server has the
 # language packs; Russian, Portuguese and Polish take their text from them
 # too.  [NFSU2_LANGUAGE]
 #language = english
+
+# The movies' subtitles: the PSA, the tutorials and the story, in every
+# language but French, German, Italian and Spanish (whose movies are dubbed).
+# English's are VileStuff's English Subtitles Fixed (nfsmods.xyz/mod/5286),
+# with who says each line, where the server has its language pack.
+# [NFSU2_SUBTITLES]
+#subtitles = on
 
 # Sound output.  [NOSOUND, inverted]
 #sound = on
