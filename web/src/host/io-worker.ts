@@ -454,6 +454,13 @@ async function op(o: Op, a: bigint[]): Promise<number> {
 }
 
 // ------------------------------------------------------------- the loop ----
+// The doorbell wait has a timeout.  WebKit (Safari, and every browser on an iPhone) sometimes leaves a waitAsync
+// without one pending after its notify (it then comes back 'ok', the waiter already off the list) until something
+// else runs on this worker: the request stays unanswered, the game thread waiting for it holds the guest lock, and
+// the whole game freezes (a player's iPhone in a career race, a CreateFileA 15.6 s and on; Playwright's WebKit 27.2
+// on a Mac: about one race in three, up to 50 s).  With a timeout no wait was late in 18 races there (50 and
+// 1000 ms); 50 also bounds one that would be to a few frames.
+const DOORBELL_WAIT_MS = 50;
 async function serve() {
   let seen = Atomics.load(ctl, CTL_IO_DOORBELL);
   for (;;) {
@@ -466,7 +473,7 @@ async function serve() {
         rpcI32[b + 2] = r; Atomics.store(rpcI32, b, RPC_DONE); Atomics.notify(rpcI32, b);
       });
     }
-    const w = (Atomics as any).waitAsync(ctl, CTL_IO_DOORBELL, seen);
+    const w = (Atomics as any).waitAsync(ctl, CTL_IO_DOORBELL, seen, DOORBELL_WAIT_MS);
     if (w.async) await w.value;
     seen = Atomics.load(ctl, CTL_IO_DOORBELL);
   }
