@@ -735,7 +735,7 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.64); }
 .dlg-head h2 { margin: 0; }
 .menu-actions { display: grid; gap: 8px; }
 .menu-radio { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); }
-.menu-radio .btn { padding: 0 80px 0 16px; overflow: hidden; }
+.menu-radio .btn { padding: 0 80px; overflow: hidden; }
 .menu-radio .btn span { min-width: 0; overflow: hidden; text-overflow: ellipsis; padding-inline-end: 0.2em; }
 .menu-radio .icon { position: absolute; top: 6px; width: 28px; height: 28px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 8px; background: none; color: inherit; }
 .menu-radio .icon:hover { color: var(--lime); }
