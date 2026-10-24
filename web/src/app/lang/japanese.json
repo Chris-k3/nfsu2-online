@@ -34,6 +34,7 @@
   "the graphics stopped working": "グラフィックが動作しなくなりました",
   "the graphics could not start": "グラフィックを起動できませんでした",
   "The game was stopped: {what}. Restart {browser}, then press Play. If it happens again, update the graphics driver.": "ゲームが停止されました: {what}。{browser}を再起動してから、「プレイ」を押してください。また同じことが起きる場合は、グラフィックドライバーを更新してください。",
+  "The game was stopped: {what}. Play reloads this page, which starts the graphics again; then press Play once more. Your saves and settings stay.": "ゲームが停止されました: {what}。「プレイ」を押すとこのページを再読み込みし、グラフィックが再び動き出します。そのあと、もう一度「プレイ」を押してください。セーブデータと設定はそのまま残ります。",
   "Adapter with BC texture compression.": "BCテクスチャ圧縮に対応したアダプターです。",
   "Browser storage": "ブラウザのストレージ",
   "This browser window cannot store files (a guest or private window?). Saves need the origin private file system.": "このブラウザウィンドウはファイルを保存できません（ゲストウィンドウまたはプライベートウィンドウ？）。セーブデータにはオリジンプライベートファイルシステムが必要です。",

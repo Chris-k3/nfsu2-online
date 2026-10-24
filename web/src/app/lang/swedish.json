@@ -34,6 +34,7 @@
   "the graphics stopped working": "grafiken slutade fungera",
   "the graphics could not start": "grafiken kunde inte starta",
   "The game was stopped: {what}. Restart {browser}, then press Play. If it happens again, update the graphics driver.": "Spelet stoppades: {what}. Starta om {browser} och tryck sedan på Spela. Om det händer igen uppdaterar du grafikdrivrutinen.",
+  "The game was stopped: {what}. Play reloads this page, which starts the graphics again; then press Play once more. Your saves and settings stay.": "Spelet stoppades: {what}. Spela laddar om sidan, så att grafiken startar igen; tryck sedan på Spela en gång till. Dina sparfiler och inställningar finns kvar.",
   "Adapter with BC texture compression.": "Adapter med BC-texturkomprimering.",
   "Browser storage": "Webbläsarens lagring",
   "This browser window cannot store files (a guest or private window?). Saves need the origin private file system.": "Det här webbläsarfönstret kan inte lagra filer (ett gästfönster eller privat fönster?). Sparfiler kräver webbplatsens privata filsystem (origin private file system).",

@@ -34,6 +34,7 @@
   "the graphics stopped working": "графика перестала работать",
   "the graphics could not start": "не удалось запустить графику",
   "The game was stopped: {what}. Restart {browser}, then press Play. If it happens again, update the graphics driver.": "Игра остановлена: {what}. Перезапустите {browser}, затем нажмите «Играть». Если это повторится, обновите графический драйвер.",
+  "The game was stopped: {what}. Play reloads this page, which starts the graphics again; then press Play once more. Your saves and settings stay.": "Игра остановлена: {what}. «Играть» перезагрузит эту страницу, и графика заработает снова; затем нажмите «Играть» ещё раз. Ваши сохранения и настройки останутся.",
   "Adapter with BC texture compression.": "Адаптер со сжатием текстур BC.",
   "Browser storage": "Хранилище браузера",
   "This browser window cannot store files (a guest or private window?). Saves need the origin private file system.": "Это окно браузера не может хранить файлы (гостевое или приватное окно?). Для сохранений нужна приватная файловая система источника.",

@@ -34,6 +34,7 @@
   "the graphics stopped working": "de grafische weergave werkte niet meer",
   "the graphics could not start": "de grafische weergave kon niet starten",
   "The game was stopped: {what}. Restart {browser}, then press Play. If it happens again, update the graphics driver.": "Het spel is gestopt: {what}. Start {browser} opnieuw en druk daarna op Spelen. Gebeurt het nog eens, werk dan het grafische stuurprogramma bij.",
+  "The game was stopped: {what}. Play reloads this page, which starts the graphics again; then press Play once more. Your saves and settings stay.": "Het spel is gestopt: {what}. Spelen laadt deze pagina opnieuw, waardoor de graphics weer starten; druk daarna nog een keer op Spelen. Je opgeslagen spellen en instellingen blijven.",
   "Adapter with BC texture compression.": "Adapter met BC-textuurcompressie.",
   "Browser storage": "Browseropslag",
   "This browser window cannot store files (a guest or private window?). Saves need the origin private file system.": "Dit browservenster kan geen bestanden opslaan (een gast- of privévenster?). Opgeslagen spellen hebben het Origin Private File System nodig.",

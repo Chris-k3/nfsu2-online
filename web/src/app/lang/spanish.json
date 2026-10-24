@@ -34,6 +34,7 @@
   "the graphics stopped working": "los gráficos dejaron de funcionar",
   "the graphics could not start": "los gráficos no pudieron iniciarse",
   "The game was stopped: {what}. Restart {browser}, then press Play. If it happens again, update the graphics driver.": "El juego se detuvo: {what}. Reinicia {browser} y pulsa Jugar. Si vuelve a pasar, actualiza el controlador gráfico.",
+  "The game was stopped: {what}. Play reloads this page, which starts the graphics again; then press Play once more. Your saves and settings stay.": "El juego se detuvo: {what}. Jugar recarga esta página, lo que vuelve a poner en marcha los gráficos; después pulsa Jugar otra vez. Tus partidas guardadas y ajustes se conservan.",
   "Adapter with BC texture compression.": "Adaptador con compresión de texturas BC.",
   "Browser storage": "Almacenamiento del navegador",
   "This browser window cannot store files (a guest or private window?). Saves need the origin private file system.": "Esta ventana del navegador no puede guardar archivos (¿es una ventana de invitado o privada?). Las partidas guardadas necesitan el sistema de archivos privado de origen.",

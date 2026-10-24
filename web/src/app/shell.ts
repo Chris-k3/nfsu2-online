@@ -107,6 +107,8 @@ let instance: ReturnType<typeof claimInstance>;
 let settingsText: string | null = null;
 let starting = false;                    // Play pressed, the session not there yet
 let fatal: { what: string; code?: string } | null = null;   // why the running game had to be stopped (English, for t())
+// the last game lost its graphics (GPU-LOST): Safari's WebGPU gives this page no adapter any more, so Play reloads it
+let gpuGone = false;
 let fps: FpsOverlay;
 let lobbyPanel: LobbyPanel;
 let quickChat: QuickChat;                // free roam's fixed phrases (quickchat.ts)
@@ -329,6 +331,7 @@ async function askFull(c: PlayerCounts | null): Promise<boolean> {
 async function play() {
   if ($<HTMLButtonElement>('#play').disabled || session || starting) return;
   if (byPlay()) { await reloadFor(newer!, 'Play', false); return; }
+  if (gpuGone) { log.add('[app] the last game lost its graphics: reloading the page (Play)'); await reload(); return; }
   if (updated) { updated = false; showNewer(); }
   starting = true; updatePlay();
   try { await startGame(); } finally { starting = false; updatePlay(); }
@@ -644,8 +647,12 @@ function onExit(s: GameSession, code: number) {
   $('#report').hidden = !fatal && (code === 0 || code === -1);
   const mins = () => seconds >= 120 ? t('{n} min', { n: Math.floor(seconds / 60) }) : t('{n} s', { n: seconds.toFixed(0) });
   const f = fatal;
+  gpuGone = f?.code === 'GPU-LOST';
+  // the graphics lost on the way: a reload starts them again (Safari: only a reload), at Play
+  if (gpuGone) setPhase('exited', T('Stopped'), () => t('The game was stopped: {what}. Play reloads this page, which starts the graphics again; then press Play once more. Your saves and settings stay.',
+    { what: t(f!.what) }) + ' ' + t('Download the log first if you want to keep it: the reload clears it.'), f!.code);
   // the graphics: a restart of the browser, then a newer driver (where to send the log is under it)
-  if (f) setPhase('exited', s.renderer ? T('Stopped') : T('Did not start'), () => t('The game was stopped: {what}. Restart {browser}, then press Play. If it happens again, update the graphics driver.',
+  else if (f) setPhase('exited', s.renderer ? T('Stopped') : T('Did not start'), () => t('The game was stopped: {what}. Restart {browser}, then press Play. If it happens again, update the graphics driver.',
     { what: t(f.what), browser: t(browserName()) }), f.code);
   else {
     const base = () => code === 0 ? t('The game closed normally after {time}.', { time: mins() }) : code === -1 ? t('The game was stopped after {time}.', { time: mins() })
