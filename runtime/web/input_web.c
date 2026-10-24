@@ -60,6 +60,7 @@ int  lifecycle_quit_requested(void);
 int  lifecycle_game_parked(void);                               /* inactive and not in a LAN session */
 void lifecycle_tick(void);
 int  lifecycle_drain_writes(double max_s);
+void watchdog_log_download(void);                               /* watchdog.c */
 int  win32_freeze_guest(int max_ms);                              /* win32_ext.c */
 void metal_game_size(unsigned *w, unsigned *h);                   /* the renderer */
 long metal_frames(void);
@@ -499,6 +500,7 @@ static void handle(const InEv *e){
         lifecycle_request_quit(e->b == IREASON_SCRIPT ? "autotest" : "page quit request");
         if (g_quit_events >= 2) force_exit("second quit request");
         break;
+    case IEV_LOG: watchdog_log_download(); break;
     default: break;
     }
 }

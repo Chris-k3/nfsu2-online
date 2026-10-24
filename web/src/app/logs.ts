@@ -29,11 +29,14 @@ export class LogRing {
   private group: string[] | null = null;
   private phase = 0;
   private reps = 0;
+  // lines being waited for (waitFor): a part of the line and what to call
+  private waits: { part: string; done: (seen: boolean) => void }[] = [];
   dropped = 0;
   constructor(private budget = 8 << 20, private echo = true, private headLines = 300, private keepBudget = 256 << 10) {}
 
   add(s: string) {
     if (this.echo) console.log(s);
+    if (this.waits.length) this.saw(s);
     if (this.group) {
       if (s === this.group[this.phase]) {
         if (++this.phase === this.group.length) { this.phase = 0; this.reps++; }
@@ -47,8 +50,20 @@ export class LogRing {
   /** a line that stays when the log is trimmed (a game's session lines) */
   keep(s: string) {
     if (this.echo) console.log(s);
+    if (this.waits.length) this.saw(s);
     if (this.group) this.endFold();
     this.push(s, true);
+  }
+  /** true once a line with `part` in it comes, false after `ms` */
+  waitFor(part: string, ms: number): Promise<boolean> {
+    return new Promise(resolve => {
+      const w = { part, done: (seen: boolean) => { clearTimeout(timer); this.waits = this.waits.filter(x => x !== w); resolve(seen); } };
+      const timer = setTimeout(() => w.done(false), ms);
+      this.waits.push(w);
+    });
+  }
+  private saw(s: string) {
+    for (const w of [...this.waits]) if (s.includes(w.part)) w.done(true);
   }
 
   private push(s: string, keep: boolean) {

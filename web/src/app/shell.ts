@@ -981,7 +981,13 @@ function choiceBox(title: string, body: Node | string, ok: string, cancel: strin
   d.showModal();
   return new Promise(res => d.addEventListener('close', () => res(d.returnValue), { once: true }));
 }
-function downloadLog() { downloadBlob(log.text(), `nfsu2-${stamp()}.log`, 'text/plain'); }
+// A frozen game's log: players download it before the stall report's 15 s (2026-10-24: 13 s, no report), so the
+// game is asked first: how long ago its last frame was and, after 3 s or more, what every thread is doing
+// (runtime/watchdog.c).  No answer in 2 s, or a game that cannot be asked: the log as it is.
+async function downloadLog() {
+  if (session?.logReport()) await log.waitFor('[watchdog] log download ready', 2000);
+  downloadBlob(log.text(), `nfsu2-${stamp()}.log`, 'text/plain');
+}
 
 // --------------------------------------------------------- game module --
 // A failed download (Wi-Fi drop, the server restarting, the module not built

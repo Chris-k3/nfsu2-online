@@ -143,6 +143,8 @@ export class GameSession {
   canQuit(): boolean { const i = this.input; return !!i?.requestQuit && !this.detached && (i.canQuit?.() ?? true); }
   /** false: the request cannot reach the game (the page can only stop it) */
   requestQuit(): boolean { return this.canQuit() && this.input!.requestQuit!() !== false; }
+  /** Download log: asks the game for its stall report (InputSubsystem.logReport); false: it cannot be asked */
+  logReport(): boolean { const i = this.input; return !this.detached && !!i?.logReport && i.logReport() !== false; }
 
   /** true once the game exited or was stopped (every subsystem detached) */
   get ended() { return this.detached; }

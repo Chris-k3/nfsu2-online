@@ -58,6 +58,7 @@ export const IEV_FOCUS = 8;
 export const IEV_RELEASE_ALL = 9;
 export const IEV_QUIT = 10;
 export const IEV_TEXT = 11;
+export const IEV_LOG = 12;
 
 export const IKF_REPEAT = 1;
 export const IKF_ALT = 2;

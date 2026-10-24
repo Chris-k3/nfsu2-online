@@ -19,7 +19,12 @@
  * sleeping) and since when, the guest call chain read from its stack, the
  * GIL holder, and the critical sections held with owner and recursion.  It
  * is printed once per stall; the next Present re-arms it.  The watchdog
- * only reads; it never changes what the game does. */
+ * only reads; it never changes what the game does.
+ *
+ * The web page's Download log asks too (watchdog_log_download): players
+ * download a frozen game's log before the limit (2026-10-24: 13 s after the
+ * last frame, no report), so the log gets how long ago the last frame was
+ * and, after 3 s or more, the report then. */
 #include "cpu.h"
 #include <pthread.h>
 #include <stdatomic.h>
@@ -54,7 +59,9 @@ void watchdog_on_present(void){
     atomic_fetch_add(&g_wd_frames, 1);
 }
 
+static pthread_mutex_t g_wd_mx = PTHREAD_MUTEX_INITIALIZER;   /* the watchdog's thread and the page's input thread */
 static void wd_report(double stalled, uint32_t flow){
+    pthread_mutex_lock(&g_wd_mx);
     g_wd_reports++;
     uint64_t now = wd_now_us();
     fprintf(stderr, "\n[watchdog] no Present for %.1f s (game flow %u, %ld frames so far); guest threads:\n",
@@ -81,6 +88,7 @@ static void wd_report(double stalled, uint32_t flow){
     for (int k = 0; k < n; k++)
         fprintf(stderr, "  critical section 0x%08x held by tid %u (depth %d)\n", key[k], owner[k], depth[k]);
     fprintf(stderr, "[watchdog] end of report\n\n");
+    pthread_mutex_unlock(&g_wd_mx);
 }
 
 /* lifecycle.c (app track) defines the real one: true while the game has been
@@ -89,6 +97,24 @@ static void wd_report(double stalled, uint32_t flow){
  * not parked (lifecycle_may_park): it keeps presenting, so the limit applies
  * as in the foreground.  Without lifecycle.c the game is never parked. */
 __attribute__((weak)) int lifecycle_game_parked(void){ return 0; }
+
+/* the page's Download log (runtime/web/input_web.c, on its input thread,
+ * which runs while the game's threads are stuck): how long ago the last
+ * frame was, the report after 3 s or more, then the line the page waits for
+ * before it makes the file.  Also with NFSU2_WATCHDOG=0. */
+void watchdog_log_download(void){
+    uint64_t last = atomic_load(&g_wd_present_us);
+    uint32_t flow = mem_is_committed(0x8654a4u) ? MR32(0x8654a4u) : 0u;
+    if (!last) fprintf(stderr, "[watchdog] log downloaded before the first frame (game flow %u)\n", flow);
+    else {
+        double ago = (wd_now_us() - last) / 1e6;
+        int parked = lifecycle_game_parked();
+        fprintf(stderr, "[watchdog] log downloaded: the last frame %.1f s ago (game flow %u, %ld frames so far%s)\n",
+                ago, flow, atomic_load(&g_wd_frames), parked ? ", parked in the background" : "");
+        if (ago >= 3.0 && !parked) wd_report(ago, flow);
+    }
+    fprintf(stderr, "[watchdog] log download ready\n");
+}
 
 static void *wd_main(void *arg){
     double lim = *(double *)arg;

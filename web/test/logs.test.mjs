@@ -98,3 +98,17 @@ test('spam in a full log no longer pushes out the history', () => {
   assert.equal(t[2], 'history 0');
   assert.equal(t.at(-2), '[log] the 2 lines above repeated 99999 more times');
 });
+
+test('waitFor: a line that comes (also inside a fold, or kept) answers true, none in time false', async () => {
+  const log = new LogRing(1 << 20, false, 0);
+  for (let i = 0; i < 5; i++) log.add('[dbg] spam');                 // a fold under way
+  const seen = log.waitFor('[watchdog] log download ready', 1000);
+  log.add('[dbg] spam');
+  log.add('[3!] [watchdog] log download ready');
+  assert.equal(await seen, true);
+  const kept = log.waitFor('=== NFSU2 web', 1000);
+  log.keep('=== NFSU2 web, the second game ===');
+  assert.equal(await kept, true);
+  assert.equal(await log.waitFor('never said', 20), false);
+  assert.equal(lines(log).at(-1), '=== NFSU2 web, the second game ===');
+});

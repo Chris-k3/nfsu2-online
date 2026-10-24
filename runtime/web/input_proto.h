@@ -80,6 +80,7 @@ enum {
     IEV_RELEASE_ALL = 9,  /* b = IREASON_*: every key and button the game holds goes up */
     IEV_QUIT = 10,        /* the player asked to quit: WM_CLOSE */
     IEV_TEXT = 11,        /* chars typed with no key (a phone's keyboard): WM_CHAR each, 0x08 deletes, 0x0D accepts */
+    IEV_LOG = 12,         /* Download log: how long ago the last frame was, a stall report if long (watchdog.c) */
 };
 enum {                    /* event flags */
     IKF_REPEAT = 1,       /* autorepeat */

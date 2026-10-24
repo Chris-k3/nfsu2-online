@@ -101,6 +101,9 @@ export interface InputSubsystem extends Subsystem {
   requestQuit?(): boolean;
   /** whether requestQuit() can (still) reach the game (default: whether it exists) */
   canQuit?(): boolean;
+  /** Download log: the game's line on its last frame (and stall report), then "[watchdog] log download ready".
+   *  false: it cannot reach the game */
+  logReport?(): boolean;
   /** performance.now() of the player's last key, mouse or controller input; null: the page cannot tell
    *  (the game's own driver plays an input script) */
   lastInput?(): number | null;

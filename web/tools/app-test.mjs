@@ -18,6 +18,8 @@
 //             what is there (settings.ini as it was); again, it would replace that one; a copy a save
 //             editor changed replaces it after a warning, sealed again, and loads in the game, its bank as edited
 //   quit     F9 -> Quit game: the game's own quit path (WM_CLOSE) -> exit 0 -> back on the start page
+//   stalllog  F9 -> Download log while the game draws nothing (tests/scripts/app_stall_probe.txt: 10 s): the file
+//             says how long ago the last frame was and holds the stall report (before the watchdog's own 15 s)
 //   instance  a second tab on the same saves waits, and takes over when the first closes
 //   readonly  that second tab's Settings are read-only; Play reads settings.ini again
 //   retry     a failed game.wasm download is its own check, retried by itself and by Retry; a new build
@@ -434,6 +436,36 @@ try {
     await shot(st, 'quit-exited.png');
     report('quit', label === 'Quit game' && p === 'exited' && exit?.code === 0 && viaGame && !fsAfter && !bugReport && !(await st.locator('#play').isDisabled()),
       { menuLabel: label, exit, quitThroughGame: viaGame, headline: head, sub, fullscreenAfter: fsAfter, bugReport });
+    await c2.close();
+  }
+
+  // F9 -> Download log while the game is stuck (its thread blocked with the GIL held): the game's input
+  // thread still answers, so the file has the stall report a player who downloads early used to miss
+  if (want('stalllog')) {
+    const c2 = await browser.newContext({ viewport: { width: 1280, height: 800 }, acceptDownloads: true });
+    const st = watch(await c2.newPage(), 'L');
+    await open(st, `save=${RUN}-l&fresh&env=NOMOVIES%3D1&env=NFSU2_FNG_LOG%3D1&script=/tests/scripts/app_stall_probe.txt`);
+    await st.click('#play');
+    await waitPhase(st, ['playing'], 60000);
+    await st.waitForFunction(() => window.__nfsu2.log.tail(300).some(l => /stall 10 s \(test-only\)/.test(l)), null, { timeout: 120000 });
+    await st.waitForTimeout(4000);
+    await st.keyboard.press('F9');
+    await st.waitForSelector('#menu[open]');
+    const dl = st.waitForEvent('download');
+    const t0 = Date.now();
+    await st.click('#menu [data-act="log"]');
+    const file = path.join(OUT, (await dl).suggestedFilename());
+    const ms = Date.now() - t0;
+    await (await dl).saveAs(file);
+    const text = fs.readFileSync(file, 'utf8');
+    await st.click('#menu [data-act="resume"]').catch(() => {});
+    const ago = +(/\[watchdog\] log downloaded: the last frame ([\d.]+) s ago/.exec(text)?.[1] ?? -1);
+    const stallReport = /\[watchdog\] no Present for [\d.]+ s/.test(text) && /\[watchdog\] end of report/.test(text) && /holds the GIL/.test(text);
+    const ready = text.includes('[watchdog] log download ready');
+    const p = await waitPhase(st, ['exited'], 120000);
+    const exit = await st.evaluate(() => window.__nfsu2.lastExit);
+    report('stalllog', ago >= 3 && ago < 10 && stallReport && ready && ms < 2500 && p === 'exited' && exit?.code === 0,
+      { lastFrameAgo: ago, stallReport, ready, downloadMs: ms, exit });
     await c2.close();
   }
 
