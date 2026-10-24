@@ -254,8 +254,16 @@ static uint64_t mono_us(void){ struct timespec t; clock_gettime(CLOCK_MONOTONIC,
  * next button change, or that button change.  Moving alone comes as soon as
  * before; a press right after a move comes a frame later.  Changes older than
  * a second (the game did not read the mouse, as in a race) are taken at once,
- * not played back one a frame. */
-enum { MS_MOVE, MS_BTN };
+ * not played back one a frame.
+ * The menus look for what is under the cursor only in a frame it moved, in
+ * their 640x480 units (sub_005bf750 from GetCursorPos; if (dx || dy) in
+ * sub_004ed140, sub_0055d410 ...), and a dialog opened by the last tap
+ * starts on its default button: a tap where the cursor already was (Yes,
+ * then Yes on the next question) pressed nothing.  So a finger landing
+ * within two of those units of the cursor first puts it two units aside for
+ * a frame of its own (MS_HOP), and the cursor comes back to the finger with
+ * a move the menu sees. */
+enum { MS_MOVE, MS_BTN, MS_HOP };
 typedef struct { int kind, x, y, dx, dy; unsigned btn; uint64_t us; } MouseStep;
 #define MOUSE_STEPS 64
 static MouseStep g_ms[MOUSE_STEPS];
@@ -266,7 +274,7 @@ static long g_view_frame = -1;
 static pthread_mutex_t g_ms_mx = PTHREAD_MUTEX_INITIALIZER;
 static void step_take(void){                  /* g_ms_mx held */
     const MouseStep *s = &g_ms[g_ms_head];
-    if (s->kind == MS_MOVE){ g_view_x = s->x; g_view_y = s->y; g_view_dx += s->dx; g_view_dy += s->dy; }
+    if (s->kind != MS_BTN){ g_view_x = s->x; g_view_y = s->y; g_view_dx += s->dx; g_view_dy += s->dy; }
     else g_view_btn = s->btn;
     g_ms_head = (g_ms_head + 1) % MOUSE_STEPS; g_ms_n--;
 }
@@ -290,7 +298,7 @@ static void mouse_take(void){
     while (g_ms_n && now - g_ms[g_ms_head].us > 1000000u) step_take();
     if (f != g_view_frame){
         g_view_frame = f;
-        if (g_ms_n && g_ms[g_ms_head].kind == MS_BTN) step_take();
+        if (g_ms_n && g_ms[g_ms_head].kind != MS_MOVE) step_take();
         else while (g_ms_n && g_ms[g_ms_head].kind == MS_MOVE) step_take();
     }
     pthread_mutex_unlock(&g_ms_mx);
@@ -380,6 +388,13 @@ static void mouse_move(const InEv *e){
     double x = nx * lw, y = ny * lh;
     if (x < 0.0) x = 0.0; else if (x > lw - 1.0) x = lw - 1.0;
     if (y < 0.0) y = 0.0; else if (y > lh - 1.0) y = lh - 1.0;
+    if (e->flags & IKF_TOUCH){
+        double ux = lw / 640.0, uy = lh / 480.0;
+        if (fabs(x - atomic_load(&g_mouse_x)) < 2.0 * ux && fabs(y - atomic_load(&g_mouse_y)) < 2.0 * uy){
+            int h = (int)ceil(2.0 * ux), hx = (int)x + h <= (int)lw - 1 ? (int)x + h : (int)x - h;
+            mouse_step((MouseStep){ .kind = MS_HOP, .x = hx, .y = (int)y });
+        }
+    }
     mouse_step((MouseStep){ .kind = MS_MOVE, .x = (int)x, .y = (int)y, .dx = dx, .dy = dy });
     atomic_store(&g_mouse_x, (int)x); atomic_store(&g_mouse_y, (int)y);
     atomic_store(&MH(IM_MOUSE_X), (uint32_t)(int)x); atomic_store(&MH(IM_MOUSE_Y), (uint32_t)(int)y);

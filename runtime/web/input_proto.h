@@ -88,6 +88,7 @@ enum {                    /* event flags */
     IKF_SHIFT = 8,        /* Shift held */
     IKF_DEAD = 16,        /* a dead key: ch[0] = its spacing character */
     IKF_SYNTH = 32,       /* a synthetic DOM event (autotest), for the log */
+    IKF_TOUCH = 64,       /* IEV_MOUSE_MOVE: a finger landed there (a tap's start) */
 };
 enum {                    /* why the page sent a focus change or a release */
     IREASON_NONE = 0, IREASON_WINDOW = 1, IREASON_VISIBILITY = 2, IREASON_FULLSCREEN = 3,

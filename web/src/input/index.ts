@@ -13,7 +13,9 @@
 //        the game's client area and HUD), buttons with pointer capture, the
 //        wheel in WHEEL_DELTA units.  The OS cursor is hidden over the game.
 // Touch: one finger is the mouse, so a tap is a left click (the game's menus
-//        take clicks); other fingers are left alone.
+//        take clicks); other fingers are left alone.  Where the finger lands
+//        is marked (IKF_TOUCH): the C side makes the cursor arrive with a
+//        move the menus see, also on the spot it already is.
 // Text:  the game's text entry while it is up (a seqlock the game writes at
 //        each Present), and characters typed with no key (a phone's
 //        keyboard, app/textentry.ts) as WM_CHAR.
@@ -35,7 +37,7 @@ import { PadPoller, type PadPage, type TouchPad } from './gamepad';
 import { SynthDriver } from './synth';
 import {
   IEV_FOCUS, IEV_KEY_DOWN, IEV_KEY_TAP, IEV_KEY_UP, IEV_MOUSE_DOWN, IEV_MOUSE_MOVE, IEV_MOUSE_UP, IEV_QUIT,
-  IEV_RELEASE_ALL, IEV_TEXT, IEV_WHEEL, IKF_ALT, IKF_CTRL, IKF_DEAD, IKF_REPEAT, IKF_SHIFT, IKF_SYNTH, IM_ATTACHED,
+  IEV_RELEASE_ALL, IEV_TEXT, IEV_WHEEL, IKF_ALT, IKF_CTRL, IKF_DEAD, IKF_REPEAT, IKF_SHIFT, IKF_SYNTH, IKF_TOUCH, IM_ATTACHED,
   IM_EV_DROP, IM_EV_R, IM_EV_W, IM_EVENTS, IM_GAME_INACTIVE, IM_HDR_WORDS, IM_KEYS_HELD, IM_MAGIC, IM_MOUSE_X,
   IM_MOUSE_Y, IM_NAMES_GEN, IM_OFF_EV, IM_OFF_NAMES, IM_OFF_SYN, IM_QUIT_REQ, IM_SYN_R, IM_SYN_W, IM_TEXT,
   IM_TEXT_KIND, IM_TEXT_LEN, IM_TEXT_MAX, IM_TEXT_SEQ, IM_VERSION, IM_VIEW_ROLL, INPUT_EV_N, INPUT_MAGIC, INPUT_NAME_LEN,
@@ -255,7 +257,7 @@ export function attachInput(proc: GameProcess, element: HTMLElement, opts: Input
   function onFingerDown(e: PointerEvent) {
     if (!e.isPrimary) return;
     finger = e.pointerId;
-    push(IEV_MOUSE_MOVE, 0, 0, flagsOf(e), [], ...pos(e));
+    push(IEV_MOUSE_MOVE, 0, 0, flagsOf(e) | IKF_TOUCH, [], ...pos(e));
     push(IEV_MOUSE_DOWN, 0, 0, flagsOf(e), [], 0);
     buttons |= 1;
     if (document.activeElement !== element && element.tabIndex >= 0) element.focus({ preventScroll: true });
