@@ -694,5 +694,10 @@
   "Screenshot": "스크린샷",
   "‹ Newer": "‹ 최근",
   "Older ›": "이전 ›",
-  "Download": "다운로드"
+  "Download": "다운로드",
+  "Reset all settings": "모든 설정 초기화",
+  "Reset all settings?": "모든 설정을 초기화할까요?",
+  "Every setting here goes back to its default, and any other line in settings.ini is removed. Your name and language stay, as do the options set inside the game.": "여기 있는 모든 설정이 기본값으로 돌아가고, settings.ini의 다른 줄은 모두 삭제돼요. 이름과 언어, 게임 안에서 설정한 옵션은 그대로 남아요.",
+  "Settings are back to their defaults. Applies the next time you press Play.": "설정을 기본값으로 되돌렸어요. 다음에 '플레이'를 누를 때 적용돼요.",
+  "Saved: {key} is back to its default. Applies the next time you press Play.": "저장했어요: {key}을(를) 기본값으로 되돌렸어요. 다음에 '플레이'를 누를 때 적용돼요."
 }

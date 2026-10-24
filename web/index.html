@@ -190,14 +190,17 @@
       <h2 id="settings-title" data-i18n>Settings</h2>
       <p class="hint" id="settings-note">Saved in this browser. Changes apply the next time you press Play.</p>
       <div id="settings-body"></div>
-      <details class="raw" id="settings-raw">
-        <summary data-i18n>Edit settings.ini as text</summary>
-        <textarea id="settings-text" spellcheck="false" rows="20" wrap="off" aria-label="settings.ini"></textarea>
-        <div class="row">
-          <button type="button" class="btn" id="settings-text-save" data-i18n>Save file</button>
-          <span class="hint" id="settings-text-msg" role="status"></span>
-        </div>
-      </details>
+      <div class="raw">
+        <button type="button" class="text-btn" id="settings-reset-all" data-i18n>Reset all settings</button>
+        <details id="settings-raw">
+          <summary data-i18n>Edit settings.ini as text</summary>
+          <textarea id="settings-text" spellcheck="false" rows="20" wrap="off" aria-label="settings.ini"></textarea>
+          <div class="row">
+            <button type="button" class="btn" id="settings-text-save" data-i18n>Save file</button>
+            <span class="hint" id="settings-text-msg" role="status"></span>
+          </div>
+        </details>
+      </div>
     </section>
 
     <section class="panel" id="game-data" aria-labelledby="game-data-title">

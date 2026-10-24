@@ -757,5 +757,10 @@
   "Screenshot": "Screenshot",
   "‹ Newer": "‹ Nieuwer",
   "Older ›": "Ouder ›",
-  "Download": "Downloaden"
+  "Download": "Downloaden",
+  "Reset all settings": "Alle instellingen resetten",
+  "Reset all settings?": "Alle instellingen resetten?",
+  "Every setting here goes back to its default, and any other line in settings.ini is removed. Your name and language stay, as do the options set inside the game.": "Elke instelling hier gaat terug naar de standaard, en elke andere regel in settings.ini wordt verwijderd. Je naam en taal blijven, net als de opties die je in het spel zelf instelt.",
+  "Settings are back to their defaults. Applies the next time you press Play.": "De instellingen staan weer op de standaard. Geldt vanaf de volgende keer dat je op Spelen drukt.",
+  "Saved: {key} is back to its default. Applies the next time you press Play.": "Opgeslagen: {key} staat weer op de standaard. Geldt vanaf de volgende keer dat je op Spelen drukt."
 }

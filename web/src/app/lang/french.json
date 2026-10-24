@@ -778,5 +778,10 @@
   "Screenshot": "Capture d'écran",
   "‹ Newer": "‹ Plus récente",
   "Older ›": "Plus ancienne ›",
-  "Download": "Télécharger"
+  "Download": "Télécharger",
+  "Reset all settings": "Réinitialiser tous les paramètres",
+  "Reset all settings?": "Réinitialiser tous les paramètres ?",
+  "Every setting here goes back to its default, and any other line in settings.ini is removed. Your name and language stay, as do the options set inside the game.": "Chaque paramètre ici revient à sa valeur par défaut, et toute autre ligne de settings.ini est supprimée. Votre nom et votre langue restent, tout comme les options réglées dans le jeu.",
+  "Settings are back to their defaults. Applies the next time you press Play.": "Les paramètres sont revenus à leurs valeurs par défaut. S'applique la prochaine fois que vous appuyez sur Jouer.",
+  "Saved: {key} is back to its default. Applies the next time you press Play.": "Enregistré : {key} est revenu à sa valeur par défaut. S'applique la prochaine fois que vous appuyez sur Jouer."
 }

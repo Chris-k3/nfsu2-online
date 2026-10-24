@@ -112,6 +112,8 @@
 #define G_CARPARTDB     0x008a2b68u
 #define G_CARLOADER     0x008a3288u   /* entries on +0x58, handle at entry +0x123C */
 #define G_CARPOOL_KB    0x007fa9d4u   /* free-roam "Cars" pool size (KB), read at the track load */
+#define CARPOOL_KB_GAME 11000         /* its size in the game */
+#define CARPOOL_KB      48000         /* free roam's (NFSU2_ROAM_CARPOOL_KB) */
 #define G_CARS_POOL     0x00828164u   /* bMemory pool 4: +0x24 size, +0x28 used */
 #define G_RECORDS       0x00890160u   /* racer records, 0x940 bytes each */
 #define RC_ENCOUNTERS   0xc40u
@@ -4250,7 +4252,15 @@ static void init_once(CPU *c){
     O.rate = env_int("NFSU2_ROAM_RATE", 20, 10, 30);
     O.delay_ms = env_int("NFSU2_ROAM_DELAY", 100, 0, 1000);
     O.extrap_ms = env_int("NFSU2_ROAM_EXTRAP", 250, 0, 1000);
-    O.carpool_kb = env_int("NFSU2_ROAM_CARPOOL_KB", 48000, 0, 128000);
+    O.carpool_kb = env_int("NFSU2_ROAM_CARPOOL_KB", CARPOOL_KB, 0, 128000);
+    /* at or below the game's own size the player's car and traffic fill the pool and no friend's car is shown:
+     * the value the Settings panel's old "Car memory pool" row left in players' files (its help said "never
+     * below the game's own 11000"), so it counts as unset */
+    if (O.carpool_kb <= CARPOOL_KB_GAME){
+        rlog("[roam] NFSU2_ROAM_CARPOOL_KB=%d is not above the game's own %d KB (no room for friends' cars), using %d\n",
+             O.carpool_kb, CARPOOL_KB_GAME, CARPOOL_KB);
+        O.carpool_kb = CARPOOL_KB;
+    }
     int port = env_int("NFSU2_ROAM_PORT", RC_DEFAULT_PORT, 1024, 65535);
     int maxp = env_int("NFSU2_ROAM_MAX_PLAYERS", RC_MAX_PLAYERS, 2, RC_MAX_PLAYERS);
     int disc = env_int("NFSU2_ROAM_DISCOVERY", 1, 0, 1);

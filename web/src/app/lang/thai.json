@@ -694,5 +694,10 @@
   "Screenshot": "ภาพหน้าจอ",
   "‹ Newer": "‹ ใหม่กว่า",
   "Older ›": "เก่ากว่า ›",
-  "Download": "ดาวน์โหลด"
+  "Download": "ดาวน์โหลด",
+  "Reset all settings": "รีเซ็ตการตั้งค่าทั้งหมด",
+  "Reset all settings?": "ต้องการรีเซ็ตการตั้งค่าทั้งหมดหรือไม่",
+  "Every setting here goes back to its default, and any other line in settings.ini is removed. Your name and language stay, as do the options set inside the game.": "การตั้งค่าทุกอย่างที่นี่จะกลับเป็นค่าเริ่มต้น และบรรทัดอื่นใน settings.ini จะถูกลบ ชื่อและภาษาของคุณยังคงอยู่ รวมถึงตัวเลือกที่ตั้งไว้ในเกม",
+  "Settings are back to their defaults. Applies the next time you press Play.": "การตั้งค่ากลับเป็นค่าเริ่มต้นแล้ว มีผลเมื่อกด “เล่น” ครั้งถัดไป",
+  "Saved: {key} is back to its default. Applies the next time you press Play.": "บันทึกแล้ว: {key} กลับเป็นค่าเริ่มต้นแล้ว มีผลเมื่อกด “เล่น” ครั้งถัดไป"
 }

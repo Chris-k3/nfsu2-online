@@ -757,5 +757,10 @@
   "Screenshot": "Skärmbild",
   "‹ Newer": "‹ Nyare",
   "Older ›": "Äldre ›",
-  "Download": "Ladda ned"
+  "Download": "Ladda ned",
+  "Reset all settings": "Återställ alla inställningar",
+  "Reset all settings?": "Återställa alla inställningar?",
+  "Every setting here goes back to its default, and any other line in settings.ini is removed. Your name and language stay, as do the options set inside the game.": "Varje inställning här går tillbaka till standard, och alla andra rader i settings.ini tas bort. Ditt namn och språk finns kvar, liksom alternativen som ställts in i själva spelet.",
+  "Settings are back to their defaults. Applies the next time you press Play.": "Inställningarna är tillbaka på standard. Gäller nästa gång du trycker på Spela.",
+  "Saved: {key} is back to its default. Applies the next time you press Play.": "Sparat: {key} är tillbaka på standard. Gäller nästa gång du trycker på Spela."
 }

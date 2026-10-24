@@ -368,7 +368,8 @@ export const TEMPLATE = `# NFSU2 settings, read at every launch.
 #roam_delay = 100
 #roam_extrap = 250
 # The free-roam car memory pool in KB, raised for other players' cars (the
-# game's own is 11000; it is never lowered).  [NFSU2_ROAM_CARPOOL_KB]
+# game's own is 11000; a value at or below it is ignored, as it would leave
+# no room for them).  [NFSU2_ROAM_CARPOOL_KB]
 #roam_carpool_kb = 48000
 `;
 

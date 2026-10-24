@@ -1099,7 +1099,7 @@ export async function boot() {
     },
     onLoaded: applyLanguage,
     // the tab that owns the saves is the one whose Play reads the file: another tab only looks
-    readOnly: () => !instance.owner, say: pageToast,
+    readOnly: () => !instance.owner, say: pageToast, confirm: confirmBox,
   }, $('#online'));
   // the language picker at the top: the same setting as Settings, Game, Language
   const pick = $<HTMLSelectElement>('#lang-pick');

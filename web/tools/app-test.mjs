@@ -4,7 +4,8 @@
 // Steps (each prints PASS/FAIL with evidence; screenshots go to --out):
 //   start     the start page renders, every check passes or warns (no problem shown), the module loads
 //   settings  the settings on the page edit /save/settings.ini; the file and the derived environment
-//             match; a refused value is shown; it survives a reload; Reset restores a line; Listen plays
+//             match; a refused value is shown; it survives a reload; Reset restores a line, also one without
+//             a row; Reset all settings (after its question) leaves the template and the name; Listen plays
 //             the horn picked through
 //   play      Play -> the game in the window (not full screen: the default) (null renderer) runs tests/scripts/app_rw_probe.txt:
 //             a new profile ROTEST is saved, F12, a Quick Race, then "close" (the game's own
@@ -217,11 +218,25 @@ try {
     n0 = await saved(page);
     await page.click('.set[data-key="hud"] .text-btn'); await settle(page, n0);
     const file2 = (await readOpfs(page, SAVE, 'settings.ini')).text;
+    // Reset on a line without a row (roam_rate): its template line back
+    n0 = await saved(page);
+    await page.click('#settings-other li:has-text("roam_rate") .text-btn'); await settle(page, n0);
+    const file3 = (await readOpfs(page, SAVE, 'settings.ini')).text;
+    // Reset all settings: asks, then the template with the name (roam_port, the Mac app's line, goes too)
+    await page.click('#settings-reset-all');
+    await page.waitForSelector('#confirm[open]');
+    const resetAsk = await page.locator('#confirm-title').textContent();
+    n0 = await saved(page);
+    await page.click('#confirm-ok'); await settle(page, n0);
+    const file4 = (await readOpfs(page, SAVE, 'settings.ini')).text;
+    const resetAll = { roamRate: /^#roam_rate = 20$/m.test(file3), ask: resetAsk, left: file4.split('\n').filter(l => /^[A-Za-z_]+ = /.test(l)),
+      disabled: await page.locator('#settings-reset-all').isDisabled() };
+    const resetOk = resetAll.roamRate && resetAsk === 'Reset all settings?' && resetAll.left.join('|') === 'roam_name = Tester' && resetAll.disabled;
     report('settings', fileOk && envOk && /not a whole number in 0\.\.32/.test(refusedMsg) && /ignored/.test(rawMsg) &&
       /ultrawide/.test(hudState) && /roam_rate = 30/.test(otherText) && /roam_port = 47300 \(ignored: only used by the Mac app\)/.test(otherText) && after.movies === 'false' && after.fps === '120' && after.name === 'Tester' && /^#hud = wide$/m.test(file2) && /\(2 changed\)$/.test(moreDisplay) &&
-      listenPlaying === 'true' && listened,
+      resetOk && listenPlaying === 'true' && listened,
       { setLines: lines, env: { NOMOVIES: env.NOMOVIES, NFSU2_FPS: env.NFSU2_FPS, NFSU2_FPS_COUNTER: env.NFSU2_FPS_COUNTER, NFSU2_ROAM_NAME: env.NFSU2_ROAM_NAME, NFSU2_ROAM: env.NFSU2_ROAM, NFSU2_HORN: env.NFSU2_HORN, WINDOW: env.WINDOW ?? '(unset)' },
-        refusedMsg, rawMsg, hudState, otherText, afterReload: after, hudReset: /^#hud = wide$/m.test(file2), listen: { playing: listenPlaying, played: listened } });
+        refusedMsg, rawMsg, hudState, otherText, afterReload: after, hudReset: /^#hud = wide$/m.test(file2), resetAll, listen: { playing: listenPlaying, played: listened } });
   }
 
   // ------------------------------------------------------------- play --

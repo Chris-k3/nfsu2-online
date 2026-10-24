@@ -799,5 +799,10 @@
   "Screenshot": "Скриншот",
   "‹ Newer": "‹ Новее",
   "Older ›": "Старее ›",
-  "Download": "Скачать"
+  "Download": "Скачать",
+  "Reset all settings": "Сбросить все настройки",
+  "Reset all settings?": "Сбросить все настройки?",
+  "Every setting here goes back to its default, and any other line in settings.ini is removed. Your name and language stay, as do the options set inside the game.": "Все настройки здесь вернутся к значениям по умолчанию, а остальные строки в settings.ini будут удалены. Ваше имя и язык сохранятся, как и параметры, заданные в самой игре.",
+  "Settings are back to their defaults. Applies the next time you press Play.": "Настройки возвращены к значениям по умолчанию. Вступит в силу при следующем нажатии «Играть».",
+  "Saved: {key} is back to its default. Applies the next time you press Play.": "Сохранено: {key} — снова значение по умолчанию. Вступит в силу при следующем нажатии «Играть»."
 }

@@ -2,9 +2,11 @@
 // for the Online group, in a section of its own under Saves.  Every change
 // rewrites the one line of that key (settingsPut, bundle.m's settings_put), so
 // the file stays the source of truth and keeps the player's own comments;
-// "Reset" puts the template's commented-out line back.  Native controls
-// (switches are checkboxes, choices are radio groups), each described by its
-// help line, so a screen reader and the keyboard get them as they are.
+// "Reset" puts the template's commented-out line back, also on the lines the
+// panel has no row for, and "Reset all settings" the whole template but the
+// name and language.  Native controls (switches are checkboxes, choices are
+// radio groups), each described by its help line, so a screen reader and the
+// keyboard get them as they are.
 
 import { checkSetting, DEFAULTS, keyDef, resolveEnv, settingsPut, TEMPLATE, type Resolved } from './settings';
 import { readText, writeFile } from './savefs';
@@ -124,6 +126,36 @@ export function putKey(text: string, key: string, value: string | null): { text:
   return { text: next, removed };
 }
 
+/** What "Reset all settings" keeps: the name the other players know you by, and the language (this page's too). */
+const RESET_KEEPS = ['roam_name', 'language'];
+
+/** "Reset all settings": the template, with the kept settings as the file has them (by their own key, also where
+ *  the file sets the variable by its name, if the key reads the value the same).  One the file does not set, or
+ *  refuses, is the default. */
+export function resetAll(text: string | null): string {
+  const r = resolveEnv(text, {}, {});
+  let next = TEMPLATE;
+  for (const key of RESET_KEEPS) {
+    const env = keyDef(key)!.env, v = r.env[env], c = checkSetting(key, v ?? '');
+    if (r.source[env] === 'settings.ini' && c?.ok && c.value === v) next = settingsPut(next, key, v);
+  }
+  return next;
+}
+
+/** A line the panel has no row for back to the default, by its line in the file (1-based): an option of the
+ *  template gets the template's commented-out line in its place, any other line (a variable by its own name, the
+ *  Mac app's options) goes. */
+export function resetLine(text: string, phys: number): string {
+  const lines = text.split('\n');
+  const l = (lines[phys - 1] ?? '').trim();
+  const eq = l.indexOf('=');
+  if (eq < 0 || l[0] === '#' || l[0] === ';') return text;          // not a setting's line: nothing to reset
+  const d = keyDef(l.slice(0, eq).trim());
+  if (d && DEFAULTS.has(d.key)) lines[phys - 1] = `#${d.key} = ${DEFAULTS.get(d.key)}`.replace(/ = $/, ' =');
+  else lines.splice(phys - 1, 1);
+  return lines.join('\n');
+}
+
 export interface SettingsDeps {
   saveDir: string;
   /** the page address's environment (overrides the file) */
@@ -138,6 +170,8 @@ export interface SettingsDeps {
   say?(msg: string | Msg): void;
   /** after settings.ini was read again (refresh) */
   onLoaded?(): void;
+  /** the page's question box (Reset all settings asks first) */
+  confirm?(title: string, body: string, ok: string, danger?: boolean): Promise<boolean>;
 }
 
 export class SettingsPanel {
@@ -151,6 +185,7 @@ export class SettingsPanel {
   /** root: the Settings section; online: the section of the group that is its own (Online, under Saves) */
   constructor(private root: HTMLElement, private deps: SettingsDeps, private online: HTMLElement) {
     root.querySelector<HTMLButtonElement>('#settings-text-save')!.onclick = () => void this.saveRaw();
+    root.querySelector<HTMLButtonElement>('#settings-reset-all')!.onclick = () => void this.resetAll();
   }
 
   async load(): Promise<string | null> {
@@ -283,6 +318,13 @@ export class SettingsPanel {
       const line = t('line {line}: {key} = {value}', { line: o.phys, key: o.key, value: o.value.length > 80 ? o.value.slice(0, 80) + '…' : o.value });
       li.textContent = o.refused ? t('{line} (ignored: {why})', { line, why: o.why ? tvars(o.why.t, o.why.v) : o.refused })
         : o.env !== o.key ? t('{line} (sets {env})', { line, env: o.env }) : line;
+      const r = document.createElement('button'); r.type = 'button'; r.className = 'text-btn'; r.textContent = t('Reset');
+      r.setAttribute('aria-label', t('Reset {label}', { label: o.key }));
+      const def = DEFAULTS.get(keyDef(o.key)?.key ?? '');
+      if (def !== undefined) r.title = t('Back to the default ({value})', { value: def === '' ? t('empty') : def });
+      r.disabled = this.ro();
+      r.onclick = () => void this.resetLine(o.phys, o.key, r);
+      li.append(' ', r);
       ul.append(li);
     }
     box.append(h, p, ul);
@@ -311,6 +353,8 @@ export class SettingsPanel {
     if (document.activeElement !== ta) ta.value = this.text ?? TEMPLATE;
     ta.readOnly = ro;
     this.root.querySelector<HTMLButtonElement>('#settings-text-save')!.disabled = ro;
+    // nothing to reset: the file is the template already, but for the name and language
+    this.root.querySelector<HTMLButtonElement>('#settings-reset-all')!.disabled = ro || resetAll(this.text) === (this.text ?? TEMPLATE);
   }
 
   private row(it: Item): HTMLElement {
@@ -442,11 +486,39 @@ export class SettingsPanel {
     const next = ta.value.endsWith('\n') ? ta.value : ta.value + '\n';
     const r = resolveEnv(next, this.deps.environment, {});
     const bad = r.notes.filter(n => /ignored$|only the page sets it$/.test(n) && !/is set in the environment|already set/.test(n));
+    await this.write(next);
+    msg.textContent = bad.length ? tn(bad.length, 'Saved. {n} line is ignored: {first}', 'Saved. {n} lines are ignored: {first} …', { first: bad[0] }) : t('Saved.');
+  }
+
+  /** "Reset all settings", once the player said yes */
+  private async resetAll() {
+    if (this.ro()) { this.deps.say?.(t(READ_ONLY)); return; }
+    if (this.deps.confirm && !await this.deps.confirm(t('Reset all settings?'),
+      t('Every setting here goes back to its default, and any other line in settings.ini is removed. Your name and language stay, as do the options set inside the game.'),
+      t('Reset'), true)) return;
+    if (this.ro()) { this.deps.say?.(t(READ_ONLY)); return; }       // another tab took the saves meanwhile
+    await this.write(resetAll(this.text));
+    this.deps.say?.(() => t('Settings are back to their defaults. Applies the next time you press Play.'));
+  }
+
+  /** a line of "Other settings in this file" back to its default; a keyboard's focus goes on to the next one */
+  private async resetLine(phys: number, key: string, btn: HTMLButtonElement) {
+    if (this.ro()) { this.deps.say?.(t(READ_ONLY)); return; }
+    const at = [...this.root.querySelectorAll('#settings-other .text-btn')].indexOf(btn), focused = document.activeElement === btn;
+    await this.write(resetLine(this.text ?? TEMPLATE, phys));
+    if (focused) {
+      const rest = this.root.querySelectorAll<HTMLElement>('#settings-other .text-btn');
+      (rest[Math.min(at, rest.length - 1)] ?? this.root.querySelector<HTMLElement>('#settings-raw > summary'))?.focus();
+    }
+    this.deps.say?.(() => t('Saved: {key} is back to its default. Applies the next time you press Play.', { key }));
+  }
+
+  /** settings.ini as a whole (the text editor, a reset), and the panel drawn again */
+  private async write(next: string) {
     await writeFile(this.deps.saveDir, 'settings.ini', next);
     this.text = next; this.resolve(next);
     this.deps.onSaved?.(next);
     this.render();
     this.root.dataset.saved = String(++this.saves);
-    msg.textContent = bad.length ? tn(bad.length, 'Saved. {n} line is ignored: {first}', 'Saved. {n} lines are ignored: {first} …', { first: bad[0] }) : t('Saved.');
   }
 }

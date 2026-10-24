@@ -694,5 +694,10 @@
   "Screenshot": "スクリーンショット",
   "‹ Newer": "‹ 新しい",
   "Older ›": "古い ›",
-  "Download": "ダウンロード"
+  "Download": "ダウンロード",
+  "Reset all settings": "すべての設定をリセット",
+  "Reset all settings?": "すべての設定をリセットしますか？",
+  "Every setting here goes back to its default, and any other line in settings.ini is removed. Your name and language stay, as do the options set inside the game.": "ここでの設定はすべてデフォルトに戻り、settings.iniのその他の行は削除されます。名前と言語、ゲーム内で設定したオプションはそのまま残ります。",
+  "Settings are back to their defaults. Applies the next time you press Play.": "設定をデフォルトに戻しました。次に「プレイ」を押したときに反映されます。",
+  "Saved: {key} is back to its default. Applies the next time you press Play.": "保存しました: {key}をデフォルトに戻しました。次に「プレイ」を押したときに反映されます。"
 }
