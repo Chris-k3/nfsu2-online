@@ -11,6 +11,7 @@
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
+#include <time.h>
 #include <unistd.h>
 #include "enhance.h"
 
@@ -877,6 +878,56 @@ void sub_00483e40(CPU *c){
     uint32_t head = list + 4u, n = 0;
     for (uint32_t e = MR32(head); e && e != head && n < 1024u; e = MR32(e)) n++;
     MR32(list + 0xcu) = n;
+}
+
+/* --- sub_0061c600: the car loader reads a car type's PARTS_ANIMATIONS.BIN ---
+ * The CarLoader (0x8A3288) has one read under way at a time: a step that
+ * starts one (a model or texture pack, a car's textures) sets its busy word
+ * (+0x14, 0x8A329C), the read's callback (0x610A10, 0x610A30, 0x61CB40...)
+ * clears it and runs the next step (0x63B160), and the frame's service
+ * (0x63BCD0) steps only while it is clear.  This one (thiscall loader, the
+ * car type's hash, ret 4) sets busy and starts its read without looking.
+ * The step calls it only in the front end, after the car before it is done;
+ * a cover shoot's start calls it at any time (0x4CE770 -> 0x633A00, the
+ * player's car type), and in free roam a friend's car is often loading then
+ * (in both shoots of the 2026-10-24 report).  Its callback (0x63BD10) then
+ * cleared busy and stepped while the friend's read was still under way, so
+ * the loader ran two reads at once and stepped a car on before its pack was
+ * in, and busy could stay set for good.  The next Load that found the rides
+ * pool full (0x63AE70: it waits for busy to clear, then purges) waited
+ * forever, holding the GIL: the game froze with the sound looping, a few
+ * friends' cars after the shoot or much later (the report: 1,000 frames
+ * after it, in the middle of a friend's car load).
+ * tests/scripts/roam_crowd_shoot.txt calls the shoot's start and
+ * end while friends' cars load: hung in that wait after 24 of them, none in
+ * 30 with this.  Here a read under way finishes first, the way that Load
+ * waits (the reads serviced, 0x57EF60, until busy is clear).
+ * NFSU2_TEST_LOADER_OVERLAP=1 (test aid): the game's way. */
+#define CARLOADER_BUSY  0x008a329cu
+#define CARTYPEINFO     0x008a1cccu   /* -> 46 x 0x890 bytes: +0 the name, +0xD0 the hash */
+uint32_t call_guest(CPU *c, uint32_t fn, int nargs, const uint32_t *args);   /* com.c */
+long autotest_frame(void);
+void sub_0061c600_orig(CPU *c);
+void sub_0061c600(CPU *c){
+    static int overlap = -1;
+    if (overlap < 0){ const char *e = getenv("NFSU2_TEST_LOADER_OVERLAP"); overlap = e && *e == '1'; }
+    if (MR32(CARLOADER_BUSY) && overlap)
+        fprintf(stderr, "[loader] f=%ld TEST: part animations read with the car loader's read under way\n", autotest_frame());
+    if (MR32(CARLOADER_BUSY) && !overlap){
+        struct timespec t0, t1;
+        clock_gettime(CLOCK_MONOTONIC, &t0);
+        while (MR32(CARLOADER_BUSY)) call_guest(c, 0x0057ef60u, 0, 0);
+        clock_gettime(CLOCK_MONOTONIC, &t1);
+        uint32_t h = MR32(c->esp + 4u), t = MR32(CARTYPEINFO);
+        char nm[16] = "?";
+        for (uint32_t k = 0; t && k < 46u; k++)
+            if (MR32(t + k * 0x890u + 0xd0u) == h){
+                for (int i = 0; i < 15 && MR8(t + k * 0x890u + (uint32_t)i); i++){ nm[i] = (char)MR8(t + k * 0x890u + (uint32_t)i); nm[i + 1] = 0; }
+                break; }
+        fprintf(stderr, "[loader] f=%ld %s's part animations waited %.0f ms for the car loader's read under way\n",
+                autotest_frame(), nm, (t1.tv_sec - t0.tv_sec) * 1e3 + (t1.tv_nsec - t0.tv_nsec) / 1e6);
+    }
+    sub_0061c600_orig(c);
 }
 
 /* --- a car's shadow outline: sub_0060cee0(points, n, comparator), cdecl ----
