@@ -272,7 +272,7 @@
   "Leave empty to drive with everyone. With a name, free roam shows only the players who set the same name. Not private: everyone on this server still sees your name.": "留空即可與所有人一起開車。輸入名稱後，自由漫遊只會顯示設定了相同名稱的玩家。這不具隱私性：此伺服器上的所有人仍看得到你的名稱。",
   "everyone": "所有人",
   "Crews": "車隊",
-  "Friends who type the same crew name always see each other in free roam, however far apart, with names and map arrows in the crew's colour. Up to 4. Anyone who types the name joins.": "輸入相同車隊名稱的好友在自由漫遊中無論相距多遠都能看到彼此，名稱和地圖箭頭會以車隊的顏色顯示。最多 4 個。任何人輸入此名稱即可加入。",
+  "Friends who type the same crew name always see each other in free roam, however far apart, with names and map arrows in the crew's colour. Up to 4 crews. Anyone who types the name joins.": "輸入相同車隊名稱的好友在自由漫遊中無論相距多遠都能看到彼此，名稱和地圖箭頭會以車隊的顏色顯示。最多 4 個車隊。任何人輸入此名稱即可加入。",
   "Crew name": "車隊名稱",
   "Join crew": "加入車隊",
   "Leave crew {name}": "退出車隊「{name}」",

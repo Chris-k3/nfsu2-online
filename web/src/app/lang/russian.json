@@ -342,7 +342,7 @@
   "Leave empty to drive with everyone. With a name, free roam shows only the players who set the same name. Not private: everyone on this server still sees your name.": "Оставьте пустым, чтобы ездить со всеми. Если указать название, в свободной езде будут видны только игроки, указавшие то же название. Это не приватно: все на этом сервере по-прежнему видят ваше имя.",
   "everyone": "все",
   "Crews": "Команды",
-  "Friends who type the same crew name always see each other in free roam, however far apart, with names and map arrows in the crew's colour. Up to 4. Anyone who types the name joins.": "Друзья, указавшие одно и то же название команды, всегда видят друг друга в свободной езде на любом расстоянии, а их имена и стрелки на карте — в цвете команды. До 4. Вступить может любой, кто введёт название.",
+  "Friends who type the same crew name always see each other in free roam, however far apart, with names and map arrows in the crew's colour. Up to 4 crews. Anyone who types the name joins.": "Друзья, указавшие одно и то же название команды, всегда видят друг друга в свободной езде на любом расстоянии, а их имена и стрелки на карте — в цвете команды. До 4 команд. Вступить может любой, кто введёт название.",
   "Crew name": "Название команды",
   "Join crew": "Вступить в команду",
   "Leave crew {name}": "Покинуть команду «{name}»",

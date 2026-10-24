@@ -46,7 +46,7 @@ const GROUPS: Group[] = [
   { title: N('Online'), more: N('More online settings'), status: true, own: true, items: [
     { key: 'roam', label: N('Free roam with others'), help: N('Everyone on this server who turns this on sees your car in career free roam, and you see theirs, with their names over them.'), c: { t: 'switch' } },
     { key: 'roam_name', label: N('Your name'), help: N('What other players see over your car in free roam, and your name in the Online menu (there only letters, digits, - and _, at most 15). Empty uses your profile name.'), c: { t: 'text', placeholder: N('profile name') } },
-    { key: 'roam_crew', label: N('Crews'), help: N('Friends who type the same crew name always see each other in free roam, however far apart, with names and map arrows in the crew\'s colour. Up to 4. Anyone who types the name joins.'), c: { t: 'crews', placeholder: N('Crew name') } },
+    { key: 'roam_crew', label: N('Crews'), help: N('Friends who type the same crew name always see each other in free roam, however far apart, with names and map arrows in the crew\'s colour. Up to 4 crews. Anyone who types the name joins.'), c: { t: 'crews', placeholder: N('Crew name') } },
     { key: 'horn', label: N('Your horn'), help: N('N or the controller\'s left stick click, in free roam and in races with other players.'), c: { t: 'select', opts: [
       ['dual', N('Dual tone')], ['single', N('Single tone')], ['truck', N('Air horn')], ['train', N('Train horn')], ['klaxon', N('Klaxon')],
       ['cucaracha', N('La Cucaracha')], ['clown', N('Clown horn')], ['trombone', N('Sad trombone')]], preview: { play: playHorn, stop: stopHorn } } },

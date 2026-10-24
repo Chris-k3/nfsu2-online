@@ -272,7 +272,7 @@
   "Leave empty to drive with everyone. With a name, free roam shows only the players who set the same name. Not private: everyone on this server still sees your name.": "เว้นว่างไว้เพื่อขับกับทุกคน หากใส่ชื่อ การขับอิสระจะแสดงเฉพาะผู้เล่นที่ตั้งชื่อเดียวกัน แต่ไม่เป็นส่วนตัว: ทุกคนบนเซิร์ฟเวอร์นี้ยังเห็นชื่อของคุณ",
   "everyone": "ทุกคน",
   "Crews": "ทีม",
-  "Friends who type the same crew name always see each other in free roam, however far apart, with names and map arrows in the crew's colour. Up to 4. Anyone who types the name joins.": "เพื่อนที่พิมพ์ชื่อทีมเดียวกันจะเห็นกันเสมอในการขับอิสระ ไม่ว่าจะอยู่ไกลแค่ไหน โดยชื่อและลูกศรบนแผนที่จะเป็นสีของทีม สูงสุด 4 ทีม ใครพิมพ์ชื่อนี้ก็เข้าร่วมได้",
+  "Friends who type the same crew name always see each other in free roam, however far apart, with names and map arrows in the crew's colour. Up to 4 crews. Anyone who types the name joins.": "เพื่อนที่พิมพ์ชื่อทีมเดียวกันจะเห็นกันเสมอในการขับอิสระ ไม่ว่าจะอยู่ไกลแค่ไหน โดยชื่อและลูกศรบนแผนที่จะเป็นสีของทีม สูงสุด 4 ทีม ใครพิมพ์ชื่อนี้ก็เข้าร่วมได้",
   "Crew name": "ชื่อทีม",
   "Join crew": "เข้าร่วมทีม",
   "Leave crew {name}": "ออกจากทีม {name}",

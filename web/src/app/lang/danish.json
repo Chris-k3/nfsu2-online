@@ -314,7 +314,7 @@
   "Leave empty to drive with everyone. With a name, free roam shows only the players who set the same name. Not private: everyone on this server still sees your name.": "Lad det stå tomt for at køre med alle. Med et navn viser udforsknings-mode kun de spillere, der har angivet samme navn. Ikke privat: alle på denne server ser stadig dit navn.",
   "everyone": "alle",
   "Crews": "Crews",
-  "Friends who type the same crew name always see each other in free roam, however far apart, with names and map arrows in the crew's colour. Up to 4. Anyone who types the name joins.": "Venner, der skriver det samme crewnavn, ser altid hinanden i udforsknings-mode, uanset afstanden, med navne og kortpile i crewets farve. Op til 4. Alle, der skriver navnet, er med.",
+  "Friends who type the same crew name always see each other in free roam, however far apart, with names and map arrows in the crew's colour. Up to 4 crews. Anyone who types the name joins.": "Venner, der skriver det samme crewnavn, ser altid hinanden i udforsknings-mode, uanset afstanden, med navne og kortpile i crewets farve. Op til 4 crews. Alle, der skriver navnet, er med.",
   "Crew name": "Crewnavn",
   "Join crew": "Bliv medlem af crew",
   "Leave crew {name}": "Forlad crewet {name}",

@@ -342,7 +342,7 @@
   "Leave empty to drive with everyone. With a name, free roam shows only the players who set the same name. Not private: everyone on this server still sees your name.": "Zostaw puste, aby jeździć ze wszystkimi. Po wpisaniu nazwy przejażdżka pokazuje tylko graczy, którzy ustawili tę samą nazwę. To nie jest prywatne: wszyscy na tym serwerze nadal widzą twoją nazwę.",
   "everyone": "wszyscy",
   "Crews": "Ekipy",
-  "Friends who type the same crew name always see each other in free roam, however far apart, with names and map arrows in the crew's colour. Up to 4. Anyone who types the name joins.": "Znajomi, którzy wpiszą tę samą nazwę ekipy, zawsze widzą się na przejażdżce, niezależnie od odległości, a ich nazwy i strzałki na mapie mają kolor ekipy. Maksymalnie 4. Każdy, kto wpisze nazwę, dołącza.",
+  "Friends who type the same crew name always see each other in free roam, however far apart, with names and map arrows in the crew's colour. Up to 4 crews. Anyone who types the name joins.": "Znajomi, którzy wpiszą tę samą nazwę ekipy, zawsze widzą się na przejażdżce, niezależnie od odległości, a ich nazwy i strzałki na mapie mają kolor ekipy. Maksymalnie 4 ekipy. Każdy, kto wpisze nazwę, dołącza.",
   "Crew name": "Nazwa ekipy",
   "Join crew": "Dołącz do ekipy",
   "Leave crew {name}": "Opuść ekipę {name}",

@@ -328,7 +328,7 @@
   "Leave empty to drive with everyone. With a name, free roam shows only the players who set the same name. Not private: everyone on this server still sees your name.": "Lascia vuoto per guidare con tutti. Con un nome, la modalità Esplora mostra solo i giocatori che hanno impostato lo stesso nome. Non è privata: tutti su questo server vedono comunque il tuo nome.",
   "everyone": "tutti",
   "Crews": "Crew",
-  "Friends who type the same crew name always see each other in free roam, however far apart, with names and map arrows in the crew's colour. Up to 4. Anyone who types the name joins.": "Gli amici che scrivono lo stesso nome di crew si vedono sempre in modalità Esplora, a qualsiasi distanza, con nomi e frecce sulla mappa nel colore della crew. Fino a 4. Chiunque scriva il nome ne fa parte.",
+  "Friends who type the same crew name always see each other in free roam, however far apart, with names and map arrows in the crew's colour. Up to 4 crews. Anyone who types the name joins.": "Gli amici che scrivono lo stesso nome di crew si vedono sempre in modalità Esplora, a qualsiasi distanza, con nomi e frecce sulla mappa nel colore della crew. Fino a 4 crew. Chiunque scriva il nome ne fa parte.",
   "Crew name": "Nome della crew",
   "Join crew": "Unisciti alla crew",
   "Leave crew {name}": "Lascia la crew {name}",

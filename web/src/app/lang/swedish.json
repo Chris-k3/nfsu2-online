@@ -314,7 +314,7 @@
   "Leave empty to drive with everyone. With a name, free roam shows only the players who set the same name. Not private: everyone on this server still sees your name.": "Lämna tomt för att köra med alla. Med ett namn visar läget Utforska bara de spelare som angett samma namn. Inte privat: alla på servern ser ändå ditt namn.",
   "everyone": "alla",
   "Crews": "Crews",
-  "Friends who type the same crew name always see each other in free roam, however far apart, with names and map arrows in the crew's colour. Up to 4. Anyone who types the name joins.": "Vänner som skriver samma crewnamn ser alltid varandra i läget Utforska, hur långt ifrån varandra de än är, med namn och kartpilar i crewens färg. Upp till 4. Alla som skriver namnet är med.",
+  "Friends who type the same crew name always see each other in free roam, however far apart, with names and map arrows in the crew's colour. Up to 4 crews. Anyone who types the name joins.": "Vänner som skriver samma crewnamn ser alltid varandra i läget Utforska, hur långt ifrån varandra de än är, med namn och kartpilar i crewens färg. Upp till 4 crews. Alla som skriver namnet är med.",
   "Crew name": "Crewnamn",
   "Join crew": "Gå med i crew",
   "Leave crew {name}": "Lämna crewen {name}",
