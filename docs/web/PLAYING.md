@@ -48,8 +48,9 @@ server answers. The start page then says **Offline**, and the game runs from the
 it first. The movies are off for such a game unless every one of them is on the PC already. Free roam and Online
 need the server; your saves are in the browser either way.
 
-**Phones and tablets** (Chrome on Android): a tap is a click, so the game's menus work by touch, and two fingers
-dragged sideways turn the car in the garage. The ☰ button opens the page menu. On a phone the game goes full screen
+**Phones and tablets** (Chrome on Android): a tap is a click, so the game's menus work by touch, two fingers
+dragged sideways turn the car in the garage, and a finger dragged up or down on a column of the ECU or Turbo tuning
+graph moves its dot. The ☰ button opens the page menu. On a phone the game goes full screen
 when you press Play and renders at 75% resolution scale (Settings, Display changes both). After a few minutes of driving the page checks whether the phone keeps its frame rate with GPU
 time to spare; if so, it renders at 100% from the next game on that phone (and goes back to 75% if it later falls
 behind). This only applies while you leave the resolution scale at its default. Held sideways, the game fills the screen with the touch controls over it; held upright, it shows
@@ -95,7 +96,9 @@ The start page shows these keys under **Controls**, and F9, Controls shows them 
 
 - **Change the keys:** in the game, Options, Controls. The horn stays on N (the game has no horn of its own).
 - **Mouse:** works in the menus; in the garage, drag with the middle button (the wheel) held to turn the car, as in
-  the PC game. **Touch:** a tap is a click there; drag two fingers to turn the car.
+  the PC game. On the ECU and Turbo tuning graphs the wheel moves the dot of the column under the pointer, as in the
+  PC game, and so does a drag up or down on that column. **Touch:** a tap is a click there; drag two fingers to turn
+  the car; drag one finger up or down on a tuning graph's column.
 - **Controller:** an Xbox or PlayStation pad works through the browser. The browser shows a pad to the page only
   after a button is pressed on it. The triggers are throttle and brake, the left stick steers, LB is nitrous, RB the
   handbrake, A and X shift, Y and B are camera and look back, View respawns, Start pauses; D-pad up starts an event
