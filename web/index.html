@@ -260,10 +260,21 @@
     <button type="button" class="btn" data-act="fullscreen">Full screen</button>
     <button type="button" class="btn" data-act="fps">Frame-rate counter: off</button>
     <button type="button" class="btn" data-act="solid" data-i18n-attr="title" title="On: you drive through the other players' cars, and they through yours. Off: you collide with them." hidden>Ghost mode: off</button>
+    <button type="button" class="btn" data-act="crews" aria-haspopup="dialog" hidden>Crews: none</button>
     <button type="button" class="btn" data-act="help" data-i18n>Controls</button>
     <button type="button" class="btn" data-act="offline" hidden data-i18n>Stop waiting: play offline</button>
     <button type="button" class="btn" data-act="log" data-i18n>Download log</button>
     <button type="button" class="btn danger" data-act="quit">Quit game</button>
+  </div>
+</dialog>
+
+<!-- the menu's Crews (a game in free roam), over the menu; after it in the page, so it is the top dialog (padnav.ts) -->
+<dialog class="dlg crews-pop" id="crews-pop" aria-labelledby="crews-pop-title" aria-describedby="crews-pop-help">
+  <h2 id="crews-pop-title" data-i18n>Crews</h2>
+  <p class="hint" id="crews-pop-help" data-i18n>Friends who type the same crew name always see each other in free roam, however far apart, with names and map arrows in the crew's colour. Up to 4. Anyone who types the name joins.</p>
+  <div class="crews-pop-box" id="crews-pop-box"></div>
+  <div class="row end">
+    <button type="button" class="btn selected" data-act="crews-done" data-i18n>Done</button>
   </div>
 </dialog>
 

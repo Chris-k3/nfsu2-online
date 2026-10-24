@@ -305,6 +305,17 @@ void roam_plat_say_marks(const uint32_t *ids, const float *xys, int n){
     for (int i = 0; i < n; i++){ m[i].id = ids[i]; m[i].x = xys[3 * i]; m[i].y = xys[3 * i + 1]; m[i].s = xys[3 * i + 2]; }
     gw_marks(m, n);
 }
+/* the crews as the page's menu changed them (net_proto.h crews): read again
+ * while the page writes them (the crews and colours first, then the number) */
+uint32_t roam_plat_crews(uint32_t crews[RC_CREW_MAX], uint32_t rgb[RC_CREW_MAX]){
+    for (int tries = 0; MB && tries < 4; tries++){
+        uint32_t g = ld(&MB->crews_gen);
+        if (!g) return 0;
+        for (int i = 0; i < RC_CREW_MAX; i++){ crews[i] = i < 4 ? ld(&MB->crews[i]) : 0; rgb[i] = i < 4 ? ld(&MB->crews_rgb[i]) & 0xffffffu : 0; }
+        if (ld(&MB->crews_gen) == g) return g;
+    }
+    return 0;
+}
 static uint8_t place(const rc_peer *p){ return p->status == RC_ST_PAUSED ? RC_ST_ROAM : p->status; }
 /* we are in free roam and the friend's car was within NEAR_M of ours (on the
  * ground) when last seen: SNAPs come only from free roam, so its newest state

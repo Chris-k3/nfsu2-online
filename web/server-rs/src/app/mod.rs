@@ -608,7 +608,10 @@ impl App {
     /// line (a page of before: gets "LAN full"); queue: the pages waiting in line (nfsu2-lan queue.rs); roamBusy: the
     /// hub gives fewer than askCap links a player, so the page does not ask the free-roam question now (false with
     /// --roam-hub off).  ?room=<hash> (roam_core's rc_room_hash of a Room setting, decimal,
-    /// not 0) adds room: how many of roam are in that room (with --roam-hub on)
+    /// not 0) adds room: how many of roam are in that room (with --roam-hub on).  ?crews=<hash>,<hash>,... (the
+    /// rc_room_hash of each of the Crews setting's words, decimal; the first 4 that are numbers and not 0, the rest
+    /// left out) adds crews: how many of roam are in each of those crews, in any room, in that order (with --roam-hub
+    /// on, and one of them at least); both as of the hub's last tick, from its counts (nothing waits for its thread)
     async fn send_players(&self, q: &Request, s: &mut Response, u: &url::Url) -> Res {
         let info = match &self.online {
             Some(h) => {
@@ -639,6 +642,13 @@ impl App {
         let room = u.param("room").and_then(|r| r.parse::<u32>().ok()).filter(|&r| r != 0);
         if let (Some(room), Some(r)) = (room, &self.roam) {
             m.insert("room".into(), serde_json::Value::from(r.in_room(room).min(players)));
+        }
+        let crews: Vec<u32> = u.param("crews").map_or(Vec::new(), |c| {
+            c.split(',').filter_map(|h| h.parse::<u32>().ok()).filter(|&h| h != 0).take(nfsu2_roam::CREWS).collect()
+        });
+        if let Some(r) = self.roam.as_ref().filter(|_| !crews.is_empty()) {
+            let n = r.in_crews(&crews).into_iter().map(|n| serde_json::Value::from(n.min(players))).collect();
+            m.insert("crews".into(), serde_json::Value::Array(n));
         }
         let body = nfsu2_util::json::stringify(&serde_json::Value::Object(m));
         let mut h = self.headers(q, Cache::Store, true);

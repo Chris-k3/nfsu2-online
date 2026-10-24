@@ -325,6 +325,11 @@ int rc_encode(const rc_msg *m, uint8_t *out, int cap){
         rc_put8(&w, nl); rc_putb(&w, m->u.hello.name, nl);
         rc_put8(&w, m->u.hello.n_seen);
         for (int i = 0; i < m->u.hello.n_seen; i++) rc_put32(&w, m->u.hello.seen[i]);
+        if (m->u.hello.n_crews){
+            if (!(m->h.flags & RC_HF_CREW) || m->u.hello.n_crews > RC_CREW_MAX) return -1;
+            rc_put8(&w, m->u.hello.n_crews);
+            for (int i = 0; i < m->u.hello.n_crews; i++){ if (!m->u.hello.crews[i]) return -1; rc_put32(&w, m->u.hello.crews[i]); }
+        }
         break; }
     case RC_MSG_PEERS:
         if (m->u.peers.n > RC_MAX_PEERS) return -1;
@@ -430,6 +435,14 @@ int rc_decode(const uint8_t *buf, int len, rc_msg *m){
         if (m->u.hello.n_seen > RC_MAX_PEERS) return RC_E_FIELD;
         for (int i = 0; i < m->u.hello.n_seen; i++) m->u.hello.seen[i] = rc_get32(&r);
         if (m->u.hello.status >= RC_ST__N) return RC_E_FIELD;
+        if ((m->h.flags & RC_HF_CREW) && !r.err && r.n < r.len){
+            m->u.hello.n_crews = (uint8_t)rc_get8(&r);
+            if (m->u.hello.n_crews > RC_CREW_MAX) return RC_E_FIELD;
+            for (int i = 0; i < m->u.hello.n_crews; i++) m->u.hello.crews[i] = rc_get32(&r);
+            if (r.err) return RC_E_SHORT;
+            for (int i = 0; i < m->u.hello.n_crews; i++) if (!m->u.hello.crews[i]) return RC_E_FIELD;
+            r.n = r.len;                                              /* (a newer core's additions) */
+        }
         break; }
     case RC_MSG_PEERS:
         m->u.peers.n = (uint8_t)rc_get8(&r);
@@ -954,6 +967,26 @@ static int in_group(const rc_session *s, const rc_peer *p){
     return s->hub_was != 2 || p->configured || p->hub_listed_us == s->hub_heard_us;
 }
 int rc_peer_listed(const rc_session *s, int i){ return i >= 0 && i < RC_TABLE && in_group(s, &s->peer[i]); }
+void rc_set_crews(rc_session *s, const uint32_t *crews, int n){
+    s->conf.n_crews = 0;
+    for (int i = 0; i < n && s->conf.n_crews < RC_CREW_MAX; i++){
+        int dup = !crews[i];
+        for (int k = 0; k < s->conf.n_crews; k++) dup |= s->conf.crews[k] == crews[i];
+        if (!dup) s->conf.crews[s->conf.n_crews++] = crews[i];
+    }
+    for (int k = s->conf.n_crews; k < RC_CREW_MAX; k++) s->conf.crews[k] = 0;
+    /* HELLOs due at the next tick: the hub links us by them, a peer colours us by them */
+    s->hub_hello_tx = INT64_MIN / 4;
+    for (int i = 0; i < RC_TABLE; i++) if (s->peer[i].state != RC_PS_FREE) s->peer[i].last_hello_tx = INT64_MIN / 4;
+}
+int rc_peer_crew(const rc_session *s, int i){
+    if (i < 0 || i >= RC_TABLE) return -1;
+    const rc_peer *p = &s->peer[i];
+    for (int c = 0; c < s->conf.n_crews && c < RC_CREW_MAX; c++)
+        for (int k = 0; k < p->n_crews && k < RC_CREW_MAX; k++)
+            if (s->conf.crews[c] && p->crews[k] == s->conf.crews[c]) return c;
+    return -1;
+}
 static int group_count(const rc_session *s){
     int n = 0;
     for (int i = 0; i < RC_TABLE; i++) if (s->peer[i].state == RC_PS_EST && in_group(s, &s->peer[i])) n++;
@@ -1009,10 +1042,15 @@ int rc_add_peer(rc_session *s, uint32_t ip, uint16_t port, int configured, int64
     p->added_us = now_us; p->last_hello_tx = now_us - T_HELLO_CAND;
     return i;
 }
-/* `to`: the peer it goes to (none for the beacon and the hub) */
-static void fill_hello(rc_session *s, rc_msg *m, const rc_peer *to){
+/* `to`: the peer it goes to (none for the beacon and the hub); crews: with
+ * our crews (the hub, a peer that reads them) */
+static void fill_hello(rc_session *s, rc_msg *m, const rc_peer *to, int crews){
     hdr(s, m, RC_MSG_HELLO);
-    m->h.flags = RC_HF_STATEX;
+    m->h.flags = RC_HF_STATEX | RC_HF_CREW;
+    if (crews){
+        int n = s->conf.n_crews < 0 ? 0 : s->conf.n_crews > RC_CREW_MAX ? RC_CREW_MAX : s->conf.n_crews;
+        for (int i = 0; i < n; i++) if (s->conf.crews[i]) m->u.hello.crews[m->u.hello.n_crews++] = s->conf.crews[i];
+    }
     if (s->conf.duels) m->h.flags |= RC_HF_DUELS;
     if (s->conf.lobbies) m->h.flags |= RC_HF_LOBBY;
     if (s->conf.say) m->h.flags |= RC_HF_SAY;
@@ -1048,7 +1086,7 @@ static void fill_hello(rc_session *s, rc_msg *m, const rc_peer *to){
     }
     m->u.hello.n_seen = (uint8_t)n;
 }
-static void send_hello(rc_session *s, rc_peer *p, int64_t now){ rc_msg m; fill_hello(s, &m, p); tx(s, p, &m); p->last_hello_tx = now; }
+static void send_hello(rc_session *s, rc_peer *p, int64_t now){ rc_msg m; fill_hello(s, &m, p, p->reads_crews); tx(s, p, &m); p->last_hello_tx = now; }
 static void send_cfg(rc_session *s, rc_peer *p, uint8_t have_mask){
     if (!s->cfg_len) return;
     int nf = (s->cfg_len + RC_CFG_FRAG - 1) / RC_CFG_FRAG;
@@ -1187,6 +1225,10 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
         p->lobbies = (m.h.flags & RC_HF_LOBBY) != 0;
         p->statex = (m.h.flags & RC_HF_STATEX) != 0;
         p->say = (m.h.flags & RC_HF_SAY) != 0;
+        int was = p->reads_crews;
+        p->reads_crews = (m.h.flags & RC_HF_CREW) != 0;
+        p->n_crews = m.u.hello.n_crews;
+        memcpy(p->crews, m.u.hello.crews, sizeof p->crews);
         int heard = 0;
         for (int k = 0; k < m.u.hello.n_seen; k++) if (m.u.hello.seen[k] == s->conf.self_id) heard = 1;
         /* the beacon of a group past 8: a full list without our id (RC_HF_ALL) */
@@ -1215,6 +1257,9 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
                 note(s, RC_EV_LEAVE, i, p->name, " left: ", "no longer hears us");
             }
         }
+        /* it reads crews now: ours at once (the HELLOs before had none) */
+        if (!was && p->reads_crews && s->conf.n_crews && p->state != RC_PS_CANDIDATE && now - p->last_hello_tx > 100000)
+            send_hello(s, p, now);
         want_cfg(s, p, p->cfg_rev_seen, now);
         break; }
     case RC_MSG_PEERS:
@@ -1313,7 +1358,7 @@ void rc_tick(rc_session *s, int64_t now){
     int hub = hub_mode(s, now);
     if (s->conf.hub_ip){
         if (!s->hub_since) s->hub_since = now ? now : 1;
-        if (now - s->hub_hello_tx >= T_HUB_HELLO){ rc_msg m; fill_hello(s, &m, 0); tx_to(s, s->conf.hub_ip, s->conf.hub_port, &m); s->hub_hello_tx = now; }
+        if (now - s->hub_hello_tx >= T_HUB_HELLO){ rc_msg m; fill_hello(s, &m, 0, 1); tx_to(s, s->conf.hub_ip, s->conf.hub_port, &m); s->hub_hello_tx = now; }
         int st = !hub ? 0 : s->hub_heard_us ? 2 : 1;        /* none or silent, waiting for its first list, answering */
         if (st != s->hub_was && st != 1){
             if (st == 2) note(s, RC_EV_NOTE, -1, "the server's free-roam hub answers: the players near you come from its list", "", "");
@@ -1323,7 +1368,7 @@ void rc_tick(rc_session *s, int64_t now){
         s->hub_was = st;
     }
     if (s->conf.discovery && !hub && now - s->last_beacon >= T_BEACON && s->io.broadcast){
-        rc_msg m; fill_hello(s, &m, 0);
+        rc_msg m; fill_hello(s, &m, 0, 0);                         /* (the beacon: no crews) */
         uint8_t b[RC_MAX_DGRAM]; int n = rc_encode(&m, b, sizeof b);
         if (n > 0) s->io.broadcast(s->io.user, s->conf.port, b, n);
         s->last_beacon = now;
@@ -1363,8 +1408,8 @@ void rc_set_status(rc_session *s, uint8_t st){
     if (st >= RC_ST__N || st == s->status) return;
     s->status = st;
     /* tell the others now, not at the next HELLO: they hide or show our car */
-    for (int i = 0; i < RC_TABLE; i++) if (s->peer[i].state == RC_PS_EST){ rc_msg m; fill_hello(s, &m, &s->peer[i]); tx(s, &s->peer[i], &m); }
-    if (s->conf.hub_ip){ rc_msg m; fill_hello(s, &m, 0); tx_to(s, s->conf.hub_ip, s->conf.hub_port, &m); }
+    for (int i = 0; i < RC_TABLE; i++) if (s->peer[i].state == RC_PS_EST){ rc_msg m; fill_hello(s, &m, &s->peer[i], s->peer[i].reads_crews); tx(s, &s->peer[i], &m); }
+    if (s->conf.hub_ip){ rc_msg m; fill_hello(s, &m, 0, 1); tx_to(s, s->conf.hub_ip, s->conf.hub_port, &m); }
 }
 void rc_bump_epoch(rc_session *s){ s->epoch++; s->nlast = 0; }
 void rc_bump_clock(rc_session *s){ s->clock++; s->nlast = 0; }

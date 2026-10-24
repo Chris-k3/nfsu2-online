@@ -139,6 +139,9 @@ export interface NetLink {
   setSolid(on: boolean): void;
   /** quick chat: the player says phrase p (runtime/roam_game.c say_frame sends it); false: no free roam */
   say(p: number): boolean;
+  /** free roam's crews, changed while the game runs (the page menu): their hashes (players.ts roomHash), in the
+   *  player's order, at most 4, and their colours (0x00rrggbb; 0 or none: the place's default) */
+  setCrews(hashes: readonly number[], rgbs?: readonly number[]): void;
   close(): void;
 }
 
@@ -325,6 +328,10 @@ class Link implements NetLink {
   private solid = 0;
   /** quick chat's picks so far (say): the count in the roam mailbox's say word */
   private picks = 0;
+  /** the roam mailbox's crews (setCrews): their hashes and colours, and how many times the page changed them (0: never) */
+  private crews: number[] = [];
+  private crewsRgb: number[] = [];
+  private crewsGen = 0;
   /** the switch's peer list (the online host on it too), as its last whole list and the changes since made it */
   private peerMap = new Map<number, { name: string; server: boolean }>();
   private peerVips = new Set<number>();
@@ -362,6 +369,7 @@ class Link implements NetLink {
     const ep = new Endpoint(name, ver, buf, r.ptr, r.size);
     if (name === 'roam') this.roam = ep; else this.lan = ep;
     if (name === 'roam' && this.solid) Atomics.store(ep.i32, P.W_SOLID, this.solid);
+    if (name === 'roam') this.publishCrews(ep);
     if (name === 'lan') this.log('LAN play attached (the game opened its LAN screens)');
     this.publishPeers(ep);
     if (this.state === 'online') this.publishOnline(ep);
@@ -471,6 +479,22 @@ class Link implements NetLink {
     this.picks = (this.picks + 1) & 0xffffff;
     Atomics.store(this.roam.i32, P.W_SAY, (this.picks << 8 | (p & 0xff)) | 0);
     return true;
+  }
+  setCrews(hashes: readonly number[], rgbs: readonly number[] = []) {
+    this.crews = hashes.slice(0, P.CREW_WORDS);
+    this.crewsRgb = rgbs.slice(0, P.CREW_WORDS).map(v => v & 0xffffff);
+    this.crewsGen = (this.crewsGen + 1) >>> 0 || 1;
+    if (this.roam) this.publishCrews(this.roam);
+    this.log(`crews: ${this.crews.length} (the page menu)`);
+  }
+  /** the crews into the roam mailbox once the page changed them: their four words first, then the colours' four,
+   *  then the count, which the game watches (it takes the words when the count moves).  Not into a module of before's
+   *  256-byte header. */
+  private publishCrews(ep: Endpoint) {
+    if (!this.crewsGen || ep.i32.length < P.W_CREWS_RGB + P.CREW_WORDS) return;
+    for (let i = 0; i < P.CREW_WORDS; i++) Atomics.store(ep.i32, P.W_CREWS + i, (this.crews[i] ?? 0) | 0);
+    for (let i = 0; i < P.CREW_WORDS; i++) Atomics.store(ep.i32, P.W_CREWS_RGB + i, this.crewsRgb[i] ?? 0);
+    Atomics.store(ep.i32, P.W_CREWS_GEN, this.crewsGen | 0);
   }
   private connect() {
     if (this.closed) return;

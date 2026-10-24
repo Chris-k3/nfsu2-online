@@ -35,8 +35,9 @@ import type { NetQueue, NetRemoved } from '../net';
 import { checkSetting, HOST_FIXED, pageOnly, resolveEnv, settingsUpgrade, TEMPLATE, type Resolved } from './settings';
 import { exists, filesOf, listProfiles, PROFILES_DIR, readText, removeSaveDir, writeFile } from './savefs';
 import { turnOnAutosave } from './profile';
-import { putKey, SettingsPanel } from './settings-ui';
-import { queueText, serverAnswers, watchPlayers, type PlayerCounts } from './players';
+import { crewControl, putKey, SettingsPanel } from './settings-ui';
+import { queueText, roomHash, serverAnswers, watchPlayers, type PlayerCounts } from './players';
+import { crewList, crewsOf, crewsValue, rgbsValue, rgbWords, type Crew } from './crews';
 import { SavesPanel } from './saves-ui';
 import { saveScreenshot } from './shots';
 import { forgetLink, VaultPanel } from './vault-ui';
@@ -92,6 +93,8 @@ let refreshMeasured: Promise<void> = Promise.resolve();
 let session: GameSession | null = null;
 let hudWide = true;                      // the running game's HUD is edge-anchored (hud = wide), not 4:3
 let solidCars: boolean | null = null;    // the running game's free roam has solid cars (null: no free roam)
+let roamCrews: Crew[] | null = null;     // the running game's crews: as it started, then as the menu changed them (null: no free roam)
+let crewDraft = '';                      // the crew name being typed in the menu
 let away: AwayCheck | null = null;
 let renderCheck: RenderCheck | null = null;
 let lastExit: { code: number; seconds: number } | null = null;
@@ -441,6 +444,8 @@ async function startGame() {
   const netName = net ? (r.env.NFSU2_ROAM_NAME?.trim() || 'Player') : null;
   hudWide = !/^(43|4:3)$/i.test(r.env.NFSU2_HUD?.trim() ?? '');
   solidCars = net && r.env.NFSU2_ROAM === '1' ? r.env.NFSU2_ROAM_COLLIDE !== '0' : null;
+  roamCrews = net && r.env.NFSU2_ROAM === '1' ? crewsOf(r.env.NFSU2_ROAM_CREW ?? '', r.env.NFSU2_ROAM_CREW_RGB ?? '') : null;
+  crewDraft = '';
   fatal = null;
   quitAt = null;
   saved = null;
@@ -603,7 +608,7 @@ function endStage() {
   untrack?.(); untrack = null;
   fps.stop(); fps.reader = null; fps.memory = null;
   lobbyPanel.clear();
-  const menu = $<HTMLDialogElement>('#menu'); if (menu.open) menu.close();
+  for (const id of ['#crews-pop', '#menu']) { const d = $<HTMLDialogElement>(id); if (d.open) d.close(); }
   // a Quit question still open belongs to the game that ended (its answer would
   // do nothing, and the open question would keep that game reachable)
   const ask = $<HTMLDialogElement>('#confirm'); if (ask.open && ask.dataset.about === 'quit') ask.close();
@@ -828,7 +833,7 @@ async function screenshot() {
 // ----------------------------------------------------------- page menu --
 function openMenu() {
   const m = $<HTMLDialogElement>('#menu');
-  if (m.open) { m.close(); return; }
+  if (m.open) { m.close(); return; }                // (its Crews popup too: the menu's close)
   const fsButton = m.querySelector<HTMLButtonElement>('[data-act="fullscreen"]')!;
   fsButton.textContent = isFullscreen() ? t('Leave full screen') : t('Full screen');
   fsButton.hidden = !canFullscreen() && fromHomeScreen();         // from an iPhone's Home Screen: already without bars
@@ -836,6 +841,9 @@ function openMenu() {
   const solid = m.querySelector<HTMLButtonElement>('[data-act="solid"]')!;
   solid.hidden = solidCars === null || !session?.net?.solid;
   solid.textContent = ghostLabel();
+  const crews = m.querySelector<HTMLButtonElement>('[data-act="crews"]')!;
+  crews.hidden = roamCrews === null || !session?.net?.crews;
+  crews.textContent = crewsLabel();
   m.querySelector<HTMLButtonElement>('[data-act="quit"]')!.textContent = quitLabel();
   const line = $('#menu-save');
   if (saved) line.textContent = t('Last saved at {when} ({name}).', { when: when(saved.at), name: saved.name });
@@ -851,6 +859,40 @@ function openMenu() {
 /** the menu's frame-rate counter and Ghost mode buttons, with what they are at now */
 const fpsLabel = (mode: string) => t('Frame-rate counter: {mode}', { mode: t(mode === 'on' ? N('on') : mode === 'detailed' ? N('detailed') : N('off')) });
 const ghostLabel = () => solidCars ? t('Ghost mode: off') : t('Ghost mode: on');
+const crewsLabel = () => roamCrews?.length ? t('Crews: {n}', { n: roamCrews.length }) : t('Crews: none');
+/** The menu's Crews popup (free roam only), over the menu: the Crews row's control, which changes the game's crews at
+ *  once.  Done, Esc or a controller's B closes it, back to the menu on its Crews button; an Esc in a crew's palette
+ *  closes only the palette. */
+function openCrews() {
+  const pop = $<HTMLDialogElement>('#crews-pop');
+  if (roamCrews === null || !session?.net?.crews || pop.open) return;
+  drawPopCrews();
+  pop.showModal();
+  ($('#crews-pop-box').querySelector<HTMLElement>('input:enabled') ?? $('#crews-pop-box').querySelector<HTMLElement>('.crew-dot'))?.focus();
+}
+/** the popup's control, drawn again after each change; focus: where the keyboard (or controller) goes then, if it was
+ *  in there */
+function drawPopCrews(focus?: (root: HTMLElement) => Element | null | undefined) {
+  const box = $('#crews-pop-box'), had = box.contains(document.activeElement);
+  box.replaceChildren();
+  crewControl({ list: roamCrews ?? [], id: 'crews-pop-input', labelId: 'crews-pop-title', placeholder: N('Crew name'), draft: crewDraft,
+    onDraft: v => { crewDraft = v; }, change: (list, f) => void menuCrews(list, f) }, box).setAttribute('aria-labelledby', 'crews-pop-title');
+  if (had && focus) ((focus(box) ?? box.querySelector('input:enabled')) as HTMLElement | null)?.focus({ focusVisible: true } as FocusOptions);
+}
+/** a Leave, Join or colour in the popup: the game takes the crews and their colours at once (its HELLO again to the
+ *  hub), and settings.ini keeps them for the next game, as Settings, Online, Crews would */
+async function menuCrews(list: Crew[], focus: (root: HTMLElement) => Element | null | undefined) {
+  if (roamCrews === null || !session?.net?.crews) return;
+  roamCrews = list;
+  session.net.crews(list.map(c => roomHash(c.name)), rgbWords(list));
+  drawPopCrews(focus);
+  $('#menu [data-act="crews"]').textContent = crewsLabel();
+  let text = putKey(settingsText ?? TEMPLATE, 'roam_crew', list.length ? crewsValue(list.map(c => c.name)) : null).text;
+  text = putKey(text, 'roam_crew_colours', list.length ? rgbsValue(list) : null).text;
+  try { await writeFile(SAVE, 'settings.ini', text); settingsText = text; void settings.refresh(); }
+  catch (e) { log.add(`[app] settings.ini not written: ${e}`); }
+  log.add(`[app] crews: ${list.length ? list.map(c => `${c.name} (${c.rgb})`).join(', ') : 'none'} (the page menu)`);
+}
 async function menuAction(act: string) {
   const m = $<HTMLDialogElement>('#menu');
   switch (act) {
@@ -872,6 +914,7 @@ async function menuAction(act: string) {
       log.add(`[app] solid cars ${solidCars ? 'on' : 'off'} (the page menu)`);
       break;
     }
+    case 'crews': openCrews(); break;
     case 'help': m.close(); openHelp(); break;
     case 'offline':
       m.close();
@@ -1129,9 +1172,11 @@ export async function boot() {
   const pick = $<HTMLSelectElement>('#lang-pick');
   pick.replaceChildren(...LANGUAGES.map(l => Object.assign(document.createElement('option'), { value: l, textContent: NATIVE[l], lang: LOCALE[l] })));
   pick.onchange = () => void settings.set('language', pick.value);
-  // who plays on this server now (Online): only while no game runs here; with free roam on in a room, that room too
-  players = watchPlayers(line => settings.setStatus(line), () => !session && !starting, setReach,
-    () => { const e = resolved().env; return e.NFSU2_ROAM === '1' ? e.NFSU2_ROAM_ROOM ?? '' : ''; });
+  // who plays on this server now (Online): only while no game runs here; with free roam on in a room, that room too,
+  // and in crews, how many are in each (on the Crews row's lines)
+  players = watchPlayers((line, crews) => { settings.setStatus(line); settings.setCrewCounts(crews); }, () => !session && !starting, setReach,
+    () => { const e = resolved().env; return e.NFSU2_ROAM === '1' ? e.NFSU2_ROAM_ROOM ?? '' : ''; },
+    () => { const e = resolved().env; return e.NFSU2_ROAM === '1' ? crewList(e.NFSU2_ROAM_CREW ?? '').map(roomHash) : []; });
   window.addEventListener('online', () => players?.now());
   window.addEventListener('resize', placeNotices);
   window.addEventListener('resize', placeLobby);
@@ -1150,7 +1195,17 @@ export async function boot() {
   $<HTMLButtonElement>('#reload').onclick = () => void reload();
   $<HTMLButtonElement>('#log-btn').onclick = downloadLog;
   $('#menu').addEventListener('click', e => { const a = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-act]'); if (a) void menuAction(a.dataset.act!); });
-  $('#menu').addEventListener('close', () => { $('#stage').classList.remove('cursor'); $('#stage').querySelector('canvas')?.focus(); });
+  $('#menu').addEventListener('close', () => {
+    const pop = $<HTMLDialogElement>('#crews-pop'); if (pop.open) pop.close();      // the menu's Crews go with it
+    $('#stage').classList.remove('cursor'); $('#stage').querySelector('canvas')?.focus();
+  });
+  // the menu's Crews popup: Done closes it; back on the menu's Crews button, with its count as it is now
+  $('#crews-pop').addEventListener('click', e => { if ((e.target as HTMLElement).closest('[data-act="crews-done"]')) $<HTMLDialogElement>('#crews-pop').close(); });
+  $('#crews-pop').addEventListener('close', () => {
+    const b = $<HTMLButtonElement>('#menu [data-act="crews"]');
+    b.textContent = crewsLabel();
+    if ($<HTMLDialogElement>('#menu').open) b.focus();
+  });
 
   // F8 / F9 belong to the page while the game runs (the game binds neither,
   // Chrome reserves neither); caught first, so the game never sees them.  F12

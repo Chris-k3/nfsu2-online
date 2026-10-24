@@ -114,6 +114,8 @@ static const struct { const char *name, *key, *def; } OPTS[] = {
     { "NFSU2_ROAM_COLLIDE",     "Collide",    ""  },
     { "NFSU2_ROAM_DISCOVERY",   "Discovery",  ""  },
     { "NFSU2_ROAM_ROOM",        "Room",       ""  },
+    { "NFSU2_ROAM_CREW",        "Crew",       ""  },
+    { "NFSU2_ROAM_CREW_RGB",    "CrewColours", "" },
     { "NFSU2_ROAM_MAX_PLAYERS", "MaxPlayers", ""  },
     { "NFSU2_ROAM_MAX_CARS",    "MaxCars",    ""  },
     { "NFSU2_ROAM_RATE",        "Rate",       ""  },

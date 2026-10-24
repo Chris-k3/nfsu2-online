@@ -88,7 +88,7 @@ rev in the countdown) and step aside for menus, the pause menu and free roam's c
 | Enter | Choose (menus); in free roam, start an event at its marker or take an outrun |
 | F12 | Screenshot (PNG), kept with your saves and shown in Saves on the start page |
 | **F8** | Frame-rate counter: off, on, detailed |
-| **F9** | The page menu: when the game last saved, full screen, counter, ghost mode (in free roam), controls, log, **Quit game**; on a controller Home, or both sticks pressed in; on a touch screen the ☰ button |
+| **F9** | The page menu: when the game last saved, full screen, counter, ghost mode and crews (in free roam), controls, log, **Quit game**; on a controller Home, or both sticks pressed in; on a touch screen the ☰ button |
 | **Hold Esc** | Leave full screen (a short press still goes to the game) |
 
 The start page shows these keys under **Controls**, and F9, Controls shows them while you play.
@@ -133,7 +133,7 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
 
 | Group | Settings |
 |---|---|
-| Online | its own section under Saves: how many play on this server now, free roam with others, your name (in free roam and online), room, ghost mode, the game's Online mode (on by default); more: the free-roam network |
+| Online | its own section under Saves: how many play on this server now, free roam with others, your name (in free roam and online), crews (with their colours), your horn, room, ghost mode, the game's Online mode (on by default); more: the free-roam network |
 | Game | language, movies, autosave; more: startup movies (skippable, original or off), sound, pause or keep running in the background, sound output latency |
 | Display | full screen on Play (off: the game plays in the browser window; on by default on phones), resolution scale (phones start at 75%, 100% once one shows it has the room), frame rate (auto follows the screen: 120 on a 120 Hz display, 240 on a 240 Hz one; 30, 60, 120 or 240, where 30 keeps a phone that cannot hold 60 steady; Online and LAN races at most 120); more: menus and HUD (original or upscaled), HUD layout, movie framing, cutscene bars, other cars' headlights (players, all cars, off), frame-rate counter |
 | Controller | rumble; more: controller on or off, menu buttons, dead zones |
@@ -233,7 +233,8 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
 
 ## 6. Free roam with other players
 
-Free roam is shared with **everyone** on the server who turns it on. Use a Room to keep to a group.
+Free roam is shared with **everyone** on the server who turns it on. Join a Crew to find your friends among them,
+or use a Room to keep to a group.
 
 1. Each player turns on **Online, Free roam with others** on the start page. The first Play asks too (Turn on or
    Not now, and Esc is Not now); it asks once, and the switch changes the answer later. While the server's free
@@ -383,6 +384,15 @@ Good to know:
     host's game waits a minute at most for the others in the LAN race's room, then starts with those who are ready.
     A race that cannot come together (the host's game gone, nobody else in the game in time) ends the trip: every game
     goes back to free roam by itself and says why. Players on an older version or the Windows plugin see no lobbies.
+- **Crews:** friends who type the same crew name (Settings, Online, Crews, or the page menu (F9) while you play) always
+  see each other, however far apart and however busy the server: the server pairs crew-mates first, before the
+  nearest players (up to 16 crew-mates each), and your game gives their cars a place first. Their names show over
+  their cars at any distance, with the distance past 100 m ("Sam (1.2 km)"), in front of other names, and their
+  minimap arrows and world-map markers (with their names beside them) are in the crew's colour. You can be in up to 4
+  crews; each has its own colour (cyan, magenta, violet, red unless you tap its dot to pick another), and the crew
+  list shows how many of each are in free roam now. Capitals and spaces don't count ("Blue Room" is "blueroom").
+  Everyone else is still there, unlike a Room. Not private: anyone who types the same name joins. A player on an
+  older version is in no crew.
 - **Rooms:** set the same "Room" to see only some of the players' cars. A room is a filter between players, not
   privacy: every browser on the server still sees your name ("Your name", or the profile name), whether you are in
   the menus or driving, and the room, and someone with their own tools could join it. Play on a server only with

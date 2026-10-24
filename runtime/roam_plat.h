@@ -73,6 +73,12 @@ int      roam_plat_said(const char *json);
  * corner) with the name's scale xys[3i + 2]; n = 0: none.  The page's lines
  * follow them in the same picture.  On the game thread, without the lock */
 void     roam_plat_say_marks(const uint32_t *ids, const float *xys, int n);
+/* the crews as the player changed them while the game runs (the page's menu,
+ * web): their rc_room_hash values in the player's order (0: none) into
+ * crews, their colours into rgb (0x00RRGGBB, 0: the place's default), and a
+ * number that changes with each change (0: not changed, NFSU2_ROAM_CREW and
+ * NFSU2_ROAM_CREW_RGB hold) */
+uint32_t roam_plat_crews(uint32_t crews[RC_CREW_MAX], uint32_t rgb[RC_CREW_MAX]);
 const char *roam_ip_str(uint32_t ip, char *buf);   /* buf >= 16 */
 
 #endif

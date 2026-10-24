@@ -8,9 +8,11 @@
 
 import { PAD_A, PAD_B, PAD_DDOWN, PAD_DLEFT, PAD_DRIGHT, PAD_DUP, PAD_START } from '../input/proto';
 
-/** the open modal dialog of the page, or null */
+/** the open modal dialog of the page (of two, the one on top: the menu's Crews popup, which comes after the menu in the
+ *  page), or null */
 export function pageDialog(): HTMLDialogElement | null {
-  return document.querySelector<HTMLDialogElement>('dialog[open]:modal');
+  const open = document.querySelectorAll<HTMLDialogElement>('dialog[open]:modal');
+  return open[open.length - 1] ?? null;
 }
 
 /** a dialog the controller works: its focus ring shows (data-pad), until it closes */

@@ -1,13 +1,14 @@
 // How many play on this server now, for the start page's Multiplayer settings: the server's /players (three
 // counts, whether it is full, how many wait in line for a place and whether free roam is busy, nothing else; with a Room setting, how many are in
-// free roam in that room too).  Asked every 15 s, and only while the start page is visible and no game runs; a
+// free roam in that room too, and with crews how many in each).  Asked every 15 s, and only while the start page is visible and no game runs; a
 // server without the route shows nothing.  Whether the server answered at all goes to reached() (offline mode).
 
 /** roam: driving in free roam or paused there (null, or missing from an older server: not shown);
  *  roamBusy: free roam gives fewer cars a player now (the server's hub cut its links), so the first Play does not ask about it;
- *  room: of roam, those in the room asked for (/players?room=, missing without one or from an older server) */
+ *  room: of roam, those in the room asked for (/players?room=, missing without one or from an older server);
+ *  crews: of roam, those in each crew asked for, in the order asked (/players?crews=, the same) */
 export interface PlayerCounts {
-  players: number; online: number | null; roam?: number | null; full?: boolean; roamBusy?: boolean; room?: number;
+  players: number; online: number | null; roam?: number | null; full?: boolean; roamBusy?: boolean; room?: number; crews?: number[];
   /** pages waiting in line for a place (missing from an older server) */
   queue?: number;
 }
@@ -70,20 +71,31 @@ export async function serverAnswers(ms: number): Promise<boolean> {
   catch { return false; }
 }
 
-/** show(line) at once and every 15 s while idle() and the page is visible; reached(whether the server answered);
- *  room(): the Room setting while free roam is on ('' for none); last(): the newest answer (null before the first,
- *  or from a server without the route); fresh(ms): asked now, whatever the page does (Play: whether the server is
- *  full), within ms, then the newest answer */
-export function watchPlayers(show: (line: Msg) => void, idle: () => boolean, reached?: (ok: boolean) => void, room: () => string = () => '') {
+/** How many are in free roam in each crew asked for (their hashes, in the order asked), by hash; none from an older
+ *  server (no crews in its answer) or for a count it does not give. */
+export function crewCounts(c: PlayerCounts, asked: readonly number[]): Map<number, number> {
+  const m = new Map<number, number>();
+  if (Array.isArray(c.crews)) asked.forEach((h, i) => { const n = c.crews![i]; if (Number.isInteger(n) && n >= 0) m.set(h, n); });
+  return m;
+}
+
+/** show(line, crews) at once and every 15 s while idle() and the page is visible (crews: crewCounts); reached(whether
+ *  the server answered); room(): the Room setting while free roam is on ('' for none); crews(): the Crews setting's
+ *  hashes then ([] for none, at most 4); last(): the newest answer (null before the first, or from a server without
+ *  the route); fresh(ms): asked now, whatever the page does (Play: whether the server is full), within ms, then the
+ *  newest answer */
+export function watchPlayers(show: (line: Msg, crews: Map<number, number>) => void, idle: () => boolean, reached?: (ok: boolean) => void,
+                             room: () => string = () => '', crews: () => number[] = () => []) {
   let gone = false, last: PlayerCounts | null = null;
   const get = async (ms: number) => {
     if (gone) return;
     try {
-      const name = room(), hash = roomHash(name);
-      const r = await fetch(hash ? `/players?room=${hash}` : '/players', { cache: 'no-store', signal: AbortSignal.timeout(ms) });
+      const name = room(), hash = roomHash(name), mine = crews().slice(0, 4);
+      const q = [hash ? `room=${hash}` : '', mine.length ? `crews=${mine.join(',')}` : ''].filter(Boolean).join('&');
+      const r = await fetch(q ? `/players?${q}` : '/players', { cache: 'no-store', signal: AbortSignal.timeout(ms) });
       reached?.(r.status < 500);
-      if (r.status === 404) { gone = true; last = null; show(() => ''); return; }
-      if (r.ok) { const c = last = await r.json() as PlayerCounts, inRoom = hash ? name : ''; show(() => playersText(c, inRoom)); }
+      if (r.status === 404) { gone = true; last = null; show(() => '', new Map()); return; }
+      if (r.ok) { const c = last = await r.json() as PlayerCounts, inRoom = hash ? name : ''; show(() => playersText(c, inRoom), crewCounts(c, mine)); }
     } catch { reached?.(false); }
   };
   const ask = async () => { if (document.visibilityState === 'visible' && idle()) await get(5000); };

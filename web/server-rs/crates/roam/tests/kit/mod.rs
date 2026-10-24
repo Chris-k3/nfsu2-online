@@ -27,8 +27,26 @@ pub fn fnv1a(s: &str) -> u32 {
     if h == 0 { 1 } else { h }
 }
 
+/// roam_core.c's rc_room_hash, a Room's or a crew's (the page's players.ts roomHash is the same): FNV-1a of the name's
+/// UTF-8 without its blanks (space, \t to \r), A to Z made small; 0 for a name of blanks only, never 0 for another
+/// (`fnv1a` is the same for a name of small letters without blanks)
+pub fn room_hash(s: &str) -> u32 {
+    let (mut h, mut kept) = (0x811C_9DC5u32, 0);
+    for b in s.bytes().filter(|&b| b != b' ' && !(b'\t'..=b'\r').contains(&b)) {
+        h ^= b.to_ascii_lowercase() as u32;
+        h = h.wrapping_mul(0x0100_0193);
+        kept += 1;
+    }
+    if kept == 0 { 0 } else { h.max(1) }
+}
+
 /// a datagram: the header, the payload, the CRC
 pub fn dgram(kind: u8, sender: u32, payload: &[u8]) -> Vec<u8> {
+    dgram_flags(kind, sender, 0, payload)
+}
+
+/// a datagram with these header flags
+pub fn dgram_flags(kind: u8, sender: u32, flags: u16, payload: &[u8]) -> Vec<u8> {
     let len = 16 + payload.len() + 4;
     let mut b = vec![0u8; len];
     b[..4].copy_from_slice(b"N2FR");
@@ -37,11 +55,15 @@ pub fn dgram(kind: u8, sender: u32, payload: &[u8]) -> Vec<u8> {
     b[6..8].copy_from_slice(&(len as u16).to_le_bytes());
     b[8..12].copy_from_slice(&sender.to_le_bytes());
     b[12..14].copy_from_slice(&7u16.to_le_bytes());
+    b[14..16].copy_from_slice(&flags.to_le_bytes());
     b[16..16 + payload.len()].copy_from_slice(payload);
     let crc = crc32fast::hash(&b[..len - 4]);
     b[len - 4..].copy_from_slice(&crc.to_le_bytes());
     b
 }
+
+/// the HELLO flag of a player that reads crews (roam_core.h RC_HF_CREW)
+pub const HF_CREW: u16 = 0x0200;
 
 pub struct HelloOpts<'a> {
     pub room: u32,
@@ -50,11 +72,14 @@ pub struct HelloOpts<'a> {
     pub seen: &'a [u32],
     pub cfg_rev: u16,
     pub core: u16,
+    /// its crews: with them the HELLO has the crew flag and ends with them (a count, the hashes); None, a HELLO of
+    /// before
+    pub crews: Option<&'a [u32]>,
 }
 
 impl Default for HelloOpts<'_> {
     fn default() -> Self {
-        HelloOpts { room: 0, status: 2, name: b"p", seen: &[], cfg_rev: 3, core: 1 }
+        HelloOpts { room: 0, status: 2, name: b"p", seen: &[], cfg_rev: 3, core: 1, crews: None }
     }
 }
 
@@ -74,7 +99,12 @@ pub fn hello_with(sender: u32, o: &HelloOpts) -> Vec<u8> {
         let at = 14 + nl + 4 * i;
         p[at..at + 4].copy_from_slice(&s.to_le_bytes());
     }
-    dgram(1, sender, &p)
+    let Some(crews) = o.crews else { return dgram(1, sender, &p) };
+    p.push(crews.len() as u8);
+    for c in crews {
+        p.extend_from_slice(&c.to_le_bytes());
+    }
+    dgram_flags(1, sender, HF_CREW, &p)
 }
 
 pub fn hello(sender: u32) -> Vec<u8> {

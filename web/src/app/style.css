@@ -279,6 +279,58 @@ kbd .glyph { display: inline-block; width: 14px; height: 14px; vertical-align: -
   color: var(--muted); font-size: 14px; line-height: 20px; text-decoration: underline; text-underline-offset: 4px;
 }
 .text-btn:hover:not(:disabled) { color: var(--lime); }
+/* the crews (settings-ui.ts crewControl): the row's label and help, and under them across the row a line of chips that
+ * wraps, one per crew: its colour in the game (the dot, which opens the palette), its name (cut short with "…", the
+ * whole of it in the chip's tooltip), how many are in free roam in it and Leave; under them the palette when open,
+ * a value box with Join in it, and why a name cannot join; Reset under it all */
+.set-list { grid-template-columns: minmax(0, 1fr); grid-template-areas: "label" "help" "ctl"; }
+/* one line (not the phone's wrap): a wrapping column stretches to its widest item, and a long name would widen the page */
+.set-list .set-control { flex-direction: column; flex-wrap: nowrap; align-items: stretch; justify-content: flex-start; margin-top: 8px; }
+.set-list .set-control > .text-btn { order: 1; align-self: flex-start; }
+.crews { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.crews:empty { display: none; }
+.crew {
+  display: flex; align-items: center; gap: 4px; height: 40px; max-width: 100%; padding: 4px;
+  border-radius: 20px; background: var(--field);
+}
+/* the crew's colour, a button that opens its palette: a dot in a ring, the ring lime under the pointer or while open */
+.crew-dot { flex: none; display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; }
+.crew-dot::before { content: ""; width: 14px; height: 14px; border-radius: 50%; background: var(--crew); box-shadow: 0 0 0 2px var(--field), 0 0 0 4px var(--line); }
+.crew-dot:hover::before, .crew-dot[aria-expanded="true"]::before { box-shadow: 0 0 0 2px var(--field), 0 0 0 4px var(--lime); }
+.crew-text { min-width: 0; display: flex; align-items: center; gap: 8px; padding-left: 2px; }
+.crew-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-style: italic; font-weight: 700; }
+.crew-count { flex: none; display: inline-flex; align-items: center; gap: 2px; color: var(--muted); font-size: 14px; line-height: 20px; }
+.crew-count svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.crew-count:empty { display: none; }
+.crew .icon-btn { border-radius: 50%; }
+/* the palette under the chips: 8 round swatches (a ring around the colour), the crew's own ringed in white */
+.crew-colours {
+  display: flex; flex-wrap: wrap; gap: 4px 6px; align-self: flex-start; max-width: 100%; padding: 4px;
+  border-radius: 20px; background: var(--field);
+}
+.swatch {
+  width: 32px; height: 32px; padding: 3px; border: 2px solid transparent; border-radius: 50%;
+  background: var(--sw) content-box; cursor: pointer;
+}
+.swatch:hover { border-color: var(--edge); }
+.swatch[aria-checked="true"] { border-color: var(--text); }
+/* words for a screen reader only (a crew's count in full) */
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.crew-add {
+  display: flex; align-items: center; height: 40px; max-width: 360px; padding-right: 2px;
+  border: 2px solid var(--edge); border-radius: 8px; background: var(--field);
+}
+.crew-add:focus-within { border-color: var(--lime); box-shadow: 0 0 12px var(--lime-glow); }
+.set .crew-add input[type="text"], .dlg .crew-add input[type="text"] {
+  flex: 1; min-width: 0; width: auto; height: 100%; padding: 0 10px; border: 0; background: none; outline: none; box-shadow: none;
+}
+.crew-add:has(input:disabled) { opacity: 0.5; }
+.crew-add input:disabled { cursor: not-allowed; }
+.crew-join:enabled { color: var(--lime); }
+.crew-add .icon-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.set-note { font-size: 14px; line-height: 20px; color: var(--muted); }
+.set-note.warn { color: var(--warn); }
+.set-note:empty { display: none; }
 
 summary { display: flex; align-items: center; gap: 8px; min-height: 48px; color: var(--muted); font-size: 14px; line-height: 20px; cursor: pointer; list-style: none; }
 summary::-webkit-details-marker { display: none; }
@@ -668,6 +720,11 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.64); }
 .menu-actions { display: grid; gap: 8px; }
 #menu-save { margin-top: -12px; }
 #menu-save:empty { display: none; }
+/* the menu's Crews popup (a game in free roam): the Crews row's control under the help, Done under it */
+.crews-pop-box { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.crews-pop-box .crew-add { max-width: none; }
+.dlg ul.crews { margin: 0; padding: 0; color: inherit; font-size: inherit; line-height: inherit; }
+.dlg p.set-note { margin: 0; }
 
 /* ---------------------------------------------------------------- narrow */
 @media (max-width: 959px) {

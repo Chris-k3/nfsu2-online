@@ -69,6 +69,11 @@ export const W_SOLID = 27;                    // free roam's solid cars as the p
 export const W_TX_WAIT_N = 34;
 export const W_SAY = 35;                      // quick chat: the phrase the player picked (bits 0-7) under a count that changes with each pick
 export const W_PEER_BITS = 36;                // NET_PEER_BITS / 32 words: bit h = host h of our network is on the switch
+// free roam's crews as the page's menu changed them (page -> C): W_CREWS_GEN counts the changes (0: none, the game keeps
+// NFSU2_ROAM_CREW and NFSU2_ROAM_CREW_RGB), W_CREWS its 4 words, the crews' hashes in the player's order (0: none),
+// W_CREWS_RGB their colours (0x00rrggbb; 0: the place's default); the crews, then the colours, then the count
+export const W_CREWS_GEN = 100, W_CREWS = 101, W_CREWS_RGB = 105;
+export const CREW_WORDS = 4;
 // header doubles: f64 index = byte offset / 8
 export const D_SWITCH_RTT_MS = 14, D_TX_WAIT_MS_SUM = 15, D_TX_WAIT_MS_MAX = 16;
 

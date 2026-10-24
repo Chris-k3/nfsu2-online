@@ -2,7 +2,7 @@
 // tests/roam_crowd.c, built here for wasm without a C library) on its own WebSocket to a server's switch,
 // driving along a track.  Real game pages (web/tools/roam-pair.mjs) can join the same server meanwhile.
 //
-//   node web/tools/roam-crowd.mjs [--base http://localhost:8655] [--n 62] [--seconds 120] [--room <name>]
+//   node web/tools/roam-crowd.mjs [--base http://localhost:8655] [--n 62] [--seconds 120] [--room <name>] [--crew <name>]
 //        [--track <pose.csv>] [--speed 15] [--spread 20] [--car 350Z] [--cars A,B,..|all] [--parts <list>|@<file>] [--stagger 50] [--states 1]
 //        [--out <summary.json>]
 //        [--race 1-3:60:120] [--bundle] [--first 0] [--loop-ms 10] [--hold 50]
@@ -23,6 +23,8 @@
 // --parts  the players' cars' parts instead of the stock ones, slot:key:owner in hex, comma-separated (or from a file): a
 //          record names every part (tests/scripts/roam_crowd_rims.parts: a 350Z with the rim shops' rims).
 // --states the car states in each SNAP: 1 as the browsers send them (roam_web.c), 3 as a LAN does.
+// --crew   every player is in this crew (the Crews setting's one name): the hub links them to the players who share it
+//          first, wherever they are, and those see them in the crew's colour.
 // --race   players first to last (Bot01 is 1) are in a race from one second to the other after the start: they
 //          announce it (RC_ST_EVENT) and send no car meanwhile, as a game in a race does.
 // --track  a pose log (NFSU2_ROAM_POSELOG): the first player's L rows, a real drive; every simulated player
@@ -41,7 +43,7 @@ import { WebSocket } from 'ws';
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && i + 1 < argv.length ? argv[i + 1] : d; };
-const BASE = opt('base', 'http://localhost:8655'), N = +opt('n', 62), SECONDS = +opt('seconds', 120), ROOM = opt('room', '');
+const BASE = opt('base', 'http://localhost:8655'), N = +opt('n', 62), SECONDS = +opt('seconds', 120), ROOM = opt('room', ''), CREW = opt('crew', '');
 const SPEED = +opt('speed', 15), CAR = opt('car', '350Z'), STAGGER = +opt('stagger', 50), TRACK = opt('track', ''), OUTF = opt('out', '');
 const STATES = +opt('states', 1), SPREAD = +opt('spread', 20), BUNDLE = argv.includes('--bundle'), FIRST = +opt('first', 0);
 const LOOP_MS = +opt('loop-ms', 0), HOLD = +opt('hold', 0);
@@ -154,7 +156,7 @@ class Bot {
           ws.send(JSON.stringify({ t: 'hello', name: this.name, deltas: 1, ...(BUNDLE ? { bundle: 1 } : {}) }));
           const io = this.x.crowd_io(), m8 = this.mem();
           const b = Buffer.from(`${this.name}\0${this.car}\0${PARTS}\0`, 'latin1'); m8.set(b, io);
-          this.x.crowd_init(this.id, roomHash(ROOM), HUB, PORT, bhash(this.car), STATES, nowUs());
+          this.x.crowd_init(this.id, roomHash(ROOM), roomHash(CREW), HUB, PORT, bhash(this.car), STATES, nowUs());
           this.ready = true;
         }
         return;

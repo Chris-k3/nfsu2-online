@@ -134,6 +134,9 @@ export interface NetSubsystem extends Subsystem {
   solid?(on: boolean): void;
   /** quick chat: the player says phrase p (quickchat.ts); false: the game has no free roam */
   say?(p: number): boolean;
+  /** free roam's crews, changed while the game runs (the page menu): their hashes, in the player's order, and their
+   *  colours (0x00rrggbb) */
+  crews?(hashes: readonly number[], rgbs: readonly number[]): void;
 }
 
 export type AttachRenderer = (proc: GameProcess, canvas: HTMLCanvasElement, opts: RendererOptions) => RendererSubsystem | Promise<RendererSubsystem>;

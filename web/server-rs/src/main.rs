@@ -16,7 +16,8 @@
 //!   /players           how many play on this server now: { players, online, roam, full, queue, roamBusy }, three
 //!                      counts, whether a newcomer waits in line, how many do and whether free roam is busy, nothing
 //!                      else (never cached);
-//!                      ?room=<hash> adds room, how many of roam are in that free-roam room
+//!                      ?room=<hash> adds room, how many of roam are in that free-roam room;
+//!                      ?crews=<hash>,<hash>,... (at most 4) adds crews, how many of roam are in each of those crews
 //!   (and for the operator, nothing on the network: control.sock in the state folder, which `nfsu2-server ctl` talks
 //!   to: who is on, kick, ban, unban; src/ctl.rs, app/control.rs)
 //!   test aids, only with --dev: the test pages (/test/) and source maps from web/dist-dev (web/build.mjs writes them

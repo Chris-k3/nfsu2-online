@@ -6,7 +6,8 @@
 //        [--timeout 1200] [--drive 3600] [--watch 2400] [--stagger 2] [--bounce <s>]
 //        [--a Alice:roam_mp_drive.txt] [--b Bob:roam_mp_watch.txt] [--c Carol:<script>] [--d Dave:<script>] [--solo]
 //        [--env K=V ...] [--headed]
-//        (an instance's own settings after its script: --a Alice:roam_mp_ram_a.txt:NFSU2_ROAM_COLLIDE=0,K=V)
+//        (an instance's own settings after its script: --a Alice:roam_mp_ram_a.txt:NFSU2_ROAM_COLLIDE=0,K=V; a comma
+//        not followed by a K= stays in the value: NFSU2_ROAM_CREW=Blue Room, Night Owls)
 //        [--base http://localhost:8616]   (use a server that is already running instead)
 //        [--https]   the pages load from https://localhost:<port> (the switch over wss://): our own server
 //                    gets a test certificate (web/test/cf-sim.mjs makeTestCerts, --tls-cert), whose
@@ -23,6 +24,10 @@
 //                    stick there for the page (quick chat's picker: tests/scripts/roam_say_view_a.txt); with
 //                    --touch the pages take taps (the touch controls show), and `log TAP <selector>` taps there
 //                    (tests/scripts/roam_say_touch.txt)
+//                    `log CREW join <name>` / `log CREW leave <name>` / `log CREW colour <k> <name>` (the palette's
+//                    k-th colour, from 0) do that in the menu's Crews popup (F9, Crews) and go back (Done, Back to
+//                    the game), `log CREW shot <name>` saves the page with the popup open
+//                    (tests/scripts/roam_crew_menu.txt)
 //        [--page play [--size 960x540] [--play-only Bob]]   the renderer's test page (test/play.html, WebGPU)
 //                    instead: frame dumps go to the server's /artifacts/ as <name>-*.png (a server of our own
 //                    gets --artifacts <out>); --play-only: only that instance renders, the others run hostcheck
@@ -108,7 +113,7 @@ for (const kv of opts('env')) COMMON[kv.slice(0, kv.indexOf('='))] = kv.slice(kv
 
 function url(i, name, script, own) {
   const env = { ...COMMON, NFSU2_ROAM_NAME: name, ROAM_PROFILE: name };
-  for (const kv of own ? own.split(',') : []) env[kv.slice(0, kv.indexOf('='))] = kv.slice(kv.indexOf('=') + 1);
+  for (const kv of own ? own.split(/,(?=[A-Za-z0-9_]+=)/) : []) env[kv.slice(0, kv.indexOf('='))] = kv.slice(kv.indexOf('=') + 1);
   if (MODE === 'vlan') env.NFSU2_ROAM_WEBTEST = 'vlan';
   else {
     env.NFSU2_ROAM_PORT = String(47300 + i);
@@ -193,6 +198,21 @@ async function start(i, name, script, own) {
     // a finger's tap on the page (--touch), at a script's `log TAP <selector>`
     const tk = APP && TOUCH && /LOG TAP (.+)$/.exec(m.text());
     if (tk) void page.tap(tk[1].trim(), { timeout: 5000 }).then(() => w(`[tap] ${tk[1].trim()}`), e => w(`[tap] ${tk[1]} failed: ${e}`));
+    // the menu's Crews popup as the player uses it, at a script's `log CREW <op> ...`: F9, Crews, the act in the popup,
+    // Done, Back to the game
+    const ck = APP && /LOG CREW (join|leave|colour|shot) (?:(\d+) )?(.+)$/.exec(m.text());
+    if (ck) {
+      const [, op, k, arg] = ck, pop = '#crews-pop', crew = () => page.locator(`${pop} li.crew`, { has: page.locator('.crew-name', { hasText: arg.trim() }) });
+      const act = op === 'join' ? () => page.fill('#crews-pop-input', arg.trim()).then(() => page.press('#crews-pop-input', 'Enter'))
+        : op === 'leave' ? () => crew().locator('.crew-leave').click({ timeout: 5000 })
+        : op === 'colour' ? () => crew().locator('.crew-dot').click({ timeout: 5000 }).then(() => page.locator(`${pop} .crew-colours .swatch`).nth(+k).click({ timeout: 5000 }))
+        : () => page.waitForTimeout(300).then(() => page.screenshot({ path: path.join(OUT, `${name}-${arg.trim()}.png`) }));
+      void page.keyboard.press('F9').then(() => page.click('#menu [data-act="crews"]', { timeout: 5000 }))
+        .then(() => page.waitForSelector(`${pop}[open]`, { timeout: 5000 })).then(act)
+        .then(() => page.waitForTimeout(200)).then(() => page.click(`${pop} [data-act="crews-done"]`))
+        .then(() => page.click('#menu [data-act="resume"]'))
+        .then(() => w(`[crew] ${op} ${k ?? ''} ${arg}`), e => w(`[crew] ${op} ${arg} failed: ${e}`));
+    }
   });
   page.on('pageerror', e => w('PAGEERROR ' + e));
   const u = url(i, name, script, own);

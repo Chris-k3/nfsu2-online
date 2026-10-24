@@ -127,7 +127,13 @@ typedef struct {
                                                                   changes with each pick (roam_plat_say_pick) */
     uint32_t peer_bits[NET_PEER_BITS / 32];                    /* 144: page: bit h set = the host h of our
                                                                   network (vip & ~netmask) is on the switch (us too) */
-    uint32_t pad[28];                                          /* 400 .. 511 */
+    uint32_t crews_gen, crews[4], crews_rgb[4];                /* 400: page: free roam's crews as the page's menu
+                                                                  changed them, rc_room_hash of each in the
+                                                                  player's order (0: none), and their colours
+                                                                  (0x00RRGGBB, 0: the default for the place);
+                                                                  crews_gen +1 a change (0: not changed), written
+                                                                  after the crews and colours (roam_plat_crews) */
+    uint32_t pad[19];                                          /* 436 .. 511 */
 } net_mailbox;
 
 typedef struct {
@@ -149,6 +155,8 @@ _Static_assert(offsetof(net_mailbox, switch_rtt_ms) == 112, "switch_rtt_ms");
 _Static_assert(offsetof(net_mailbox, tx_wait_ms_sum) == 120, "tx_wait_ms_sum");
 _Static_assert(offsetof(net_mailbox, tx_wait_n) == 136, "tx_wait_n");
 _Static_assert(offsetof(net_mailbox, peer_bits) == 144, "peer_bits");
+_Static_assert(offsetof(net_mailbox, crews_gen) == 400, "crews_gen");
+_Static_assert(offsetof(net_mailbox, crews_rgb) == 420, "crews_rgb");
 _Static_assert(offsetof(net_slot, src_port) == 16, "src_port");
 _Static_assert(offsetof(net_slot, t_ms) == 24, "t_ms");
 _Static_assert(offsetof(net_slot, data) == NET_SLOT_HDR, "data");

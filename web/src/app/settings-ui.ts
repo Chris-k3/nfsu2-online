@@ -4,13 +4,15 @@
 // the file stays the source of truth and keeps the player's own comments;
 // "Reset" puts the template's commented-out line back, also on the lines the
 // panel has no row for, and "Reset all settings" the whole template but the
-// name and language.  Native controls (switches are checkboxes, choices are
-// radio groups), each described by its help line, so a screen reader and the
-// keyboard get them as they are.
+// name, crews and language.  Native controls (switches are checkboxes, choices
+// are radio groups, the crews a list with buttons), each described by its help
+// line, so a screen reader and the keyboard get them as they are.
 
 import { checkSetting, DEFAULTS, keyDef, resolveEnv, settingsPut, TEMPLATE, type Resolved } from './settings';
 import { readText, writeFile } from './savefs';
 import { playHorn, stopHorn } from './horn-preview';
+import { checkCrew, CREW_COLOUR_NAMES, CREW_MAX, CREW_PALETTE, crewsOf, crewsValue, freeColour, rgbsValue, type Crew } from './crews';
+import { roomHash } from './players';
 import { LANGUAGES, live, N, NATIVE, t, tn, tvars, type Language, type Msg } from './i18n';
 
 type Control =
@@ -21,7 +23,9 @@ type Control =
    *  value chosen (the promise ends when it has played), stop ends that early */
   | { t: 'select'; opts: [value: string, label: string][]; preview?: { play(value: string): Promise<void>; stop(): void } }
   | { t: 'num'; min?: number; max?: number; step?: number; unit?: string }
-  | { t: 'text'; placeholder?: string };
+  | { t: 'text'; placeholder?: string }
+  /** the crews (crews.ts): a line per crew with Leave, and a box with Join for one more */
+  | { t: 'crews'; placeholder: string };
 
 /** link: the words of help that link to a page (a mod's, say), opened in a new tab */
 interface Item { key: string; label: string; help: string; link?: { text: string; href: string }; c: Control; more?: boolean }
@@ -42,6 +46,7 @@ const GROUPS: Group[] = [
   { title: N('Online'), more: N('More online settings'), status: true, own: true, items: [
     { key: 'roam', label: N('Free roam with others'), help: N('Everyone on this server who turns this on sees your car in career free roam, and you see theirs, with their names over them.'), c: { t: 'switch' } },
     { key: 'roam_name', label: N('Your name'), help: N('What other players see over your car in free roam, and your name in the Online menu (there only letters, digits, - and _, at most 15). Empty uses your profile name.'), c: { t: 'text', placeholder: N('profile name') } },
+    { key: 'roam_crew', label: N('Crews'), help: N('Friends who type the same crew name always see each other in free roam, however far apart, with names and map arrows in the crew\'s colour. Up to 4. Anyone who types the name joins.'), c: { t: 'crews', placeholder: N('Crew name') } },
     { key: 'horn', label: N('Your horn'), help: N('N or the controller\'s left stick click, in free roam and in races with other players.'), c: { t: 'select', opts: [
       ['dual', N('Dual tone')], ['single', N('Single tone')], ['truck', N('Air horn')], ['train', N('Train horn')], ['klaxon', N('Klaxon')],
       ['cucaracha', N('La Cucaracha')], ['clown', N('Clown horn')], ['trombone', N('Sad trombone')]], preview: { play: playHorn, stop: stopHorn } } },
@@ -84,14 +89,157 @@ const GROUPS: Group[] = [
   ] },
 ];
 
+/** a row's second key, which its control writes with its own and its Reset resets too (not listed under "Other
+ *  settings in this file"): the Crews row's colours */
+const COMPANION: Record<string, string> = { roam_crew: 'roam_crew_colours' };
+const COMPANIONS = new Set(Object.values(COMPANION));
 /** Every key the panel shows (the check in app-test.mjs compares this with the template). */
-export const PANEL_KEYS = GROUPS.flatMap(g => g.items.map(i => i.key));
+export const PANEL_KEYS = [...GROUPS.flatMap(g => g.items.map(i => i.key)), ...COMPANIONS];
 const ITEMS = new Map(GROUPS.flatMap(g => g.items.map(i => [i.key, i] as const)));
 const GROUP_OF = new Map(GROUPS.flatMap(g => g.items.map(i => [i.key, g] as const)));
 
 const boolOn = (v: string) => v === 'on';
 const READ_ONLY = N('Read only here: another tab of this browser runs the game and owns its saves and settings. Change them there; this tab takes over when that one closes.');
 const NOTE = N('Saved in this browser. Changes apply the next time you press Play.');
+
+/** a small button with a drawn sign (the Crews row's Join and Leave), its name for a screen reader and as its tooltip */
+function iconButton(cls: string, name: string, path: string): HTMLButtonElement {
+  const b = document.createElement('button'); b.type = 'button'; b.className = `icon-btn ${cls}`;
+  b.setAttribute('aria-label', name); b.title = name;
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
+  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', path);
+  svg.append(p); b.append(svg);
+  return b;
+}
+const PLUS = 'M12 5v14M5 12h14', CROSS = 'M6 6l12 12M18 6L6 18', PERSON = 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21c0-4 3.6-7 8-7s8 3 8 7';
+
+/** What a crews control shows and does: the Crews row's, and the page menu's while a game is in free roam */
+export interface CrewControl {
+  /** the crews now, in the player's order, with their colours */
+  list: readonly Crew[];
+  /** the field's id (a label names it), and the label's (it names the list too) */
+  id: string; labelId: string;
+  placeholder: string;
+  /** how many are in free roam in each crew, by hash (none: not shown) */
+  counts?: Map<number, number>;
+  /** what the field held when it was last drawn, and each change of it */
+  draft: string; onDraft(v: string): void;
+  /** the crews after a Leave, a Join or a colour picked; focus(root): where the keyboard goes once they are drawn
+   *  again in root */
+  change(list: Crew[], focus: (root: HTMLElement) => Element | null | undefined): void;
+}
+
+/**
+ * A crews control into ctl: a row of chips, one per crew in the player's order (its colour in the game, a button that
+ * opens the palette under the chips; its name, how many are in free roam in it when the server says, and Leave), and
+ * under them a value box with Join in it (or Enter).  Join waits for a name that can join (crews.ts checkCrew), and the note
+ * under the box says why one cannot; with 4 crews the box waits for one to be left.  A Leave keeps the others'
+ * colours; a Join takes the first colour no crew has.  Returns the box's field.
+ */
+export function crewControl(o: CrewControl, ctl: HTMLElement): HTMLInputElement {
+  const list = o.list;
+  const ul = document.createElement('ul'); ul.className = 'crews'; ul.setAttribute('aria-labelledby', o.labelId);
+  list.forEach((c, i) => {
+    const li = document.createElement('li'); li.className = 'crew'; li.dataset.hash = String(roomHash(c.name)); li.title = c.name;
+    li.style.setProperty('--crew', `#${c.rgb}`);
+    const what = t('Colour of {name}', { name: c.name }), change = t('Change the colour of {name}', { name: c.name });
+    const dot = document.createElement('button'); dot.type = 'button'; dot.className = 'crew-dot';
+    dot.setAttribute('aria-label', change); dot.title = change; dot.setAttribute('aria-expanded', 'false');
+    dot.onclick = () => palette(dot, c, i, what);
+    const text = document.createElement('span'); text.className = 'crew-text';
+    const nm = document.createElement('span'); nm.className = 'crew-name'; nm.textContent = c.name;
+    const n = document.createElement('span'); n.className = 'crew-count';
+    text.append(nm, n);
+    const leave = iconButton('crew-leave', t('Leave crew {name}', { name: c.name }), CROSS);
+    // the keyboard goes on to the next crew's Leave (the last one's: the one before), or to the box
+    leave.onclick = () => o.change(list.filter((_, k) => k !== i), root => root.querySelectorAll('.crew-leave')[Math.min(i, list.length - 2)]);
+    li.append(dot, text, leave);
+    ul.append(li);
+  });
+  /** crew i's palette, under the crews (the chips stay where they are), one open at a time: a radio group of the 8
+   *  colours, its own marked; the arrows move along it, Enter, Space or a tap picks one and closes it, Esc (or the dot
+   *  again) closes it.  Esc stays here: in the menu's Crews popup it does not close the popup too. */
+  const palette = (dot: HTMLButtonElement, c: Crew, i: number, what: string) => {
+    const was = ctl.querySelector<HTMLElement>('.crew-colours');
+    was?.remove();
+    for (const d of ul.querySelectorAll('.crew-dot')) d.setAttribute('aria-expanded', 'false');
+    if (was?.dataset.crew === String(i)) { dot.focus(); return; }
+    const g = document.createElement('div'); g.className = 'crew-colours'; g.id = `${o.id}-colours`; g.dataset.crew = String(i);
+    g.setAttribute('role', 'radiogroup'); g.setAttribute('aria-label', what);
+    dot.setAttribute('aria-controls', g.id); dot.setAttribute('aria-expanded', 'true');
+    const close = () => { g.remove(); dot.setAttribute('aria-expanded', 'false'); dot.focus(); };
+    const sw = CREW_PALETTE.map((rgb, k) => {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'swatch'; b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', String(rgb === c.rgb)); b.tabIndex = rgb === c.rgb ? 0 : -1;
+      const name = t(CREW_COLOUR_NAMES[k]); b.setAttribute('aria-label', name); b.title = name;
+      b.style.setProperty('--sw', `#${rgb}`);
+      b.onclick = () => {
+        if (rgb === c.rgb) { close(); return; }
+        o.change(list.map((x, j) => j === i ? { ...x, rgb } : x), root => root.querySelectorAll('.crew-dot')[i]);
+      };
+      return b;
+    });
+    if (!sw.some(b => b.tabIndex === 0)) sw[0].tabIndex = 0;          // a colour from the file the palette lacks
+    g.onkeydown = e => {
+      const at = sw.indexOf(document.activeElement as HTMLButtonElement);
+      const to = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? at + 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? at - 1
+        : e.key === 'Home' ? 0 : e.key === 'End' ? sw.length - 1 : null;
+      if (to !== null) {
+        e.preventDefault();
+        const next = sw[(to + sw.length) % sw.length];
+        for (const b of sw) b.tabIndex = b === next ? 0 : -1;
+        next.focus();
+      } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
+    };
+    g.append(...sw);
+    ul.after(g);
+    sw.find(b => b.tabIndex === 0)!.focus();
+  };
+  if (o.counts) showCrewCounts(ul, o.counts);
+  const box = document.createElement('div'); box.className = 'crew-add';
+  const inp = document.createElement('input'); inp.type = 'text'; inp.id = o.id; inp.placeholder = t(o.placeholder);
+  inp.autocomplete = 'off'; inp.spellcheck = false; inp.enterKeyHint = 'done';
+  inp.value = o.draft;
+  const join = iconButton('crew-join', t('Join crew'), PLUS);
+  const note = document.createElement('p'); note.className = 'set-note'; note.id = `${o.id}-note`; note.setAttribute('aria-live', 'polite');
+  const check = () => {
+    const r = checkCrew(inp.value, list.map(c => c.name)), full = list.length >= CREW_MAX;
+    inp.disabled = full; join.disabled = !r.ok;
+    note.textContent = r.ok || !r.why ? '' : t(r.why, { name: r.name ?? '' });
+    note.classList.toggle('warn', !full);
+    return r;
+  };
+  const add = () => {
+    const r = check();
+    if (!r.ok) return;
+    o.onDraft('');
+    // the keyboard stays in the box for one more (with 4: on the last crew's Leave)
+    o.change([...list, { name: r.name, rgb: freeColour(list) }], root => root.querySelector('.crew-add input:enabled') ?? [...root.querySelectorAll('.crew-leave')].pop());
+  };
+  inp.oninput = () => { o.onDraft(inp.value); check(); };
+  inp.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); add(); } };
+  join.onclick = add;
+  box.append(inp, join);
+  ctl.append(ul, box, note);
+  check();
+  return inp;
+}
+
+/** the counts on a crews control's chips: a figure by a person's outline (a screen reader gets "{n} in free roam"), the
+ *  chip's tooltip its name and that; nothing for a crew counts lacks */
+export function showCrewCounts(root: ParentNode, counts: Map<number, number>) {
+  for (const li of root.querySelectorAll<HTMLElement>('.crew[data-hash]')) {
+    const n = counts.get(Number(li.dataset.hash)), el = li.querySelector('.crew-count')!, name = li.querySelector('.crew-name')!.textContent ?? '';
+    if (n === undefined) { el.replaceChildren(); li.title = name; continue; }
+    const said = t('{n} in free roam', { n });
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
+    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', PERSON); svg.append(p);
+    const fig = document.createElement('span'); fig.setAttribute('aria-hidden', 'true'); fig.textContent = String(n);
+    const sr = document.createElement('span'); sr.className = 'vh'; sr.textContent = said;
+    el.replaceChildren(svg, fig, sr);
+    li.title = `${name} · ${said}`;
+  }
+}
 
 /** an option's label in the page's language (a language: its name there, and its own name beside it) */
 function optLabel(it: Item, value: string, label: string): string {
@@ -127,8 +275,9 @@ export function putKey(text: string, key: string, value: string | null): { text:
   return { text: next, removed };
 }
 
-/** What "Reset all settings" keeps: the name the other players know you by, and the language (this page's too). */
-const RESET_KEEPS = ['roam_name', 'language'];
+/** What "Reset all settings" keeps: the name the other players know you by, your crews, and the language (this
+ *  page's too). */
+const RESET_KEEPS = ['roam_name', 'roam_crew', 'roam_crew_colours', 'language'];
 
 /** "Reset all settings": the template, with the kept settings as the file has them (by their own key, also where
  *  the file sets the variable by its name, if the key reads the value the same).  One the file does not set, or
@@ -183,6 +332,8 @@ export class SettingsPanel {
   private saves = 0;                       // writes so far (tests wait on data-saved)
   private openMore = new Set<string>();    // "More ... settings" kept open across re-renders
   private status: Msg = () => '';          // the Online group's line (setStatus)
+  private crewCounts = new Map<number, number>();   // how many are in free roam in each crew, by hash (setCrewCounts)
+  private crewDraft = '';                  // the crew name being typed, kept across re-renders
   /** root: the Settings section; online: the section of the group that is its own (Online, under Saves) */
   constructor(private root: HTMLElement, private deps: SettingsDeps, private online: HTMLElement) {
     root.querySelector<HTMLButtonElement>('#settings-text-save')!.onclick = () => void this.saveRaw();
@@ -226,9 +377,11 @@ export class SettingsPanel {
 
   private ro() { return !!this.deps.readOnly?.(); }
 
-  private async put(key: string, value: string | null) {
+  /** key's line, and also's (a row's second key: COMPANION) in the same write */
+  private async put(key: string, value: string | null, also: [string, string | null][] = []) {
     if (this.ro()) { this.deps.say?.(t(READ_ONLY)); return; }
-    const { text: next, removed } = putKey(this.text ?? TEMPLATE, key, value);
+    let next = this.text ?? TEMPLATE, removed = 0;
+    for (const [k, v] of [[key, value] as [string, string | null], ...also]) { const r = putKey(next, k, v); next = r.text; removed += r.removed; }
     await writeFile(this.deps.saveDir, 'settings.ini', next);
     this.text = next;
     this.resolve(next);
@@ -269,6 +422,13 @@ export class SettingsPanel {
     if (p) { live(p, this.status); p.hidden = !p.textContent; }
   }
 
+  /** How many are in free roam in each crew now, by its hash (players.ts crewCounts; a crew it lacks: not known),
+   *  on the Crews row's lines; kept across re-renders. */
+  setCrewCounts(counts: Map<number, number>) {
+    this.crewCounts = counts;
+    for (const r of [this.root, this.online]) showCrewCounts(r, counts);
+  }
+
   private group(g: Group): HTMLElement {
     const box = document.createElement('div'); box.className = 'group';
     // a group in its own section has that section's heading
@@ -304,7 +464,7 @@ export class SettingsPanel {
   /** The lines with keys outside the table, and those of table keys the panel has no row for (roam_rate and the
    *  other tuning knobs, the Mac app's): listed, so nothing in the file acts unseen (the audit's PAGE-2). */
   private others(): HTMLElement[] {
-    const unshown = Object.entries(this.fileOnly.file).filter(([k, f]) => !ITEMS.has(k) && f.raw !== '')
+    const unshown = Object.entries(this.fileOnly.file).filter(([k, f]) => !ITEMS.has(k) && !COMPANIONS.has(k) && f.raw !== '')
       .map(([key, f]) => ({ phys: f.phys, key, env: key, value: f.raw, refused: f.refused, why: f.why }));
     const other = [...this.fileOnly.other, ...unshown].sort((a, b) => a.phys - b.phys);
     if (!other.length) return [];
@@ -363,8 +523,8 @@ export class SettingsPanel {
     const row = document.createElement('div'); row.className = 'set'; row.dataset.key = it.key;
     const id = `set-${it.key}`;
     const cur = this.current(it.key);
-    const f = this.resolved.file[it.key];
-    const setInFile = !!f && f.raw !== '';          // set (or refused): Reset puts the template line back
+    const f = this.resolved.file[it.key], comp = COMPANION[it.key], f2 = comp ? this.resolved.file[comp] : undefined;
+    const setInFile = (!!f && f.raw !== '') || (!!f2 && f2.raw !== '');   // set (or refused): Reset puts the template line back
     const c = it.c;
     // a choice is a radio group named by this label; any other control is labelled by it directly
     const label = document.createElement(c.t === 'seg' ? 'span' : 'label'); label.className = 'set-label'; label.id = `${id}-label`;
@@ -429,6 +589,10 @@ export class SettingsPanel {
         ctl.append(b);
       }
       described = sel;
+    } else if (c.t === 'crews') {
+      row.classList.add('set-list');
+      described = crewControl({ list: crewsOf(cur, this.current('roam_crew_colours')), id, labelId: label.id, placeholder: c.placeholder, counts: this.crewCounts,
+        draft: this.crewDraft, onDraft: v => { this.crewDraft = v; }, change: (list, focus) => void this.setCrews(list, focus) }, ctl);
     } else {
       const inp = document.createElement('input'); inp.id = id;
       inp.type = c.t === 'num' ? 'number' : 'text';
@@ -455,11 +619,13 @@ export class SettingsPanel {
       const r = document.createElement('button'); r.type = 'button'; r.className = 'text-btn'; r.textContent = t('Reset');
       r.setAttribute('aria-label', t('Reset {label}', { label: t(it.label) }));
       r.title = t('Back to the default ({value})', { value: shown(it, DEFAULTS.get(it.key) ?? '') });
-      r.onclick = () => void this.put(it.key, null);
+      r.onclick = () => void this.put(it.key, null, comp ? [[comp, null]] : []);
       ctl.prepend(r);                                // first: the control keeps its place at the right edge
     }
     row.append(label, help, ctl);
-    if (f?.refused) this.state(row, t('settings.ini line {line}: {key} = {why}, so the default is used.', { line: f.phys, key: it.key, why: f.why ? tvars(f.why.t, f.why.v) : f.refused }), 'bad');
+    const bad = ([[it.key, f], [comp, f2]] as const).filter(([, x]) => x?.refused)
+      .map(([k, x]) => t('settings.ini line {line}: {key} = {why}, so the default is used.', { line: x!.phys, key: k!, why: x!.why ? tvars(x!.why.t, x!.why.v) : x!.refused! }));
+    if (bad.length) this.state(row, bad.join(' '), 'bad');
     const by = this.fileOnly.byEnv[def.env];
     if (by && keyDef(by.key)?.key !== it.key) this.state(row, t('settings.ini line {line} sets {env} = {value} by its own name: that is what applies.', { line: by.phys, env: def.env, value: this.fileOnly.env[def.env] }), 'env');
     const envName = def.env;
@@ -469,9 +635,18 @@ export class SettingsPanel {
     return row;
   }
 
-  /** the control is described by its help line and any state line under it */
+  /** the control is described by its help line, its own note (the Crews box's) and any state line under it */
   private describe(el: HTMLElement, row: HTMLElement) {
-    el.setAttribute('aria-describedby', [...row.querySelectorAll('.set-help, .set-state')].map(p => p.id).join(' '));
+    el.setAttribute('aria-describedby', [...row.querySelectorAll('.set-help, .set-note, .set-state')].map(p => p.id).join(' '));
+  }
+
+  /** The crews as a Leave, Join or colour left them, saved (names and colours in one write; none left: both lines
+   *  back to the template's); then, if the row had the focus, it goes where focus() says. */
+  private async setCrews(list: Crew[], focus: (row: HTMLElement) => Element | null | undefined) {
+    const had = !!this.find('.set[data-key="roam_crew"]')?.contains(document.activeElement);
+    await this.put('roam_crew', list.length ? crewsValue(list.map(c => c.name)) : null, [['roam_crew_colours', list.length ? rgbsValue(list) : null]]);
+    const row = this.find<HTMLElement>('.set[data-key="roam_crew"]');
+    if (had && row) ((focus(row) ?? row.querySelector('input:enabled')) as HTMLElement | null)?.focus();
   }
 
   private state(row: HTMLElement, msg: string, cls: string) {
@@ -495,7 +670,7 @@ export class SettingsPanel {
   private async resetAll() {
     if (this.ro()) { this.deps.say?.(t(READ_ONLY)); return; }
     if (this.deps.confirm && !await this.deps.confirm(t('Reset all settings?'),
-      t('Every setting here goes back to its default, and any other line in settings.ini is removed. Your name and language stay, as do the options set inside the game.'),
+      t('Every setting here goes back to its default, and any other line in settings.ini is removed. Your name, crews and language stay, as do the options set inside the game.'),
       t('Reset'), true)) return;
     if (this.ro()) { this.deps.say?.(t(READ_ONLY)); return; }       // another tab took the saves meanwhile
     await this.write(resetAll(this.text));

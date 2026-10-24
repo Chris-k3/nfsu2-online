@@ -52,6 +52,13 @@ const LOBBY_JOIN_MS: f64 = 6000.0;
 const LOBBY_STAY_M: f64 = 50.0;
 /// a player's race reports logged: one a race (its lobby), and none sooner than this after its last
 const REPORT_GAP_MS: f64 = 20000.0;
+/// Two players of a room who share a crew are linked after the race lobbies' links and before all others, each
+/// player with at most this many such links (`crew_pairs`): half of the 32, so that the cars around it still show
+/// (under the busy cap, 8 links a player, a crew of 9 or more in one place takes all of them)
+const CREW_LINKS: u32 = 16;
+/// a crew of more players than this in one room gets no links first (its pairs grow as the square of its players:
+/// 64 are 2016), its players link by distance as everyone does, and it counts in `crewSkips`
+const CREW_GROUP_MAX: usize = 64;
 
 /// A player's race report as a log line (one each player of a race, back in free roam: the lines of one race share
 /// its lobby), for evening out the cars: the race, how the player did, the car as its game rated it.  Grep `[race]`.
@@ -123,6 +130,9 @@ struct Player {
     seen: f64,
     /// its HELLO says it takes race lobbies (its map questions get the room's lobbies too)
     lobbies: bool,
+    /// its crews as its last HELLO named them (wire::HF_CREW), each once, 0 after them: its crew-mates of its room are
+    /// linked with it first (`crew_pairs`), and /players counts them (`crew_counts`)
+    crews: [u32; wire::CREWS],
     /// the race lobby it hosts, as its last advert to the hub had it, and when that came
     lobby: Option<(HubLobby, f64)>,
     /// the lobby it asked to join (its id), and when
@@ -144,6 +154,23 @@ impl Player {
 /// a player's endpoint, its virtual address and port, in one number
 fn key(vip: u32, port: u16) -> u64 {
     (vip as u64) << 16 | port as u64
+}
+
+/// a HELLO's crews as the hub keeps them: each one once (a page may name a crew twice), in its order, 0 after them
+fn distinct(crews: [u32; wire::CREWS]) -> [u32; wire::CREWS] {
+    let (mut out, mut n) = ([0u32; wire::CREWS], 0);
+    for c in crews {
+        if c != 0 && !out[..n].contains(&c) {
+            out[n] = c;
+            n += 1;
+        }
+    }
+    out
+}
+
+/// a player's crews: the nonzero ones of its `crews`
+fn crews_of(p: &Player) -> impl Iterator<Item = u32> + '_ {
+    p.crews.iter().copied().take_while(|&c| c != 0)
 }
 
 /// the nearest integer, a half up (to +infinity, where `f64::round` takes it away from 0)
@@ -196,6 +223,10 @@ struct Stats {
     cap_cuts: u64,
     /// links a race lobby needed made before the others (`lobby_pairs`), at the last tick
     lobby_links: u64,
+    /// links made for crews before the others (`crew_pairs`), and the crews too large for that (CREW_GROUP_MAX
+    /// players in one room), at the last tick
+    crew_links: u64,
+    crew_skips: u64,
     /// players' race reports logged
     race_reports: u64,
 }
@@ -246,6 +277,16 @@ struct Scratch {
     lids: HashMap<u32, u32>,
     ljoin: Vec<(u32, u32)>,
     lnear: Vec<(f64, u32)>,
+    /// the crews' pairs (`crew_pairs`): their place in the crews' order and the two places in the room, the lower
+    /// first; the room's players in crews as (crew, place); a place's links of the last tick, stamped (`cmark`, and
+    /// since when, `csince`); the links each place got for its crews (`ccount`)
+    cpairs: Vec<(u64, u32, u32)>,
+    cmembers: Vec<(u32, u32)>,
+    cmark: Vec<u32>,
+    csince: Vec<f64>,
+    ccount: Vec<u32>,
+    /// each place's links made first, the lobbies' and the crews' (the first of its new links: `link_every_pair`)
+    npre: Vec<u32>,
     /// a large room's links of the last tick, sorted (`link_many`)
     olds: Vec<Cand>,
     /// each place's links of the last tick as places in the room: `olinks[ostart[i]..ostart[i + 1]]`
@@ -302,6 +343,8 @@ pub struct Hub {
     by_key: HashMap<u64, u32>,
     /// the endpoints of each virtual address (`max_per_vip`)
     per_vip: HashMap<u32, u32>,
+    /// the players whose last HELLO named a crew: with none, a tick does not look for crews at all
+    crewed: usize,
     /// each virtual address's last world map answered (map_gap_ms), kept past its players: a BYE and a HELLO (or
     /// another port) make a new player, and when a player's own time was the limit, a new player's first answer came
     /// at once (the second security audit, 2026-10-22: a map walks every player on the hub's one thread, and a few
@@ -342,6 +385,7 @@ impl Hub {
             holes: 0,
             by_key: HashMap::new(),
             per_vip: HashMap::new(),
+            crewed: 0,
             map_at: HashMap::new(),
             s: Scratch::default(),
         }
@@ -386,6 +430,7 @@ impl Hub {
     fn remove(&mut self, slot: u32) -> bool {
         let Some(p) = self.slots.get_mut(slot as usize).and_then(Option::take) else { return false };
         self.by_key.remove(&p.key());
+        self.crewed -= (p.crews[0] != 0) as usize;
         if let Some(n) = self.per_vip.get_mut(&p.vip) {
             *n -= 1;
             if *n == 0 {
@@ -499,6 +544,7 @@ impl Hub {
                     pos_at: 0.0,
                     seen: 0.0,
                     lobbies: false,
+                    crews: [0; wire::CREWS],
                     lobby: None,
                     join: None,
                     reported: None,
@@ -514,8 +560,10 @@ impl Hub {
         p.hub_port = dport;
         let mut ask = None;
         let mut report = None;
+        // (in a crew before this HELLO, and after it)
+        let mut crewed = None;
         match m {
-            Msg::Hello { sender, core, status, room, name, lobbies } => {
+            Msg::Hello { sender, core, status, room, name, lobbies, crews } => {
                 // another start of the game on the same endpoint
                 if p.id != sender {
                     p.links.clear();
@@ -529,6 +577,9 @@ impl Hub {
                 }
                 p.degree = if core >= 2 { degree } else { degree.min(DEGREE_V1) };
                 p.lobbies = lobbies;
+                let was = p.crews[0] != 0;
+                p.crews = distinct(crews);
+                crewed = Some((was, p.crews[0] != 0));
             }
             Msg::Snap { sender, status, p: pos, v, heading } if sender == p.id => {
                 p.p = Some(pos);
@@ -550,6 +601,9 @@ impl Hub {
                 report = Some(race_line(&p.name, &r));
             }
             _ => {}
+        }
+        if let Some((was, is)) = crewed {
+            self.crewed = self.crewed + is as usize - was as usize;
         }
         if let Some(line) = report {
             self.st.race_reports += 1;
@@ -684,22 +738,32 @@ impl Hub {
         s.local.clear();
         s.local.resize(self.slots.len(), NONE);
         let w = Weigh { now, hold_ms: self.o.hold_ms, keep: self.o.keep };
-        let mut lobby_links = 0;
+        let (mut lobby_links, mut crew_links, mut crew_skips) = (0, 0, 0);
         for r in 0..rooms {
             let list = std::mem::take(&mut s.rooms[r]);
             prepare(&self.slots, &list, self.cap, &self.o, now, s);
             lobby_pairs(&self.slots, &list, now, s);
-            lobby_links += if list.len() > self.o.exact_room {
+            // (no player in a crew, nothing to look for)
+            if self.crewed > 0 {
+                crew_skips += crew_pairs(&self.slots, &list, &w, s);
+            } else {
+                s.cpairs.clear();
+            }
+            let (lobby, crew) = if list.len() > self.o.exact_room {
                 link_many(&self.slots, &list, &w, s)
             } else {
                 link_every_pair(&self.slots, &list, &w, s)
             };
+            lobby_links += lobby;
+            crew_links += crew;
             for &slot in &list {
                 s.local[slot as usize] = NONE;
             }
             s.rooms[r] = list;
         }
         self.st.lobby_links = lobby_links;
+        self.st.crew_links = crew_links;
+        self.st.crew_skips = crew_skips;
         self.lists();
         let ms = t0.elapsed().as_secs_f64() * 1000.0;
         self.st.ticks += 1;
@@ -801,6 +865,36 @@ impl Hub {
         n
     }
 
+    /// `in_roam()` by crew, in any room: (crew, browsers) for each crew that a player in free roam, or paused there,
+    /// names, in the order of the crews' numbers (each browser once a crew, whatever its endpoints), into `out`, which
+    /// is kept from tick to tick (`RoamHub` keeps this after each tick for the server's /players `crews`)
+    pub fn crew_counts(&self, out: &mut Vec<(u32, u32)>) {
+        out.clear();
+        if self.crewed == 0 {
+            return;
+        }
+        for p in self.players().filter(|p| matches!(p.status, 2 | 5)) {
+            out.extend(crews_of(p).map(|c| (c, p.vip)));
+        }
+        // each (crew, browser) once, then each crew's run counted, in place
+        out.sort_unstable();
+        out.dedup();
+        out.iter_mut().for_each(|e| e.1 = 1);
+        out.dedup_by(|e, kept| {
+            let same = e.0 == kept.0;
+            kept.1 += same as u32;
+            same
+        });
+    }
+
+    /// `in_roam()` in each of these crews (any room), in their order: the server's /players `crews`, for the start
+    /// page of a player who set crews
+    pub fn in_crews(&self, crews: &[u32]) -> Vec<usize> {
+        let mut counts = Vec::new();
+        self.crew_counts(&mut counts);
+        crews.iter().map(|&c| crew_count(&counts, c)).collect()
+    }
+
     /// for the tests and the switch's `info()` (the server's console): counts only, never a position
     pub fn info(&self) -> Value {
         let (mut linked, mut links) = (0u64, 0u64);
@@ -826,6 +920,8 @@ impl Hub {
             "busy": num(st.busy),
             "capCuts": st.cap_cuts,
             "lobbyLinks": st.lobby_links,
+            "crewLinks": st.crew_links,
+            "crewSkips": st.crew_skips,
             "raceReports": st.race_reports,
         })
     }
@@ -951,12 +1047,96 @@ fn lobby_pairs(slots: &[Option<Player>], list: &[u32], now: f64, s: &mut Scratch
     }
 }
 
+/// The crews' pairs, linked after the race lobbies' and before any other: two players of the room who share a crew
+/// (any of their crews: each pair once), nearest first, into `s.cpairs` as places in the room, the lower first; the
+/// link functions make them while both ends have room, each player with at most CREW_LINKS of them.  By distance alone
+/// a crew-mate 300 m off in a crowd was never linked (32 nearer players were, 8 under the busy cap), so its car, its
+/// name and its arrow never showed.  The rest of the links come in the order of before: a crew-mate near enough is
+/// linked by distance anyway, only sooner.
+///
+/// "Nearest" here is the plain distance of the two places soon_ms on (`s.soon`, where the links weigh first: a car
+/// moved on a second, a player not in free roam away_m up, so a crew-mate driving comes before one in a shop),
+/// compared as its square: these pairs need no order but their own (the rest is the Node hub's order, bit for bit),
+/// and four Math.hypot a pair (`apart`) would cost more than the rest of this.  The order decides only which of a
+/// player's crew-mates are linked first when it has more of them than CREW_LINKS, or than room; a pair linked at the
+/// last tick weighs as the links do (younger than hold_ms first, older at keep its distance), so that a crew of more
+/// than CREW_LINKS driving about does not trade its links every tick.
+///
+/// What it costs is the crews' pairs, not the room's: the room's players in crews, sorted by crew (one flat list, no
+/// map, kept from tick to tick), then every pair of each crew.  A crew of k players in the room is k (k - 1) / 2
+/// pairs, so one of more than CREW_GROUP_MAX (2000 players in one crew would be two million pairs) gets none: its
+/// players link by distance as everyone does.  Returns how many crews of the room were too large.  (Only while a
+/// player is in a crew, and not inlined into the tick, so that a tick without crews is the tick of before.)
+#[inline(never)]
+fn crew_pairs(slots: &[Option<Player>], list: &[u32], w: &Weigh, s: &mut Scratch) -> u64 {
+    let Scratch { soon, local: at, cpairs, cmembers, cmark, csince, .. } = s;
+    cpairs.clear();
+    cmembers.clear();
+    for (j, &q) in list.iter().enumerate() {
+        if let Some(p) = player(slots, q) {
+            cmembers.extend(crews_of(p).map(|c| (c, j as u32)));
+        }
+    }
+    // by crew, each crew's players by place (each (crew, place) once: a player's crews are distinct)
+    cmembers.sort_unstable();
+    cmark.clear();
+    cmark.resize(list.len(), 0);
+    csince.resize(list.len(), 0.0);
+    let keep2 = w.keep * w.keep;
+    let (mut stamp, mut skipped, mut g) = (0u32, 0, 0);
+    while g < cmembers.len() {
+        let crew = cmembers[g].0;
+        let e = g + cmembers[g..].iter().position(|m| m.0 != crew).unwrap_or(cmembers.len() - g);
+        if e - g > CREW_GROUP_MAX {
+            skipped += 1;
+            g = e;
+            continue;
+        }
+        for x in g..e - 1 {
+            let i = cmembers[x].1 as usize;
+            // i's links of the last tick, by place
+            stamp += 1;
+            for l in player(slots, list[i]).map_or(&[][..], |a| &a.links) {
+                if let Some(j) = local(at, l.slot) {
+                    cmark[j] = stamp;
+                    csince[j] = l.since;
+                }
+            }
+            for &(_, j) in &cmembers[x + 1..e] {
+                let j = j as usize;
+                let (a, b) = (&soon[i], &soon[j]);
+                let (dx, dy, dz) = (a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+                let sq = dx * dx + dy * dy + dz * dz;
+                let d = if cmark[j] != stamp {
+                    sq
+                } else if w.now - csince[j] < w.hold_ms {
+                    -1.0
+                } else {
+                    sq * keep2
+                };
+                cpairs.push((order_key(d), i as u32, j as u32));
+            }
+        }
+        g = e;
+    }
+    // nearest first, at one place in the order by the places; a pair of two crews once
+    cpairs.sort_unstable();
+    cpairs.dedup();
+    skipped
+}
+
+/// a crew's count in `Hub::crew_counts`'s table (0: none)
+pub(crate) fn crew_count(counts: &[(u32, u32)], crew: u32) -> usize {
+    counts.binary_search_by_key(&crew, |e| e.0).map_or(0, |k| counts[k].1 as usize)
+}
+
 /// The links of a room of at most `exact_room` players: every pair of them, nearest first (a link younger than
-/// `hold_ms` before them all, an older one at `keep` its distance), into the links while both ends have room.
-fn link_every_pair(slots: &[Option<Player>], list: &[u32], w: &Weigh, s: &mut Scratch) -> u64 {
+/// `hold_ms` before them all, an older one at `keep` its distance), into the links while both ends have room.  The
+/// race lobbies' links and the crews' come first; returns how many of each were made.
+fn link_every_pair(slots: &[Option<Player>], list: &[u32], w: &Weigh, s: &mut Scratch) -> (u64, u64) {
     let m = list.len();
-    let Scratch { soon, ahead, view, deg, mark, since, pairs, order, sorting, local: at, fresh, lpairs, .. } = s;
-    // the race lobbies' links first
+    let Scratch { soon, ahead, view, deg, mark, since, pairs, order, sorting, local: at, fresh, lpairs, cpairs, ccount, npre, .. } = s;
+    // the race lobbies' links first, then the crews'
     let linked = |fresh: &[Vec<Link>], a: u32, b: u32| fresh[a as usize].iter().any(|l| l.slot == b);
     let mut made = 0;
     for &(a, b) in lpairs.iter() {
@@ -967,6 +1147,34 @@ fn link_every_pair(slots: &[Option<Player>], list: &[u32], w: &Weigh, s: &mut Sc
             made += 1;
         }
     }
+    let mut crew = 0;
+    if !cpairs.is_empty() {
+        ccount.clear();
+        ccount.resize(m, 0);
+        for &(_, a, b) in cpairs.iter() {
+            let (a, b) = (a as usize, b as usize);
+            let (sa, sb) = (list[a], list[b]);
+            if ccount[a] < CREW_LINKS
+                && ccount[b] < CREW_LINKS
+                && fresh[sa as usize].len() < deg[a]
+                && fresh[sb as usize].len() < deg[b]
+                && !linked(fresh, sa, sb)
+            {
+                join(fresh, sa, sb, since_of(slots, sa, sb, w.now));
+                ccount[a] += 1;
+                ccount[b] += 1;
+                crew += 1;
+            }
+        }
+    }
+    // a pair linked already is one of the links made first, and those are the first of each player's new links: only
+    // they are looked through (a few a player), not all of its links
+    let first = made + crew > 0;
+    if first {
+        npre.clear();
+        npre.extend(list.iter().map(|&slot| fresh[slot as usize].len() as u32));
+    }
+    let made_first = |fresh: &[Vec<Link>], a: usize, sa: u32, sb: u32| fresh[sa as usize][..npre[a] as usize].iter().any(|l| l.slot == sb);
     pairs.clear();
     order.clear();
     mark.clear();
@@ -1006,12 +1214,12 @@ fn link_every_pair(slots: &[Option<Player>], list: &[u32], w: &Weigh, s: &mut Sc
         let p = &pairs[k as usize];
         let (a, b) = (p.a as usize, p.b as usize);
         let (sa, sb) = (list[a], list[b]);
-        if fresh[sa as usize].len() < deg[a] && fresh[sb as usize].len() < deg[b] && (made == 0 || !linked(fresh, sa, sb)) {
+        if fresh[sa as usize].len() < deg[a] && fresh[sb as usize].len() < deg[b] && (!first || !made_first(fresh, a, sa, sb)) {
             join(fresh, sa, sb, p.since);
             open -= (fresh[sa as usize].len() == deg[a]) as usize + (fresh[sb as usize].len() == deg[b]) as usize;
         }
     }
-    made
+    (made, crew)
 }
 
 /// whether `places` has `j` (every one compared, without a branch: there are at most a degree of them, and this
@@ -1038,9 +1246,10 @@ fn has_place(places: &[u32], j: u32) -> bool {
 ///
 /// What the order asks of a pair, which players have room and which pairs were or are linked, is read from arrays
 /// by place in the room (a player's last links and its new ones, as places), not from the players.  (Not inlined
-/// into the tick: there it made the every-pair loop of the small rooms 1 % slower.)
+/// into the tick: there it made the every-pair loop of the small rooms 1 % slower.)  The race lobbies' links and the
+/// crews' come first, as in `link_every_pair`; returns how many of each were made.
 #[inline(never)]
-fn link_many(slots: &[Option<Player>], list: &[u32], w: &Weigh, s: &mut Scratch) -> u64 {
+fn link_many(slots: &[Option<Player>], list: &[u32], w: &Weigh, s: &mut Scratch) -> (u64, u64) {
     let m = list.len();
     let Scratch {
         soon,
@@ -1062,6 +1271,8 @@ fn link_many(slots: &[Option<Player>], list: &[u32], w: &Weigh, s: &mut Scratch)
         fcount,
         flinks,
         lpairs,
+        cpairs,
+        ccount,
         ..
     } = s;
     let cand = |d: f64, i: usize, j: usize, nearest: bool| Cand::new(d, i as u32, j as u32, nearest);
@@ -1118,7 +1329,7 @@ fn link_many(slots: &[Option<Player>], list: &[u32], w: &Weigh, s: &mut Scratch)
     flinks.clear();
     flinks.resize(m * stride, 0);
     let room = |fcount: &[u32], i: usize| (fcount[i] as usize) < deg[i];
-    // the race lobbies' links first
+    // the race lobbies' links first, then the crews'
     let mut made = 0;
     for &(a, b) in lpairs.iter() {
         let (i, j) = (a as usize, b as usize);
@@ -1129,6 +1340,28 @@ fn link_many(slots: &[Option<Player>], list: &[u32], w: &Weigh, s: &mut Scratch)
                 fcount[a] += 1;
             }
             made += 1;
+        }
+    }
+    let mut crew = 0;
+    if !cpairs.is_empty() {
+        ccount.clear();
+        ccount.resize(m, 0);
+        for &(_, a, b) in cpairs.iter() {
+            let (i, j) = (a as usize, b as usize);
+            if ccount[i] < CREW_LINKS
+                && ccount[j] < CREW_LINKS
+                && room(fcount, i)
+                && room(fcount, j)
+                && !has_place(&flinks[i * stride..i * stride + fcount[i] as usize], b)
+            {
+                join(fresh, list[i], list[j], since_of(slots, list[i], list[j], w.now));
+                for (a, b) in [(i, j), (j, i)] {
+                    flinks[a * stride + fcount[a] as usize] = b as u32;
+                    fcount[a] += 1;
+                    ccount[a] += 1;
+                }
+                crew += 1;
+            }
         }
     }
     let mut o = 0;
@@ -1184,5 +1417,5 @@ fn link_many(slots: &[Option<Player>], list: &[u32], w: &Weigh, s: &mut Scratch)
     for n in near.drain(..).chain(near_a.drain(..)).chain(near_v.drain(..)) {
         found.push(n.into_found());
     }
-    made
+    (made, crew)
 }

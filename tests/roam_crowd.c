@@ -38,11 +38,13 @@ static void io_event(void *u, int ev, int peer, const char *t){ (void)u; (void)p
 /* the buffer the script writes a name or a received datagram into */
 __attribute__((export_name("crowd_io"))) uint8_t *crowd_io(void){ return IO; }
 
-/* name (in IO, 0-terminated), id, room hash, the hub's address, our port, the car type's name hash, states per SNAP */
-__attribute__((export_name("crowd_init"))) void crowd_init(uint32_t id, uint32_t room, uint32_t hub_ip, uint32_t port, uint32_t type_hash,
-                                                           uint32_t states, double now_us){
+/* name (in IO, 0-terminated), id, room hash, a crew's hash (0: none), the hub's address, our port, the car type's
+ * name hash, states per SNAP */
+__attribute__((export_name("crowd_init"))) void crowd_init(uint32_t id, uint32_t room, uint32_t crew, uint32_t hub_ip, uint32_t port,
+                                                           uint32_t type_hash, uint32_t states, double now_us){
     rc_config cf; memset(&cf, 0, sizeof cf);
     cf.self_id = id; cf.port = (uint16_t)port; cf.room = room; cf.platform = RC_PLAT_TOOL;
+    if (crew){ cf.crews[0] = crew; cf.n_crews = 1; }
     cf.max_players = RC_MAX_PLAYERS; cf.rate_hz = 20; cf.snap_states = (int)states; cf.hub_ip = hub_ip; cf.hub_port = (uint16_t)port;
     rc_name_clean(cf.name, (const char *)IO, RC_NAME_MAX);
     rc_io io = { 0, io_send, 0, io_event };

@@ -461,6 +461,74 @@ async fn players_who_leave_leave_nothing_behind() {
     assert!(!srv.lines().iter().any(|l| l.contains("panicked")), "{:?}", srv.lines());
 }
 
+/// a HELLO of a player that reads crews (roam_core.h RC_HF_CREW, core version 7) in `room`, in free roam, named "p",
+/// naming no ids it hears, then its crews
+fn roam_hello_crews(sender: u32, room: u32, crews: &[u32]) -> Vec<u8> {
+    let mut p = vec![0u8; 12];
+    p[0..2].copy_from_slice(&7u16.to_le_bytes());
+    p[2] = 1;
+    p[3] = 2;
+    p[4..6].copy_from_slice(&47210u16.to_le_bytes());
+    p[6..8].copy_from_slice(&3u16.to_le_bytes());
+    p[8..12].copy_from_slice(&room.to_le_bytes());
+    p.extend_from_slice(&[1, b'p', 0, crews.len() as u8]);
+    for c in crews {
+        p.extend_from_slice(&c.to_le_bytes());
+    }
+    let mut d = dgram(1, sender, &p);
+    d[14..16].copy_from_slice(&0x0200u16.to_le_bytes());
+    let n = d.len();
+    let crc = crc32(&d[..n - 4]);
+    d[n - 4..].copy_from_slice(&crc.to_le_bytes());
+    d
+}
+
+// /players?crews=: how many drive in free roam in each crew asked, in any room, in the order asked, as of the hub's
+// last tick; with ?room= too; what is not a number, or 0, left out, 4 at most; none left, no crews
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn players_counts_free_roams_crews() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (data, wasm) = game_folder(tmp.path());
+    let (port, state) = (free_port(), tmp.path().join("state"));
+    let mut srv = Server::spawn(command(&data, &wasm, port, &state, &[]), port);
+    srv.ready().await;
+    let host = format!("localhost:{port}");
+    let (a, b) = (Browser::open_at(&host, port, "", None).await, Browser::open_at(&host, port, "", None).await);
+    a.hello("Ann");
+    b.hello("Bob");
+    a.binary(to_hub(&roam_hello_crews(501, 5, &[7, 8])));
+    b.binary(to_hub(&roam_hello_crews(502, 0, &[8])));
+    // /players with this query once the hub's tick counts `roam` in free roam
+    let until = |q: &'static str, roam: u32| {
+        let srv = &srv;
+        async move {
+            let t0 = Instant::now();
+            loop {
+                let p = srv.get(q).await.1;
+                if p.contains(&format!("\"roam\":{roam},")) || t0.elapsed() > Duration::from_secs(5) {
+                    return p;
+                }
+                sleep(50).await;
+            }
+        }
+    };
+    let head = r#"{"players":2,"online":0,"roam":2,"full":false,"queue":0,"roamBusy":false"#;
+    assert_eq!(until("/players?room=5&crews=8,x,7,0,9,10,11", 2).await, format!(r#"{head},"room":1,"crews":[2,1,0,0]}}"#));
+    assert_eq!(srv.get("/players?crews=7").await.1, format!(r#"{head},"crews":[1]}}"#));
+    assert_eq!(srv.get("/players?crews=8%2C7&room=5").await.1, format!(r#"{head},"room":1,"crews":[2,1]}}"#), "as URLSearchParams asks");
+    // (a + in a query is a space, as URLSearchParams reads it)
+    assert_eq!(srv.get("/players?crews=4294967296,-8,8.0,+8,08").await.1, format!(r#"{head},"crews":[2]}}"#), "decimal u32s only: 08 is 8");
+    assert_eq!(srv.get("/players?crews=x,0,").await.1, format!("{head}}}"), "none asked: no crews");
+    assert_eq!(srv.get("/players?crews").await.1, format!("{head}}}"));
+    b.close().await;
+    assert_eq!(
+        until("/players?crews=8,7", 1).await,
+        r#"{"players":1,"online":0,"roam":1,"full":false,"queue":0,"roamBusy":false,"crews":[1,1]}"#,
+        "Bob left"
+    );
+    assert_eq!(srv.stop().await, Some(0));
+}
+
 /// a client frame (masked with a zero mask: the payload as it is)
 fn client_frame(op: u8, payload: &[u8]) -> Vec<u8> {
     let mut f = vec![0x80 | op];

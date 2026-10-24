@@ -87,12 +87,20 @@ fn the_wire_what_roam_core_sends_the_hub_reads_and_its_peers_lists_decode_in_roa
         String::from_utf8_lossy(&o.stdout).trim().to_string()
     };
     let (h, s, b) = (unhex(&run(&["hello"])), unhex(&run(&["snap"])), unhex(&run(&["bye"])));
+    // the C core's version (roam_core.h RC_CORE_VER), which its HELLO says
+    let hdr = std::fs::read_to_string(repo().join("runtime/roam_core.h")).expect("roam_core.h");
+    let core: u16 = hdr
+        .lines()
+        .find_map(|l| l.strip_prefix("#define RC_CORE_VER"))
+        .and_then(|r| r.split_whitespace().next())
+        .and_then(|v| v.parse().ok())
+        .expect("RC_CORE_VER");
     assert_eq!(
         decode_roam(&h),
-        Some(RoamMsg::Hello { sender: 0x1234ABCD, core: 5, status: 2, room: fnv1a("blue"), name: "Ann K.".into() })
+        Some(RoamMsg::Hello { sender: 0x1234ABCD, core, status: 2, room: fnv1a("blue"), name: "Ann K.".into(), crews: vec![] })
     );
     assert_eq!(
-        hello_with(0x1234ABCD, &HelloOpts { room: fnv1a("blue"), name: b"Ann K.", seen: &[0x11, 0x22], core: 5, ..Default::default() }),
+        hello_with(0x1234ABCD, &HelloOpts { room: fnv1a("blue"), name: b"Ann K.", seen: &[0x11, 0x22], core, ..Default::default() }),
         h,
         "this test's HELLO = the C core's, byte for byte"
     );
@@ -112,6 +120,78 @@ fn the_wire_what_roam_core_sends_the_hub_reads_and_its_peers_lists_decode_in_roa
     );
     assert_eq!(run(&["peers", &hex(&peers)]), format!("ok 2 10.77.0.5:47210:3 10.77.0.6:47300:{}", 0xDEADBEEFu32));
     assert_eq!(run(&["peers", &hex(&encode_peers(0xB0B, 10, &[]))]), "ok 0", "an empty list (the hub is there)");
+}
+
+/// web/test/roam_hubwire.c with roam_core.c, built for wasm into `file` (each test its own: they run at once), and
+/// the way to run it under node, its output trimmed; None without a wasi-sdk in deps/ or node (the test is skipped)
+fn hubwire(file: &str) -> Option<impl Fn(&[&str]) -> String> {
+    let wasi = std::fs::read_dir(repo().join("deps")).ok().and_then(|d| {
+        let mut v: Vec<PathBuf> =
+            d.flatten().filter(|e| e.file_name().to_string_lossy().starts_with("wasi-sdk-")).map(|e| e.path()).collect();
+        v.sort();
+        v.pop()
+    });
+    let Some(wasi) = wasi.filter(|_| have_node()) else {
+        eprintln!("no wasi-sdk in deps/, or no node: skipped");
+        return None;
+    };
+    let w = Path::new(env!("CARGO_TARGET_TMPDIR")).join(file);
+    let out = Command::new(wasi.join("bin/clang"))
+        .current_dir(repo())
+        .args(["--target=wasm32-wasip1-threads", "-pthread", "-O2", "-ffp-contract=off", "-Iruntime", "-o"])
+        .arg(&w)
+        .args(["web/test/roam_hubwire.c", "runtime/roam_core.c"])
+        .arg("-Wl,--import-memory,--export-memory,--shared-memory,--initial-memory=67108864,--max-memory=268435456")
+        .output()
+        .expect("clang");
+    assert!(out.status.success(), "clang: {}", String::from_utf8_lossy(&out.stderr));
+    Some(move |args: &[&str]| {
+        let o = Command::new("node").arg(repo().join("web/test/wasi-run.mjs")).arg(&w).args(args).output().expect("node");
+        String::from_utf8_lossy(&o.stdout).trim().to_string()
+    })
+}
+
+// the wire: a session's HELLO to the hub as roam_core makes it (rc_tick's, fill_hello: the ids of the two players the
+// hub listed, who said hello, then its two crews from its config) names its crews; they are the room hashes the page
+// makes (players.ts roomHash, players.test.mjs's 0x160fba32 for "Blue Room") and this test's; the hub links that
+// player in a crowd with a crew-mate 2 km off (a HELLO made here) first, and not one of another crew
+#[test]
+fn the_wire_a_sessions_hello_to_the_hub_names_its_crews() {
+    let Some(run) = hubwire("roam_hubwire_crew.wasm") else { return };
+    let h = unhex(&run(&["hellocrew"]));
+    let (blue, owls) = (room_hash("Blue Room"), room_hash("Night Owls"));
+    // capitals and blanks do not count, a name of blanks is none
+    assert_eq!([blue, room_hash("blueroom"), room_hash(" Blue Room\t"), room_hash("BLUE ROOM")], [0x160F_BA32; 4]);
+    assert_eq!((room_hash("night owls"), fnv1a("nightowls")), (owls, owls));
+    assert_eq!((room_hash(""), room_hash(" \t\r\n")), (0, 0));
+    // the crew flag, the ids it hears (the hub's list), then its crews
+    assert!(h.len() > 30 && u16::from_le_bytes([h[14], h[15]]) & HF_CREW != 0, "the crew flag: {}", hex(&h));
+    let nl = h[28] as usize;
+    let at = |o: usize| u32::from_le_bytes(h[o..o + 4].try_into().unwrap());
+    let ids: Vec<u32> = (0..h[29 + nl] as usize).map(|k| at(30 + nl + 4 * k)).collect();
+    assert_eq!(ids, [0x11, 0x22], "the ids it hears: {}", hex(&h));
+    match decode_roam(&h) {
+        Some(RoamMsg::Hello { sender, status, crews, .. }) => assert_eq!((sender, status, crews), (0x1234ABCD, 2, vec![blue, owls])),
+        other => panic!("not its HELLO: {other:?} ({})", hex(&h)),
+    }
+    // that player (V(0)) in a crowd of 60 within 15 m, and V(61) 2 km off in "Night Owls" or in "Red"
+    for (crew, want) in [(owls, true), (room_hash("Red"), false)] {
+        let mut k = Kit::new(RoamOptions { view_m: 1e-9, ..RoamOptions::default() });
+        k.from(V(0), &h);
+        k.from(V(0), &snap(0x1234ABCD, [0.25, 0.25, 0.0]));
+        for i in 1..=60u32 {
+            k.from(V(i), &hello_with(100 + i, &HelloOpts { core: 6, ..Default::default() }));
+            k.from(V(i), &snap(100 + i, [((i - 1) % 8) as f64 * 3.0 - 9.25, ((i - 1) / 8) as f64 * 3.0 - 9.25, 0.0]));
+        }
+        k.from(V(61), &hello_with(161, &HelloOpts { core: 6, crews: Some(&[crew]), ..Default::default() }));
+        k.from(V(61), &snap(161, [2000.25, 0.25, 0.0]));
+        k.hub.tick();
+        let l = Lists(k.lists());
+        l.both_ends();
+        assert_eq!((l.has(0, 61), l.of(0).len()), (want, 32), "crew {crew:#x}: the crew-mate linked, the links full");
+        assert_eq!(k.info("crewLinks"), if want { 1.0 } else { 0.0 });
+        assert_eq!(k.hub.in_crews(&[blue, owls]), [1, 1 + want as usize]);
+    }
 }
 
 /// the lists by player i (10.77.0.(10 + i), port 47210)

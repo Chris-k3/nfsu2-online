@@ -155,7 +155,11 @@ void app_local_network_notice(void){
  * "Team#1" stays Team#1), the rule the free-roam options follow in the
  * runtime and in the Windows plugin's .ini.
  * K_PATH: a folder (absolute, ~/..., or a name), printable, under 1024
- * bytes.  K_TEXT: printable text (UTF-8 allowed), 1 to 63 bytes.  K_WXH:
+ * bytes.  K_TEXT: printable text (UTF-8 allowed), 1 to 63 bytes.  K_CREWS:
+ * crew names joined by commas, printable (UTF-8 allowed), under 1024 bytes,
+ * each name at most 24 characters without the blanks round it (the page's
+ * crews.ts; the game takes the first 4).  K_RGBS: at most 4 colours joined
+ * by commas, each 6 hex digits (no '#') or empty, blanks round them.  K_WXH:
  * <w>x<h>, each 320..16384.  K_FIXES: default|all|none or a comma list of
  * the frame-rate fixes, "-name" removes one.  K_IFNAME: a network interface
  * name (letters and digits, at most 15).  K_IPV4: a.b.c.d.  K_MAC:
@@ -164,7 +168,7 @@ void app_local_network_notice(void){
  * pack's parts.  K_DUMP: on/off or a folder (as K_PATH).  Every key of the
  * table has a kind that checks its value: K_RAW is not used. */
 enum { K_RAW, K_BOOL, K_BOOL_INV, K_ENUM, K_NUM, K_ID, K_TOKEN, K_INT, K_NAME, K_PEERS,
-       K_PATH, K_TEXT, K_WXH, K_FIXES, K_IFNAME, K_IPV4, K_MAC, K_HOST, K_PARTS, K_DUMP };
+       K_PATH, K_TEXT, K_CREWS, K_RGBS, K_WXH, K_FIXES, K_IFNAME, K_IPV4, K_MAC, K_HOST, K_PARTS, K_DUMP };
 #define K_IC 0x100
 static const struct { const char *key, *env; int kind; const char *vals; } g_keys[] = {
     /* app */
@@ -217,6 +221,8 @@ static const struct { const char *key, *env; int kind; const char *vals; } g_key
     { "roam_peers",               "NFSU2_ROAM_PEERS",           K_PEERS | K_IC },
     { "roam_discovery",           "NFSU2_ROAM_DISCOVERY",       K_BOOL  | K_IC },
     { "roam_room",                "NFSU2_ROAM_ROOM",            K_TEXT  | K_IC },
+    { "roam_crew",                "NFSU2_ROAM_CREW",            K_CREWS | K_IC },
+    { "roam_crew_colours",        "NFSU2_ROAM_CREW_RGB",        K_RGBS  | K_IC },
     { "roam_max_players",         "NFSU2_ROAM_MAX_PLAYERS",     K_INT   | K_IC, "2..33" },
     { "roam_max_cars",            "NFSU2_ROAM_MAX_CARS",        K_INT   | K_IC, "0..32" },
     { "roam_collide",             "NFSU2_ROAM_COLLIDE",         K_BOOL  | K_IC },
@@ -423,6 +429,13 @@ static const char *const k_template =
 "# Empty: everyone.  With a name, only the players who set the same name\n"
 "# (capitals and spaces do not count).  [NFSU2_ROAM_ROOM]\n"
 "#roam_room =\n"
+"# Your crews, up to 4, joined by commas (Blue Room, Night Owls): players who\n"
+"# share one see each other's names and map arrows in its colour, at any\n"
+"# distance, with everyone else still there.  [NFSU2_ROAM_CREW]\n"
+"#roam_crew =\n"
+"# Each crew's colour, in the order of roam_crew: 6 hex digits, no #.  Empty:\n"
+"# cyan, magenta, violet, red.  [NFSU2_ROAM_CREW_RGB]\n"
+"#roam_crew_colours =\n"
 "# UDP port, the same on every machine (1024 to 65535).  [NFSU2_ROAM_PORT]\n"
 "#roam_port = 47210\n"
 "# Look for friends with a network broadcast every 2 s.  [NFSU2_ROAM_DISCOVERY]\n"
@@ -603,6 +616,25 @@ static int value_ok(int kind, const char *v){
     switch (kind){
     case K_PATH: return printable_ok(v, 1023);
     case K_TEXT: return printable_ok(v, 63);
+    case K_CREWS: { if (!printable_ok(v, 1023)) return 0;
+                    for (const char *p = v; *p; p += *p == ','){
+                        const char *e = p; while (*e && *e != ',') e++;
+                        while (p < e && strchr(" \t\n\v\f\r", *p)) p++;
+                        while (e > p && strchr(" \t\n\v\f\r", e[-1])) e--;
+                        int chars = 0;
+                        for (; p < e; p++) chars += ((unsigned char)*p & 0xc0) != 0x80;    /* (UTF-8: a character's first byte) */
+                        if (chars > 24) return 0;
+                        while (*p && *p != ',') p++;
+                    }
+                    return 1; }
+    case K_RGBS: { int n = 0;
+                   for (const char *p = v; ; p++){
+                       while (*p == ' ' || *p == '\t') p++;
+                       int d = 0; while (isxdigit((unsigned char)*p)) { p++; d++; }
+                       while (*p == ' ' || *p == '\t') p++;
+                       if ((d != 0 && d != 6) || (*p && *p != ',') || ++n > 4) return 0;
+                       if (!*p) return 1;
+                   } }
     case K_WXH: { char *e; long w = strtol(v, &e, 10); if (e == v || (*e != 'x' && *e != 'X')) return 0;
                   const char *h0 = e + 1; long h = strtol(h0, &e, 10);
                   return e != h0 && !*e && w >= 320 && w <= 16384 && h >= 320 && h <= 16384; }
@@ -635,6 +667,8 @@ static const char *kind_text(int kind){
     switch (kind){
     case K_PATH: return "a folder (printable, under 1024 bytes)";
     case K_TEXT: return "text of 1 to 63 bytes without control characters";
+    case K_CREWS: return "crew names (at most 24 characters each) joined by commas";
+    case K_RGBS: return "at most 4 colours of 6 hex digits (no #) joined by commas";
     case K_WXH: return "<width>x<height> (320 to 16384 each)";
     case K_FIXES: return "default, all, none or a list of ticks, timer, particles, trail, audio, rtf, rain (-name removes one)";
     case K_IFNAME: return "a network interface name (letters and digits, e.g. en0)";

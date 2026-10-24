@@ -15,12 +15,14 @@
 //
 // This module is pure (no DOM, no OPFS) so it can be checked under node.
 import { blockedName } from './names.mjs';
+import { crewsOk, rgbsOk } from './crews';
 import { fill, LANGUAGES, N, type Vars } from './i18n';
 export { LANGUAGES };
 
-/** bundle.m's K_* kinds.  ic: K_IC, "value ; comment" (the free-roam keys). */
+/** bundle.m's K_* kinds, and the browser's own crews (a list of names: crews.ts).  ic: K_IC, "value ; comment" (the
+ *  free-roam keys). */
 export type Kind = 'raw' | 'bool' | 'boolInv' | 'enum' | 'num' | 'id' | 'token' | 'int' | 'name' | 'peers'
-  | 'path' | 'text' | 'wxh' | 'fixes' | 'ifname' | 'ipv4' | 'mac' | 'host' | 'parts' | 'dump';
+  | 'path' | 'text' | 'wxh' | 'fixes' | 'ifname' | 'ipv4' | 'mac' | 'host' | 'parts' | 'dump' | 'crews' | 'rgbs';
 
 export interface KeyDef {
   key: string;
@@ -104,6 +106,10 @@ export const KEYS: readonly KeyDef[] = [
   { key: 'roam_peers', env: 'NFSU2_ROAM_PEERS', kind: 'peers', ic: true, scope: 'mac' },
   { key: 'roam_discovery', env: 'NFSU2_ROAM_DISCOVERY', kind: 'bool', ic: true, scope: 'web' },
   { key: 'roam_room', env: 'NFSU2_ROAM_ROOM', kind: 'text', ic: true, scope: 'web' },
+  // the crews the player is in (crews.ts; runtime/roam_game.c): bundle.m's K_CREWS
+  { key: 'roam_crew', env: 'NFSU2_ROAM_CREW', kind: 'crews', ic: true, scope: 'web' },
+  // and each one's colour, in the same order (crews.ts): bundle.m's K_RGBS
+  { key: 'roam_crew_colours', env: 'NFSU2_ROAM_CREW_RGB', kind: 'rgbs', ic: true, scope: 'web' },
   { key: 'roam_max_players', env: 'NFSU2_ROAM_MAX_PLAYERS', kind: 'int', vals: '2..33', ic: true, scope: 'web' },
   { key: 'roam_max_cars', env: 'NFSU2_ROAM_MAX_CARS', kind: 'int', vals: '0..32', ic: true, scope: 'web' },
   { key: 'roam_collide', env: 'NFSU2_ROAM_COLLIDE', kind: 'bool', ic: true, scope: 'web' },
@@ -351,6 +357,20 @@ export const TEMPLATE = `# NFSU2 settings, read at every launch.
 # players who set the same name (capitals and spaces do not count).  Not
 # private: everyone on the server still sees your name.  [NFSU2_ROAM_ROOM]
 #roam_room =
+
+# Your crews, up to 4, separated by commas (e.g. Blue Room, Night Owls):
+# players in the same crew see each other in its colour (roam_crew_colours,
+# below, sets each one's), at any distance, with everyone
+# else still around.  Capitals and spaces do not count; at most 24
+# characters each.  Not private: anyone who types the same name is in it.
+# [NFSU2_ROAM_CREW]
+#roam_crew =
+
+# Each crew's colour, in the order of roam_crew (6 hex digits, no #),
+# e.g. 3cd2ff, ff4646.  Empty: cyan, magenta, violet, red.
+# [NFSU2_ROAM_CREW_RGB]
+#roam_crew_colours =
+
 # Look for players with a broadcast every 2 s when the server does not pick
 # the players near you (its free-roam hub).  [NFSU2_ROAM_DISCOVERY]
 #roam_discovery = on
@@ -492,6 +512,8 @@ function valueOk(kind: Kind, v: string): boolean {
     case 'host': return /^[A-Za-z0-9-]{1,63}$/.test(v);
     case 'parts': return listOk(v, PART_WORDS, false);
     case 'dump': return truthy(v) || falsy(v) || printableOk(v, 1023);
+    case 'crews': return printableOk(v, 1023) && crewsOk(v);
+    case 'rgbs': return rgbsOk(v);
     default: return true;
   }
 }
@@ -507,6 +529,8 @@ const KIND_TEXT: Partial<Record<Kind, string>> = {
   host: N("a computer name (letters, digits and '-', at most 63)"),
   parts: N('all, or a list of world, signs, cars, garage, sky, effects, frontend, hud, other'),
   dump: N('on, off or a folder'),
+  crews: N('a list of crew names (at most 24 characters each, separated by commas)'),
+  rgbs: N('a list of up to 4 colours of 6 hex digits (rrggbb), separated by commas'),
 };
 
 /** strtod() consuming the whole string (decimal, exponent, hex, inf/nan, leading blanks as C does).

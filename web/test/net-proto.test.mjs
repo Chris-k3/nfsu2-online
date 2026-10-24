@@ -52,8 +52,10 @@ test('offsets', () => {
     tx_bell: P.W_TX_BELL, rx_tail: P.W_RX_TAIL, c_alive: P.W_C_ALIVE, want: P.W_WANT, page_state: P.W_PAGE_STATE, vip: P.W_VIP, netmask: P.W_NETMASK,
     generation: P.W_GENERATION, tx_tail: P.W_TX_TAIL, rx_head: P.W_RX_HEAD, rx_bell: P.W_RX_BELL, rx_full_drop: P.W_RX_FULL_DROP,
     tx_offline_drop: P.W_TX_OFFLINE_DROP, rx_oversize: P.W_RX_OVERSIZE, switch_peers: P.W_SWITCH_PEERS, solid: P.W_SOLID, tx_wait_n: P.W_TX_WAIT_N,
-    say: P.W_SAY, peer_bits: P.W_PEER_BITS };
+    say: P.W_SAY, peer_bits: P.W_PEER_BITS, crews_gen: P.W_CREWS_GEN, crews: P.W_CREWS, crews_rgb: P.W_CREWS_RGB };
   for (const [f, w] of Object.entries(words)) assert.equal(off[f], w * 4, f);
+  const crewArrays = /uint32_t\s+crews_gen,\s*crews\[(\d+)\],\s*crews_rgb\[(\d+)\]/.exec(body);
+  assert.deepEqual(crewArrays?.slice(1), [String(P.CREW_WORDS), String(P.CREW_WORDS)], 'crews and their colours: as many words');
   const dbl = { switch_rtt_ms: P.D_SWITCH_RTT_MS, tx_wait_ms_sum: P.D_TX_WAIT_MS_SUM, tx_wait_ms_max: P.D_TX_WAIT_MS_MAX };
   for (const [f, d] of Object.entries(dbl)) assert.equal(off[f], d * 8, f);
   // net_slot

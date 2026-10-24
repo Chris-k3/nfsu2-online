@@ -52,6 +52,7 @@ export const attachNet: AttachNet = (proc, o) => {
     offline: () => link.goOffline(),
     solid: (on: boolean) => link.setSolid(on),
     say: (p: number) => link.say(p),
+    crews: (hashes: readonly number[], rgbs: readonly number[]) => link.setCrews(hashes, rgbs),
     stats: () => {
       const s = link.stats();
       return { 'lan online': s.state === 'online' ? 1 : 0, 'lan friends': friends().length, 'lan rtt ms': s.switchRttMs };

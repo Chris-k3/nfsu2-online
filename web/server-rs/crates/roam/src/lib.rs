@@ -7,8 +7,8 @@
 //! each player's peers are the hub's list of the players nearest to it (runtime/roam_core.c, hub mode), and the
 //! snapshots still go straight from player to player through the switch.
 //!
-//! - player -> hub: a HELLO every second (its id, room, status, name), a SNAP twice a second (where its car is), a
-//!   BYE when it stops.
+//! - player -> hub: a HELLO every second (its id, room, status, name, and its crews), a SNAP twice a second (where
+//!   its car is), a BYE when it stops.
 //! - hub -> player: twice a second (`tick_ms`) a PEERS message: the players linked to it, { virtual address, port, id }, at most
 //!   `degree` (32: roam_core's group of 33 with itself), or 7 for a player whose HELLO says core version 1 (its group
 //!   was 8, and it drops a longer list); an empty one says the hub is there.
@@ -46,6 +46,14 @@
 //! links full of nearer players, the ones who went into the career race there among them: the link to a player who
 //! stopped there to join came and went, and its Enter went nowhere.
 //!
+//! Then the crews' (a word each, up to 4 a player, set on the start page; its HELLO names them by roam_core's room
+//! hash): two players of one room who share a crew are linked before the rest, nearest first, while both ends have
+//! room, at most 16 such links a player, so crew-mates always see each other and still see the cars around them.  By
+//! distance alone a friend 300 m off in a crowd was never linked (32 nearer players were, 8 under the busy cap): his
+//! car, name and map arrow never showed.  A crew of more than 64 players in one room gets no links first (its pairs
+//! grow as the square of its players): they link by distance as everyone does.  /players counts each crew's players
+//! for the start page (`in_crews()`).
+//!
 //! A busy server gives every player fewer links: each link is two players' snapshots to each other, 20 a second each
 //! way (fewer for far ones), so a crowd costs its players times their links, all through the switch; a switch that
 //! cannot keep up delays every snapshot, and the cars stutter for everyone (nfsu2.xyz at 855 players, 2026-10-20:
@@ -57,10 +65,10 @@
 //! cars; it asks at a later Play once the cap is back.  /players also says how many drive in free roam, or are paused
 //! there (`in_roam()`, counted at each tick).
 //!
-//! What the hub keeps, in memory only: per player endpoint its virtual address, port, id, room hash, status, name and
-//! last position; gone `gone_ms` after its last message, when it says BYE, or when it leaves the switch.  Reading
-//! positions is what choosing by distance costs: the switch itself never looks inside a frame.  At most `max_per_vip`
-//! endpoints per virtual address (a browser has one), and `max_players` in all.
+//! What the hub keeps, in memory only: per player endpoint its virtual address, port, id, room hash, crews' hashes,
+//! status, name and last position; gone `gone_ms` after its last message, when it says BYE, or when it leaves the
+//! switch.  Reading positions is what choosing by distance costs: the switch itself never looks inside a frame.  At
+//! most `max_per_vip` endpoints per virtual address (a browser has one), and `max_players` in all.
 //!
 //! - [`Hub`]: the hub's logic, single-threaded, with the clock, the busy measure and the sending given to it (the
 //!   tests drive it by its `frame()`, `tick()` and `info()`)
@@ -93,6 +101,9 @@ pub use wire::{decode_roam, encode_peers};
 
 /// 10.77.0.253, runtime/web/net_proto.h NET_ROAM_HUB
 pub const ROAM_HUB_VIP: u32 = 0x0A4D_00FD;
+
+/// the most crews a player is in (roam_core.h RC_CREW_MAX), and so the most /players counts for one question
+pub const CREWS: usize = wire::CREWS;
 
 /// The hub's options.  exact_room: a room of at most this many players sorts every pair of them; a larger one takes
 /// the pairs in the same order but only as far as it needs them: each player's nearest one after another (a grid)
@@ -162,10 +173,11 @@ impl Default for RoamOptions {
     }
 }
 
-/// The fields the hub reads of one free-roam datagram (`decode_roam`)
+/// The fields the hub reads of one free-roam datagram (`decode_roam`); a HELLO's crews are the ones it names (with the
+/// crew flag), in its order
 #[derive(Clone, Debug, PartialEq)]
 pub enum RoamMsg {
-    Hello { sender: u32, core: u16, status: u8, room: u32, name: String },
+    Hello { sender: u32, core: u16, status: u8, room: u32, name: String, crews: Vec<u32> },
     Snap { sender: u32, status: u8, p: [f64; 3] },
     Bye { sender: u32 },
     Other { kind: u8, sender: u32 },
@@ -207,11 +219,12 @@ const MAX_PENDING: usize = 1 << 13;
 pub struct RoamHub {
     tx: mpsc::Sender<Cmd>,
     pending: Arc<AtomicUsize>,
-    /// the hub's `crowded()`, `in_roam()` and `in_rooms()` after its last tick, for /players (which must not wait for
-    /// the hub's thread)
+    /// the hub's `crowded()`, `in_roam()`, `in_rooms()` and `crew_counts()` after its last tick, for /players (which
+    /// must not wait for the hub's thread)
     crowded: Arc<AtomicBool>,
     in_roam: Arc<AtomicUsize>,
     in_rooms: Arc<Mutex<HashMap<u32, usize>>>,
+    in_crews: Arc<Mutex<Vec<(u32, u32)>>>,
 }
 
 impl RoamHub {
@@ -240,12 +253,13 @@ impl RoamHub {
         let crowded = Arc::new(AtomicBool::new(hub.crowded()));
         let in_roam = Arc::new(AtomicUsize::new(0));
         let in_rooms = Arc::new(Mutex::new(HashMap::new()));
-        let (busy_now, roam_now, rooms_now) = (crowded.clone(), in_roam.clone(), in_rooms.clone());
+        let in_crews = Arc::new(Mutex::new(Vec::new()));
+        let (busy_now, roam_now, rooms_now, crews_now) = (crowded.clone(), in_roam.clone(), in_rooms.clone(), in_crews.clone());
         std::thread::Builder::new()
             .name("roam-hub".into())
-            .spawn(move || run(hub, rx, &waiting, &busy_now, &roam_now, &rooms_now))
+            .spawn(move || run(hub, rx, &waiting, &busy_now, &roam_now, &rooms_now, &crews_now))
             .expect("a thread for the free-roam hub");
-        Arc::new(RoamHub { tx, pending, crowded, in_roam, in_rooms })
+        Arc::new(RoamHub { tx, pending, crowded, in_roam, in_rooms, in_crews })
     }
 
     /// the hub's `crowded()`: free roam is busy, the cap is under `ask_cap` (as of the hub's last tick)
@@ -262,6 +276,13 @@ impl RoamHub {
     /// free roam, or are paused there (as of the hub's last tick)
     pub fn in_room(&self, room: u32) -> usize {
         self.in_rooms.lock().map_or(0, |m| m.get(&room).copied().unwrap_or(0))
+    }
+
+    /// the hub's `in_crews()`: how many browsers drive in free roam, or are paused there, in each of these crews
+    /// (roam_core's rc_room_hash of a crew's word; any room), in their order (as of the hub's last tick)
+    pub fn in_crews(&self, crews: &[u32]) -> Vec<usize> {
+        let counts = self.in_crews.lock();
+        crews.iter().map(|&c| counts.as_ref().map_or(0, |t| hub::crew_count(t, c))).collect()
     }
 
     /// the switch's way to its browsers
@@ -285,9 +306,12 @@ fn run(
     crowded: &AtomicBool,
     in_roam: &AtomicUsize,
     in_rooms: &Mutex<HashMap<u32, usize>>,
+    in_crews: &Mutex<Vec<(u32, u32)>>,
 ) {
     let every = Duration::from_millis(hub.options().tick_ms);
     let mut next = Some(Instant::now() + every);
+    // the crews' counts made at a tick, then swapped with /players' (the two tables are kept: no allocation a tick)
+    let mut crews = Vec::new();
     loop {
         let cmd = match next {
             Some(at) => {
@@ -299,6 +323,10 @@ fn run(
                     let rooms = hub.in_rooms();
                     if let Ok(mut m) = in_rooms.lock() {
                         *m = rooms;
+                    }
+                    hub.crew_counts(&mut crews);
+                    if let Ok(mut m) = in_crews.lock() {
+                        std::mem::swap(&mut *m, &mut crews);
                     }
                     next = Some(now + every);
                     continue;
@@ -391,6 +419,7 @@ mod tests {
             crowded: Arc::new(AtomicBool::new(false)),
             in_roam: Arc::new(AtomicUsize::new(0)),
             in_rooms: Arc::new(Mutex::new(HashMap::new())),
+            in_crews: Arc::new(Mutex::new(Vec::new())),
         };
         let ctx = FrameCtx { group: Arc::from("client"), site: None, cause: None, slot: None };
         for _ in 0..100_000 {
@@ -425,7 +454,9 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         let (pending, crowded) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicBool::new(false)));
         let c = crowded.clone();
-        let t = std::thread::spawn(move || run(hub, rx, &pending, &c, &AtomicUsize::new(0), &Mutex::new(HashMap::new())));
+        let t = std::thread::spawn(move || {
+            run(hub, rx, &pending, &c, &AtomicUsize::new(0), &Mutex::new(HashMap::new()), &Mutex::new(Vec::new()))
+        });
         let until = |want: bool| {
             let t0 = Instant::now();
             while crowded.load(Ordering::Relaxed) != want {
