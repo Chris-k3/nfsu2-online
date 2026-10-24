@@ -13,7 +13,8 @@
 //        the game's client area and HUD), buttons with pointer capture, the
 //        wheel in WHEEL_DELTA units.  The OS cursor is hidden over the game.
 // Touch: one finger is the mouse, so a tap is a left click (the game's menus
-//        take clicks); other fingers are left alone.  Where the finger lands
+//        take clicks); two are a middle-button drag (the garage turns the
+//        car); other fingers are left alone.  Where the first finger lands
 //        is marked (IKF_TOUCH): the C side makes the cursor arrive with a
 //        move the menus see, also on the spot it already is.
 // Text:  the game's text entry while it is up (a seqlock the game writes at
@@ -227,7 +228,7 @@ export function attachInput(proc: GameProcess, element: HTMLElement, opts: Input
   }
   function onPointerMove(e: PointerEvent) {
     if (detached) return;
-    if (e.pointerType === 'touch') { if (e.pointerId === finger) push(IEV_MOUSE_MOVE, 0, 0, flagsOf(e), [], ...pos(e)); return; }
+    if (e.pointerType === 'touch') { onFingerMove(e); return; }
     const [x, y] = pos(e);
     push(IEV_MOUSE_MOVE, 0, 0, flagsOf(e), [], x, y);
     if ((e.buttons & 31) !== buttons) syncButtons(e);
@@ -249,13 +250,32 @@ export function attachInput(proc: GameProcess, element: HTMLElement, opts: Input
     try { element.releasePointerCapture(e.pointerId); } catch { /* not captured */ }
   }
 
-  // ---- touch: one finger is the mouse ------------------------------------------------
+  // ---- touch: one finger is the mouse, two turn the car --------------------------------
   // A tap is a move, a press and a release within a frame or two; the game
   // takes mouse changes one a frame (runtime/web/input_web.c), so it sees the
   // cursor arrive, then the button go down, then up, however slow its frames.
-  let finger = -1;
+  // A second finger makes the two a middle-button drag, the PC game's way to
+  // turn the car in the garage (its only use of that button, 0x4a5d90): the
+  // first finger's button goes up, the cursor to the point between them, then
+  // the middle button goes down and the cursor follows that point.  When one of
+  // the two lifts, the button goes up and no finger is the mouse until all are.
+  let finger = -1, second = -1;
+  const fingers = new Map<number, [number, number]>();
+  const between = (): [number, number] => {
+    const a = fingers.get(finger)!, b = fingers.get(second)!;
+    return [Math.round((a[0] + b[0]) / 2), Math.round((a[1] + b[1]) / 2)];
+  };
   function onFingerDown(e: PointerEvent) {
-    if (!e.isPrimary) return;
+    fingers.set(e.pointerId, pos(e));
+    if (!e.isPrimary) {
+      if (finger < 0 || second >= 0) return;
+      second = e.pointerId;
+      push(IEV_MOUSE_UP, 0, 0, flagsOf(e), [], 0);
+      push(IEV_MOUSE_MOVE, 0, 0, flagsOf(e), [], ...between());
+      push(IEV_MOUSE_DOWN, 0, 0, flagsOf(e), [], 2);
+      buttons = (buttons & ~1) | 4;
+      return;
+    }
     finger = e.pointerId;
     push(IEV_MOUSE_MOVE, 0, 0, flagsOf(e) | IKF_TOUCH, [], ...pos(e));
     push(IEV_MOUSE_DOWN, 0, 0, flagsOf(e), [], 0);
@@ -263,7 +283,20 @@ export function attachInput(proc: GameProcess, element: HTMLElement, opts: Input
     if (document.activeElement !== element && element.tabIndex >= 0) element.focus({ preventScroll: true });
     e.preventDefault();
   }
+  function onFingerMove(e: PointerEvent) {
+    if (!fingers.has(e.pointerId)) return;
+    fingers.set(e.pointerId, pos(e));
+    if (second >= 0) { if (e.pointerId === finger || e.pointerId === second) push(IEV_MOUSE_MOVE, 0, 0, flagsOf(e), [], ...between()); }
+    else if (e.pointerId === finger) push(IEV_MOUSE_MOVE, 0, 0, flagsOf(e), [], ...pos(e));
+  }
   function onFingerUp(e: PointerEvent) {
+    fingers.delete(e.pointerId);
+    if (second >= 0 && (e.pointerId === finger || e.pointerId === second)) {
+      finger = second = -1;
+      push(IEV_MOUSE_UP, 0, 0, flagsOf(e), [], 2);
+      buttons &= ~4;
+      return;
+    }
     if (e.pointerId !== finger) return;
     finger = -1;
     push(IEV_MOUSE_UP, 0, 0, flagsOf(e), [], 0);
