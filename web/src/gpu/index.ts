@@ -42,7 +42,7 @@ export interface RendererOptions {
   /** most frames the GPU may have queued (default 2) */
   maxInFlight?: number;
   /** false: always draw into the back buffer and composite it (the path before direct
-   *  canvas drawing; A/B and diagnostics) */
+   *  canvas drawing; default in Firefox, which shows half-drawn frames otherwise; A/B and diagnostics) */
   direct?: boolean;
   /** unpack DXT textures on the CPU even when the GPU has texture-compression-bc (tests the
    *  path of PowerVR and Mali phones on a desktop GPU) */
@@ -191,8 +191,12 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
   const canvasFormat = navigator.gpu.getPreferredCanvasFormat();
   // in the encoder's format the game draws its screen straight into the canvas
   // texture whenever the sizes match (Encoder.encodeFrame), so the canvas texture
-  // takes every use the back buffer has
-  const direct = canvasFormat === 'bgra8unorm' && opts.direct !== false;
+  // takes every use the back buffer has.  Not in Firefox: it shows the canvas texture
+  // while the next frame draws into it (Firefox 158 on a Mac, a race: 3 of 25
+  // screenshots a third to a half black, the rest of the picture half drawn).  From
+  // the back buffer the canvas gets each picture whole, in one copy (0 of 25).
+  const firefox = /\bFirefox\//.test(navigator.userAgent);
+  const direct = canvasFormat === 'bgra8unorm' && (opts.direct ?? !firefox);
   const canvasUsage = GPUTextureUsage.RENDER_ATTACHMENT
     | (direct ? GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST : 0);
   try { ctx.configure({ device, format: canvasFormat, alphaMode: 'opaque', usage: canvasUsage }); }
@@ -274,7 +278,7 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
   // (wgpu-core's Queue::submit runs Device::maintain), so while a frame waits the pump sends one
   // at once and then every 1-2 ms (Firefox's Atomics.waitAsync times out that finely; its
   // setTimeout takes 4.5 ms).  Chrome reports done work on its own: no pokes there.
-  const poke = opts.poke ?? /\bFirefox\//.test(navigator.userAgent);
+  const poke = opts.poke ?? firefox;
   const pokeCell = new Int32Array(new SharedArrayBuffer(4));
   let waitingSince = 0, poking = false, slotWaits = 0, slotWaitMsMax = 0, pokes = 0;
   let winWaits = 0, winWaitMax = 0, winWaitT = performance.now();

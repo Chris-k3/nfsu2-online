@@ -302,7 +302,10 @@ The game thread keeps `com.c` (D3D9 state, shader translation) and records throu
   (`gpu_web.c` `metal_read_texture`). When the game's device size is
   the canvas's (the usual case) the frame draws its screen straight into the canvas texture: no back buffer and no
   composite pass. A frame that copies from the screen before drawing to it keeps the back buffer (it reads the
-  previous frame); none of the checked scenes did. `?direct=0` on the test page turns the direct path off.
+  previous frame); none of the checked scenes did. Firefox keeps the back buffer too: it shows the canvas texture
+  while the next frame draws into it, so drawn straight in, frames showed half drawn and partly black (Firefox 158 on
+  a Mac: 3 of 25 race screenshots, none from the back buffer). `?direct=0` / `?direct=1` on the test page turns the
+  direct path off or on.
 - DXT textures stay BC on the GPU. A GPU without `texture-compression-bc` (PowerVR and Mali phones) gets them unpacked
   to BGRA8 as they upload (`web/src/gpu/dxt.ts`). Measured on a Quick Race (Resort Loop) with a desktop CPU: about
   7× the texture memory (30 MB packed, 213 MB unpacked) and about 0.4 s of page-thread work, all of it in the menus
