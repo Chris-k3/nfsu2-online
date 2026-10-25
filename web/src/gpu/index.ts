@@ -514,7 +514,14 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
     }
     lastT = t;
     if (iv.length >= 30) {
-      const sorted = iv.slice().sort((a, b) => a - b), med = sorted[sorted.length >> 1];
+      // the median over spans of 4 frames, not of single intervals: Safari on an iPhone or iPad gives rAF times in
+      // whole milliseconds, so at 60 Hz an interval is 16 or 17 ms and their median at times said 62.5 Hz ("display
+      // 63 Hz"), at 120 Hz always 125: not a standard rate, so the period went out unsnapped and the pacer lost its
+      // vsync lock.  Over 4 frames the rounding is a quarter of a millisecond, inside snap()'s 2.5 %.
+      const sp: number[] = [];
+      for (let i = 3; i < iv.length; i++) sp.push((iv[i] + iv[i - 1] + iv[i - 2] + iv[i - 3]) / 4);
+      sp.sort((a, b) => a - b);
+      const med = sp[sp.length >> 1];
       rafHz = 1000 / med;
       const h = snap(rafHz);
       if (h !== cand) { cand = h; candSince = t; }

@@ -4,16 +4,18 @@
 // Escape, the game's Back/Pause, reaches the game; hold Escape to leave),
 // and the screen kept on while a game runs.
 
-const COMMON_HZ = [48, 50, 60, 72, 75, 90, 100, 120, 144, 165, 180, 240, 360];
+const COMMON_HZ = [30, 48, 50, 60, 72, 75, 90, 100, 120, 144, 165, 180, 240, 360];
 
-/** Median requestAnimationFrame rate over `frames` frames, snapped to a common refresh rate when close. */
+/** Median requestAnimationFrame rate over `frames` frames, snapped to a common refresh rate when close.  The median
+ *  is of spans of 4 frames: Safari on an iPhone or iPad gives rAF times in whole milliseconds, and single intervals
+ *  of 8 or 9 ms at 120 Hz had a median of 125 Hz (as the renderer's measurement, gpu/index.ts). */
 export function measureRefresh(frames = 60): Promise<{ hz: number; raw: number }> {
   return new Promise(resolve => {
     const t: number[] = [];
     const step = (now: number) => {
       t.push(now);
       if (t.length <= frames) { requestAnimationFrame(step); return; }
-      const d = t.slice(1).map((x, i) => x - t[i]).sort((a, b) => a - b);
+      const d = t.slice(4).map((x, i) => (x - t[i]) / 4).sort((a, b) => a - b);
       const raw = 1000 / d[d.length >> 1];
       const snap = COMMON_HZ.reduce((a, b) => Math.abs(b - raw) < Math.abs(a - raw) ? b : a);
       resolve({ hz: Math.abs(snap - raw) / snap < 0.04 ? snap : Math.round(raw), raw });
