@@ -906,7 +906,7 @@ paths to the VPS, so pick a VPS location between you.
   to 15 letters, digits, `-` and `_` logs in; there are no accounts. One player per name, while online and while
   racing: a name in use is given with four digits in place of its end (on a busy server many players come as
   `NAME`), and the game plays under that.
-  - **Kept in the state volume:** `online/stats.json` (race results and best times per persona) and
+  - **Kept in the state volume:** `online/stats.json` (race results, best times and records per persona) and
     `online/buddies.json` (EA Messenger: each persona's friends and blocked by name, its friend requests waiting for
     an answer, and the messages from friends waiting for it while it is away, text included, 7 days at most), each
     with the month a persona was last seen, written atomically (0600). No passwords, CD keys, addresses, and no chat

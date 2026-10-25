@@ -1426,7 +1426,13 @@ impl Core {
         }
         let r = r.expect("checked");
         // the reporter's own entry in its report (check_result: each index names one of the game's players)
-        let finished = r.players.iter().any(|p| !p.dropped && lower(&names[p.index as usize]) == persona);
+        let own = r.players.iter().find(|p| !p.dropped && lower(&names[p.index as usize]) == persona);
+        let finished = own.is_some();
+        // its records: what its own game measured of it (stats.rs add_records), whether the result stands or not
+        if let Some(p) = own {
+            let name = self.lobby.game(g).expect("held").players[me].name.clone();
+            self.stats.add_records(&name, r.kind as u32, p);
+        }
         // (a report not taken is not the player's one report)
         let gm = self.lobby.game_mut(g).expect("held");
         gm.players[me].reported = true;

@@ -542,6 +542,7 @@ fn results() {
     report(&mut w, b2, &auth);
     assert!(w.logged("not taken: a time the race has not had"));
     assert_eq!(w.core.stats.board(0, false).len(), 0);
+    assert!(w.core.stats.rec("Bravo", false).is_none(), "no records from a report not taken");
     // after the race: Bravo's report alone decides nothing (a report not taken was not his one report); Alpha's,
     // from another browser with the same places, makes the result
     w.advance(200_000.0);
@@ -569,6 +570,11 @@ fn results() {
     assert!(w.c(a2).msgs.iter().any(|m| m.kind == "user" && m.get("PERS") == Some("Alpha")));
     w.send(a2, "user", fields![("PERS", "Alpha")]);
     assert_eq!(stat_of(w.c(a2).l("user"))[8..13], [0, 0, 0, 0, 1]);
+    // the records (Top Speed Achieved in mm/s): each player's from its own entry in its own report (both sent the
+    // same one: Bravo is index 1, 42.126 m/s; Alpha index 0, 42.212 m/s)
+    assert_eq!(stat_of(w.c(a2).l("user"))[3..8], [42212, 0, 0, 0, 0]);
+    w.send(a2, "user", fields![("PERS", "Bravo")]);
+    assert_eq!(stat_of(w.c(a2).l("user"))[3..8], [42126, 0, 0, 0, 0]);
     // the rankings: the circuit board, and one's own row
     w.send(a2, "snap", fields![("INDEX", 4), ("CHAN", 6), ("START", 0), ("RANGE", 100)]);
     assert_eq!(w.c(a2).l("snap").g("COUNT"), "2");
