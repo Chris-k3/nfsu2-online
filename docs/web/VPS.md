@@ -935,7 +935,7 @@ paths to the VPS, so pick a VPS location between you.
     from one persona (30 days), 20 messages waiting for one (the oldest goes) and 20,000 in all (7 days), 5000
     persona lists (the least recently seen go), 20 new ones an hour per client address. Results: 100,000 personas
     (the least recently seen go), a
-    race counts once two of its players in different browsers sent the same result.
+    race counts once two of its players who finished it, in different browsers, sent the same result.
   - **What one client costs the others:** what the online host sends because of a client's message (its answer,
     and what the others hear of it: room chat, a game's players) comes out of that client's switch budget; over
     it, the connection that message came on closes, and the client must pay the overspend back before its next

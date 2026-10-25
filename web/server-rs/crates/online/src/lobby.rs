@@ -41,9 +41,9 @@
 //! most once a second; a game's settings only when they changed; games created, joined and car descriptions
 //! published have their own rates; a browser keeps `open_per_vip` open games and `started_per_vip` started ones (a
 //! client `open_per_group`, `started_per_group`); a race needs players in different browsers, and is over once its
-//! players' browsers have been gone from the switch for `orphan_ms`.  A race's result counts once two of its players,
-//! in different browsers, reported the same places, no sooner than the race type's shortest race; a ranked race
-//! needs three players for its points.
+//! players' browsers have been gone from the switch for `orphan_ms`.  A race's result counts once two of its players
+//! who finished it, in different browsers, reported the same places, no sooner than the race type's shortest race; a
+//! ranked race needs three players for its points.
 //!
 //! Sessions and games are kept by id.  A session that left (and a game that ended) stays readable until the event
 //! that ended it is over (the graveyard), so the code still handling that event goes on with it: a send to a gone
@@ -211,6 +211,9 @@ const REPORT_TYPES: [&str; 7] = ["circuit", "sprint", "drag", "drift", "streetx"
 /// the shortest race of each type (REPORT_TYPES order) a result may come from, in seconds: well under the game's own
 /// shortest (one lap of the shortest track; a quarter-mile drag)
 const MIN_RACE_S: [f64; 7] = [20.0, 20.0, 5.0, 20.0, 20.0, 20.0, 20.0];
+/// the Rankings screens' six boards in their order (Circuit, Sprint, Drift, Drag, Street X, URL: SPEED2.EXE 0x58ce30,
+/// 0x582530) as race types (RACE_TYPES: drag 2, drift 3)
+const SLOT_TYPES: [u32; 6] = [0, 1, 3, 2, 4, 5];
 /// what a ranked race's results screen counts down from until its table comes, in ms ("Waiting 60 seconds for
 /// results", then "Waiting for final server results"; SPEED2.EXE 0x4e9210): a guess at how long the others take to
 /// finish and report, no limit (the table comes once the result stands)
@@ -1379,7 +1382,10 @@ impl Core {
     /// players, once per player (the first that passes the checks) (the same names as the game's players, places
     /// 1..n, the race and its times no shorter than the type's shortest race and no longer than the race has been
     /// going).  The race's result is the first report that another player, in another browser, sent too (the same
-    /// places): one player alone cannot decide it; later reports are compared with it.  A ranked race of fewer than
+    /// places): one player alone cannot decide it; later reports are compared with it.  Only the reports of players who
+    /// finished decide it: the game of a player who left the race (dropped out, quit) reports every player as dropped
+    /// and is back first, so two of them decided a fifth of the live results as "everyone DNF" before the finishers
+    /// reported (2026-10-24); such a report is logged, and its player sees the table.  A ranked race of fewer than
     /// three players (the game's own minimum) counts as unranked.  The game is told "Unranked" either way (what the
     /// game shows after the race); a ranked game's players see its table on their results screens (`results_table`).
     fn rank(&mut self, s: SessId, f: &FieldMap) {
@@ -1419,6 +1425,8 @@ impl Core {
             return self.end_if_back(g);
         }
         let r = r.expect("checked");
+        // the reporter's own entry in its report (check_result: each index names one of the game's players)
+        let finished = r.players.iter().any(|p| !p.dropped && lower(&names[p.index as usize]) == persona);
         // (a report not taken is not the player's one report)
         let gm = self.lobby.game_mut(g).expect("held");
         gm.players[me].reported = true;
@@ -1446,7 +1454,12 @@ impl Core {
         let gm = self.lobby.game(g).expect("held");
         // the ranked table goes to this player's results screen alone once the result stands, else to every reporter's
         let mut to = None;
-        if let Some(result) = &gm.result {
+        if !finished {
+            if gm.result.is_some() {
+                to = Some(s);
+            }
+            self.llog(&format!("[online] \"{gname}\": {spers} did not finish: the report decides nothing ({line})"), s);
+        } else if let Some(result) = &gm.result {
             to = Some(s);
             if key != *result {
                 self.llog(&format!("[online] \"{gname}\": {spers}'s report differs ({line}); the result stands"), s);
@@ -1601,9 +1614,12 @@ impl Core {
         }
     }
 
-    /// A ranking (the game's Rankings screens): CHAN 6..11 the overall board of one race type (RACE_TYPES order),
-    /// 12..17 the asking player's own row of it (RANGE=1 FIND=$<persona>, or "$" for one's own); 18..29: the same
-    /// for the current month (the game keeps channels 6..29: their meaning past 17 is UNVERIFIED).  Rows: +snp N
+    /// A ranking (the game's Rankings screens, SPEED2.EXE 0x58c700 and 0x58c990, the channel from 0x5826e0): CHAN
+    /// 6..11 a race type's overall board (Overall Rankings), 12..17 the asking player's own row of it (RANGE=1
+    /// FIND=$<persona>, or "$" for one's own), 18..23 the current month's board (Current Month's Leaderboard, its first
+    /// two), 24..29 last month's (Last Month's Leaderboard: none, the server keeps no past month).  Each six in the
+    /// screens' order, Drift before Drag (`SLOT_TYPES`; until 2026-10-25 read as race types, so the Drift pages showed
+    /// the drag board); INDEX (the race type and the player's class, 0x58ce30) only goes back.  Rows: +snp N
     /// (name), R (rank), P (points), S (points,wins,losses), O.  R and P in decimal (SPEED2.EXE 0x7420b0 reads digits
     /// 0-9 only; the screen shows P, sorts its list by it and takes the player's class from it), S in hex (0x7425d0,
     /// "l*"; the screen shows its wins and losses).
@@ -1612,15 +1628,18 @@ impl Core {
         let index = f.get("INDEX").map_or(V::N(0.0), V::from);
         let start = 0i32.max(jsx::to_int32(f.num("START", 0.0)));
         let range = 100i32.min(0i32.max(jsx::to_int32(f.num("RANGE", 0.0))));
-        let monthly = chan >= 18;
-        // (in 64 bits: CHAN - 6 does not overflow for a CHAN near -2^31; % keeps the sign, and only 6..29 has a board)
-        let kind = (chan as i64 - 6) % 6;
-        let own = (chan as i64 - 6) % 12 >= 6;
+        // (in 64 bits: CHAN - 6 does not overflow for a CHAN near -2^31)
+        let at = chan as i64 - 6;
+        let kind = (0..18).contains(&at).then(|| SLOT_TYPES[(at % 6) as usize]);
+        let (own, monthly) = ((6..12).contains(&at), at >= 12);
         let find = f.get("FIND").map(str::to_string);
         // the board as last built (stats.rs: at most every few seconds), and its rows by name
         let (rows, total) = {
             let persona = self.lobby.s(s).persona.clone().unwrap_or_default();
-            let board = if (6..=29).contains(&chan) { Some(self.stats.ranking(kind as u32, monthly)) } else { None };
+            let board = match kind {
+                Some(k) => Some(self.stats.ranking(k, monthly)),
+                None => None,
+            };
             let all: &[crate::stats::BoardRow] = board.map_or(&[], |b| &b.rows);
             let rows: Vec<crate::stats::BoardRow> = if own || find.is_some() {
                 let f = find.unwrap_or_default();

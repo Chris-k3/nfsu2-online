@@ -590,6 +590,37 @@ fn results() {
     assert_eq!([row.g("N"), row.g("R"), row.g("P"), row.g("S")], ["Alpha", "1", "2800", "af0,1c,0"]);
 }
 
+// the rankings: the screens' channels go in their own order, Drift before Drag (SPEED2.EXE 0x58ce30, 0x5826e0): the
+// overall boards 6..11, one's own row 12..17, the month's leaders 18..23; last month's (24..29) are empty
+#[test]
+fn rankings_channels() {
+    let mut w = world();
+    let g = w.client("10.77.0.2");
+    let a = w.login(g, "Alpha");
+    let add = |w: &mut World, kind: u32, names: [&str; 2]| {
+        let players = names.iter().enumerate().map(|(i, n)| RacePlayer { name: n.to_string(), place: i as u32 + 1, time: 60.0 });
+        w.core.stats.add_race(&Race { kind, ranked: true, track: 4011, players: players.collect() });
+    };
+    add(&mut w, 3, ["Alpha", "Drifter"]);
+    add(&mut w, 2, ["Dragger", "Other"]);
+    let rows = |w: &mut World, chan: i32, own: bool| -> Vec<String> {
+        let from = w.c(a).msgs.len();
+        let mut f = fields![("INDEX", 21), ("CHAN", chan), ("START", 0), ("RANGE", if own { 1 } else { 100 })];
+        if own {
+            f.extend(fields![("FIND", "$")]);
+        }
+        w.send(a, "snap", f);
+        w.c(a).msgs[from..].iter().filter(|m| m.kind == "+snp").map(|m| format!("{} {}", m.g("N"), m.g("P"))).collect()
+    };
+    assert_eq!(rows(&mut w, 8, false), ["Alpha 100", "Drifter 0"], "Drift: the drift board");
+    assert_eq!(rows(&mut w, 9, false), ["Dragger 100", "Other 0"], "Drag: the drag board");
+    assert_eq!(rows(&mut w, 14, true), ["Alpha 100"], "one's own Drift row");
+    assert!(rows(&mut w, 15, true).is_empty(), "no drag race of one's own");
+    assert_eq!(rows(&mut w, 20, false), ["Alpha 100", "Drifter 0"], "the month's drift leaders");
+    assert!(rows(&mut w, 26, false).is_empty(), "last month's leaders: none kept");
+    assert_eq!(w.c(a).l("snap").g("TOTAL"), "0");
+}
+
 // names: a name another browser holds comes with four digits (the same for one client); its own browser takes it
 // back
 #[test]

@@ -487,12 +487,12 @@ Good to know:
   In the original game the Filter always hid all others, so a game made with Collision Detection off was seen by no
   one. A game with **Private Room** on is not listed, as in the original game.
 - **Ranked games** need three players at least. Ranked wins give ranking points. After a ranked race the results
-  screen lists whose results came in (received or waiting), then, once two players' games sent the same result,
-  Official Race Results: each player's place, time (drift: score) and the ranking points the race gave (100 for the
+  screen lists whose results came in (received or waiting), then, once the games of two players who finished sent
+  the same result, Official Race Results: each player's place, time (drift: score) and the ranking points the race gave (100 for the
   winner down to 0 for the last; 0 for a player who left the race, shown as Disconnected).
-- **A race counts** in Rankings once two of its players' games sent the same result (every game sends its own at
-  the results screen), so a race that only one player finished does not count. Each player races from their own
-  browser.
+- **A race counts** in Rankings once the games of two players who finished it sent the same result (every game
+  sends its own at the results screen), so a race that only one player finished does not count. A player who left
+  the race decides nothing: their game counts every player as gone. Each player races from their own browser.
 - **EA Messenger** (the Online Main Menu's button): Search finds the players online on this server and those with a
   race in Rankings. **Send Friend Request** reaches the other player now, or when they next come online: they see you
   in their list with a green arrow and pick **Answer Friend Request**: Accept, Decline or Block. Your friends stay on
