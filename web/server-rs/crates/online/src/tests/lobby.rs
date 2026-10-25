@@ -9,6 +9,7 @@
 use super::world::{C, Opts, World, ip};
 use crate::aries::{Fields, V, encode_fields, encode_frame};
 use crate::lobby::Limits;
+use crate::stats::{Race, RacePlayer};
 use crate::vhost::{DATA, lan_frame};
 use crate::{PORT_BUDDY, PORT_HTTP, PORT_LOBBY, PORT_REDIRECTOR, VHOST_VIP};
 
@@ -579,6 +580,14 @@ fn results() {
     assert_eq!(w.c(a2).l("+snp").g("N"), "Alpha");
     w.send(a2, "snap", fields![("INDEX", 4), ("CHAN", 7), ("START", 0), ("RANGE", 100)]);
     assert_eq!(w.c(a2).l("snap").g("COUNT"), "0", "no sprint races yet");
+    // points in P are decimal, in S hex: 28 ranked wins, 2800 points (hex af0: the game read P "af0" as 0)
+    for _ in 0..28 {
+        let players = ["Alpha", "Bravo"].iter().enumerate().map(|(i, n)| RacePlayer { name: n.to_string(), place: i as u32 + 1, time: 60.0 });
+        w.core.stats.add_race(&Race { kind: 4, ranked: true, track: 4011, players: players.collect() });
+    }
+    w.send(a2, "snap", fields![("INDEX", 4), ("CHAN", 16), ("RANGE", 1), ("FIND", "$")]);
+    let row = w.c(a2).l("+snp");
+    assert_eq!([row.g("N"), row.g("R"), row.g("P"), row.g("S")], ["Alpha", "1", "2800", "af0,1c,0"]);
 }
 
 // names: a name another browser holds comes with four digits (the same for one client); its own browser takes it

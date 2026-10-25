@@ -1604,7 +1604,9 @@ impl Core {
     /// A ranking (the game's Rankings screens): CHAN 6..11 the overall board of one race type (RACE_TYPES order),
     /// 12..17 the asking player's own row of it (RANGE=1 FIND=$<persona>, or "$" for one's own); 18..29: the same
     /// for the current month (the game keeps channels 6..29: their meaning past 17 is UNVERIFIED).  Rows: +snp N
-    /// (name), R (rank), P (points), S (points,wins,losses), O; numbers in hex.
+    /// (name), R (rank), P (points), S (points,wins,losses), O.  R and P in decimal (SPEED2.EXE 0x7420b0 reads digits
+    /// 0-9 only; the screen shows P, sorts its list by it and takes the player's class from it), S in hex (0x7425d0,
+    /// "l*"; the screen shows its wins and losses).
     fn snap(&mut self, s: SessId, f: &FieldMap) {
         let chan = jsx::to_int32(f.num("CHAN", f64::NAN));
         let index = f.get("INDEX").map_or(V::N(0.0), V::from);
@@ -1656,7 +1658,7 @@ impl Core {
                 &fields![
                     ("N", r.name),
                     ("R", r.rank),
-                    ("P", h(r.points)),
+                    ("P", jsx::to_uint32(r.points)),
                     ("S", format!("{},{},{}", h(r.points), h(r.wins), h(r.losses))),
                     ("O", 1)
                 ],
