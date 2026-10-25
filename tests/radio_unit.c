@@ -1,6 +1,7 @@
 /* radio_unit.c -- the radio's checks of the game's song number and of the tags, then one test per scenario of the game's
  * songs: starts, stops, pauses, volume (runtime/radio.c), game, mixer and page stubbed (tests/radio_mixer_stub.h).
  *   gcc -O1 -DNFSU2_RADIO_TEST -Iruntime -Igen/all -Itests -o out/radio_unit tests/radio_unit.c && out/radio_unit
+ * (web/test/radio.test.mjs builds and runs it)
  */
 #include "cpu.h"
 #include "web/status_proto.h"
@@ -423,6 +424,28 @@ TEST(page_silent_20_s__silence){
     folder_song_plays_in_main_menu();
     seconds(21);
     expect_no_song();
+}
+TEST(game_song_stop__gil_kept_and_only_while_events_idle){
+    in_main_menu();
+    game_song_starts(3);
+    steps(SETTLED);
+    MR32(SOUND_API_BUSY) = 1;
+    radio_switched_on();
+    steps(5);
+    expect(g.stops == 0, "no stop while the event system is busy");
+    MR32(SOUND_API_BUSY) = 0;
+    steps(SETTLED);
+    expect(g.stops == 1 && g.stop_noyield == 1 && g.noyield == 0, "the stop once it is idle, with the GIL kept");
+    expect_folder_song(1);
+}
+TEST(page_stops_writing__track_ends_after_20_s){
+    folder_song_plays_in_main_menu();
+    int stops = g.stops;
+    page_never_answers();
+    seconds(19);
+    expect(g.stops == stops, "the track waits for the page 19 s");
+    seconds(2);
+    expect(g.stops == stops + 1, "the track ends after 20 s without sound");
 }
 TEST(game_song_readers_alike_on_both_sides__game_song_plays){
     game_song_has_both_sides_alike();

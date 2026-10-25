@@ -31,6 +31,7 @@ void sub_00739320(CPU *c);        /* stops a song (17 callers); we call it from 
 #include <stdio.h>
 #include <stdlib.h>
 uint32_t gheap_alloc(int heap, uint32_t n, int zero);
+void guest_noyield(int d);        /* win32_ext.c: no fair yield, a free mutex taken without handing the GIL over */
 
 #define TRAX_TABLE         0x007ecd80u   /* the EA Trax songs: RADIO_TRACKS entries of 16 bytes */
 #define TRAX_ENTRY_SIZE    16u
@@ -57,15 +58,15 @@ uint32_t gheap_alloc(int heap, uint32_t n, int zero);
 #define EARLIER_STEPS      100u          /* then the readers there before count too: the game restarts a song on them (Game Music Volume back from 0) */
 #define PAUSE_SOUND_GROUPS 0xf0000000u   /* 0x00739030: the groups the pause menu and the loading screen pass */
 #define END_OF_STREAM      0xffffffffu
-#define SOUND_API_ACTIVE   0x008b7bbcu   /* byte: the sound library is up */
-#define SOUND_API_BUSY     0x008b7bc0u   /* word: a call of the sound library is under way */
+#define SOUND_API_ACTIVE   0x008b7bbcu   /* byte: the music's event system is up */
+#define SOUND_API_BUSY     0x008b7bc0u   /* word: the event system's tick or one of its calls is under way; a call that finds it set does nothing (overrides.c, sub_0073b900) */
 #define SOUND_GROUPS_OWNER 0x0082b974u   /* pointer to the first of the game's sound owners */
 #define OWNER_SONG_GROUPS  0x17cu        /* in an owner: the sound groups of the game's songs */
 #define PIPELINE_SCALE     32768.0f      /* the game mixes in 16-bit units */
 #define CHANNELS           2u
 #define RING_FRAMES        (1u << 17)    /* about 3 s: the page refills the rings every 50 ms */
 #define RING_BYTES         (CHANNELS * RING_FRAMES * sizeof(float))
-#define WAIT_FRAMES        (RADIO_RATE * 20u * CHANNELS)
+#define WAIT_FRAMES        (RADIO_RATE * 20u * CHANNELS)   /* 20 s: `waited` and `starved` count the frames of both readers */
 #define SIDE_UNKNOWN       2u
 #define NO_TAGS_LENT       (-1)
 
@@ -228,9 +229,13 @@ static void follow_music_inputs(HostStatusRadio *r){
     else update_music_readers(first, inputs);
 }
 
-/* The game stops its song with the call at the top, here from the start of the mixer step, where no sound call of
- * the game is under way (the library's lock is checked), on a copy of the registers.  The stop is taken back and
- * the song marked ended before the call, which may run the mixer step or start a song again. */
+/* The game stops its song with the call at the top, here from the start of the mixer step, on a copy of the
+ * registers, and only while the music's event system is idle: a call that finds it busy does nothing, and the song
+ * would be marked ended with nothing stopped.  The call sets the busy word itself and takes the sound library's
+ * mutex (0x46c690 -> 0x721f99) for each of the song's streams; there the GIL could go to the game thread, whose
+ * song start, stop, pause and unpause would then do nothing (the tick's own case, overrides.c sub_0073b900), so
+ * it keeps the GIL as the tick does.  The stop is taken back and the song marked ended before the call, which may
+ * run the mixer step or start a song again. */
 static void stop_game_song(CPU *c){
     uint32_t owner = MR32(SOUND_GROUPS_OWNER);
     if (g_radio.stopping || g_music.paused || !in_guest(owner, OWNER_SONG_GROUPS + 4u)
@@ -243,7 +248,9 @@ static void stop_game_song(CPU *c){
     c->esp = (c->esp - 256u) & ~15u;
     PUSH32(MR32(owner + OWNER_SONG_GROUPS));
     PUSH32(0x007292bcu);
+    guest_noyield(+1);
     sub_00739320(c);
+    guest_noyield(-1);
     *c = save;
     g_radio.stopping = 0;
 }
@@ -340,7 +347,7 @@ static int read_folder_track(HostStatusRadio *r, unsigned ch, uint32_t out, uint
     g_song.read[ch] += take;
     if (ch == 0) __atomic_store_n(&r->rings.read, g_song.read[0], __ATOMIC_RELEASE);
     if (take) g_song.starved = 0;
-    else if (ch == 0) g_song.starved += n;
+    else g_song.starved += n;
     g_song.over = take == 0 && (g_song.read[ch] >= total || g_song.starved > WAIT_FRAMES);
     return g_song.over;
 }

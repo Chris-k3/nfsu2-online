@@ -22,6 +22,7 @@ static Ear ear[2];
 static struct {
     int readers, pending, restart, in_step, paused, muted, plaques, plaque_folder_song, last_index, stops;
     int song_slot[2], reuse_addresses, song_on_both_sides;
+    int noyield, stop_noyield;                     /* guest_noyield's depth now, and in the last stop */
 } g;
 static struct { int next_id, served_seq, silent; uint32_t track_steps; } pg;
 static CPU cpu;
@@ -110,9 +111,11 @@ void sub_0072d18d_orig(CPU *c){
     MRF32(MR32(c->esp + 16u)) = MRF32(MR32(c->esp + 4u) + 4u);
     c->eax = MR32(c->esp + 8u);
 }
+void guest_noyield(int d){ g.noyield += d; }
 void sub_00739320(CPU *c){
     (void)c;
     g.stops++;
+    g.stop_noyield = g.noyield;
     if (remove_song_readers() && g.in_step) g.restart = 1;
 }
 

@@ -1,9 +1,11 @@
-// The radio (web/src/radio.ts), its link to the runtime (web/src/app/radio-link.ts) and its folder (web/src/radio-folder.ts) on fakes.
+// The radio (web/src/radio.ts), its link to the runtime (web/src/app/radio-link.ts) and its folder (web/src/radio-folder.ts) on fakes,
+// and the runtime's side (runtime/radio.c) in tests/radio_unit.c.
 //   node --test web/test/radio.test.mjs
 import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as esbuild from 'esbuild';
 
@@ -222,3 +224,11 @@ test('modes are kept by path, a damaged value is not believed, a track not in th
   }
 });
 
+test('the runtime: the song number, the tags and the scenarios of the game\'s songs (tests/radio_unit.c)', () => {
+  const out = path.join(ROOT, 'out/web/test'), bin = path.join(out, 'radio_unit');
+  fs.mkdirSync(out, { recursive: true });
+  execFileSync('clang', ['-O1', '-Wall', '-Wextra', '-Werror', '-DNFSU2_RADIO_TEST', '-I', path.join(ROOT, 'runtime'), '-I', path.join(ROOT, 'tests'),
+    '-o', bin, path.join(ROOT, 'tests/radio_unit.c')]);
+  const got = execFileSync(bin, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  assert.match(got, /radio_unit: 0 failed; scenarios: 0 of \d+ failed$/, got.split('\n').filter(l => !l.startsWith('ok ')).join('\n'));
+});
