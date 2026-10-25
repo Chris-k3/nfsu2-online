@@ -676,6 +676,8 @@
   "Control size": "컨트롤 크기",
   "How big the touch controls on the game are. Auto sizes them for this screen.": "게임 위 터치 컨트롤의 크기예요. 자동은 이 화면에 맞춰 조절해요.",
   "Auto ({size})": "자동 ({size})",
+  "Menu button size": "메뉴 버튼 크기",
+  "How big the game's small menu buttons are: Back, Continue and the others at the bottom, and the arrows. Auto sizes them for a finger.": "게임 메뉴의 작은 버튼 크기예요: 아래쪽의 뒤로, 계속 등의 버튼과 화살표. 자동은 손가락으로 누르기 좋은 크기로 맞춰요.",
   "Throttle, brake and reverse": "가속, 브레이크, 후진",
   "Steer (or W S A D)": "조향(또는 W S A D)",
   "Space": "스페이스",

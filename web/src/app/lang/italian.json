@@ -760,6 +760,8 @@
   "Control size": "Dimensione dei comandi",
   "How big the touch controls on the game are. Auto sizes them for this screen.": "Quanto sono grandi i comandi touch sul gioco. Auto li adatta a questo schermo.",
   "Auto ({size})": "Auto ({size})",
+  "Menu button size": "Dimensione dei pulsanti dei menu",
+  "How big the game's small menu buttons are: Back, Continue and the others at the bottom, and the arrows. Auto sizes them for a finger.": "Quanto sono grandi i piccoli pulsanti dei menu del gioco: Indietro, Continua e gli altri in basso, e le frecce. Auto li rende abbastanza grandi per un dito.",
   "Throttle, brake and reverse": "Acceleratore, freno e retromarcia",
   "Steer (or W S A D)": "Sterzo (o W S A D)",
   "Space": "Spazio",

@@ -69,6 +69,11 @@ rev in the countdown) and step aside for menus, the pause menu and free roam's c
 - **Gears:** with a manual gearbox (the race's Transmission choice), gear down and gear up above the steering.
 - **Small buttons** along the top: pause, camera, look back, reset; in free roam also the map, messages, horn, and
   Start (an event, or an outrun).
+- **Sizes**, in the Controls sheet's Touch tab and kept in this browser: **Control size** for the touch controls, and
+  **Menu button size** for the game's own small menu buttons (Back, Continue and the others at the bottom of every
+  menu, and the arrows of the main menu's and Quick Race's choices). Both are **Auto** by default: the touch controls
+  at 100% on a phone and up to 125% on a tablet, as far as they fit; the menu buttons big enough for a finger, up to
+  200%.
 - A keyboard or a controller sends them away until you touch the game again. Android phones buzz on crashes.
 
 ## 3. Controls

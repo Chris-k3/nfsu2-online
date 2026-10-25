@@ -781,6 +781,8 @@
   "Control size": "Размер управления",
   "How big the touch controls on the game are. Auto sizes them for this screen.": "Насколько крупное сенсорное управление поверх игры. «Авто» подбирает размер под этот экран.",
   "Auto ({size})": "Авто ({size})",
+  "Menu button size": "Размер кнопок меню",
+  "How big the game's small menu buttons are: Back, Continue and the others at the bottom, and the arrows. Auto sizes them for a finger.": "Насколько крупные маленькие кнопки в меню игры: «Назад», «Продолжить» и другие внизу, а также стрелки. «Авто» делает их удобными для пальца.",
   "Throttle, brake and reverse": "Газ, тормоз и задний ход",
   "Steer (or W S A D)": "Руление (или W S A D)",
   "Space": "Пробел",

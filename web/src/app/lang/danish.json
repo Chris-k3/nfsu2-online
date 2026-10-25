@@ -739,6 +739,8 @@
   "Control size": "Knapstørrelse",
   "How big the touch controls on the game are. Auto sizes them for this screen.": "Hvor store touchknapperne på spillet er. Auto tilpasser dem til denne skærm.",
   "Auto ({size})": "Auto ({size})",
+  "Menu button size": "Størrelse på menuknapper",
+  "How big the game's small menu buttons are: Back, Continue and the others at the bottom, and the arrows. Auto sizes them for a finger.": "Hvor store spillets små menuknapper er: Tilbage, Fortsæt og de andre forneden samt pilene. Auto gør dem store nok til en finger.",
   "Throttle, brake and reverse": "Speeder, bremse og bakgear",
   "Steer (or W S A D)": "Styr (eller W S A D)",
   "Space": "Mellemrum",

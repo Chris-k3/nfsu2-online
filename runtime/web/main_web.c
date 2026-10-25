@@ -92,6 +92,7 @@ int main(int argc, char **argv){
     { extern void language_install(void); language_install(); }   /* NFSU2_LANGUAGE: the language pack, the exe's tables */
     { extern void sponsors_install(void); sponsors_install(); }   /* the sponsor screens' Continue (help bar) */
     { extern void lobbyclick_install(void); lobbyclick_install(); }   /* the lobby's list ignores a click on a dialog over it */
+    { extern void menusize_install(void); menusize_install(); }       /* the help bar's buttons at the page's menu button size */
     { extern void olfilter_install(void); olfilter_install(); }       /* the Online lobby's Filter, once set, narrows its list */
     { extern void tunegraph_install(void); tunegraph_install(); }     /* the tuning graphs' dots follow a press and a drag */
     { extern void regional_install(void); regional_install(); }       /* the European game's Corsa and 106 for sale, and AI racers' cars */

@@ -739,6 +739,8 @@
   "Control size": "Kontrollstorlek",
   "How big the touch controls on the game are. Auto sizes them for this screen.": "Hur stora pekkontrollerna över spelet är. Auto anpassar dem efter den här skärmen.",
   "Auto ({size})": "Auto ({size})",
+  "Menu button size": "Storlek på menyknappar",
+  "How big the game's small menu buttons are: Back, Continue and the others at the bottom, and the arrows. Auto sizes them for a finger.": "Hur stora spelets små menyknappar är: Tillbaka, Fortsätt och de andra längst ner, och pilarna. Auto gör dem stora nog för ett finger.",
   "Throttle, brake and reverse": "Gasa, bromsa och backa",
   "Steer (or W S A D)": "Styr (eller W S A D)",
   "Space": "Mellanslag",
