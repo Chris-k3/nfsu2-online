@@ -92,6 +92,21 @@ test('a song is served from the queue of its place, the next track is offered, a
   assert.deepEqual([s.radio.song, s.w[W.written]], [null, RING * 2]);
 });
 
+test('songs that change quickly decode one track at a time: the one under way, then only the latest', async () => {
+  let running = 0, most = 0, decodes = 0;
+  const done = [];
+  const s = setup(['a.mp3', 'b.mp3', 'c.mp3'], () => new Promise(r => { decodes++; most = Math.max(most, ++running); done.push(() => { running--; r(pcm(RING * 2)); }); }));
+  await s.started();
+  await s.game(0, 1);
+  await s.game(0, 2);
+  await s.game(1, 3);
+  assert.equal(done.length, 1);
+  done.shift()(); await settle();
+  assert.deepEqual([done.length, s.w[W.ready_seq]], [1, 0]);
+  done.shift()(); await settle();
+  assert.deepEqual([most, decodes, s.w[W.ready_seq], s.radio.song?.at], [1, 2, 3, RING]);
+});
+
 test('a broken track gives way to the next; when every track is broken the game is told once and the radio goes off', async () => {
   const s = setup(['a.mp3', 'b.mp3', 'c.mp3']);
   s.radio.files[0].getFile = bad;

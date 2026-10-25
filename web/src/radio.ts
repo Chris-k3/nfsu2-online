@@ -36,6 +36,7 @@ export class Radio {
   private bad = 0;
   private song: { left: Float32Array; right: Float32Array; at: number } | null = null;
   private decoder: OfflineAudioContext | null = null;
+  private decoding: Promise<unknown> = Promise.resolve();   // the decode under way: one track is decoded at a time
   private next: Pair = [0, 0];            // per place: where its queue goes on
   private offered: Pair = [-1, -1];       // per place: the track whose tags the game was shown
   private tags = new Map<number, Promise<Lines>>();
@@ -204,10 +205,13 @@ export class Radio {
   private async load(link: RadioLink, seq: number, i: number, epoch: number): Promise<'played' | 'skipped' | 'ring' | 'stale'> {
     let left: Float32Array, right: Float32Array;
     try {
+      await this.decoding;                // songs that change quickly never hold two decoded tracks at once
+      if (epoch !== this.epoch || this.seq !== seq) return 'stale';
       const file = await this.files[i].getFile();
       if (file.size > MAX_FILE_BYTES) throw new Error(`${Math.round(file.size / 1048576)} MB is too long for a song`);
-      this.decoder ??= new OfflineAudioContext(2, 1, RATE);
-      const pcm = await this.decoder.decodeAudioData(await file.arrayBuffer());
+      const decoder = this.decoder ??= new OfflineAudioContext(2, 1, RATE), decoding = file.arrayBuffer().then(b => decoder.decodeAudioData(b));
+      this.decoding = decoding.catch(() => {});
+      const pcm = await decoding;
       if (epoch !== this.epoch || this.seq !== seq) return 'stale';
       left = pcm.getChannelData(0); right = pcm.numberOfChannels > 1 ? pcm.getChannelData(1) : left;
       if (!left.length) throw new Error('no samples');
