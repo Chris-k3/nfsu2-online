@@ -54,6 +54,7 @@ uint32_t gheap_alloc(int heap, uint32_t n, int zero);
 #define GUEST_END          0x28000000u   /* the guest's memory ends here (web/build.sh) */
 #define MUSIC_INPUTS       2u            /* a song is a pair of inputs, left and right */
 #define SEARCH_STEPS       1200u         /* mixer steps a song may take to show both its readers */
+#define EARLIER_STEPS      100u          /* then the readers there before count too: the game restarts a song on them (Game Music Volume back from 0) */
 #define PAUSE_SOUND_GROUPS 0xf0000000u   /* 0x00739030: the groups the pause menu and the loading screen pass */
 #define END_OF_STREAM      0xffffffffu
 #define SOUND_API_ACTIVE   0x008b7bbcu   /* byte: the sound library is up */
@@ -76,7 +77,7 @@ typedef struct {
     uint8_t side[MUSIC_INPUTS];
     int searching, paused;
 } Music;
-typedef struct { int who, over, ended, again; uint32_t place, seq, read[CHANNELS], waited, starved; } Song;   /* place: 0 menus, 1 driving */
+typedef struct { int who, over, ended, again, refind; uint32_t place, seq, read[CHANNELS], waited, starved; } Song;   /* place: 0 menus, 1 driving */
 typedef struct {
     int was_on;
     int lent;                                      /* the table entry lent the page's tags, or NO_TAGS_LENT */
@@ -191,7 +192,7 @@ static void update_music_readers(uint32_t first, unsigned inputs){
         now[now_n++] = reader;
         if (g_music.searching && g_music.count < MUSIC_INPUTS && side != SIDE_UNKNOWN
             && (!g_music.count || g_music.side[0] != side) && !list_has(g_music.reader, g_music.count, reader)
-            && !list_has(g_music.earlier, g_music.earlier_n, reader)){
+            && (g_music.search_steps > EARLIER_STEPS || !list_has(g_music.earlier, g_music.earlier_n, reader))){
             g_music.side[g_music.count] = side;
             g_music.reader[g_music.count++] = reader;
         }
@@ -201,11 +202,15 @@ static void update_music_readers(uint32_t first, unsigned inputs){
         kept_side[kept_n] = g_music.side[k];
         kept[kept_n++] = g_music.reader[k];
     }
-    if (g_music.count && !kept_n && (g_song.who == SONG_WAITING || g_song.who == SONG_FOLDER)){
+    if (g_music.count && !kept_n && g_song.refind){
+        g_song.refind = 0;
+        fprintf(stderr, "[radio] the game moved its song to other readers: the track goes on there\n");
+        start_searching();
+    } else if (g_music.count && !kept_n && (g_song.who == SONG_WAITING || g_song.who == SONG_FOLDER)){
         fprintf(stderr, "[radio] the song's readers left the mixer: the track ends\n");
         song_start(SONG_GAME, 0);
     }
-    if (g_music.searching && (g_music.count >= MUSIC_INPUTS || ++g_music.search_steps > SEARCH_STEPS)){
+    if (g_music.searching && (kept_n >= MUSIC_INPUTS || ++g_music.search_steps > SEARCH_STEPS)){
         g_music.searching = 0;
     }
     memcpy(g_radio.before, now, now_n * sizeof now[0]);
@@ -281,7 +286,7 @@ static void start_radio_song(HostStatusRadio *r, unsigned index){
     int going = (g_song.who == SONG_WAITING || (g_song.who == SONG_FOLDER && !g_song.over)) && g_song.place == place;
     if (going){
         lend_tags(index);
-        g_song.again = 1;
+        g_song.again = g_song.refind = 1;
         fprintf(stderr, "[radio] game starts a song (entry %u): the track goes on\n", index);
     } else if (copy_tags(r, place)){
         ask_page_for_track(r, place);
