@@ -909,7 +909,10 @@ paths to the VPS, so pick a VPS location between you.
   - **Kept in the state volume:** `online/stats.json` (race results, best times and records per persona) and
     `online/buddies.json` (EA Messenger: each persona's friends and blocked by name, its friend requests waiting for
     an answer, and the messages from friends waiting for it while it is away, text included, 7 days at most), each
-    with the month a persona was last seen, written atomically (0600). No passwords, CD keys, addresses, and no chat
+    with the month a persona was last seen, written atomically (0600). When the server stops, `online/races.json`
+    keeps the races going on (each one's players by persona and virtual address, and the reports so far), read back
+    and removed at the next start: the players race on through a restart (the switch gives their addresses back),
+    and their reports afterwards still count. No passwords, CD keys, addresses, and no chat
     but those waiting messages. The server never reads an account's
     password; a game's password it checks against an HMAC kept in memory with that game, under a key of the game's
     own.

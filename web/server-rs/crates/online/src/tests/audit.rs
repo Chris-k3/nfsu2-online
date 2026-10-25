@@ -576,6 +576,90 @@ fn leavers_decide_nothing() {
     assert_eq!(board(&mut w, 0), ["Ann:67:0:1", "Bob:100:1:0", "Cat:0:0:1", "Dan:0:0:1"], "counted nowhere");
 }
 
+// a restart (a release) mid-race: the races go on in their players' browsers and count when the players report after
+// it, with the reports, result and table of before it; a racer's name stays its own.  The file goes once read; open
+// games are not kept, nor races long over (races.rs)
+#[test]
+fn races_over_a_restart() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("online");
+    let file = dir.join("races.json");
+    let mut w = World::new(Opts { state_dir: Some(dir.clone()), ..Default::default() });
+    let names = ["Ann", "Bob", "Cat", "Dan", "Eve"];
+    let gs: Vec<u32> = (0..5).map(|i| client(&mut w, &format!("10.77.0.{}", i + 2))).collect();
+    let rep = |w: &mut World, c: C, auth: &str, names: &[&str], players: &[(u8, u8, f32, i32, bool)]| {
+        let mut f = fields![("AUTH", auth), ("RESU", resu_full(0, 4014, players))];
+        for (i, n) in names.iter().enumerate() {
+            f.extend(fields![(format!("NAME{i}"), *n)]);
+        }
+        w.send(c, "rank", f);
+    };
+    let row = |m: &super::world::M, i: usize| format!("{} {}", m.g(&format!("OPPO{i}")), m.g(&format!("DATA{i}")));
+    let unranked = [(0, 2, 190.0, 0, false), (1, 1, 186.0, 0, false)];
+    let ranked = [(0, 1, 180.0, 0, false), (1, 2, 185.0, 0, false), (2, 3, 190.0, 0, false)];
+    // Ann and Bob race unranked, Cat, Dan and Eve ranked; their games close their lobby links for the race
+    let s: Vec<C> = (0..5).map(|i| login(&mut w, gs[i], names[i])).collect();
+    let u = race(&mut w, "u", &s[0..2], vec![]).unwrap();
+    let r = race(&mut w, "r", &s[2..5], fields![("SYSFLAGS", 1 << 18)]).unwrap();
+    for c in &s {
+        w.close(*c);
+    }
+    // before the restart: Bob reports (that alone decides nothing), Cat and Dan decide theirs; a game not started
+    w.advance(200_000.0);
+    let bob = login(&mut w, gs[1], "Bob");
+    rep(&mut w, bob, &u, &names[0..2], &unranked);
+    let cat = login(&mut w, gs[2], "Cat");
+    let dan = login(&mut w, gs[3], "Dan");
+    for c in [cat, dan] {
+        rep(&mut w, c, &r, &names[2..5], &ranked);
+    }
+    let before: Vec<String> = (0..3).map(|i| row(w.c(cat).l("$rfn"), i)).collect();
+    let gf = client(&mut w, "10.77.0.9");
+    let fay = login(&mut w, gf, "Fay");
+    w.send(fay, "gcre", fields![("NAME", "open"), ("PARAMS", "TRACK=4014")]);
+    w.core.stop();
+    assert!(w.logged("2 races going on written to"), "{}", w.text().join("\n"));
+    let t = w.t.get();
+
+    // the restart
+    let mut w = World::new(Opts { state_dir: Some(dir.clone()), ..Default::default() });
+    w.t.set(t + 10_000.0);
+    assert!(w.logged("2 races going on read back from"), "{}", w.text().join("\n"));
+    assert!(!file.exists(), "read once");
+    let mut kept: Vec<&str> = w.core.lobby.games.values().map(|g| g.name.as_str()).collect();
+    kept.sort();
+    assert_eq!(kept, ["r", "u"], "the open game is not kept");
+    let gs: Vec<u32> = (0..5).map(|i| client(&mut w, &format!("10.77.0.{}", i + 2))).collect();
+    // Ann's name is still hers: another browser gets it with digits, Ann's own its name
+    let go = client(&mut w, "10.77.0.10");
+    let other = login(&mut w, go, "Ann");
+    assert_ne!(w.c(other).l("pers").g("PERS"), "Ann");
+    let ann = login(&mut w, gs[0], "Ann");
+    assert_eq!(w.c(ann).l("pers").g("PERS"), "Ann");
+    // her report and Bob's of before the restart make the result
+    rep(&mut w, ann, &u, &names[0..2], &unranked);
+    assert!(w.logged("\"u\" (circuit, unranked): 1 Bob 3:06.00, 2 Ann 3:10.00"), "{}", w.text().join("\n"));
+    // Eve sees the table of before the restart; everyone is back: the races are over
+    let eve = login(&mut w, gs[4], "Eve");
+    rep(&mut w, eve, &r, &names[2..5], &ranked);
+    assert_eq!((0..3).map(|i| row(w.c(eve).l("$rfn"), i)).collect::<Vec<_>>(), before);
+    assert!(w.core.lobby.games.is_empty(), "{}", w.text().join("\n"));
+    assert_eq!(board(&mut w, 0), ["Ann:0:0:1", "Bob:0:1:0", "Cat:100:1:0", "Dan:50:0:1", "Eve:0:0:1"], "each race counted once");
+
+    // a race that started more than race_ms before the next start is over
+    let s: Vec<C> = (0..2).map(|i| login(&mut w, gs[i], names[i])).collect();
+    race(&mut w, "late", &s, vec![]).unwrap();
+    w.core.stop();
+    let mut j: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    let started = j["races"][0]["started"].as_f64().unwrap();
+    j["races"][0]["started"] = (started - Limits::default().race_ms - 1.0).into();
+    std::fs::write(&file, j.to_string()).unwrap();
+    let w = World::new(Opts { state_dir: Some(dir.clone()), ..Default::default() });
+    assert!(w.core.lobby.games.is_empty());
+    assert!(w.logged("0 races going on read back from") && w.logged("(1 long over left out)"), "{}", w.text().join("\n"));
+    assert!(!file.exists());
+}
+
 // ONL-7: the results store: the rankings built once for many asks (the store's other parts: stats.rs)
 #[test]
 fn onl7_rankings_built_once() {

@@ -3,9 +3,10 @@
 The game's server, in Rust: it serves the page, the game module and the game's own files, and connects the players
 (the virtual LAN switch, the free-roam hub and the game's Online mode).  Its options are in `src/options.rs`, and the
 crates' docs say why each rule is what it is, with the audits they name.  The state folder keeps `etag.key`,
-`lan-addresses.json`, `online/stats.json`, `online/buddies.json`, `vault/` and the operator's bans (`bans.json`,
-`bans.key`: nfsu2-bans), and has the control socket, `control.sock`, which `nfsu2-server ctl` talks to (who is on,
-kick, ban: src/app/control.rs, docs/web/VPS.md "Kick and ban").
+`lan-addresses.json`, `online/stats.json`, `online/buddies.json`, `online/races.json` (the races going on, from a stop
+to the next start), `vault/` and the operator's bans (`bans.json`, `bans.key`: nfsu2-bans), and has the control
+socket, `control.sock`, which `nfsu2-server ctl` talks to (who is on, kick, ban: src/app/control.rs, docs/web/VPS.md
+"Kick and ban").
 
 It replaced the Node.js server (`web/server/*.mjs`, removed after 6076514) with the same options and environment
 (`NFSU2_*`), the same console lines and the same state files, byte for byte, so a VPS switched with one line

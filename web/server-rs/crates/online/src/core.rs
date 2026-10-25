@@ -37,6 +37,8 @@ pub struct Core {
     pub log: LogFn,
     pub tap: Option<Tap>,
     pub send: Option<SwitchSend>,
+    /// the state folder (races.rs keeps the races going on there over a restart)
+    pub state_dir: Option<PathBuf>,
     /// the budgets of the frame being handled (what the host sends for it is charged to its sender)
     pub cause: Option<Arc<dyn Charge>>,
     /// the browsers that spoke to this host and are still on the switch
@@ -69,6 +71,7 @@ impl Core {
             log: o.log,
             tap: o.tap,
             send: None,
+            state_dir: o.state_dir.clone(),
             cause: None,
             here: HashSet::new(),
             timers: Timers::default(),
@@ -82,6 +85,7 @@ impl Core {
             #[cfg(test)]
             errors: Vec::new(),
         };
+        core.load_races();
         // the lobby's tick, every 5 s
         core.tick_timer = Some(core.set_timeout(5000.0, Action::LobbyTick));
         core

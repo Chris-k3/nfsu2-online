@@ -26,7 +26,7 @@
 //!
 //! At the race start the game closes its lobby link (as with server.dll in LAN play) and opens a new one afterwards
 //! (it logs in again and reports the result: rank).  A started game therefore outlives its players' sessions, for
-//! `race_ms` at most.
+//! `race_ms` at most, and a restart of the server (races.rs).
 //!
 //! Never read: PASS (the account password), REGKEY (the CD key), PSES (a checksum of the player's files): aries.rs
 //! passes over their values.  PASS in gcre and gjoi is a game's own password instead (SPEED2.EXE 0x58d5d0,
@@ -305,10 +305,10 @@ pub struct Game {
     /// when the race started (0: not started)
     pub started: f64,
     pub auth: String,
-    reports: Vec<(u32, String)>,
-    result: Option<String>,
+    pub reports: Vec<(u32, String)>,
+    pub result: Option<String>,
     /// a ranked race's table once its result stands ($rfn, encoded once)
-    table: Option<Vec<u8>>,
+    pub table: Option<Vec<u8>>,
     pub ranked: bool,
 }
 
@@ -413,8 +413,8 @@ pub struct Lobby {
     pop: IndexMap<u32, Later>,
     /// a browser's address -> when it left the switch (not back since)
     gone_vips: HashMap<u32, f64>,
-    next_user: u64,
-    next_game: u64,
+    pub next_user: u64,
+    pub next_game: u64,
     pub stats: LobbyStats,
     last_sst: Option<[f64; 3]>,
 }
@@ -2316,7 +2316,7 @@ impl Core {
         self.lobby.gone_vips.retain(|_, t| now - *t <= l.race_ms);
     }
 
-    /// the server stops: the timers end, every session's link goes, the results are written
+    /// the server stops: the timers end, every session's link goes, the races going on and the results are written
     pub fn lobby_stop(&mut self) {
         // (the timers end, but each record keeps its timer's id: a `later` after this sends nothing)
         let keys: Vec<LaterKey> =
@@ -2331,6 +2331,7 @@ impl Core {
             let conn = self.lobby.s(s).conn;
             self.conn_destroy(conn, "server stopping");
         }
+        self.save_races();
         self.stats.stop();
     }
 }
