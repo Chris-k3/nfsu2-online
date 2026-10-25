@@ -911,8 +911,9 @@ paths to the VPS, so pick a VPS location between you.
     an answer, and the messages from friends waiting for it while it is away, text included, 7 days at most), each
     with the month a persona was last seen, written atomically (0600). When the server stops, `online/races.json`
     keeps the races going on (each one's players by persona and virtual address, and the reports so far), read back
-    and removed at the next start: the players race on through a restart (the switch gives their addresses back),
-    and their reports afterwards still count. No passwords, CD keys, addresses, and no chat
+    at the next start and removed once it is up: the players race on through a restart (the switch gives their
+    addresses back) and their reports afterwards still count, as long as their pages are back within about 10 s (the
+    game ends a race whose network was gone that long). No passwords, CD keys, addresses, and no chat
     but those waiting messages. The server never reads an account's
     password; a game's password it checks against an HMAC kept in memory with that game, under a key of the game's
     own.

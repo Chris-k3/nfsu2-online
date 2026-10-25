@@ -412,7 +412,7 @@ pub struct Lobby {
     /// room id -> the same for its population
     pop: IndexMap<u32, Later>,
     /// a browser's address -> when it left the switch (not back since)
-    gone_vips: HashMap<u32, f64>,
+    pub gone_vips: HashMap<u32, f64>,
     pub next_user: u64,
     pub next_game: u64,
     pub stats: LobbyStats,
@@ -2262,6 +2262,7 @@ impl Core {
 
     /// the lobby's 5 s tick
     pub fn lobby_tick(&mut self) {
+        self.forget_read_races();
         let now = self.now();
         let l = self.lobby.l;
         // what waits for its announce_ms (the timers do it; here too for a clock that is not the real one)

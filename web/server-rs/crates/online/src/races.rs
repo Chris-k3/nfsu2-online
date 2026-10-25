@@ -3,12 +3,16 @@
 //! address back after a restart (nfsu2-lan's store): a release mid-race leaves the race going, and its players log in
 //! again after it and report.  A lobby that had forgotten the race refused every one of those reports (160 at the
 //! release of 2026-10-24: "a race report for no race of this server's").  So the lobby writes its started races when
-//! the server stops and reads them back at the next start, once: the file goes once read (a server that dies later
-//! starts without them, as every start did before).
+//! the server stops and reads them back at the next start, once: the file goes at the lobby's first tick, 5 s after the
+//! start (a start that fails before, at its bans or its ports, leaves it for the next; a server that dies later starts
+//! without them, as every start did before).
 //!
 //! Kept per race: what its reports are checked against and decided by (lobby.rs `rank`): its id, name, creator, room,
-//! settings, start time, AUTH and whether it is ranked; per player its persona, virtual address and how far it got
-//! (back, reported); the reports so far, by browser; the result and a ranked race's table once they stand.  Not kept:
+//! settings, start time, AUTH and whether it is ranked; per player its persona, virtual address, how far it got (back,
+//! reported) and when its browser left the switch; the reports so far, by browser; the result and a ranked race's
+//! table once they stand.  A browser that left frees its player's name and ends a race nobody is left in (lobby.rs
+//! `name_taken`, `lobby_tick`): kept, these hold after the restart too, and the switch tells of the players who do not
+//! come back after it (nfsu2-lan: an address of before the restart that nobody resumed in time).  Not kept:
 //! the game's password (a started game takes no one in), its creator's client id (the server's client ids are new at
 //! each start: a race read back counts against no client's started games) and the players' sessions (gone with the
 //! server).  A race that started more than `race_ms` ago is not read (the lobby would end it at once).  Nothing in it
@@ -67,6 +71,8 @@ struct KeptPlayer {
     flags: u32,
     back: bool,
     reported: bool,
+    /// when its browser left the switch (not back since)
+    left: Option<f64>,
 }
 
 impl Core {
@@ -74,11 +80,11 @@ impl Core {
         self.state_dir.as_ref().map(|d| d.join("races.json"))
     }
 
-    /// the races of before the restart, read back (the server's start); the file goes
+    /// the races of before the restart, read back (the server's start); the file goes at the first tick
     pub fn load_races(&mut self) {
         let Some(file) = self.races_file() else { return };
         let Ok(bytes) = std::fs::read(&file) else { return };
-        let _ = std::fs::remove_file(&file);
+        self.races_read = true;
         let kept = serde_json::from_slice::<Kept>(&bytes)
             .map_err(|e| e.to_string())
             .and_then(|k| if k.v == VERSION { Ok(k) } else { Err(format!("version {}", k.v)) });
@@ -108,6 +114,9 @@ impl Core {
                 .into_iter()
                 .map(|p| {
                     lb.next_user = lb.next_user.max(p.id + 1);
+                    if let Some(t) = p.left {
+                        lb.gone_vips.insert(p.vip, t);
+                    }
                     Player {
                         s: None,
                         id: p.id,
@@ -152,8 +161,18 @@ impl Core {
         (self.log)(&format!("[online] {read} races going on read back from {}{tail}", file.display()), None);
     }
 
+    /// the lobby's first tick: the file read at the start goes (the start went well)
+    pub fn forget_read_races(&mut self) {
+        if std::mem::take(&mut self.races_read)
+            && let Some(file) = self.races_file()
+        {
+            let _ = std::fs::remove_file(file);
+        }
+    }
+
     /// the started races, for the next start (the server stops: once their players' sessions went)
     pub fn save_races(&mut self) {
+        self.races_read = false;
         let (Some(dir), Some(file)) = (self.state_dir.clone(), self.races_file()) else { return };
         let races: Vec<KeptRace> = self
             .lobby
@@ -186,6 +205,7 @@ impl Core {
                         flags: p.flags,
                         back: p.back,
                         reported: p.reported,
+                        left: self.lobby.gone_vips.get(&p.vip).copied(),
                     })
                     .collect(),
                 reports: g.reports.clone(),

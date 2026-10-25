@@ -687,12 +687,13 @@ pub fn drain(mut s: TcpStream) -> JoinHandle<()> {
     })
 }
 
-/// a host on the switch for the tests (the breakdown's: its address, name and vips())
+/// a host on the switch for the tests (the breakdown's: its address, name and vips(); the browsers it heard leave)
 pub struct FakeHost {
     pub vip: u32,
     pub name: String,
     pub listed: bool,
     pub vips: Arc<Mutex<HashSet<u32>>>,
+    pub gone: Arc<Mutex<Vec<u32>>>,
 }
 
 impl Host for FakeHost {
@@ -706,7 +707,9 @@ impl Host for FakeHost {
         self.listed
     }
     fn frame(&self, _from: u32, _data: Bytes, _ctx: nfsu2_util::FrameCtx) {}
-    fn peer_gone(&self, _vip: u32) {}
+    fn peer_gone(&self, vip: u32) {
+        self.gone.lock().unwrap().push(vip);
+    }
     fn info(&self) -> oneshot::Receiver<Value> {
         let (tx, rx) = oneshot::channel();
         let _ = tx.send(json!({}));
