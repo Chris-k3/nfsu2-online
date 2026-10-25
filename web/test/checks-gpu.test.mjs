@@ -77,6 +77,9 @@ const CASES = [
   ['Chrome on Linux without a Vulkan driver', { ua: UA.chromeLinux, gpu: null, webgl: 'ANGLE (Intel, Mesa Intel(R) Graphics (RPL-U), OpenGL 4.6)' }, 'fail', 'GPU-ADAPTER-LINUX'],
   ['Chrome on a Mac with no adapter', { ua: UA.chromeMac, gpu: null }, 'fail', 'GPU-ADAPTER'],
   ['a phone GPU without BC', { ua: UA.chromeAndroid, gpu: adapter([], { vendor: 'arm', architecture: 'valhall', description: '' }) }, 'warn', 'GPU-NO-BC'],
+  // DXT1 goes up as ASTC there (web/src/gpu/astc.ts): only ~50 MB more than BC, no note
+  ['an iPhone: no BC, but ASTC', { ua: UA.iphone, gpu: adapter(['texture-compression-astc'], { vendor: 'apple', architecture: 'common-3', description: '' }) }, 'ok', undefined],
+  ['a phone GPU without BC, with ASTC', { ua: UA.chromeAndroid, gpu: adapter(['texture-compression-astc', 'texture-compression-etc2'], { vendor: 'qualcomm', architecture: 'adreno-7xx', description: '' }) }, 'ok', undefined],
   ['Firefox on Intel integrated graphics', { ua: UA.firefoxWin, gpu: adapter(undefined, {}), webgl: 'Intel(R) HD Graphics 400' }, 'warn', 'GPU-INTEGRATED-FIREFOX'],
   ['Firefox on a graphics card', { ua: UA.firefoxWin, gpu: adapter(undefined, {}), webgl: 'NVIDIA GeForce GTX 980 Direct3D11 vs_5_0 ps_5_0' }, 'ok', undefined],
   ['Chrome on a graphics card', { ua: UA.chromeWin, gpu: adapter() }, 'ok', undefined],

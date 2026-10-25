@@ -71,29 +71,43 @@ function dataFile(rel: string): DNode | null {
   return (a && dataLookup(a)) || n;
 }
 
-// block cache: memory LRU over OPFS-persisted blocks over HTTP
+// block cache: memory LRU over OPFS-persisted blocks over HTTP.  While OPFS keeps the blocks, the memory only saves
+// a read from it (a 1 MB block in 0.14 ms in WebKit, M4 Pro): 64 MB, the blocks being read.  The memory is the only
+// cache without OPFS (no cache folder, or no room left on the disk): 768 MB then.
 const memBlocks = new Map<string, Uint8Array>();
 let memBytes = 0;
-const MEM_BUDGET = 768 << 20;
+const MEM_KEPT = 64 << 20, MEM_ALONE = 768 << 20;
 const inflight = new Map<string, Promise<Uint8Array>>();
 let cacheDir: FileSystemDirectoryHandle | null = null;
+// The cache files open now, the least recently used first.  WebKit gives a page 251 sync access handles at once
+// (Playwright WebKit 27.2; then "UnknownError: Invalid platform file handle"), and a cache file holds two: kept open
+// for good, the files of a long free roam took them all in 13 min, the game data's cache stopped, and so would have
+// any file of the save folder the game opened after.  At most CACHE_OPEN stay open; opening one again takes < 1 ms.
+const CACHE_OPEN = 64;
 const cacheFiles = new Map<string, Promise<CacheFile | null>>();
 let keeping = true, kept = 0;                              // blocks still go into the cache (keepBlock)
 
+// Use the file at once, in the same task: a file that is not among the CACHE_OPEN newest is closed.
 async function cacheFile(n: DNode) {
   if (!cacheDir) return null;
   const k = cacheKey(n);
   let p = cacheFiles.get(k);
-  if (!p) {
-    p = openCacheFile(cacheDir, n).catch(e => { if (keeping) note(`[data] ${n.path} is not kept on this PC: ${e}`); return null; });
-    cacheFiles.set(k, p);
+  if (p) { cacheFiles.delete(k); cacheFiles.set(k, p); return p; }
+  p = openCacheFile(cacheDir, n).catch(e => { if (keeping) note(`[data] ${n.path} is not kept on this PC: ${e}`); return null; });
+  cacheFiles.set(k, p);
+  for (const [ok, op] of cacheFiles) {
+    if (cacheFiles.size <= CACHE_OPEN) break;
+    cacheFiles.delete(ok);
+    // after the reactions already waiting for it (a reader that just opened it uses it first)
+    void op.then(cf => { if (cf) { cf.h.flush(); cf.h.close(); cf.haveH.flush(); cf.haveH.close(); } }).catch(() => {});
   }
   return p;
 }
 
 function memPut(key: string, b: Uint8Array) {
   memBlocks.set(key, b); memBytes += b.length;
-  for (const [k, v] of memBlocks) { if (memBytes <= MEM_BUDGET) break; memBlocks.delete(k); memBytes -= v.length; }
+  const budget = cacheDir && keeping ? MEM_KEPT : MEM_ALONE;
+  for (const [k, v] of memBlocks) { if (memBytes <= budget) break; memBlocks.delete(k); memBytes -= v.length; }
 }
 // a line for the game's log (F9 > Download log), as "[data] ...": what a read waited for on the server
 const note = (s: string) => (self as unknown as Worker).postMessage({ t: 'log', s });
@@ -156,6 +170,19 @@ async function fetchOnce(url: string, start: number, len: number, ranged: boolea
     return { why: ac.signal.aborted ? `no answer for ${f.stall / 1000} s` : String((e as Error)?.message ?? e), again: true, lost: true };
   } finally { clearTimeout(timer); }
 }
+// A line a minute for the log while blocks come from the server (a first game, a new area): how many, how fast, how
+// many had to be asked again, and what this device's cache read meanwhile.  A game the cache has wholly says nothing.
+const SUM_MS = 60_000;
+let sum = { t: 0, fetched: 0, bytes: 0, ms: 0, maxMs: 0, again: 0, local: 0 };
+function dataSummary(now: number) {
+  if (!sum.t) { sum.t = now; return; }
+  if (now - sum.t < SUM_MS) return;
+  if (sum.fetched || sum.again)
+    note(`[data] ${((now - sum.t) / 1000).toFixed(0)} s: ${sum.fetched} blocks from the server (${(sum.bytes / 1048576).toFixed(1)} MB, ` +
+         `${sum.fetched ? (sum.ms / sum.fetched).toFixed(0) : 0} ms on average, the slowest ${sum.maxMs.toFixed(0)} ms${sum.again ? `, ${sum.again} tries again` : ''}), ` +
+         `${sum.local} from this device's cache, ${cacheFiles.size} cache files open, ${(memBytes / 1048576).toFixed(0)} MB in memory${keeping ? '' : ', no longer kept on this device'}`);
+  sum = { t: now, fetched: 0, bytes: 0, ms: 0, maxMs: 0, again: 0, local: 0 };
+}
 async function fetchBlock(n: DNode, bi: number, start: number, len: number): Promise<Uint8Array> {
   while (fetching >= FETCHES) await new Promise<void>(r => fetchWait.push(r));
   fetching++;
@@ -168,11 +195,13 @@ async function fetchBlock(n: DNode, bi: number, start: number, len: number): Pro
       const r = await fetchOnce(ranged ? range : run, start, len, ranged, !ranged && f.deny > 0 && (bi + 1) % f.deny === 0);
       if (r instanceof Uint8Array) {
         const s = (performance.now() - t0) / 1000;
+        sum.fetched++; sum.bytes += r.length; sum.ms += s * 1000; if (s * 1000 > sum.maxMs) sum.maxMs = s * 1000;
         if (k > 1 || s >= SLOW_MS / 1000) note(`[data] ${what}: in after ${s.toFixed(1)} s${k > 1 ? `, ${k} tries` : ''}${by}`);
         return r;
       }
       if (r.lost) lost++;
       if (!r.again || (r.size && ++sized >= 3)) throw new Error(`${what}: ${r.why}${by}`);
+      sum.again++;
       if (k <= 3 || k % 10 === 0) note(`[data] ${what}: ${r.why}${by}; again in ${wait / 1000} s (try ${k + 1})`);
       await new Promise(res => setTimeout(res, wait));
     }
@@ -194,6 +223,7 @@ function keepBlock(cf: CacheFile, n: DNode, bi: number, b: Uint8Array) {
 }
 async function getBlock(n: DNode, bi: number): Promise<Uint8Array> {
   const key = n.path + '#' + bi;
+  dataSummary(performance.now());
   const hit = memBlocks.get(key);
   if (hit) { memBlocks.delete(key); memBlocks.set(key, hit); return hit; }
   let p = inflight.get(key);
@@ -202,10 +232,14 @@ async function getBlock(n: DNode, bi: number): Promise<Uint8Array> {
     const start = bi * BLOCK, len = Math.min(BLOCK, n.size - start);
     const cf = await cacheFile(n);
     if (cf && cf.have[bi]) {
-      const b = new Uint8Array(len); cf.h.read(b, { at: start }); memPut(key, b); return b;
+      try {
+        const b = new Uint8Array(len); cf.h.read(b, { at: start }); memPut(key, b); sum.local++; return b;
+      } catch (e) { note(`[data] ${n.path} block ${bi}: the cache file did not read (${e}); from the server`); }
     }
     const b = await fetchBlock(n, bi, start, len);
-    if (cf) keepBlock(cf, n, bi, b);
+    // the file again: the one from before the fetch may have been closed meanwhile (CACHE_OPEN)
+    const cf2 = await cacheFile(n);
+    if (cf2) keepBlock(cf2, n, bi, b);
     memPut(key, b);
     return b;
   })();

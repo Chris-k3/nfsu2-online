@@ -4,8 +4,12 @@
 //   node web/tools/vault-pair.mjs --base http://127.0.0.1:8080 --backup <a "Download a backup" zip> [--state <dir>] [--play] [--headed]
 //
 // A restores the backup and makes a keyphrase; B (with a screenshot of its own) types it in, in another shape, and
-// loads the saves; a rename in A comes to B at its next page load; both rename (a conflict: B keeps its own, A takes
-// it at its next load); A deletes the saves from the server and B is told at its next load.  The profile's bytes are
+// loads the saves, but A's DVD and magazine covers (a keyphrase keeps none: each 1 MB, the server takes 256 KB) and
+// the device's own (B keeps its registry.txt and its resolution scale and frame rate in settings.ini); A's resolution
+// scale changed sends nothing; a settings.ini changed in A comes to B, a cover B has of its own and B's scale staying;
+// a rename in A comes to B at its next page
+// load; both rename (a conflict: B keeps its own, A takes it at its next load); A deletes the saves from the server
+// and B is told at its next load.  The profile's bytes are
 // compared between the two, B's screenshot must stay throughout.  --state: the server's state folder as this machine
 // reads it (\\wsl.localhost\... from Windows): exactly one keyphrase file in its vault folder, which holds neither the
 // profile's name nor a byte of the profile.  --play (a server with --dev and a module): two more browsers on fresh
@@ -17,6 +21,12 @@ import { chromium } from 'playwright';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import * as esbuild from 'esbuild';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const S = await import('data:text/javascript;base64,' + Buffer.from((await esbuild.build({ entryPoints: [path.join(ROOT, 'web/src/app/settings.ts')],
+  bundle: true, format: 'esm', platform: 'neutral', write: false })).outputFiles[0].text).toString('base64'));
 
 const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 && i + 1 < argv.length ? argv[i + 1] : d; };
@@ -44,11 +54,37 @@ const fileHash = (page, rel, save = 'save') => page.evaluate(async ([rel, save])
   const f = await (await d.getFileHandle(parts[parts.length - 1])).getFile();
   return [...new Uint8Array(await crypto.subtle.digest('SHA-256', await f.arrayBuffer()))].map(b => b.toString(16).padStart(2, '0')).join('');
 }, [rel, save]).catch(() => null);
+/** a page's file of the save folder as text, or null */
+const readText = (page, rel) => page.evaluate(async rel => {
+  let d = await (await navigator.storage.getDirectory()).getDirectoryHandle('save');
+  const parts = rel.split('/');
+  for (const p of parts.slice(0, -1)) d = await d.getDirectoryHandle(p);
+  return (await (await d.getFileHandle(parts[parts.length - 1])).getFile()).text();
+}, rel).catch(() => null);
+/** a page's settings.ini as a keyphrase keeps it (settings.ts withoutDevice) */
+const keptIni = async page => S.withoutDevice((await readText(page, 'settings.ini')) ?? '');
+/** what a page's settings.ini sets these keys to */
+const iniSets = async (page, ...keys) => { const r = S.resolveEnv(await readText(page, 'settings.ini'), {}, {});
+  return keys.map(k => r.file[k]?.value ?? '').join(' '); };
+/** a page's settings.ini with these keys set */
+const putIni = async (page, sets) => writeFile(page, 'settings.ini',
+  [...Buffer.from(sets.reduce((t, [k, v]) => S.settingsPut(t, k, v), (await readText(page, 'settings.ini')) ?? S.TEMPLATE))]);
 const writeFile = (page, rel, bytes) => page.evaluate(async ({ rel, bytes }) => {
-  const d = await (await navigator.storage.getDirectory()).getDirectoryHandle('save', { create: true });
-  const w = await (await d.getFileHandle(rel, { create: true })).createWritable();
+  let d = await (await navigator.storage.getDirectory()).getDirectoryHandle('save', { create: true });
+  const parts = rel.split('/');
+  for (const p of parts.slice(0, -1)) d = await d.getDirectoryHandle(p, { create: true });
+  const w = await (await d.getFileHandle(parts[parts.length - 1], { create: true })).createWritable();
   await w.write(new Uint8Array(bytes)); await w.close();
 }, { rel, bytes });
+/** a page's DVD and magazine covers ("NFS Underground 2/<NAME> DVD 1/<NAME> DVD 1") */
+const covers = page => page.evaluate(async () => {
+  const out = [];
+  try {
+    const d = await (await (await navigator.storage.getDirectory()).getDirectoryHandle('save')).getDirectoryHandle('NFS Underground 2');
+    for await (const [name, h] of d.entries()) if (h.kind === 'directory' && / (DVD|Magazine) [0-9]+$/.test(name)) out.push(name);
+  } catch { /* none */ }
+  return out.sort();
+});
 const link = (page, save = 'save') => page.evaluate(save => JSON.parse(localStorage.getItem(`nfsu2-keyphrase:${save}`) ?? 'null'), save);
 const phase = page => page.evaluate(() => window.__nfsu2?.phase);
 const profiles = page => page.$$eval('#profiles .name', els => els.map(e => e.textContent));
@@ -81,6 +117,8 @@ try {
   await confirmOk(a);
   const name = await until('a profile restored in A', async () => (await profiles(a))[0]);
   const at = n => `NFS Underground 2/${n}/${n}`;
+  await putIni(a, [['render', 'scale:1.5'], ['fps', '120']]);           // A's own scale and frame rate
+  await open(a);
   await a.click('#vault-make');
   const phrase = await until('the keyphrase in the box', async () => (await link(a)) && (await a.inputValue('#vault-input')).trim());
   const box = page => page.evaluate(() => ({ masked: document.querySelector('#vault-box').classList.contains('masked'), dots: document.querySelector('#vault-mask').textContent,
@@ -102,6 +140,10 @@ try {
   // B: a screenshot of its own, then the keyphrase typed in another shape
   await open(b);
   await writeFile(b, 'nfsu2000.tga', [1, 2, 3, 4]);
+  // and its own graphics options, resolution scale and frame rate
+  await writeFile(b, 'registry.txt', [...Buffer.from('d g_RacingResolution=1\n')]);
+  await putIni(b, [['render', 'scale:0.5'], ['fps', '30']]);
+  const regB = await fileHash(b, 'registry.txt');
   const typing = ` ${phrase.split('-').slice(2).join(' ').toUpperCase()} `;
   await b.fill('#vault-input', typing);
   const typed = await box(b);
@@ -112,8 +154,31 @@ try {
   await until('B linked', async () => synced(b));
   check(true, `B loaded the keyphrase's saves: "${await syncedNote(b)}"`);
   check((await fileHash(a, at(name))) === (await fileHash(b, at(name))) && !!(await fileHash(b, at(name))), 'the profile is the same bytes in A and B');
-  check((await fileHash(a, 'settings.ini')) === (await fileHash(b, 'settings.ini')), 'settings.ini came along');
+  check((await keptIni(a)) === (await keptIni(b)), 'settings.ini came along, but its device settings');
+  check(await iniSets(b, 'render', 'fps') === 'scale:0.5 30', `B kept its own resolution scale and frame rate (${await iniSets(b, 'render', 'fps')}; A: ${await iniSets(a, 'render', 'fps')})`);
+  check((await fileHash(b, 'registry.txt')) === regB && regB !== (await fileHash(a, 'registry.txt')), 'B kept its own graphics options (registry.txt)');
   check(!!(await fileHash(b, 'nfsu2000.tga')), 'B\'s screenshot stayed');
+  const coversA = await covers(a);
+  check(!(await covers(b)).length, `A's covers stayed in A (${coversA.join(', ') || 'the backup has none'})`);
+
+  // A changes its resolution scale: nothing is sent
+  const revD = (await link(a)).rev;
+  await putIni(a, [['render', 'scale:2']]);
+  await open(a);
+  await sleep(5000);
+  check((await link(a))?.rev === revD && await synced(a), 'A\'s resolution scale changed: nothing sent');
+
+  // A changes settings.ini: B takes it, and keeps a cover of its own of the profile and its own scale
+  const own = `${name} DVD 9`, ownAt = `NFS Underground 2/${own}/${own}`;
+  await writeFile(b, ownAt, [...crypto.randomBytes(4096)]);
+  const revS = (await link(a)).rev;
+  await putIni(a, [['horn', 'trombone']]);
+  await open(a);
+  await until('A sent settings.ini', async () => (await link(a))?.rev !== revS);
+  await open(b);
+  await until('settings.ini in B', async () => (await keptIni(a)) === (await keptIni(b)));
+  check(!!(await fileHash(b, ownAt)) && await iniSets(b, 'horn', 'render') === 'trombone scale:0.5',
+    `B took A's settings.ini and kept its own cover (${own}) and scale (${await iniSets(b, 'horn', 'render')})`);
 
   // A renames: B has it after its next page load
   const rev0 = (await link(a)).rev;
@@ -154,7 +219,7 @@ try {
   await confirmOk(a);
   await until('A unlinked', async () => !(await link(a)));
   await open(b);
-  await until('B told', async () => /gone from the cloud/.test(await status(b)));
+  await until('B told', async () => /no saves for this keyphrase/.test(await status(b)));
   check(true, `B: "${await status(b)}"`);
   check((await profiles(b)).includes('FROMB') && !!(await fileHash(b, 'nfsu2000.tga')), 'B keeps its saves and screenshot');
 

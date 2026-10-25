@@ -42,7 +42,8 @@
 //             points to #bug-reports on Discord
 //   gpulost   every WebGPU call failing in the middle of a game, as in Safari once its graphics process went away
 //             (createCommandEncoder throws, device.lost never comes): the game is stopped with GPU-LOST instead of a
-//             frozen picture, the page says Play reloads it, and Play does reload it (then plays)
+//             frozen picture, the page says Play reloads it, and Play does reload it (then plays); the reloaded
+//             page's line on the last game says what it held at its last copy (its textures)
 //   crash     a trap (exit 134): "Stopped" with the error code, the trap in the log, the pointer to
 //             #bug-reports on Discord; a normal close after it takes the pointer away
 //   leak     three Play -> Stop rounds with sound on in one tab (the second with free roam on, so
@@ -237,6 +238,13 @@ try {
     const resetAll = { roamRate: /^#roam_rate = 20$/m.test(file3), ask: resetAsk, left: file4.split('\n').filter(l => /^[A-Za-z_]+ = /.test(l)),
       disabled: await page.locator('#settings-reset-all').isDisabled() };
     const resetOk = resetAll.roamRate && resetAsk === 'Reset all settings?' && resetAll.left.join('|') === 'roam_name = Tester' && resetAll.disabled;
+    // the steps after this one play with movies off and the detailed counter (play's F8, saves' and restore's
+    // settings.ini): set again after the reset
+    n0 = await saved(page);
+    await page.click('.set[data-key="movies"] .switch'); await settle(page, n0++);
+    const more = page.locator('#settings details:has(> summary:has-text("More display"))');
+    if (!await more.evaluate(d => d.open)) await page.click('#settings summary:has-text("More display")');
+    await page.click('.set[data-key="fps_counter"] .opt:has-text("Detailed")'); await settle(page, n0++);
     report('settings', fileOk && envOk && /not a whole number in 0\.\.32/.test(refusedMsg) && /ignored/.test(rawMsg) &&
       /ultrawide/.test(hudState) && /roam_rate = 30/.test(otherText) && /roam_port = 47300 \(ignored: only used by the Mac app\)/.test(otherText) && after.movies === 'false' && after.fps === '120' && after.name === 'Tester' && /^#hud = wide$/m.test(file2) && /\(2 changed\)$/.test(moreDisplay) &&
       resetOk && listenPlaying === 'true' && listened,
@@ -829,12 +837,15 @@ try {
     r.reloaded = await nav;
     if (r.reloaded) {
       await waitPhase(p, ['ready', 'error'], 60000);
-      r.logAfter = (await p.evaluate(() => window.__nfsu2.log.tail(50))).some(l => /the last game lost its graphics/.test(l));
+      const after = await p.evaluate(() => window.__nfsu2.log.tail(50));
+      r.logAfter = after.some(l => /the last game lost its graphics/.test(l));
+      // the line on the last game says what it held at its last copy (lastgame.ts): the textures, at least
+      r.held = after.find(l => /^\[app\] the last game .*; at that copy it held textures [1-9]\d* MB/.test(l)) ?? null;
       await p.click('#play');
       r.playsAgain = await waitPhase(p, ['playing'], 60000).then(() => true, () => false);
     }
     report('gpulost', r.phase === 'exited' && r.headline === 'Stopped' && r.failed >= 1 && r.gone && r.stopped &&
-      /the graphics stopped working\. Play reloads this page/.test(r.sub) && r.bugReport && r.reloaded && !r.logAfter && r.playsAgain, r);
+      /the graphics stopped working\. Play reloads this page/.test(r.sub) && r.bugReport && r.reloaded && !r.logAfter && !!r.held && r.playsAgain, r);
     await c2.close();
   }
 

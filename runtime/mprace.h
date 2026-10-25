@@ -42,6 +42,11 @@ void mprace_ack(void);
  * prize the career's bank got for it */
 int  mprace_place(void);
 int  mprace_prize(void);
+/* the race's results as the game showed them (its results' rows, in their order): each racer's LAN name, whether it
+ * finished, its time (s) or, in a drift race, its points, and which is ours; how many (0: no results) */
+#define MPRACE_RESULTS_MAX 6
+typedef struct { char name[16]; int finished, ours, points; float time; } MpResult;
+int  mprace_results(MpResult *r, int max);
 /* our car's engine power in the race as evened out (1: as it was) */
 float mprace_factor(void);
 /* a network race of this type (its N_MODE: circuit 0, sprint 1, drag 2, drift 3, URL 4, Street X 10) evens

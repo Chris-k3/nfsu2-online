@@ -233,6 +233,15 @@ async function start(i, name, script, own) {
         const n = globalThis.nfsu2Net; return n ? { ...n.stats(), peers: n.peers } : null;
       });
       if (s) w(`NETSTAT ${JSON.stringify(s)}`);
+      // the app page: what its copy of the log for a stopped page says the game held (lastgame.ts)
+      const held = APP && await page.evaluate(() => {
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k?.startsWith('nfsu2.lastgame.')) return JSON.parse(localStorage.getItem(k) ?? 'null')?.held ?? '';
+        }
+        return null;
+      });
+      if (held) w(`HELD ${held}`);
     } catch {}
   }, 10000);
   const r = { name, page, ctx, log, w, timer, done: null };

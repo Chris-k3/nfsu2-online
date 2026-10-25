@@ -112,9 +112,12 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
     - heap VA 0x08000000–0x28000000
   - The runtime's data, C stacks and malloc heap sit above (`--global-base=0x28000000 --no-stack-first`).
   - Initial memory 1 GB, maximum 4 GB.
-- **Threads:** the page starts the I/O worker and a pool of 24 game workers (`web/src/host/process.ts`).
-  - `wasi thread-spawn` claims a pool slot synchronously. Workers block with `Atomics.wait`; the page's main thread
-    never runs wasm and never blocks.
+- **Threads:** the page starts the I/O worker and a pool of game workers (`web/src/host/process.ts`): 12 at first,
+  then more as threads take them so that 2 stay idle, up to 24. A race or free roam starts 15 (at most 13 threads at
+  once), hosting a LAN game 18; all 24 at once held about 55 MB more of WebKit's page process (a phone's memory).
+  - `wasi thread-spawn` claims an idle pool slot synchronously. One that finds none asks the page for a worker and
+    waits for it (up to 10 s, as a slow `CreateThread`; never more than 15 ms in the suite's 19 scenarios). Workers block with `Atomics.wait`; the
+    page's main thread never runs wasm and never blocks.
   - Guest threads still hold the GIL (`win32_ext.c`): a FIFO ticket lock (`runtime/web/ticketlock.h`). A woken
     worker sometimes runs only 3 to 4.6 ms after its notify (Chrome 155 on Windows 11: about 1 in 1,800 wakes,
     measured between two plain workers), so every hand-over of the lock to a sleeping thread can cost a 120 Hz slot.
@@ -133,10 +136,14 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
 - **Files:** WASI preview1 calls go to the I/O worker over per-thread RPC slots (SAB + `Atomics.wait`). Results are
   written straight into wasm memory. Mounts:
   - `/data`: the install folder. Manifest from the server, case-insensitive lookup, 1 MiB blocks, memory LRU,
-    persistent OPFS block cache (`web/src/host/datacache.ts`). Blocks come from the server's `/data-blocks/` (named by
-    the manifest: `/data-blocks/v2/`): runs of up to 8 blocks as one answer, compressed with zstd, br or gzip as
-    Content-Encoding, which the browser undoes itself; a run whose first 64 KB does not compress goes as it is. One
-    block (all the page asks for) goes to a client that takes br as the server keeps it: compressed once at brotli's
+    persistent OPFS block cache (`web/src/host/datacache.ts`). The memory holds 64 MB while OPFS keeps the blocks (a
+    block reads from OPFS in 0.14 ms in WebKit), 768 MB without it. At most 64 cache files are open at once: each
+    holds two sync access handles, and WebKit gives a page 251 in all (then "Invalid platform file handle", for the
+    save folder's files too); kept open for good, a long free roam used them up in 13 min. Blocks come from the
+    server's `/data-blocks/` (named by the manifest: `/data-blocks/v2/`): runs of up to 8 blocks as one answer,
+    compressed with zstd, br or gzip as Content-Encoding, which the browser undoes itself; a run whose first 64 KB
+    does not compress goes as it is. One block (all the page asks for) goes to a client that takes br as the server
+    keeps it: compressed once at brotli's
     best in its state folder (`web/server-rs/src/app/kept.rs`, threads of its own at the lowest priority that wait
     while the CPU quota is 70 % used, the blocks asked for first, then the manifest's), or as it is where that found
     it does not compress; until it is kept, as
@@ -216,6 +223,34 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
   folder's 965 MB of movies become 179 MB, a dubbed language's 216 MB 153 MB.
 - **Clock:** `clock_gettime(MONOTONIC)` is `performance.timeOrigin + performance.now()`, which is one clock across
   workers.
+- **Display rate:** the page measures the refresh rate from rAF, as the median of spans of 4 frames: Safari on an
+  iPhone or iPad gives rAF times in whole milliseconds, and single intervals had a median of 62.5 Hz at times at 60
+  Hz, always 125 at 120. `fps = auto` follows the rate as it changes (`NFSU2_DISPLAY_HZ` is only the page's
+  measurement at Play): a 30 Hz phase (Safari in Low Power Mode; Playwright's WebKit on the Mac after a minute
+  without input, or with another window in front) runs the game at 30, with the 30 fps fixes
+  (`runtime/framerate.c`), instead of making every other frame for nothing: in WebKit's free roam 1 of 896 frames
+  was then drawn over unseen, and the web content process took 27 % of a core instead of 42 %. The log's `[gpu]`
+  line a minute counts the frames drawn over before the browser showed them (more than one frame between two rAFs;
+  at fps = 120 on a 60 Hz rAF half of them, on a 30 Hz one three quarters).
+- **The log for a player to send** (`web/src/app/logs.ts`, Download log): besides the game's own lines (its `[status]`
+  line a minute: fps, CPU, frame times, heap), the page writes the browser and system by name (an iPhone's Safari is
+  "Safari 26 on iOS", an iPad's "on iPadOS" although it says Macintosh), a `[app] device:` line (screen, pixel ratio,
+  cores, touch, Home Screen app or tab, a 30 Hz display before Play), and a line a minute each from the renderer
+  (`[gpu] 60 s to t=…`: frames, rAF rate, frames drawn over, the GPU's time to finish a frame p50/p90/max, frames
+  that waited for the GPU, the textures' memory on the GPU) and, while blocks come from the server, from the I/O worker
+  (`[data] 60 s: …`: blocks, MB, average and slowest fetch, tries again, reads from the cache, cache files open). How
+  long the page was hidden and an AudioContext interruption lasted are in the log too. Safari stops a page whose memory
+  it needs without any event, and the log went with it: `web/src/app/lastgame.ts` keeps a copy of the running game's log
+  (`LogRing.snapshot`, 160 KB at most: the opening lines, the game's session lines, the newest lines) in localStorage
+  every 10 s while it grows, when the page is hidden or shown, and at the end. A page that finds a game that did not get
+  to its end (or one stopped for a reason, GPU-LOST say, before a reload) says so on the start page and puts that log
+  first in Download log, with a line on how it ended (the page on screen or hidden at its last copy) and what the game
+  held at that copy: the textures' MB (and those unpacked from DXT or DXT1 as ASTC) and, in free roam, the friends' cars in the game
+  and the friends connected (the status table's `roam_cars` and `roam_friends`, `runtime/web/status_web.c`). Safari
+  gives the page no memory figure, and the first kept iPhone kill came between two renderer lines. A game the player
+  left by reloading or closing the page (`pagehide`) is offered as well (a frozen game, reloaded), with a quiet line and
+  no call for a bug report (`lastGameEnd`). Tested by killing WebKit's web content process during a game (`kill -9`,
+  as Safari's memory limit does).
 - **Frame pacing on Windows:** a worker's `Atomics.wait` timeout wakes on the OS timer, which Chrome on Windows runs
   at 1 ms or at 15.6 ms (Chrome 155: a 1 ms wait took 15.5 ms at the median). The pacer's sleep
   (`runtime/win32_ext.c`) therefore waits until a learned margin before its deadline and spins on the clock for the
@@ -249,7 +284,11 @@ The game thread keeps `com.c` (D3D9 state, shader translation) and records throu
      never waits on JS or WebGPU except for frames in flight (≤ 2) and explicit readbacks.
 - The TypeScript side (`web/src/gpu/`) reads those structures **zero-copy** from the wasm memory and uploads arenas with
   one `queue.writeBuffer` each per frame. It keeps pipeline and bind-group caches and encodes the passes. It presents to
-  the canvas at native resolution, aspect-fit, and reads frames back for the tests' dumps and F12 screenshots (the
+  the canvas at native resolution, aspect-fit; at a render scale below 1 (a phone's 75 %) with the picture in the
+  view's shape, the canvas takes the picture's size, the frame draws straight into it and CSS stretches it, so there
+  is no composite pass over every screen pixel (Playwright WebKit, iPhone 13 geometry: GPU 0.62 -> 0.60 ms a frame on
+  an M4 Pro, the screen within 2 levels where it holds still; three canvas buffers of 1898x876 instead of 2532x1170).
+  It reads frames back for the tests' dumps and F12 screenshots (the
   PNGs are made in a worker, `png-worker.ts`, off the thread that draws). The one readback the game waits for: a
   render target it locks to read, the picture of a DVD or magazine cover. The frame drawn so far goes to the page
   early with the request, and the page writes the texture's rows into the game's lock buffer
@@ -262,6 +301,16 @@ The game thread keeps `com.c` (D3D9 state, shader translation) and records throu
   7× the texture memory (30 MB packed, 213 MB unpacked) and about 0.4 s of page-thread work, all of it in the menus
   and on the loading screen (pauses up to ~0.2 s there), none during the race. `?bc=0` on the test page takes this
   path on any GPU.
+- Where such a GPU has `texture-compression-astc` (Apple's: every iPhone and iPad), DXT1 goes up as ASTC 4x4 instead
+  (`web/src/gpu/astc.ts`): block for block, the two RGB565 colours kept exactly (endpoint mode 8, 8 bits) and the codes
+  as weights (2-bit 0/21/43/64 for four colours, trits 0/32/64 for three). On an Apple GPU (`web/tools/astc-check.mjs`,
+  Chrome and WebKit) a texel is at most 2 of 255 from the CPU's unpacking, as close as that GPU's own BC1 (mean 0.469
+  against 0.471); in game frames at most 4, 87-91 % of the pixels identical. Textures 228 → 112 MB in free roam
+  (Quick Race 229 → 113): DXT1 is 4x smaller than unpacked, and rewriting a level is quicker than unpacking it
+  (1.2 against 1.7 ms for 1024x1024). A DXT1 texture with transparent texels (a three-colour block's fourth code) in
+  the first level that goes up is unpacked as before: one plane cannot give transparent black. One met only in a later
+  level gets two-plane blocks (alpha exact, the colour under a transparent texel the darker endpoint, not black).
+  DXT3 and DXT5 stay unpacked. `?astc=0` on the test page unpacks DXT1 too.
 - C and TS layouts come from one source: a C header with `_Static_assert` offsets, plus a generated or hand-mirrored
   `proto.ts` checked by a test.
 

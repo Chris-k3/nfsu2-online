@@ -107,11 +107,13 @@ pub struct Opts {
     pub limits: Limits,
     pub buddy: BuddyLimits,
     pub state_dir: Option<std::path::PathBuf>,
+    /// the lobby's clock at the start (ms; None: 1,000,000)
+    pub t0: Option<f64>,
 }
 
 impl World {
     pub fn new(o: Opts) -> World {
-        let t = Rc::new(Cell::new(1_000_000.0));
+        let t = Rc::new(Cell::new(o.t0.unwrap_or(1_000_000.0)));
         let tt = Rc::new(Cell::new(0.0));
         let lines = Rc::new(RefCell::new(Vec::new()));
         let (t2, tt2, l2) = (t.clone(), tt.clone(), lines.clone());

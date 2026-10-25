@@ -1,11 +1,12 @@
 // Drift mode in free roam (runtime/drift.c): X in the game turns the game's own drift-event handling, drift camera
 // and drift scoring on and off.  The free-roam HUD has no place for the score (the drift event's panel is HUD_Drift's),
 // so while drift mode is on the page shows that panel -- Best, the multiplier with the points its next level needs,
-// Total -- under the game's Bank panel and as wide, the drift event's DRIFT popup with the points of each drift banked,
-// where free roam's HUD shows its own popups (the drift event's place, the middle, is free roam's arrow's), and a note
-// at each X: on, off, or that it is for free roam.  Not over a dialog of the page's.  It reads the game's status (runtime/web/status_web.c), as the pause hint does:
-// drift (1 chosen, 2 on now, 4 the last X was elsewhere), drift_key (X presses), drift_x, drift_gain, drift_total,
-// drift_best.
+// Total -- under the game's Bank panel and as wide, and the drift event's DRIFT counter: a drift's points counting up
+// while it counts, then in lime when it banks or in red when a wall loses it, fading out, in the middle as there (under
+// free roam's arrow, which has the drift event's place), and a note at each X: on, off, or that it is for free roam.
+// Not over a dialog of the page's.  It reads the game's status (runtime/web/status_web.c), as the pause hint does, every
+// frame while drift mode is on: drift (1 chosen, 2 on now, 4 the last X was elsewhere), drift_key (X presses), drift_x,
+// drift_gain, drift_total, drift_best, drift_st (0 a drift that counts) and drift_pend (its points).
 import type { GameSession } from './game';
 import { t } from './i18n';
 import { pageDialog } from './padnav';
@@ -13,8 +14,9 @@ import { pageDialog } from './padnav';
 /** the game's Bank panel, in HUD units (640x480 in the middle of the picture; hud = wide moves its side out by up to
  *  109): its right edge 299 right of the middle, its bottom 167 above it; the panel goes 4 under it, as wide (176) */
 const RIGHT_U = 299, TOP_U = -163, WIDE_U = 176;
-/** free roam's style popups (a jump's HANG TIME): right-aligned 295 right of the middle, from 15 above it */
-const POP_RIGHT_U = 295, POP_TOP_U = -15;
+/** the DRIFT counter: centred, from 92 above the middle (free roam's arrow ends 98 above it; the drift event's counter,
+ *  from 154 above, is where the arrow is) */
+const POP_TOP_U = -92;
 
 export class DriftPanel {
   private root: HTMLElement;
@@ -31,6 +33,8 @@ export class DriftPanel {
   private shown = false;
   private filled = '';
   private banked = -1;
+  private counting = false;
+  private pend = 0;
 
   constructor(stage: HTMLElement, private deps: { toast(msg: string, ms: number): void; wide(): boolean; log(s: string): void }) {
     const p = this.root = document.createElement('div');
@@ -51,7 +55,7 @@ export class DriftPanel {
 
   /** a game started: the panel follows its drift mode until stop() */
   start(s: GameSession) {
-    this.session = s; this.keys = -1; this.on = false; this.filled = ''; this.banked = -1;
+    this.session = s; this.keys = -1; this.on = false; this.filled = ''; this.banked = -1; this.counting = false;
     const tick = () => { this.update(); this.raf = requestAnimationFrame(tick); };
     this.raf = requestAnimationFrame(tick);
   }
@@ -68,7 +72,7 @@ export class DriftPanel {
     const s = this.session;
     if (!s) return;
     const now = performance.now();
-    if (now - this.readAt > 100) {
+    if (this.on || now - this.readAt > 100) {
       this.readAt = now;
       const st = s.status?.read();                // null while the game writes it: the last state stands
       if (st && st.has('drift')) {
@@ -79,24 +83,29 @@ export class DriftPanel {
         }
         this.keys = k;
         this.on = (d & 2) !== 0;
-        const total = st.get('drift_total') ?? 0;
-        if (this.banked >= 0 && total > this.banked && this.on && !pageDialog()) this.popup(total - this.banked, s);
-        this.banked = total;
+        const total = st.get('drift_total') ?? 0, pend = st.get('drift_pend') ?? 0, was = this.counting;
+        const grew = this.banked >= 0 && total > this.banked;
+        this.counting = this.on && st.get('drift_st') === 0 && pend > 0;
+        if (this.counting) this.counter('live', pend);
+        else if (this.on && grew) this.counter('banked', total - this.banked);
+        else if (this.on && was) this.counter('lost', this.pend);   // over without banking: a wall took it
+        this.pend = pend; this.banked = total;
         this.fill(st.get('drift_best') ?? 0, st.get('drift_x') ?? 1, st.get('drift_gain') ?? 0, total);
       }
     }
     this.show(this.on && !pageDialog());
     if (this.shown) this.place(s);
-    if (!this.shown) this.pop.hidden = true;
+    else this.pop.hidden = true;
   }
 
-  /** a drift banked: DRIFT and its points, fading out (the animation's end hides it) */
-  private popup(points: number, s: GameSession) {
-    const q = this.pop;
+  /** DRIFT and the points: live while the drift counts, then banked or lost, fading out (the animation's end hides it) */
+  private counter(kind: 'live' | 'banked' | 'lost', points: number) {
+    const q = this.pop, again = kind !== 'live' || !q.classList.contains('live') || q.hidden;
     q.firstElementChild!.textContent = t('DRIFT');
-    q.lastElementChild!.textContent = `+${points}`;
-    q.hidden = true; void q.offsetWidth; q.hidden = false;     // the animation from its start
-    this.place(s);
+    q.lastElementChild!.textContent = String(Math.floor(points));
+    if (!again) return;
+    q.className = `drift-pop ${kind}`;
+    q.hidden = true; void q.offsetWidth; q.hidden = !this.shown;    // a fade from its start
   }
 
   private show(on: boolean) {
@@ -130,7 +139,7 @@ export class DriftPanel {
     st.left = `${v.x + v.w / 2 + (RIGHT_U + out - WIDE_U) * u}px`;
     st.top = `${v.y + v.h / 2 + TOP_U * u}px`;
     st.setProperty('--u', `${u}px`);
-    ps.left = `${v.x + v.w / 2 + (POP_RIGHT_U + out) * u}px`;           // its right edge (the style's translate)
+    ps.left = `${v.x + v.w / 2}px`;                                      // its middle (the style's translate)
     ps.top = `${v.y + v.h / 2 + POP_TOP_U * u}px`;
     ps.setProperty('--u', `${u}px`);
   }

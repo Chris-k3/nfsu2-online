@@ -69,6 +69,11 @@ rev in the countdown) and step aside for menus, the pause menu and free roam's c
 - **Gears:** with a manual gearbox (the race's Transmission choice), gear down and gear up above the steering.
 - **Small buttons** along the top: pause, camera, look back, reset; in free roam also the map, messages, horn, and
   Start (an event, or an outrun).
+- **Sizes**, in the Controls sheet's Touch tab and kept in this browser: **Control size** for the touch controls, and
+  **Menu button size** for the game's own small menu buttons (Back, Continue and the others at the bottom of every
+  menu, and the arrows of the main menu's and Quick Race's choices). Both are **Auto** by default: the touch controls
+  at 100% on a phone and up to 125% on a tablet, as far as they fit; the menu buttons big enough for a finger, up to
+  200%.
 - A keyboard or a controller sends them away until you touch the game again. Android phones buzz on crashes.
 
 ## 3. Controls
@@ -98,9 +103,10 @@ The start page shows these keys under **Controls**, and F9, Controls shows them 
 - **Change the keys:** in the game, Options, Controls. The horn stays on N (the game has no horn of its own).
 - **Drift mode (X):** in free roam, the car handles as in the game's drift races (its drift tuning and the drift
   assist), the camera is the drift races' (C still goes through all of them), and drifts score as there: the drift
-  races' panel (Best, the multiplier with the points its next level needs, Total) shows under Bank, and DRIFT with
-  the points of each drift. Just for fun: the points never go into the bank or the career. X again turns it off and
-  gives your camera back. It is off in races and outruns and comes back in free roam after them.
+  races' panel (Best, the multiplier with the points its next level needs, Total) shows under Bank, and DRIFT counts
+  a drift's points up while you drift, as in the races: lime when it banks, red when a wall loses it. Just for fun:
+  the points never go into the bank or the career. X again turns it off and gives your camera back. It is off in
+  races and outruns and comes back in free roam after them.
 - **Mouse:** works in the menus; in the garage, drag with the middle button (the wheel) held to turn the car, as in
   the PC game. On the ECU and Turbo tuning graphs the wheel moves the dot of the column under the pointer, as in the
   PC game, and so does a drag up or down on that column. **Touch:** a tap is a click there; drag two fingers to turn
@@ -193,6 +199,11 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
 - **The European cars:** the Peugeot 106 and the Vauxhall Corsa 1.8, which only the European release sold, are in the
   car lot and on every car select (Quick Race, Customize, LAN and Online), and AI racers drive them too. The North
   American game has their files but hid them.
+- **Power Units:** the game's Options, Gameplay (also in the pause menu's) has a row after Speedometer Units: the
+  engine's power in bhp or kW wherever the game shows it (the dyno, the performance shop's parts), whatever the
+  speedometer shows. Until you change it, it follows Speedometer Units, as in the original game (kW with km/h).
+  Torque still follows the speedometer (Nm with km/h, ft-lbs with mph), and the dyno results' 0-60 and 0-100 are
+  mph times either way.
 - **Two tabs:** one browser runs one game at a time. A second tab shows "Open elsewhere" and its Settings are
   read only. It takes over when the first tab closes.
 
@@ -214,8 +225,11 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
     empty saves by itself: it offers the cloud's instead (keeping the empty ones asks first: every browser on the
     keyphrase loses its profiles). The page also asks before cloud saves with no profiles, or older than the ones in
     this browser (a server gone back), replace yours.
-  - The profiles, their DVD and magazine covers, the game's options and `settings.ini` go; F12 screenshots stay in
-    each browser.
+  - The profiles and `settings.ini` go. What belongs to the device stays in each browser: F12 screenshots, DVD and
+    magazine covers (a cover is a picture of 1 MB: another browser's crib lists it, but the game says it cannot load
+    it), the game's graphics options, and in Settings full screen, the resolution scale, render size and pixel limit,
+    Menus and HUD, the frame rate and its counter, the output latency, the controller's settings and how many
+    players' cars free roam shows. A phone keeps its own and a PC its own.
   - The server keeps the copy of an earlier day too: "Go back to ..." brings it back when a day went wrong.
   - Stop syncing leaves the saves where they are, and the keyphrase in the box; Delete from cloud deletes them on the
     server (your browsers keep theirs). A keyphrase nobody used for two years is deleted from the server. A browser
@@ -493,12 +507,12 @@ Good to know:
   In the original game the Filter always hid all others, so a game made with Collision Detection off was seen by no
   one. A game with **Private Room** on is not listed, as in the original game.
 - **Ranked games** need three players at least. Ranked wins give ranking points. After a ranked race the results
-  screen lists whose results came in (received or waiting), then, once two players' games sent the same result,
-  Official Race Results: each player's place, time (drift: score) and the ranking points the race gave (100 for the
+  screen lists whose results came in (received or waiting), then, once the games of two players who finished sent
+  the same result, Official Race Results: each player's place, time (drift: score) and the ranking points the race gave (100 for the
   winner down to 0 for the last; 0 for a player who left the race, shown as Disconnected).
-- **A race counts** in Rankings once two of its players' games sent the same result (every game sends its own at
-  the results screen), so a race that only one player finished does not count. Each player races from their own
-  browser.
+- **A race counts** in Rankings once the games of two players who finished it sent the same result (every game
+  sends its own at the results screen), so a race that only one player finished does not count. A player who left
+  the race decides nothing: their game counts every player as gone. Each player races from their own browser.
 - **EA Messenger** (the Online Main Menu's button): Search finds the players online on this server and those with a
   race in Rankings. **Send Friend Request** reaches the other player now, or when they next come online: they see you
   in their list with a green arrow and pick **Answer Friend Request**: Accept, Decline or Block. Your friends stay on
@@ -522,7 +536,7 @@ Good to know:
 | `GPU-ADAPTER-WIN-ARM`: Chrome on Windows on ARM (Snapdragon) | Chrome keeps WebGPU behind a flag there: turn on `chrome://flags/#enable-unsafe-webgpu`, then restart Chrome. |
 | `GPU-ADAPTER-ANDROID` | Chrome on Android has WebGPU from Android 12 on Qualcomm (Adreno), ARM (Mali) and Intel graphics, and from Android 16 on Imagination (PowerVR); not yet on Samsung's Xclipse. Update Android and Chrome; on other phones the game cannot run yet. |
 | `GPU-ADAPTER`, `GPU-ADAPTER-FIREFOX` | The browser would not use the graphics. Restart it; update the graphics driver (on a Mac: macOS) and the browser. `chrome://gpu` in Chrome, about:support (Graphics) in Firefox says why. In Firefox on Windows, graphics without Direct3D 12 cannot run it either. |
-| `GPU-NO-BC`: a note about packed textures | Nothing to do: the game plays. This GPU (in many phones, Pixels among them) cannot read the game's compressed textures, so the page unpacks them as the game loads: about 200 MB more memory, and loading screens may pause for a moment. |
+| `GPU-NO-BC`: a note about packed textures | Nothing to do: the game plays. This GPU (in many phones, Pixels among them) cannot read the game's compressed textures, so the page unpacks them as the game loads: about 200 MB more memory, and loading screens may pause for a moment. Graphics that can read ASTC instead (iPhones, iPads, most other phones) get no note: most textures are converted to that, about 50 MB more. |
 | `GPU-INTEGRATED-FIREFOX`: "Graphics: Intel (integrated)" (or AMD) in Firefox on Windows | Firefox runs the game on the graphics it draws its own windows with, whatever the game asks for. If the computer also has a graphics card, as many laptops do, give Firefox the card: Windows Settings, System, Display, Graphics, Firefox, High performance; then quit Firefox completely and start it again. On a computer with integrated graphics only, nothing changes. Chrome does the same (its `chrome://gpu` names the graphics it uses): the same Windows setting for Chrome, or `chrome://flags/#force-high-performance-gpu`. |
 | `GPU-RENDERER`: "The game was stopped" | The graphics did not start: the game cannot go on without them. Restart the browser and press **Play**; if it happens again, update the graphics driver, and download the log (its `[gpu]` lines say why). |
 | `GPU-LOST`: "The game was stopped" | The graphics stopped during the game (the graphics driver reset, or the browser's graphics process crashed): the game cannot go on without them. Press **Play**: the page reloads, which starts the graphics again (Safari gives a page no graphics after that until it reloads), then **Play** starts the game. Your saves and settings stay; the log is cleared by the reload, so download it first if you want to keep it. If it keeps happening, restart the browser. |
@@ -532,6 +546,6 @@ Good to know:
 | No sound | Click the game or press a key. Check the sound setting and the output latency (try "Robust"). |
 | Stuck on a loading screen | F9, Quit game; then "Close the game now"; then "Stop the game". When the log ends in `[data]` lines, the game was waiting for its data from the server: it goes on when the data comes. |
 | Other players' cars stutter, freeze and jump in an Online or LAN race | All updates go through the player who created the game, so let whoever has the steadiest connection (a cable rather than Wi-Fi or mobile) and the fastest computer create it, and keep the game's tab in front. After the race, F9, Download log: its `[racenet]` lines say how each car's updates came (long waits, how many came at once after them) and each player's frame rate. |
-| Anything odd | F9, Download log (or "Download log" on the start page after the game ended) and keep the file. It has the game's own log. Before you post it anywhere: it names your browser, its version and your system, your graphics chip, your time zone, and the names and virtual addresses of the players you met (not the server's address: only whether it was this machine, on the LAN or remote). |
+| Anything odd | F9, Download log (or "Download log" on the start page after the game ended) and keep the file. It has the game's own log. When the browser stopped the page itself (on an iPhone the game is suddenly gone and the page loads again), the start page says so and Download log starts with that last game's log. After you reload or close the page during a game, Download log has that game's log as well. Before you post it anywhere: it names your browser, its version and your system, your graphics chip, your time zone, and the names and virtual addresses of the players you met (not the server's address: only whether it was this machine, on the LAN or remote). |
 | `Port 8080 is in use` when starting | The server already runs; open its address. Or start on another port: `web/start.sh --http-port 9080`. |
 | Full screen | The game plays in the browser window. F9, Full screen goes full screen, and holding Esc leaves it (in Firefox, a press). "Full screen on Play" in Settings starts every game full screen. |

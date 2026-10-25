@@ -9,6 +9,7 @@
 use super::world::{C, Opts, World, ip};
 use crate::aries::{Fields, V, encode_fields, encode_frame};
 use crate::lobby::Limits;
+use crate::stats::{Race, RacePlayer};
 use crate::vhost::{DATA, lan_frame};
 use crate::{PORT_BUDDY, PORT_HTTP, PORT_LOBBY, PORT_REDIRECTOR, VHOST_VIP};
 
@@ -346,6 +347,40 @@ fn the_game_list() {
     assert_eq!(w.c(e).l("gjoi").code, "");
 }
 
+// the game list in one search: the config sets the game's page (GAMES_PER_UPDATE), its search asks for that many, and
+// gets every open game, oldest first; past the page, the next one
+#[test]
+fn the_game_list_in_one_search() {
+    let mut w = world();
+    let hosts: Vec<C> = (0..210)
+        .map(|i| {
+            let g = w.client(&format!("10.77.{}.{}", 1 + i / 200, 2 + i % 200));
+            w.login(g, &format!("Host{i}"))
+        })
+        .collect();
+    let g = w.client("10.77.0.2");
+    let e = w.login(g, "Looker");
+    assert_eq!(w.c(e).l("news").g("GAMES_PER_UPDATE"), "200");
+    for (i, &h) in hosts.iter().enumerate() {
+        w.send(h, "gcre", fields![("NAME", format!("{i}00.Host{i}")), ("CUSTFLAGS", 0x40000f3), ("PARAMS", "TRACK=4011")]);
+    }
+    let names = |w: &mut World| -> Vec<String> {
+        w.cm(e).take().iter().filter(|m| m.kind == "+gam").map(|m| m.g("NAME").to_string()).collect()
+    };
+    let search = |s: i32, n: i32| {
+        fields![("START", s), ("COUNT", n), ("CUSTFLAGS", 0x40000f3), ("CUSTMASK", 0x40001f3), ("SYSFLAGS", 0), ("SYSMASK", 0xc0000)]
+    };
+    let made = |r: std::ops::Range<usize>| -> Vec<String> { r.map(|i| format!("{i}00.Host{i}")).collect() };
+    w.cm(e).take();
+    w.send(e, "gsea", search(0, 200));
+    assert_eq!(w.c(e).l("gsea").g("COUNT"), "200");
+    assert_eq!(names(&mut w), made(0..200), "a page of 200, oldest first");
+    w.send(e, "gsea", search(200, 200));
+    assert_eq!(names(&mut w), made(200..210));
+    w.send(e, "gsea", search(0, 1000));
+    assert_eq!(w.c(e).l("gsea").g("COUNT"), "200", "never more than a page");
+}
+
 // six players: a game asked for 8 takes 6, the seventh finds it full; +ses names all six
 #[test]
 fn six_players() {
@@ -541,6 +576,7 @@ fn results() {
     report(&mut w, b2, &auth);
     assert!(w.logged("not taken: a time the race has not had"));
     assert_eq!(w.core.stats.board(0, false).len(), 0);
+    assert!(w.core.stats.rec("Bravo", false).is_none(), "no records from a report not taken");
     // after the race: Bravo's report alone decides nothing (a report not taken was not his one report); Alpha's,
     // from another browser with the same places, makes the result
     w.advance(200_000.0);
@@ -568,6 +604,11 @@ fn results() {
     assert!(w.c(a2).msgs.iter().any(|m| m.kind == "user" && m.get("PERS") == Some("Alpha")));
     w.send(a2, "user", fields![("PERS", "Alpha")]);
     assert_eq!(stat_of(w.c(a2).l("user"))[8..13], [0, 0, 0, 0, 1]);
+    // the records (Top Speed Achieved in mm/s): each player's from its own entry in its own report (both sent the
+    // same one: Bravo is index 1, 42.126 m/s; Alpha index 0, 42.212 m/s)
+    assert_eq!(stat_of(w.c(a2).l("user"))[3..8], [42212, 0, 0, 0, 0]);
+    w.send(a2, "user", fields![("PERS", "Bravo")]);
+    assert_eq!(stat_of(w.c(a2).l("user"))[3..8], [42126, 0, 0, 0, 0]);
     // the rankings: the circuit board, and one's own row
     w.send(a2, "snap", fields![("INDEX", 4), ("CHAN", 6), ("START", 0), ("RANGE", 100)]);
     assert_eq!(w.c(a2).l("snap").g("COUNT"), "2");
@@ -579,6 +620,45 @@ fn results() {
     assert_eq!(w.c(a2).l("+snp").g("N"), "Alpha");
     w.send(a2, "snap", fields![("INDEX", 4), ("CHAN", 7), ("START", 0), ("RANGE", 100)]);
     assert_eq!(w.c(a2).l("snap").g("COUNT"), "0", "no sprint races yet");
+    // points in P are decimal, in S hex: 28 ranked wins, 2800 points (hex af0: the game read P "af0" as 0)
+    for _ in 0..28 {
+        let players = ["Alpha", "Bravo"].iter().enumerate().map(|(i, n)| RacePlayer { name: n.to_string(), place: i as u32 + 1, time: 60.0 });
+        w.core.stats.add_race(&Race { kind: 4, ranked: true, track: 4011, players: players.collect() });
+    }
+    w.send(a2, "snap", fields![("INDEX", 4), ("CHAN", 16), ("RANGE", 1), ("FIND", "$")]);
+    let row = w.c(a2).l("+snp");
+    assert_eq!([row.g("N"), row.g("R"), row.g("P"), row.g("S")], ["Alpha", "1", "2800", "af0,1c,0"]);
+}
+
+// the rankings: the screens' channels go in their own order, Drift before Drag (SPEED2.EXE 0x58ce30, 0x5826e0): the
+// overall boards 6..11, one's own row 12..17, the month's leaders 18..23; last month's (24..29) are empty
+#[test]
+fn rankings_channels() {
+    let mut w = world();
+    let g = w.client("10.77.0.2");
+    let a = w.login(g, "Alpha");
+    let add = |w: &mut World, kind: u32, names: [&str; 2]| {
+        let players = names.iter().enumerate().map(|(i, n)| RacePlayer { name: n.to_string(), place: i as u32 + 1, time: 60.0 });
+        w.core.stats.add_race(&Race { kind, ranked: true, track: 4011, players: players.collect() });
+    };
+    add(&mut w, 3, ["Alpha", "Drifter"]);
+    add(&mut w, 2, ["Dragger", "Other"]);
+    let rows = |w: &mut World, chan: i32, own: bool| -> Vec<String> {
+        let from = w.c(a).msgs.len();
+        let mut f = fields![("INDEX", 21), ("CHAN", chan), ("START", 0), ("RANGE", if own { 1 } else { 100 })];
+        if own {
+            f.extend(fields![("FIND", "$")]);
+        }
+        w.send(a, "snap", f);
+        w.c(a).msgs[from..].iter().filter(|m| m.kind == "+snp").map(|m| format!("{} {}", m.g("N"), m.g("P"))).collect()
+    };
+    assert_eq!(rows(&mut w, 8, false), ["Alpha 100", "Drifter 0"], "Drift: the drift board");
+    assert_eq!(rows(&mut w, 9, false), ["Dragger 100", "Other 0"], "Drag: the drag board");
+    assert_eq!(rows(&mut w, 14, true), ["Alpha 100"], "one's own Drift row");
+    assert!(rows(&mut w, 15, true).is_empty(), "no drag race of one's own");
+    assert_eq!(rows(&mut w, 20, false), ["Alpha 100", "Drifter 0"], "the month's drift leaders");
+    assert!(rows(&mut w, 26, false).is_empty(), "last month's leaders: none kept");
+    assert_eq!(w.c(a).l("snap").g("TOTAL"), "0");
 }
 
 // names: a name another browser holds comes with four digits (the same for one client); its own browser takes it

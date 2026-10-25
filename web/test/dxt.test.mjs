@@ -69,3 +69,15 @@ test('layout: edge blocks, a pitch wider than the blocks, a 1x1 level, an offset
   for (let y = 0; y < 6; y++) for (let x = 0; x < 6; x++) assert.deepEqual(t[y * 6 + x], want(x, y), `texel ${x},${y}`);
   assert.deepEqual(rgba(unpackDxt(DXT1, src, 5 + 24, 8, 1, 1)), [BLUE]);
 });
+
+test('into a reused buffer: the same texels, the rest of the buffer left alone', () => {
+  const src = hex('00 F8 1F 00 E4 1B E4 1B');
+  const want = rgba(unpackDxt(DXT1, src, 0, 8, 4, 4));
+  const buf = new Uint8Array(4 * 4 * 4 + 8).fill(0xAB);
+  const got = unpackDxt(DXT1, src, 0, 8, 4, 4, buf);
+  assert.equal(got.buffer, buf.buffer);
+  assert.deepEqual(rgba(got), want);
+  assert.deepEqual([...buf.subarray(64)], new Array(8).fill(0xAB));
+  // too small: a new array
+  assert.notEqual(unpackDxt(DXT1, src, 0, 8, 4, 4, new Uint8Array(8)).buffer.byteLength, 8);
+});

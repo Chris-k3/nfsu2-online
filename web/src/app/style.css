@@ -410,7 +410,7 @@ summary:hover { color: var(--text); }
 
 /* a short message at the bottom of the page (settings saved) */
 .page-toast {
-  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 5; max-width: calc(100vw - 32px);
+  position: fixed; left: 50%; bottom: max(24px, env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 5; max-width: calc(100vw - 32px);
   padding: 8px 16px; border: 2px solid var(--edge); border-radius: 12px; background: var(--frame);
   font-size: 14px; line-height: 20px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
@@ -423,13 +423,17 @@ summary:hover { color: var(--text); }
 html:has(> body > .stage:not([hidden])) { overflow: hidden; }
 .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: none; touch-action: none; }
 .stage.cursor canvas { cursor: default; }
+/* the touch controls' size (touch.ts touchScale: the Controls sheet's choice, or auto's for the screen), set on the
+ * stage: every size and gap below is so many px at 100 % times --ts; the margins from the screen's edges and the
+ * picture stay as they are.  touch.ts ROOM: the most room they take at 100 % */
+.stage { --ts: 1; }
 /* the menu's button on the game (touch screens): small and dim in the top left corner, clear of a notch */
 .stage-menu {
   position: absolute; z-index: 4; top: max(12px, env(safe-area-inset-top)); left: max(12px, env(safe-area-inset-left));
-  width: 48px; height: 48px; padding: 12px; border: 0; border-radius: 50%;
+  width: calc(48px * var(--ts)); height: calc(48px * var(--ts)); padding: calc(12px * var(--ts)); border: 0; border-radius: 50%;
   background: rgba(0, 0, 0, 0.4); color: rgba(255, 255, 255, 0.72); -webkit-tap-highlight-color: transparent;
 }
-.stage-menu svg { display: block; width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.stage-menu svg { display: block; width: calc(24px * var(--ts)); height: calc(24px * var(--ts)); fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
 .stage-menu:active { background: rgba(0, 0, 0, 0.72); color: var(--lime); }
 /* touch controls (touch.ts) while the player drives: dim and see-through like the menu's button, lime while
  * pressed.  The small round ones in a row after the menu's button (the mode button and tilt's straight-ahead top
@@ -438,54 +442,59 @@ html:has(> body > .stage:not([hidden])) { overflow: hidden; }
   position: absolute; inset: 0; z-index: 3; pointer-events: none; -webkit-user-select: none; user-select: none;
   --l: max(12px, env(safe-area-inset-left)); --r: max(12px, env(safe-area-inset-right));
   --t: max(12px, env(safe-area-inset-top)); --b: max(12px, env(safe-area-inset-bottom));
+  /* the margins as padding, for auto's size to read (touch.ts autoTouchSize): it moves none of the controls */
+  padding: var(--t) var(--r) var(--b) var(--l);
 }
 .touch > * { position: absolute; pointer-events: auto; touch-action: none; -webkit-tap-highlight-color: transparent; }
 .tc {
   display: flex; align-items: center; justify-content: center; text-align: center;
-  background: rgba(0, 0, 0, 0.4); color: rgba(255, 255, 255, 0.72); font: italic 700 16px/20px var(--font);
+  background: rgba(0, 0, 0, 0.4); color: rgba(255, 255, 255, 0.72); font: italic 700 calc(16px * var(--ts)) / calc(20px * var(--ts)) var(--font);
 }
-.tc svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.tc svg { width: calc(24px * var(--ts)); height: calc(24px * var(--ts)); fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .tc svg .fill { fill: currentColor; stroke: none; }
 .tc.on { background: rgba(0, 0, 0, 0.72); color: var(--lime); }
-.tc.small { top: var(--t); width: 48px; height: 48px; border-radius: 50%; }
-.tc.big { bottom: var(--b); border-radius: 16px; }
-.tc.big svg { width: 32px; height: 32px; }
-.tc.round { border-radius: 50%; font-size: 14px; line-height: 16px; }
+.tc.small { top: var(--t); width: calc(48px * var(--ts)); height: calc(48px * var(--ts)); border-radius: 50%; }
+.tc.big { bottom: var(--b); border-radius: calc(16px * var(--ts)); }
+.tc.big svg { width: calc(32px * var(--ts)); height: calc(32px * var(--ts)); }
+.tc.round { border-radius: 50%; font-size: calc(14px * var(--ts)); line-height: calc(16px * var(--ts)); }
 /* Nitro: the nitrous bottle of the game's performance shop (Upscaled HUD's copy, white), a mask in the control's colour */
-.tc .nitro { width: 48px; height: 17px; background: currentColor; mask: url(./nitro.png) center / contain no-repeat; }
-.tc.pill { height: 40px; padding: 0 20px; border-radius: 20px; }
-.tc[data-ctl="pause"] { left: calc(var(--l) + 56px); }
-.tc[data-ctl="camera"] { left: calc(var(--l) + 112px); }
-.tc[data-ctl="look"] { left: calc(var(--l) + 168px); }
-.tc[data-ctl="reset"] { left: calc(var(--l) + 224px); }
-.tc[data-ctl="map"] { left: calc(var(--l) + 280px); }
-.tc[data-ctl="msgs"] { left: calc(var(--l) + 336px); }
-.tc[data-ctl="horn"] { left: calc(var(--l) + 392px); }
-.tc[data-ctl="chat"] { left: calc(var(--l) + 448px); }
+.tc .nitro { width: calc(48px * var(--ts)); height: calc(17px * var(--ts)); background: currentColor; mask: url(./nitro.png) center / contain no-repeat; }
+.tc.pill { height: calc(40px * var(--ts)); padding: 0 calc(20px * var(--ts)); border-radius: calc(20px * var(--ts)); }
+.tc[data-ctl="pause"] { left: calc(var(--l) + 56px * var(--ts)); }
+.tc[data-ctl="camera"] { left: calc(var(--l) + 112px * var(--ts)); }
+.tc[data-ctl="look"] { left: calc(var(--l) + 168px * var(--ts)); }
+.tc[data-ctl="reset"] { left: calc(var(--l) + 224px * var(--ts)); }
+.tc[data-ctl="map"] { left: calc(var(--l) + 280px * var(--ts)); }
+.tc[data-ctl="msgs"] { left: calc(var(--l) + 336px * var(--ts)); }
+.tc[data-ctl="horn"] { left: calc(var(--l) + 392px * var(--ts)); }
+.tc[data-ctl="chat"] { left: calc(var(--l) + 448px * var(--ts)); }
 .tc[data-ctl="mode"] { right: var(--r); }
-.tc[data-ctl="center"] { right: calc(var(--r) + 56px); }
-.tc[data-ctl="start"] { left: var(--l); bottom: calc(var(--b) + 128px); }
-.tc[data-ctl="left"] { left: var(--l); width: 80px; height: 80px; }
-.tc[data-ctl="right"] { left: calc(var(--l) + 88px); width: 80px; height: 80px; }
-.tc[data-ctl="gas"] { right: var(--r); width: 84px; height: 148px; }
-.tc[data-ctl="brake"] { right: calc(var(--r) + 92px); width: 84px; height: 104px; }
-.tc[data-ctl="nitro"] { right: calc(var(--r) + 12px); bottom: calc(var(--b) + 160px); width: 60px; height: 60px; }
-.tc[data-ctl="hb"] { right: calc(var(--r) + 106px); bottom: calc(var(--b) + 116px); width: 56px; height: 56px; font-size: 12px; line-height: 14px; }
+.tc[data-ctl="center"] { right: calc(var(--r) + 56px * var(--ts)); }
+.tc[data-ctl="start"] { left: var(--l); bottom: calc(var(--b) + 128px * var(--ts)); }
+.tc[data-ctl="left"] { left: var(--l); width: calc(80px * var(--ts)); height: calc(80px * var(--ts)); }
+.tc[data-ctl="right"] { left: calc(var(--l) + 88px * var(--ts)); width: calc(80px * var(--ts)); height: calc(80px * var(--ts)); }
+.tc[data-ctl="gas"] { right: var(--r); width: calc(84px * var(--ts)); height: calc(148px * var(--ts)); }
+.tc[data-ctl="brake"] { right: calc(var(--r) + 92px * var(--ts)); width: calc(84px * var(--ts)); height: calc(104px * var(--ts)); }
+.tc[data-ctl="nitro"] { right: calc(var(--r) + 12px * var(--ts)); bottom: calc(var(--b) + 160px * var(--ts)); width: calc(60px * var(--ts)); height: calc(60px * var(--ts)); }
+.tc[data-ctl="hb"] {
+  right: calc(var(--r) + 106px * var(--ts)); bottom: calc(var(--b) + 116px * var(--ts)); width: calc(56px * var(--ts)); height: calc(56px * var(--ts));
+  font-size: calc(12px * var(--ts)); line-height: calc(14px * var(--ts));
+}
 /* a manual gearbox: gear down and up above the left thumb's controls (the arrows, the stick's corner, or tilt's
  * Brake and handbrake), and free roam's Start above them */
-.touch { --gb: 88px; }
-.touch[data-steering="stick"] { --gb: 132px; }
-.touch[data-steering="tilt"] { --gb: 112px; }
-.tc.gear { bottom: calc(var(--b) + var(--gb)); width: 80px; height: 56px; border-radius: 16px; }
-.tc.gear svg { width: 32px; height: 32px; stroke-width: 2.5; }
+.touch { --gb: calc(88px * var(--ts)); }
+.touch[data-steering="stick"] { --gb: calc(132px * var(--ts)); }
+.touch[data-steering="tilt"] { --gb: calc(112px * var(--ts)); }
+.tc.gear { bottom: calc(var(--b) + var(--gb)); width: calc(80px * var(--ts)); height: calc(56px * var(--ts)); border-radius: calc(16px * var(--ts)); }
+.tc.gear svg { width: calc(32px * var(--ts)); height: calc(32px * var(--ts)); stroke-width: 2.5; }
 .tc[data-ctl="down"] { left: var(--l); }
-.tc[data-ctl="up"] { left: calc(var(--l) + 88px); }
-.touch[data-gears] .tc[data-ctl="start"] { bottom: calc(var(--b) + var(--gb) + 72px); }
+.tc[data-ctl="up"] { left: calc(var(--l) + 88px * var(--ts)); }
+.touch[data-gears] .tc[data-ctl="start"] { bottom: calc(var(--b) + var(--gb) + 72px * var(--ts)); }
 .touch:not([data-gears]) .gear { display: none; }
 /* tilt: Brake and the handbrake under the left thumb, Nitro beside Gas */
 .touch[data-steering="tilt"] .tc[data-ctl="brake"] { right: auto; left: var(--l); }
-.touch[data-steering="tilt"] .tc[data-ctl="hb"] { right: auto; left: calc(var(--l) + 96px); bottom: calc(var(--b) + 24px); }
-.touch[data-steering="tilt"] .tc[data-ctl="nitro"] { right: calc(var(--r) + 96px); bottom: calc(var(--b) + 24px); }
+.touch[data-steering="tilt"] .tc[data-ctl="hb"] { right: auto; left: calc(var(--l) + 96px * var(--ts)); bottom: calc(var(--b) + 24px * var(--ts)); }
+.touch[data-steering="tilt"] .tc[data-ctl="nitro"] { right: calc(var(--r) + 96px * var(--ts)); bottom: calc(var(--b) + 24px * var(--ts)); }
 .touch:not([data-steering="buttons"]) :is([data-ctl="left"], [data-ctl="right"]),
 .touch:not([data-steering="stick"]) .stick,
 .touch:not([data-steering="tilt"]) [data-ctl="center"],
@@ -497,24 +506,26 @@ html:has(> body > .stage:not([hidden])) { overflow: hidden; }
 .tc.menu { box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.2); }
 .touch {
   --bar: calc((100vw - 100dvh * 4 / 3) / 2);
-  --k: clamp(44px, calc((var(--bar) - var(--l) - 16px) / 3), 52px); --w: clamp(96px, calc(var(--bar) - var(--r) - 8px), 136px);
+  --k: clamp(44px * var(--ts), calc((var(--bar) - var(--l) - 16px * var(--ts)) / 3), 52px * var(--ts));
+  --w: clamp(96px * var(--ts), calc(var(--bar) - var(--r) - 8px * var(--ts)), 136px * var(--ts));
 }
-.tc.dpad { width: var(--k); height: var(--k); border-radius: 12px; }
-.tc[data-ctl="m-up"] { left: calc(var(--l) + var(--k) + 4px); bottom: calc(var(--b) + 2 * (var(--k) + 4px)); }
-.tc[data-ctl="m-left"] { left: var(--l); bottom: calc(var(--b) + var(--k) + 4px); }
-.tc[data-ctl="m-right"] { left: calc(var(--l) + 2 * (var(--k) + 4px)); bottom: calc(var(--b) + var(--k) + 4px); }
-.tc[data-ctl="m-down"] { left: calc(var(--l) + var(--k) + 4px); bottom: var(--b); }
+.tc.dpad { width: var(--k); height: var(--k); border-radius: calc(12px * var(--ts)); }
+.tc[data-ctl="m-up"] { left: calc(var(--l) + var(--k) + 4px * var(--ts)); bottom: calc(var(--b) + 2 * (var(--k) + 4px * var(--ts))); }
+.tc[data-ctl="m-left"] { left: var(--l); bottom: calc(var(--b) + var(--k) + 4px * var(--ts)); }
+.tc[data-ctl="m-right"] { left: calc(var(--l) + 2 * (var(--k) + 4px * var(--ts))); bottom: calc(var(--b) + var(--k) + 4px * var(--ts)); }
+.tc[data-ctl="m-down"] { left: calc(var(--l) + var(--k) + 4px * var(--ts)); bottom: var(--b); }
 .tc.wide { right: var(--r); width: var(--w); height: var(--k); border-radius: 999px; }
-.tc[data-ctl="m-back"] { bottom: calc(var(--b) + var(--k) + 12px); }
+.tc[data-ctl="m-back"] { bottom: calc(var(--b) + var(--k) + 12px * var(--ts)); }
 .tc[data-ctl="m-ok"] { bottom: var(--b); }
 /* the thumb stick: anywhere in the lower left; at rest it waits in the corner, a touch brings it under the thumb */
 .stick { left: 0; bottom: 0; width: 42%; height: 72%; }
 .stick-base {
-  position: absolute; left: calc(var(--l) + 60px); top: calc(100% - var(--b) - 60px); width: 120px; height: 120px;
+  position: absolute; left: calc(var(--l) + 60px * var(--ts)); top: calc(100% - var(--b) - 60px * var(--ts));
+  width: calc(120px * var(--ts)); height: calc(120px * var(--ts));
   border-radius: 50%; transform: translate(-50%, -50%); border: 2px solid rgba(255, 255, 255, 0.24); background: rgba(0, 0, 0, 0.24);
 }
 .stick-knob {
-  position: absolute; left: 50%; top: 50%; width: 52px; height: 52px; border-radius: 50%;
+  position: absolute; left: 50%; top: 50%; width: calc(52px * var(--ts)); height: calc(52px * var(--ts)); border-radius: 50%;
   transform: translate(calc(-50% + var(--dx, 0px)), -50%); background: rgba(0, 0, 0, 0.4); border: 2px solid rgba(255, 255, 255, 0.5);
 }
 /* the field for a phone's keyboard while the game asks for text (textentry.ts): a value box at the top, where the
@@ -525,8 +536,8 @@ html:has(> body > .stage:not([hidden])) { overflow: hidden; }
   background: var(--field); color: var(--lime); font: italic 700 16px/24px var(--font);
   -webkit-user-select: text; user-select: text; touch-action: manipulation;
 }
-/* a note on the game, and the frame-rate counter, go under the row of small buttons */
-.stage:has(> .touch[data-mode="drive"]) :is(.toast:not(.away), .hud-fps) { top: calc(max(12px, env(safe-area-inset-top)) + 60px); }
+/* the notes on the game, and the frame-rate counter, go under the row of small buttons */
+.stage:has(> .touch[data-mode="drive"]) :is(.toasts, .hud-fps) { top: calc(max(12px, env(safe-area-inset-top)) + 12px + 48px * var(--ts)); }
 /* a touch screen held upright: the game in a 4:5 picture at the top, as wide as the screen and at most 60% of its
  * height, and the menu's button and the touch controls in the space below it, so nothing covers the picture */
 @media (orientation: portrait) {
@@ -534,35 +545,36 @@ html:has(> body > .stage:not([hidden])) { overflow: hidden; }
   html[data-touch] .stage canvas { inset: 0 auto auto 50%; width: calc(var(--pic-h) * 0.8); height: var(--pic-h); transform: translateX(-50%); }
   html[data-touch] .stage-menu { top: calc(var(--pic-h) + 12px); }
   html[data-touch] .touch { --t: calc(var(--pic-h) + 12px); }
-  html[data-touch] .stage:has(> .touch[data-mode="drive"]) :is(.toast:not(.away), .hud-fps) { top: 16px; }
-  html[data-touch] .touch { --k: 56px; --w: 136px; }
-  html[data-touch] .tc[data-ctl="map"] { left: var(--l); top: calc(var(--t) + 56px); }
-  html[data-touch] .tc[data-ctl="msgs"] { left: calc(var(--l) + 56px); top: calc(var(--t) + 56px); }
-  html[data-touch] .tc[data-ctl="horn"] { left: calc(var(--l) + 112px); top: calc(var(--t) + 56px); }
-  html[data-touch] .tc[data-ctl="chat"] { left: calc(var(--l) + 168px); top: calc(var(--t) + 56px); }
-  html[data-touch] .stick { top: calc(var(--pic-h) + 64px); height: auto; width: 50%; }
+  html[data-touch] .stage:has(> .touch[data-mode="drive"]) :is(.toasts, .hud-fps) { top: max(16px, env(safe-area-inset-top)); }
+  html[data-touch] .toast.away { top: calc(var(--pic-h) / 2); }
+  html[data-touch] .touch { --k: calc(56px * var(--ts)); --w: calc(136px * var(--ts)); }
+  html[data-touch] .tc[data-ctl="map"] { left: var(--l); top: calc(var(--t) + 56px * var(--ts)); }
+  html[data-touch] .tc[data-ctl="msgs"] { left: calc(var(--l) + 56px * var(--ts)); top: calc(var(--t) + 56px * var(--ts)); }
+  html[data-touch] .tc[data-ctl="horn"] { left: calc(var(--l) + 112px * var(--ts)); top: calc(var(--t) + 56px * var(--ts)); }
+  html[data-touch] .tc[data-ctl="chat"] { left: calc(var(--l) + 168px * var(--ts)); top: calc(var(--t) + 56px * var(--ts)); }
+  html[data-touch] .stick { top: calc(var(--pic-h) + 12px + 52px * var(--ts)); height: auto; width: 50%; }
   /* below the picture, on black: a light backing, and room for bigger pedals and steering */
   html[data-touch] :is(.tc, .stage-menu) { background: rgba(255, 255, 255, 0.1); }
   html[data-touch] :is(.tc.on, .stage-menu:active) { background: rgba(255, 255, 255, 0.2); }
   html[data-touch] .stick-base { background: rgba(255, 255, 255, 0.06); }
-  html[data-touch] .tc[data-ctl="left"] { width: 88px; height: 120px; }
-  html[data-touch] .tc[data-ctl="right"] { left: calc(var(--l) + 96px); width: 88px; height: 120px; }
-  html[data-touch] .tc[data-ctl="gas"] { width: 88px; height: 200px; }
-  html[data-touch] .tc[data-ctl="brake"] { right: calc(var(--r) + 96px); width: 88px; height: 140px; }
-  html[data-touch] .tc[data-ctl="nitro"] { right: calc(var(--r) + 12px); bottom: calc(var(--b) + 212px); width: 64px; height: 64px; }
-  html[data-touch] .tc[data-ctl="hb"] { right: calc(var(--r) + 110px); bottom: calc(var(--b) + 152px); width: 60px; height: 60px; }
-  html[data-touch] .tc[data-ctl="start"] { bottom: calc(var(--b) + 132px); }
-  html[data-touch] .touch { --gb: 132px; }
-  html[data-touch] .touch[data-steering="tilt"] { --gb: 148px; }
-  html[data-touch] .tc.gear { width: 88px; height: 64px; }
-  html[data-touch] .tc[data-ctl="up"] { left: calc(var(--l) + 96px); }
-  html[data-touch] .touch[data-steering="tilt"] .tc[data-ctl="hb"] { right: auto; left: calc(var(--l) + 100px); bottom: calc(var(--b) + 24px); }
-  html[data-touch] .touch[data-steering="tilt"] .tc[data-ctl="nitro"] { right: calc(var(--r) + 100px); bottom: calc(var(--b) + 24px); }
+  html[data-touch] .tc[data-ctl="left"] { width: calc(88px * var(--ts)); height: calc(120px * var(--ts)); }
+  html[data-touch] .tc[data-ctl="right"] { left: calc(var(--l) + 96px * var(--ts)); width: calc(88px * var(--ts)); height: calc(120px * var(--ts)); }
+  html[data-touch] .tc[data-ctl="gas"] { width: calc(88px * var(--ts)); height: calc(200px * var(--ts)); }
+  html[data-touch] .tc[data-ctl="brake"] { right: calc(var(--r) + 96px * var(--ts)); width: calc(88px * var(--ts)); height: calc(140px * var(--ts)); }
+  html[data-touch] .tc[data-ctl="nitro"] { right: calc(var(--r) + 12px * var(--ts)); bottom: calc(var(--b) + 212px * var(--ts)); width: calc(64px * var(--ts)); height: calc(64px * var(--ts)); }
+  html[data-touch] .tc[data-ctl="hb"] { right: calc(var(--r) + 110px * var(--ts)); bottom: calc(var(--b) + 152px * var(--ts)); width: calc(60px * var(--ts)); height: calc(60px * var(--ts)); }
+  html[data-touch] .tc[data-ctl="start"] { bottom: calc(var(--b) + 132px * var(--ts)); }
+  html[data-touch] .touch { --gb: calc(132px * var(--ts)); }
+  html[data-touch] .touch[data-steering="tilt"] { --gb: calc(148px * var(--ts)); }
+  html[data-touch] .tc.gear { width: calc(88px * var(--ts)); height: calc(64px * var(--ts)); }
+  html[data-touch] .tc[data-ctl="up"] { left: calc(var(--l) + 96px * var(--ts)); }
+  html[data-touch] .touch[data-steering="tilt"] .tc[data-ctl="hb"] { right: auto; left: calc(var(--l) + 100px * var(--ts)); bottom: calc(var(--b) + 24px * var(--ts)); }
+  html[data-touch] .touch[data-steering="tilt"] .tc[data-ctl="nitro"] { right: calc(var(--r) + 100px * var(--ts)); bottom: calc(var(--b) + 24px * var(--ts)); }
 }
 .stick-base.on { border-color: rgba(200, 240, 136, 0.5); }
 .stick-base.on .stick-knob { border-color: var(--lime); background: rgba(0, 0, 0, 0.72); }
 .hud-fps {
-  position: absolute; top: 16px; right: 16px; z-index: 2; pointer-events: none; min-width: 80px;
+  position: absolute; top: max(16px, env(safe-area-inset-top)); right: max(16px, env(safe-area-inset-right)); z-index: 2; pointer-events: none; min-width: 80px;
   padding: 4px 12px; border-radius: 8px; background: rgba(0, 0, 0, 0.64);
   color: var(--lime); font-size: 20px; line-height: 28px; font-variant-numeric: tabular-nums; text-align: right;
 }
@@ -570,9 +582,21 @@ html:has(> body > .stage:not([hidden])) { overflow: hidden; }
 .hud-fps dl { display: grid; grid-template-columns: auto auto; gap: 0 12px; margin-top: 4px; font: 400 12px/16px var(--font); color: var(--text); }
 .hud-fps dt { color: var(--muted); text-align: left; }
 .hud-fps dd { font-variant-numeric: tabular-nums; }
+/* the notes on the game (shell.ts toast): at the top in the middle, clear of a notch or a camera hole, as wide as their
+ * text up to 560 px or the screen; a full server's place in line (players.ts queueText) over the note, however many
+ * lines either takes.  On a touch screen on its side they keep clear of the menu's button in the top left corner too,
+ * and over the touch controls where a small screen has a long note reach them (the controls still take the taps) */
+.toasts {
+  --side: max(16px, env(safe-area-inset-left), env(safe-area-inset-right));
+  position: absolute; top: max(16px, env(safe-area-inset-top)); left: var(--side); right: var(--side); z-index: 4;
+  display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none;
+}
+@media (orientation: landscape) {
+  html[data-touch] .toasts { --side: calc(max(12px, env(safe-area-inset-left), env(safe-area-inset-right)) + 56px * var(--ts)); }
+}
 .toast {
-  position: absolute; left: 50%; top: 16px; transform: translateX(-50%); z-index: 3; max-width: calc(100vw - 32px);
-  padding: 8px 16px; border-radius: 8px; background: rgba(0, 0, 0, 0.8); font-size: 14px; line-height: 20px; pointer-events: none;
+  max-width: 560px; padding: 8px 16px; border-radius: 8px; background: rgba(0, 0, 0, 0.8);
+  font-size: 14px; line-height: 20px; pointer-events: none;
 }
 /* the game's pause menu: what opens the page's menu, under the game's panel (pausehint.ts places it), as a toast */
 .pause-hint {
@@ -588,12 +612,14 @@ html:has(> body > .stage:not([hidden])) { overflow: hidden; }
 }
 .pause-hint-list { color: var(--muted); }
 .pause-hint-list::before { content: " · "; }
-/* the away check (away.ts): in the middle, until the player is back; a kick or a ban (shell.ts netRemoved) the same */
-.toast.away { top: 50%; transform: translate(-50%, -50%); width: max-content; max-width: min(560px, calc(100vw - 32px)); text-align: center; }
-/* a full server: the place in line for one (players.ts queueText), at the top while the game waits; a note on the
- * game goes under it */
-.toast.queue { width: max-content; text-align: center; }
-.stage:has(> .queue:not([hidden])) .toast:not(.away):not(.queue) { margin-top: 44px; }
+/* the away check (away.ts): in the middle, until the player is back; a kick or a ban (shell.ts netRemoved) the same,
+ * over the touch controls it leaves; upright, in the middle of the picture */
+.toast.away {
+  position: absolute; left: 50%; top: 50%; z-index: 4; transform: translate(-50%, -50%); width: max-content;
+  max-width: min(560px, calc(100vw - 2 * max(16px, env(safe-area-inset-left), env(safe-area-inset-right)))); text-align: center;
+}
+/* a full server: the place in line for one (players.ts queueText), at the top while the game waits */
+.toast.queue { text-align: center; }
 /* free roam: friends joining, leaving, going into a race; a quiet log on the left between the game's SMS
  * icon and its radar (shell.ts placeNotices: the place, and --u, one HUD unit), sized with the HUD: small
  * dim italic text, the friend's name in lime; newest at the bottom, each fading out after 5 s (when
@@ -630,17 +656,20 @@ html:has(> body > .stage:not([hidden])) { overflow: hidden; }
 .drift-gain { display: flex; flex-direction: column; align-items: flex-end; gap: calc(5 * var(--u)); }
 .drift-gain b { color: #d8a020; }
 .drift-total, .drift-total b { color: #30cd30; }
-/* a drift banked (drift.ts): the drift event's DRIFT popup, in lime, the label over the points in big italics, where
- * free roam's HUD shows its own popups (right-aligned there: its left is that edge), fading out after 2 s */
+/* the DRIFT counter (drift.ts): the drift event's, centred under free roam's arrow, the label over the points in big
+ * italics: lime while a drift counts and when it banks, red (the drift event's) when a wall loses it; a banked or lost
+ * one fades out */
 .drift-pop {
   --u: 1px;
-  position: absolute; z-index: 2; translate: -100% 0; pointer-events: none;
-  display: flex; flex-direction: column; align-items: flex-end; gap: calc(3 * var(--u));
-  color: var(--lime); white-space: nowrap; animation: drift-pop 2.4s linear both;
+  position: absolute; z-index: 2; translate: -50% 0; pointer-events: none;
+  display: flex; flex-direction: column; align-items: center; gap: calc(3 * var(--u));
+  color: var(--lime); white-space: nowrap;
 }
+.drift-pop.banked { animation: drift-pop 2.4s linear both; }
+.drift-pop.lost { color: #ce3030; animation: drift-pop 1.6s linear both; }
 .drift-pop span { font: 400 calc(13 * var(--u)) / 1 var(--font); letter-spacing: 0.08em; }
-.drift-pop b { font: italic 700 calc(26 * var(--u)) / 1 var(--font); }
-@keyframes drift-pop { 0% { opacity: 0; } 6%, 80% { opacity: 1; } 100% { opacity: 0; } }
+.drift-pop b { font: italic 700 calc(26 * var(--u)) / 1 var(--font); font-variant-numeric: tabular-nums; }
+@keyframes drift-pop { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
 /* quick chat's lines in the log (shell.ts chatLine): a speech balloon first, upright and brighter than the notices,
  * as big as the race lobby card's text, for 8 s */
 .notices div.chat {
@@ -732,6 +761,14 @@ html:has(> body > .stage:not([hidden])) { overflow: hidden; }
 .lobby-cover[hidden] { display: none; }
 .lobby-card { width: min(calc(400 * var(--u)), calc(100% - 32px)); min-width: min(300px, calc(100% - 32px)); }
 .lobby-card .lobby-title { font-size: 1.4em; }
+/* the race's results on the way back (lobby.ts results) */
+.lobby-results { margin-top: 0.8em; }
+.lobby-head { font-size: 0.75em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.lobby-results .lobby-places { margin-top: 0.25em; }
+.lobby-places li.mine .lobby-name { font-weight: 700; }
+.lobby-time { font-variant-numeric: tabular-nums; color: var(--muted); }
+.lobby-places li.mine .lobby-time { color: var(--text); }
+.lobby-prize { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--lime); }
 .lobby-step { display: flex; gap: 0.6em; align-items: center; margin-top: 1em; color: var(--muted); }
 .lobby-spin {
   width: 1em; height: 1em; border: 2px solid rgba(255, 255, 255, 0.2); border-top-color: var(--lime); border-radius: 50%;
@@ -743,7 +780,7 @@ html:has(> body > .stage:not([hidden])) { overflow: hidden; }
 dialog { color: var(--text); }
 dialog::backdrop { background: rgba(0, 0, 0, 0.64); }
 .dlg {
-  width: min(448px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 24px;
+  width: min(448px, calc(100vw - 32px)); max-height: calc(100dvh - 2 * max(16px, env(safe-area-inset-top), env(safe-area-inset-bottom))); padding: 24px;
   border: 2px solid var(--line); border-radius: 12px; background: var(--frame);
 }
 .dlg h2 { margin-bottom: 8px; }

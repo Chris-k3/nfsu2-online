@@ -1,4 +1,4 @@
-//! The two files of the state folder (stats.json, buddies.json), written atomically: the folder made 0700 when it is
+//! The files of the state folder (stats.json, buddies.json, races.json), written atomically: the folder made 0700 when it is
 //! missing (the Online audit's ONL-13), a temporary file of 0600 (`<file>.tmp-<pid>`), then a rename; a failure
 //! described in Node's words (its `e.message`: the console line quotes it, as the Node server's line did).
 

@@ -112,3 +112,40 @@ test('waitFor: a line that comes (also inside a fold, or kept) answers true, non
   assert.equal(await log.waitFor('never said', 20), false);
   assert.equal(lines(log).at(-1), '=== NFSU2 web, the second game ===');
 });
+
+test('snapshot: the whole text when it fits', () => {
+  const log = new LogRing(1 << 20, false, 3);
+  for (let i = 0; i < 50; i++) log.add(`line ${i}`);
+  assert.equal(log.snapshot(64 << 10), log.text());
+});
+
+test('snapshot: opening lines, the newest session, the newest lines, gaps said, within the budget', () => {
+  const log = new LogRing(1 << 20, false, 2);
+  log.add('[app] game module abc'); log.add('[app] warning BROWSER-IPHONE'); log.keep('=== NFSU2 web, the first game ===');
+  for (let i = 0; i < 2000; i++) log.add(`a ${i}`);
+  log.keep('=== NFSU2 web, the second game ==='); log.keep('[app] settings.ini:1: fps -> 60');
+  for (let i = 0; i < 3000; i++) log.add(`b ${i}`);
+  const budget = 8 << 10, snap = log.snapshot(budget), t = snap.trimEnd().split('\n');
+  assert.ok(snap.length <= budget + 200, `${snap.length} bytes`);
+  assert.deepEqual(t.slice(0, 3), ['[app] game module abc', '[app] warning BROWSER-IPHONE', '=== NFSU2 web, the first game ===']);
+  assert.match(t[3], /^\[\.\.\. 2000 lines left out of this copy of the log\]$/);
+  assert.deepEqual(t.slice(4, 6), ['=== NFSU2 web, the second game ===', '[app] settings.ini:1: fps -> 60']);
+  assert.match(t[6], /^\[\.\.\. (\d+) lines left out of this copy of the log\]$/);
+  const left = +/(\d+) lines/.exec(t[6])[1], newest = t.slice(7);
+  assert.equal(newest[newest.length - 1], 'b 2999');
+  assert.equal(left + newest.length, 3000, 'every b line is either in or counted');
+  newest.forEach((l, i) => assert.equal(l, `b ${3000 - newest.length + i}`));
+});
+
+test('snapshot: a recent session is in the newest lines once, and a fold still running is said', () => {
+  const log = new LogRing(1 << 20, false, 2);
+  log.add('open 1'); log.add('open 2');
+  for (let i = 0; i < 3000; i++) log.add(`a ${i}`);
+  log.keep('=== NFSU2 web, now ===');
+  for (let i = 0; i < 5; i++) log.add(`b ${i}`);
+  for (let i = 0; i < 10; i++) log.add('same');
+  const t = log.snapshot(4 << 10).trimEnd().split('\n');
+  assert.equal(t.filter(l => l === '=== NFSU2 web, now ===').length, 1);
+  assert.deepEqual(t.slice(-3), ['b 4', 'same', '[log] the line above repeated 9 more times (so far)']);
+  assert.deepEqual(t.slice(0, 2), ['open 1', 'open 2']);
+});

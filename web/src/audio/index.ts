@@ -13,8 +13,9 @@
 //     gamepad button is not such a gesture (Chrome gives pads no user
 //     activation): it resumes the context only once the page already had a
 //     click or key press, e.g. the Play click.
-//   - Latency: the ring holds 512-1024 frames (12-23 ms, raised by the pump
-//     after underruns) on top of the context's own output latency.
+//   - Latency: the ring holds 512-1024 frames (12-23 ms; the pump raises it
+//     after underruns and lowers it again after 20 s without one) on top of
+//     the context's own output latency.
 //   - Hidden page: the output fades to silence (the game itself parks and
 //     mutes when it loses focus); optionally the context is suspended.
 //   - autotest "audioreset": the pump bumps AR_RESET and the context is rebuilt.
@@ -116,7 +117,14 @@ export async function attachAudio(proc: GameProcess, opts: AudioOptions = {}): P
     given = null;
     ctx = c;
     // endOutput() removes it again: nothing of this game may stay on a context that outlives it
-    c.onstatechange = () => { ctxWord(); log(`[audio] context ${c.state}`); };
+    // with how long the state before lasted (an iPhone interrupts the sound for a call, Siri, the lock screen)
+    let was = c.state as string, since = performance.now();
+    c.onstatechange = () => {
+      ctxWord();
+      const now = performance.now();
+      log(`[audio] context ${c.state}${was !== c.state ? ` (${was} for ${((now - since) / 1000).toFixed(1)} s)` : ''}`);
+      was = c.state; since = now;
+    };
     try { await c.audioWorklet.addModule(new URL('/audio/worklet.js', import.meta.url)); }
     catch (e) {
       // a context closed meanwhile (sound off, a rebuild) aborts the load

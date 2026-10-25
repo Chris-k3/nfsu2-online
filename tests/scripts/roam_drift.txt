@@ -1,6 +1,7 @@
 # Drift mode in free roam (runtime/drift.c), one instance (--page app): new career -> prologue free roam, onto the
 # straight south of the start, X on the page: the drift-event switch and the drift camera (view 4).  A handbrake
-# flick at the bend banks a drift (the log: "[drift] ... a drift of N"; the page's panel, log SHOT drift), the pause
+# flick at the bend banks a drift (the log: "[drift] ... a drift of N"; the page's DRIFT counter counting, log SHOT
+# counting, and the panel, log SHOT drift), the pause
 # menu switches the handling off and back on, and X off gives the view back.  The trace: the switch, the view,
 # STYLE_DRIFT (state, pending, total), the DriftCar (multiplier, its next level's points, rate) and the car's slip.
 #   node web/tools/roam-pair.mjs --solo --page app --a Drv:roam_drift.txt
@@ -40,7 +41,8 @@
 +0    down LEFT
 +150wms up LEFT
 +0    log SHOT drifting
-+700wms log SHOT drift
++12   log SHOT counting
++600wms log SHOT drift
 +0    expect i:0x861e74 == 0             # the career's bank: drift points are not money
 +60   up UP
 +0    down DOWN

@@ -1064,6 +1064,13 @@ float input_view_roll(void){
     if (roll > 1.5f) roll = 1.5f; else if (roll < -1.5f) roll = -1.5f;
     return roll;
 }
+/* the menus' help bar buttons' size (web/src/app/touch.ts: the Controls
+ * sheet's Menu button size; runtime/menusize.c), 1 = the game's own */
+float input_menu_scale(void){
+    uint32_t v = atomic_load_explicit(&MH(IM_MENU_SCALE), memory_order_relaxed);
+    float s; memcpy(&s, &v, 4);
+    return isfinite(s) && s >= 1.f ? s : 1.f;
+}
 /* on: 0 unplugged, 1 a pad, 2 a steering wheel */
 void gamepad_synth_connect(int on){
     pthread_mutex_lock(&g_pad_mx);

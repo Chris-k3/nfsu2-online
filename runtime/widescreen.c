@@ -363,6 +363,8 @@ int ws_hook(CPU *c, uint32_t ip){
      * where the portrait screen had it. */
     case HOOK_SITE(0x00536745): {
         long metal_frames(void);
+        void menusize_obj(CPU *);
+        menusize_obj(c);
         if (g_redirty_cap && metal_frames() < g_redirty_until){
             g_redirty_cap--; g_hits[11]++;
             if (mem_is_committed(c->ebx + 0x1fu)) MR32(c->ebx + 0x1cu) |= 0x400000u;

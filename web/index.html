@@ -66,6 +66,7 @@
         <button type="button" class="btn" id="reload" hidden data-i18n>Reload</button>
         <button type="button" class="text-btn" id="log-btn" hidden data-i18n>Download log</button>
       </div>
+      <p class="msg" id="lastgame" hidden></p>
       <p class="msg" id="report" hidden data-i18n-html>Help get it fixed: download the log and post it in <a href="https://discord.gg/SSHm5g43gh"target="_blank" rel="noopener noreferrer">#bug-reports on our Discord</a>, with what you were doing when it happened.</p>
       <p class="msg" id="newer" aria-live="polite" hidden></p>
       <ul class="problems" id="problems" aria-live="polite"></ul>
@@ -82,7 +83,7 @@
         </div>
         <div class="tab-panel" role="tabpanel" data-tab="keys">
           <p class="hint touch-only" data-i18n>Tap the game's menus, or use the arrows, OK and Back beside them. While you drive, touch controls show on the game. A controller works too.</p>
-          <!-- the steering's list and the level horizon's switch: controls.ts -->
+          <!-- the steering's list, the level horizon's switch and the sizes: controls.ts -->
           <div class="set touch-only" data-steer>
             <label class="set-label" data-i18n>Steering</label>
             <p class="set-help" data-i18n>How you steer while driving. The button in the game's top right corner switches it too.</p>
@@ -92,6 +93,16 @@
             <label class="set-label" data-i18n>Level horizon</label>
             <p class="set-help" data-i18n>With tilt steering, the view turns against the phone, so the road's horizon stays level.</p>
             <div class="set-control"><span class="val" aria-hidden="true"></span><input type="checkbox" class="switch" role="switch"></div>
+          </div>
+          <div class="set touch-only" data-size>
+            <label class="set-label" data-i18n>Control size</label>
+            <p class="set-help" data-i18n>How big the touch controls on the game are. Auto sizes them for this screen.</p>
+            <div class="set-control"><select></select></div>
+          </div>
+          <div class="set touch-only" data-menu-size>
+            <label class="set-label" data-i18n>Menu button size</label>
+            <p class="set-help" data-i18n>How big the game's small menu buttons are: Back, Continue and the others at the bottom, and the arrows. Auto sizes them for a finger.</p>
+            <div class="set-control"><select></select></div>
           </div>
           <dl class="keys key-only">
             <div><dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd data-i18n>Throttle, brake and reverse</dd></div>
@@ -242,10 +253,12 @@
 <div class="stage" id="stage" hidden>
   <button type="button" class="stage-menu" id="stage-menu" tabindex="-1" data-i18n-attr="aria-label" aria-label="Menu" data-nfsu2-ui hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h14"/></svg></button>
   <div class="hud-fps" id="fps" hidden></div>
-  <div class="toast" id="toast" hidden></div>
+  <div class="toasts">
+    <div class="toast queue" id="queue" hidden></div>
+    <div class="toast" id="toast" hidden></div>
+  </div>
   <div class="toast away" id="away" role="status" hidden></div>
   <div class="toast away" id="removed" role="alert" hidden></div>
-  <div class="toast queue" id="queue" hidden></div>
   <div class="notices" id="notices" role="status" aria-live="polite"></div>
   <div class="lobby" id="lobby" role="status" aria-live="polite" hidden></div>
   <div class="lobby-cover" id="lobby-cover" role="status" aria-live="polite" hidden></div>

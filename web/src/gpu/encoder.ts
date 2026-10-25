@@ -25,6 +25,7 @@ import { D, F, Kind, Op } from './proto';
 import { COPY, FF_FS, TVERT_VS } from './wgsl';
 import { createShaderAbi, alphaFunc, PSCUBE, VSPAR_SIZE, KWIN_SIZE, PSPAR_SIZE, HLPAR_SIZE } from './shader-abi';
 import { unpackDxt } from './dxt';
+import { dxt1HasPunch, dxt1ToAstc } from './astc';
 
 export interface EncodeStats {
   draws: number; passes: number; skipped: number; encodeMs: number;
@@ -38,6 +39,10 @@ interface Tex {
   rtViews: GPUTextureView[];       // render target views: [0] = level 0 (2d) or faces 0..5 (cube)
   expandA8: boolean; bc: boolean;
   unpack: boolean;                 // DXT on a GPU without texture-compression-bc: BGRA8, unpacked on upload
+  astc: boolean;                   // DXT1 on a GPU with ASTC but not BC: ASTC 4x4, rewritten on upload (astc.ts)
+  filled: boolean;                 // a level has gone up (an ASTC texture's choice is made at its first upload)
+  bytes: number;                   // its size on the GPU, every level and face
+  face0?: GPUTextureView;          // a cube's face 0, level 0 as a 2D view (StretchRect from it), made at its first use
 }
 
 const enum Src { TVert = 0, Raw = 1, Pool = 2 }
@@ -65,7 +70,7 @@ export class Encoder {
   private u8!: Uint8Array; private u32!: Uint32Array; private i32!: Int32Array; private f32!: Float32Array;
   private ctlW: number;              // word index of GwCtl
   private log: (s: string) => void;
-  private feat: { bc: boolean; swizzle: boolean; unaligned: boolean };
+  private feat: { bc: boolean; astc: boolean; swizzle: boolean; unaligned: boolean };
 
   // resources
   private tex: (Tex | undefined)[] = [];
@@ -104,7 +109,7 @@ export class Encoder {
   // back buffer (the game's device-size "screen"), and the texture the current frame
   // draws its screen into: the back buffer, or the canvas texture when sizes match
   bb: GPUTexture | null = null; private bbView: GPUTextureView | null = null;
-  screen: GPUTexture | null = null; private screenView: GPUTextureView | null = null;
+  screen: GPUTexture | null = null; screenView: GPUTextureView | null = null;
   /** frames that copied from the screen before drawing to it (they keep the back buffer) */
   screenReadFirst = 0;
 
@@ -116,6 +121,11 @@ export class Encoder {
 
   // stats
   totalDraws = 0; totalPasses = 0; pipelinesMade = 0; missingTarget = 0; noVs = 0; zMismatch = 0; conflicts = 0;
+  /** the game's textures on the GPU, bytes: all of them, those unpacked from DXT and those DXT1 as ASTC (no
+   *  texture-compression-bc) */
+  texBytes = 0; unpackBytes = 0; astcBytes = 0;
+  /** blocks with a transparent texel that went into a texture already ASTC: two planes (astc.ts) */
+  private astcHoles = { blocks: 0 };
   /** WebGPU calls made by encodeFrame, by kind (totals; what the GPU process decodes and records) */
   calls = { pipe: 0, bg0: 0, bg1: 0, bg1New: 0, blend: 0, ix: 0, draw: 0, pass: 0, copy: 0 };
   private seenFmt = new Set<string>();
@@ -123,7 +133,8 @@ export class Encoder {
   constructor(device: GPUDevice, memory: WebAssembly.Memory, ctlPtr: number, log: (s: string) => void) {
     this.device = device; this.queue = device.queue; this.memory = memory; this.ctlW = ctlPtr >> 2; this.log = log;
     const f = device.features;
-    this.feat = { bc: f.has('texture-compression-bc'), swizzle: f.has('texture-component-swizzle'), unaligned: f.has('texture-compression-unaligned' as GPUFeatureName) };
+    this.feat = { bc: f.has('texture-compression-bc'), astc: f.has('texture-compression-astc'), swizzle: f.has('texture-component-swizzle'),
+      unaligned: f.has('texture-compression-unaligned' as GPUFeatureName) };
     this.views();
     const d = device;
     // the shader ABI's explicit layouts (docs/web/gpu-abi.md section 2), shared with the shader check
@@ -167,8 +178,8 @@ export class Encoder {
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
     const px = new Uint8Array(24).fill(255);
     this.queue.writeTexture({ texture: t }, px, { bytesPerRow: 4, rowsPerImage: 1 }, [1, 1, cube ? 6 : 1]);
-    return { serial: 0, tex: t, fmt: 21, w: 1, h: 1, levels: 1, cube, rt: false, expandA8: false, bc: false, unpack: false, rtViews: [],
-      view: t.createView({ dimension: cube ? 'cube' : '2d' }) };
+    return { serial: 0, tex: t, fmt: 21, w: 1, h: 1, levels: 1, cube, rt: false, expandA8: false, bc: false, unpack: false, astc: false, filled: true,
+      rtViews: [], view: t.createView({ dimension: cube ? 'cube' : '2d' }), bytes: 0 };
   }
 
   // ------------------------------------------------------------ resource queue
@@ -216,23 +227,27 @@ export class Encoder {
     return tail;
   }
 
-  private gpuFormat(fmt: number): { f: GPUTextureFormat; bc: boolean; a8: boolean; unpack?: boolean } | null {
+  private gpuFormat(fmt: number): { f: GPUTextureFormat; bc: boolean; a8: boolean; unpack?: boolean; astc?: boolean } | null {
     switch (fmt) {
       case P.Fmt.A8R8G8B8: case P.Fmt.X8R8G8B8: return { f: 'bgra8unorm', bc: false, a8: false };
       case P.Fmt.A8: return this.feat.swizzle ? { f: 'r8unorm', bc: false, a8: false } : { f: 'bgra8unorm', bc: false, a8: true };
       case P.Fmt.P8: return { f: 'r8unorm', bc: false, a8: false };         // samples (L,0,0,1), as on the Mac
       case P.Fmt.DXT1: case P.Fmt.DXT3: case P.Fmt.DXT5:
+        if (!this.feat.bc && fmt === P.Fmt.DXT1 && this.feat.astc) return { f: 'astc-4x4-unorm', bc: false, a8: false, astc: true };
         if (!this.feat.bc) return { f: 'bgra8unorm', bc: false, a8: false, unpack: true };
         return { f: fmt === P.Fmt.DXT1 ? 'bc1-rgba-unorm' : fmt === P.Fmt.DXT3 ? 'bc2-rgba-unorm' : 'bc3-rgba-unorm', bc: true, a8: false };
     }
     return null;
   }
 
-  private texCreate(id: number, w: number, h: number, levels: number, fmt: number, flags: number): void {
+  /** unpack: DXT unpacked to BGRA8 even where it could go up as ASTC (a DXT1 texture with transparent texels) */
+  private texCreate(id: number, w: number, h: number, levels: number, fmt: number, flags: number, unpack = false): void {
     this.texFree(id);
-    const gf = this.gpuFormat(fmt);
+    let gf = this.gpuFormat(fmt);
     if (!gf) { this.log(`[gpu] texture ${id}: format ${fmt} not supported`); return; }
-    const cube = (flags & P.TF_CUBE) !== 0, rt = (flags & P.TF_RT) !== 0 && !gf.bc && !gf.unpack && fmt !== P.Fmt.A8 && fmt !== P.Fmt.P8;
+    // ASTC wants whole blocks (as BC does without texture-compression-unaligned): a level 0 of another size unpacks
+    if (gf.astc && (unpack || (w & 3) || (h & 3))) gf = { f: 'bgra8unorm', bc: false, a8: false, unpack: true };
+    const cube = (flags & P.TF_CUBE) !== 0, rt = (flags & P.TF_RT) !== 0 && !gf.bc && !gf.unpack && !gf.astc && fmt !== P.Fmt.A8 && fmt !== P.Fmt.P8;
     if (gf.bc && ((w & 3) || (h & 3)) && !this.feat.unaligned) {
       const k = `bc-unaligned ${w}x${h}`;
       if (!this.seenFmt.has(k)) { this.seenFmt.add(k); this.log(`[gpu] texture ${id}: ${k} without texture-compression-unaligned (drawn white)`); }
@@ -250,23 +265,55 @@ export class Encoder {
       if (cube) for (let f = 0; f < 6; f++) rtViews.push(tex.createView({ dimension: '2d', baseArrayLayer: f, arrayLayerCount: 1, baseMipLevel: 0, mipLevelCount: 1 }));
       else rtViews.push(tex.createView({ dimension: '2d', baseMipLevel: 0, mipLevelCount: 1 }));
     }
+    // its size on the GPU, for the log (memory runs out first on phones, whose GPUs unpack DXT)
+    const bpp = gf.bc ? (fmt === P.Fmt.DXT1 ? 0.5 : 1) : gf.astc || gf.f === 'r8unorm' ? 1 : 4;
+    let bytes = 0;
+    for (let l = 0; l < levels; l++) {
+      let lw = Math.max(1, w >> l), lh = Math.max(1, h >> l);
+      if (gf.bc || gf.astc) { lw = (lw + 3) & ~3; lh = (lh + 3) & ~3; }
+      bytes += lw * lh * bpp;
+    }
+    bytes *= cube ? 6 : 1;
+    this.texBytes += bytes; if (gf.unpack) this.unpackBytes += bytes; if (gf.astc) this.astcBytes += bytes;
     this.tex[id] = { serial: this.serial++, tex, fmt, w, h, levels, cube, rt, view: tex.createView(vd), rtViews, expandA8: gf.a8, bc: gf.bc,
-      unpack: !!gf.unpack };
+      unpack: !!gf.unpack, astc: !!gf.astc, filled: false, bytes };
   }
 
   private texFree(id: number): void {
     const t = this.tex[id];
     if (!t) return;
     t.tex.destroy();
+    this.texBytes -= t.bytes; if (t.unpack) this.unpackBytes -= t.bytes; if (t.astc) this.astcBytes -= t.bytes;
     this.tex[id] = undefined;
     if (this.bg1.size > 8192) this.bg1.clear();       // keys carry serials: stale entries are never hit again
   }
 
   private uploads = new Map<number, number>();   // diagnostics: uploads per texture serial
+  private unpackBuf = new Uint8Array(0);           // DXT unpacked or rewritten as ASTC for an upload (no texture-compression-bc)
   private texUpload(id: number, level: number, face: number, lw: number, lh: number, pitch: number, rows: number, data: number): void {
-    const t = this.tex[id];
+    let t = this.tex[id];
     if (t && this.traceDumps) this.uploads.set(t.serial, (this.uploads.get(t.serial) ?? 0) + 1);
     if (!t || level >= t.levels) return;
+    if (t.astc) {
+      const bw = (lw + 3) >> 2, bh = (lh + 3) >> 2;
+      if (!t.filled && dxt1HasPunch(this.u8, data, pitch, bw, bh)) {
+        // transparent texels in the first level to go up: one ASTC plane cannot give transparent black, so the
+        // texture is unpacked as before (nothing of it is on the GPU yet)
+        this.texCreate(id, t.w, t.h, t.levels, t.fmt, t.cube ? P.TF_CUBE : 0, true);
+        t = this.tex[id]!;
+      } else {
+        t.filled = true;
+        if (this.unpackBuf.length < bw * bh * 16) this.unpackBuf = new Uint8Array(bw * bh * 16);
+        const holes = this.astcHoles.blocks;
+        const dst: GPUTexelCopyTextureInfo = { texture: t.tex, mipLevel: level, origin: { x: 0, y: 0, z: t.cube ? Math.min(face, 5) : 0 } };
+        this.queue.writeTexture(dst, dxt1ToAstc(this.u8, data, pitch, bw, bh, this.unpackBuf, this.astcHoles), { bytesPerRow: bw * 16, rowsPerImage: bh }, [bw * 4, bh * 4, 1]);
+        if (this.astcHoles.blocks > holes && !this.seenFmt.has('astc-holes')) {
+          this.seenFmt.add('astc-holes');
+          this.log(`[gpu] texture ${id}: transparent texels in level ${level}, not in the first level that went up: two-plane ASTC blocks (black under them not kept)`);
+        }
+        return;
+      }
+    }
     let w = lw, h = lh;
     if (t.bc) { w = (lw + 3) & ~3; h = (lh + 3) & ~3; }
     const dst: GPUTexelCopyTextureInfo = { texture: t.tex, mipLevel: level, origin: { x: 0, y: 0, z: t.cube ? Math.min(face, 5) : 0 } };
@@ -277,7 +324,10 @@ export class Encoder {
       return;
     }
     if (t.unpack) {
-      this.queue.writeTexture(dst, unpackDxt(t.fmt, this.u8, data, pitch, lw, lh), { bytesPerRow: lw * 4, rowsPerImage: lh }, [lw, lh, 1]);
+      // into one buffer for every upload (writeTexture copies it at once): no array of up to 16 MB left to the page's
+      // garbage collector for every level of every texture a phone loads
+      if (this.unpackBuf.length < lw * lh * 4) this.unpackBuf = new Uint8Array(lw * lh * 4);
+      this.queue.writeTexture(dst, unpackDxt(t.fmt, this.u8, data, pitch, lw, lh, this.unpackBuf), { bytesPerRow: lw * 4, rowsPerImage: lh }, [lw, lh, 1]);
       return;
     }
     this.queue.writeTexture(dst, this.u8, { offset: data, bytesPerRow: pitch, rowsPerImage: rows }, [w, h, 1]);
@@ -337,12 +387,24 @@ export class Encoder {
     return p;
   }
 
+  // A copy's bind group, by its source view and sampler.  Made anew for every copy, the composite alone was one a
+  // frame (a phone's render scale always composites), and WebKit frees what a bind group holds in its graphics
+  // process only when the page's garbage collector gets to it.
+  private copyBgs = new WeakMap<GPUTextureView, Map<GPUSampler, GPUBindGroup>>();
+  private copyBg(src: GPUTextureView, smp: GPUSampler): GPUBindGroup {
+    let m = this.copyBgs.get(src);
+    if (!m) this.copyBgs.set(src, m = new Map());
+    let g = m.get(smp);
+    if (!g) m.set(smp, g = this.device.createBindGroup({ layout: this.copyBgl, entries: [{ binding: 0, resource: src }, { binding: 1, resource: smp }] }));
+    return g;
+  }
+
   /** draw `src` over the whole of `dst` (StretchRect between sizes, composite) */
   copyQuad(enc: GPUCommandEncoder, src: GPUTextureView, dst: GPUTextureView, format: GPUTextureFormat, smp: GPUSampler,
            vp?: [number, number, number, number], opaque = false, ts?: GPURenderPassTimestampWrites): void {
     const pass = enc.beginRenderPass({ colorAttachments: [{ view: dst, loadOp: 'clear', clearValue: [0, 0, 0, 1], storeOp: 'store' }], timestampWrites: ts });
     pass.setPipeline(this.copyPipe(format, opaque));
-    pass.setBindGroup(0, this.device.createBindGroup({ layout: this.copyBgl, entries: [{ binding: 0, resource: src }, { binding: 1, resource: smp }] }));
+    pass.setBindGroup(0, this.copyBg(src, smp));
     if (vp) pass.setViewport(vp[0], vp[1], vp[2], vp[3], 0, 1);
     pass.draw(3);
     pass.end();
@@ -601,7 +663,7 @@ export class Encoder {
         else if (sTex.width === dTex.width && sTex.height === dTex.height && sTex.format === dTex.format && sTex.depthOrArrayLayers === 1 && dTex.depthOrArrayLayers === 1)
           { enc.copyTextureToTexture({ texture: sTex }, { texture: dTex }, [sTex.width, sTex.height, 1]); this.calls.copy++; }
         else {
-          const sv = sid ? (st!.cube ? st!.tex.createView({ dimension: '2d', baseArrayLayer: 0, arrayLayerCount: 1, baseMipLevel: 0, mipLevelCount: 1 }) : st!.view) : this.screenView!;
+          const sv = sid ? (st!.cube ? st!.face0 ??= st!.tex.createView({ dimension: '2d', baseArrayLayer: 0, arrayLayerCount: 1, baseMipLevel: 0, mipLevelCount: 1 }) : st!.view) : this.screenView!;
           const dv = tgt ? dt!.rtViews[0] : this.screenView!;
           this.copyQuad(enc, sv, dv, 'bgra8unorm', this.linear);
           passes++;

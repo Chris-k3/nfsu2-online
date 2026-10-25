@@ -80,7 +80,8 @@
 //!
 //! With a store (the server's state folder: lan-addresses.json, store.rs), the addresses held and reserved (by a hash
 //! of their tokens) outlive a restart of the server: each is reserved for its token again for `reserve_ms` after the
-//! start, so the players come back to the same addresses, as they did before tokens.
+//! start, so the players come back to the same addresses, as they did before tokens.  One that nobody came back for by
+//! then counts as a browser that left for the hosts (`Host::peer_gone`): they never saw it leave.
 //!
 //! ## What a peer learns
 //!
@@ -1264,9 +1265,7 @@ impl LanSwitch {
         let now = nfsu2_util::now_ms();
         {
             let mut m = self.members.lock();
-            let before = m.reserved.len();
-            m.reserved.retain(|_, r| r.until > now);
-            if m.reserved.len() != before {
+            if self.expire(&mut m) {
                 self.persist(&mut m);
             }
         }
@@ -1389,7 +1388,9 @@ impl LanSwitch {
     /// `Members::allocate`: the next free address that is nobody's reservation, or 0
     #[doc(hidden)]
     pub fn allocate(&self) -> u32 {
-        self.members.lock().allocate()
+        let mut m = self.members.lock();
+        self.expire(&mut m);
+        m.allocate()
     }
 
     /// every peer's connection ends at once, without a close frame (each one as `terminate()` ends it)
