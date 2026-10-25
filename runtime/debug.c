@@ -97,6 +97,7 @@ void guest_hook(CPU *c, uint32_t ip){
     { int roam_hook(CPU *, uint32_t); if (roam_hook(c, ip)) return; }
     { int language_hook(CPU *, uint32_t); if (language_hook(c, ip)) return; }
     { int hornmenu_hook(CPU *, uint32_t); if (hornmenu_hook(c, ip)) return; }
+    { int powerunits_hook(CPU *, uint32_t); if (powerunits_hook(c, ip)) return; }
     { int regional_hook(CPU *, uint32_t); if (regional_hook(c, ip)) return; }
     { int sndlead_hook(CPU *, uint32_t); if (sndlead_hook(c, ip)) return; }
     if (ip == 0x0065ae25u){

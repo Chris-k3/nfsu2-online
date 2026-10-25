@@ -187,6 +187,11 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
 - **The European cars:** the Peugeot 106 and the Vauxhall Corsa 1.8, which only the European release sold, are in the
   car lot and on every car select (Quick Race, Customize, LAN and Online), and AI racers drive them too. The North
   American game has their files but hid them.
+- **Power Units:** the game's Options, Gameplay (also in the pause menu's) has a row after Speedometer Units: the
+  engine's power in bhp or kW wherever the game shows it (the dyno, the performance shop's parts), whatever the
+  speedometer shows. Until you change it, it follows Speedometer Units, as in the original game (kW with km/h).
+  Torque still follows the speedometer (Nm with km/h, ft-lbs with mph), and the dyno results' 0-60 and 0-100 are
+  mph times either way.
 - **Two tabs:** one browser runs one game at a time. A second tab shows "Open elsewhere" and its Settings are
   read only. It takes over when the first tab closes.
 
