@@ -56,6 +56,7 @@ const SCEN = [
   ['pad_wheel_switch', 'pad_wheel_switch', [], null, null, 300],
   ['pad_bind_save', 'pad_bind_save', [], 'pad', 'pad-rvf-bind_save', 400],
   ['pad_bind_load', 'pad_bind_load', [], 'pad', 'pad-rvf-bind_load', 300],
+  ['pad_bind_pedals', 'pad_bind_pedals', ['NFSU2_PAD_LOG=1'], null, null, 400],
 ];
 const FAULT = /FAULT IN GUEST|GUEST MEMORY FAULT|HOST SEGV|TIME LIMIT REACHED|^\[trap\]|UNRESOLVED INDIRECT|\[expect\] FAIL|TRAP in thread|PAGEERROR|^TIMEOUT/;
 // the raw values only: printf spells a NaN's sign differently on wasi-libc ("-nan")
