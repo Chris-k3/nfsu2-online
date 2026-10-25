@@ -787,5 +787,6 @@
   "Best:": "ดีที่สุด:",
   "Total": "รวม",
   "Gain {n}X with:": "ถึง {n}X ด้วย:",
-  "DRIFT": "ดริฟต์"
+  "DRIFT": "ดริฟต์",
+  "The last game ended without closing. Download log has its log.": "เกมล่าสุดจบลงโดยไม่ได้ปิดตามปกติ \"ดาวน์โหลดล็อก\" มีล็อกของเกมนั้น"
 }

@@ -116,7 +116,14 @@ export async function attachAudio(proc: GameProcess, opts: AudioOptions = {}): P
     given = null;
     ctx = c;
     // endOutput() removes it again: nothing of this game may stay on a context that outlives it
-    c.onstatechange = () => { ctxWord(); log(`[audio] context ${c.state}`); };
+    // with how long the state before lasted (an iPhone interrupts the sound for a call, Siri, the lock screen)
+    let was = c.state as string, since = performance.now();
+    c.onstatechange = () => {
+      ctxWord();
+      const now = performance.now();
+      log(`[audio] context ${c.state}${was !== c.state ? ` (${was} for ${((now - since) / 1000).toFixed(1)} s)` : ''}`);
+      was = c.state; since = now;
+    };
     try { await c.audioWorklet.addModule(new URL('/audio/worklet.js', import.meta.url)); }
     catch (e) {
       // a context closed meanwhile (sound off, a rebuild) aborts the load

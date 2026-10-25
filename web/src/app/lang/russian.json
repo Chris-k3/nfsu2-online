@@ -892,5 +892,6 @@
   "Best:": "Лучший:",
   "Total": "Всего",
   "Gain {n}X with:": "До {n}X:",
-  "DRIFT": "ДРИФТ"
+  "DRIFT": "ДРИФТ",
+  "The last game ended without closing. Download log has its log.": "Последняя игра завершилась, не закрывшись. В «Скачать журнал» есть её журнал."
 }

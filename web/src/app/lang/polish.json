@@ -892,5 +892,6 @@
   "Best:": "Najlepszy:",
   "Total": "Razem",
   "Gain {n}X with:": "{n}X za:",
-  "DRIFT": "DRIFT"
+  "DRIFT": "DRIFT",
+  "The last game ended without closing. Download log has its log.": "Ostatnia gra skończyła się bez zamknięcia. „Pobierz dziennik” zawiera jej dziennik."
 }

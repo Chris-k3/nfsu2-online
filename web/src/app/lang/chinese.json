@@ -787,5 +787,6 @@
   "Best:": "最佳：",
   "Total": "總分",
   "Gain {n}X with:": "升至 {n}X 需：",
-  "DRIFT": "甩尾"
+  "DRIFT": "甩尾",
+  "The last game ended without closing. Download log has its log.": "上一局遊戲沒有正常關閉就結束了。「下載記錄檔」裡有它的記錄。"
 }

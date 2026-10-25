@@ -850,5 +850,6 @@
   "Best:": "Beste:",
   "Total": "Totaal",
   "Gain {n}X with:": "Verdien {n}X met:",
-  "DRIFT": "DRIFT"
+  "DRIFT": "DRIFT",
+  "The last game ended without closing. Download log has its log.": "Het vorige spel is gestopt zonder af te sluiten. \"Log downloaden\" bevat het log ervan."
 }

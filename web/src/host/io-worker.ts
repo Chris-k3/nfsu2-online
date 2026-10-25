@@ -170,6 +170,19 @@ async function fetchOnce(url: string, start: number, len: number, ranged: boolea
     return { why: ac.signal.aborted ? `no answer for ${f.stall / 1000} s` : String((e as Error)?.message ?? e), again: true, lost: true };
   } finally { clearTimeout(timer); }
 }
+// A line a minute for the log while blocks come from the server (a first game, a new area): how many, how fast, how
+// many had to be asked again, and what this device's cache read meanwhile.  A game the cache has wholly says nothing.
+const SUM_MS = 60_000;
+let sum = { t: 0, fetched: 0, bytes: 0, ms: 0, maxMs: 0, again: 0, local: 0 };
+function dataSummary(now: number) {
+  if (!sum.t) { sum.t = now; return; }
+  if (now - sum.t < SUM_MS) return;
+  if (sum.fetched || sum.again)
+    note(`[data] ${((now - sum.t) / 1000).toFixed(0)} s: ${sum.fetched} blocks from the server (${(sum.bytes / 1048576).toFixed(1)} MB, ` +
+         `${sum.fetched ? (sum.ms / sum.fetched).toFixed(0) : 0} ms on average, the slowest ${sum.maxMs.toFixed(0)} ms${sum.again ? `, ${sum.again} tries again` : ''}), ` +
+         `${sum.local} from this device's cache, ${cacheFiles.size} cache files open, ${(memBytes / 1048576).toFixed(0)} MB in memory${keeping ? '' : ', no longer kept on this device'}`);
+  sum = { t: now, fetched: 0, bytes: 0, ms: 0, maxMs: 0, again: 0, local: 0 };
+}
 async function fetchBlock(n: DNode, bi: number, start: number, len: number): Promise<Uint8Array> {
   while (fetching >= FETCHES) await new Promise<void>(r => fetchWait.push(r));
   fetching++;
@@ -182,11 +195,13 @@ async function fetchBlock(n: DNode, bi: number, start: number, len: number): Pro
       const r = await fetchOnce(ranged ? range : run, start, len, ranged, !ranged && f.deny > 0 && (bi + 1) % f.deny === 0);
       if (r instanceof Uint8Array) {
         const s = (performance.now() - t0) / 1000;
+        sum.fetched++; sum.bytes += r.length; sum.ms += s * 1000; if (s * 1000 > sum.maxMs) sum.maxMs = s * 1000;
         if (k > 1 || s >= SLOW_MS / 1000) note(`[data] ${what}: in after ${s.toFixed(1)} s${k > 1 ? `, ${k} tries` : ''}${by}`);
         return r;
       }
       if (r.lost) lost++;
       if (!r.again || (r.size && ++sized >= 3)) throw new Error(`${what}: ${r.why}${by}`);
+      sum.again++;
       if (k <= 3 || k % 10 === 0) note(`[data] ${what}: ${r.why}${by}; again in ${wait / 1000} s (try ${k + 1})`);
       await new Promise(res => setTimeout(res, wait));
     }
@@ -208,6 +223,7 @@ function keepBlock(cf: CacheFile, n: DNode, bi: number, b: Uint8Array) {
 }
 async function getBlock(n: DNode, bi: number): Promise<Uint8Array> {
   const key = n.path + '#' + bi;
+  dataSummary(performance.now());
   const hit = memBlocks.get(key);
   if (hit) { memBlocks.delete(key); memBlocks.set(key, hit); return hit; }
   let p = inflight.get(key);
@@ -217,7 +233,7 @@ async function getBlock(n: DNode, bi: number): Promise<Uint8Array> {
     const cf = await cacheFile(n);
     if (cf && cf.have[bi]) {
       try {
-        const b = new Uint8Array(len); cf.h.read(b, { at: start }); memPut(key, b); return b;
+        const b = new Uint8Array(len); cf.h.read(b, { at: start }); memPut(key, b); sum.local++; return b;
       } catch (e) { note(`[data] ${n.path} block ${bi}: the cache file did not read (${e}); from the server`); }
     }
     const b = await fetchBlock(n, bi, start, len);

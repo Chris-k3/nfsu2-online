@@ -32,9 +32,12 @@ export class LogRing {
   // lines being waited for (waitFor): a part of the line and what to call
   private waits: { part: string; done: (seen: boolean) => void }[] = [];
   dropped = 0;
+  /** lines given to add() and keep() so far (a fold's repeats too): changes whenever the log does */
+  added = 0;
   constructor(private budget = 8 << 20, private echo = true, private headLines = 300, private keepBudget = 256 << 10) {}
 
   add(s: string) {
+    this.added++;
     if (this.echo) console.log(s);
     if (this.waits.length) this.saw(s);
     if (this.group) {
@@ -49,6 +52,7 @@ export class LogRing {
   }
   /** a line that stays when the log is trimmed (a game's session lines) */
   keep(s: string) {
+    this.added++;
     if (this.echo) console.log(s);
     if (this.waits.length) this.saw(s);
     if (this.group) this.endFold();
@@ -133,6 +137,49 @@ export class LogRing {
       else { out.push(this.lines[j--]); abs--; }
     }
     return out.reverse();
+  }
+  /** A short copy of the log, about `budget` bytes, for keeping where a page that is stopped cannot lose it
+   *  (lastgame.ts): the opening lines (an eighth of it), the newest game's session lines from its "=== NFSU2 web" line
+   *  on (a quarter), and the newest lines; where lines are left out it says so.  The whole text when that fits. */
+  snapshot(budget = 160 << 10): string {
+    if (this.size + 64 <= budget) return this.text();
+    const kept = this.kept, out: string[] = [];
+    const first = this.total - (this.lines.length - this.head);    // the oldest droppable line still here
+    // the opening: the kept lines with no line between them that this copy would leave out
+    let used = 0, h = 0;
+    for (; h < kept.length && kept[h].at <= first && used + kept[h].s.length + 1 <= budget >> 3; h++) { out.push(kept[h].s); used += kept[h].s.length + 1; }
+    // the newest game's session: from its first line, as far as a quarter of the budget goes
+    let s = kept.length;
+    for (let i = kept.length - 1; i >= h; i--) if (kept[i].s.startsWith('=== NFSU2 web')) { s = i; break; }
+    let e = s;
+    for (let b = 0; e < kept.length && b + kept[e].s.length + 1 <= budget >> 2; e++) b += kept[e].s.length + 1;
+    const sess = kept.slice(s, e).map(k => k.s);
+    for (const l of sess) used += l.length + 1;
+    // the newest lines, back to the last kept line already in, as far as the rest of the budget goes
+    const tail: string[] = [];
+    if (this.group) { const f = this.foldNote(' (so far)'); tail.push(f); used += f.length + 1; }
+    let j = this.lines.length - 1, k = kept.length - 1, abs = this.total - 1;
+    const stop = Math.max(h, e) - 1;   // kept lines up to here are in already
+    while (j >= this.head || k > stop) {
+      const isKept = k > stop && (j < this.head || kept[k].at > abs);
+      const l = isKept ? kept[k].s : this.lines[j];
+      if (used + l.length + 1 > budget) break;
+      tail.push(l); used += l.length + 1;
+      if (isKept) k--; else { j--; abs--; }
+    }
+    // how many lines each gap leaves out: droppable ones (by place) and kept ones (by index)
+    const gap = (n: number) => n > 0 ? [`[... ${n} lines left out of this copy of the log]`] : [];
+    const keptAt = (i: number) => (i < kept.length ? kept[i].at : this.total);
+    const tailStartAbs = j + 1 - this.head + first;      // the first droppable line in the tail
+    const res = [...out];
+    if (sess.length) {
+      res.push(...gap(Math.max(0, keptAt(s) - Math.max(first, h ? kept[h - 1].at : first)) + (s - h)));
+      res.push(...sess);
+    }
+    const from = sess.length ? e : h;
+    res.push(...gap(Math.max(0, tailStartAbs - (from > 0 ? keptAt(from - 1) : first)) + Math.max(0, k - from + 1)));
+    res.push(...tail.reverse());
+    return res.join('\n') + '\n';
   }
   get size() { return this.bytes + this.keptBytes; }
   get count() { return this.lines.length - this.head + this.kept.length; }

@@ -128,6 +128,7 @@ const errText = (x: unknown) => {
 
 export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElement, opts: RendererOptions = {}): Promise<Renderer> {
   const log = opts.log ?? ((s: string) => console.log(s));
+  const attachedAt = performance.now();
   if (!navigator.gpu) throw new Error('WebGPU is not available in this browser');
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
   if (!adapter) throw new Error('no WebGPU adapter');
@@ -350,9 +351,20 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
   // ever on the screen (counted in raf).  The canvas texture tells nothing here: WebKit gives every frame a texture of
   // its own (at 120 fps on its 30 Hz rAF, 1 of 3,571 frames got the one before it).
   let sinceRaf = 0, unshown = 0, winUnshown = 0, winUnshownFrames = 0, winUnshownT = performance.now();
-  // the textures' memory on the GPU, for the log when it moved by 16 MB (a phone's graphics process runs out of it first)
-  let texSaid = 0;
+  // A line a minute for the log (what a phone's log is read for): frames, the browser's rAF rate, frames drawn over
+  // unseen, how long the GPU took to finish a frame (submit to onSubmittedWorkDone: GPU-bound as it nears the frame
+  // time, a hot phone as it climbs), frames that waited for the GPU, and the textures' memory on the GPU (a phone's
+  // graphics process runs out of memory first).
+  const SUMMARY_MS = 60_000;
+  let winDone: number[] = [], winWaits0 = 0;
   const MB = (b: number) => (b / 1048576).toFixed(0);
+  const summary = (now: number) => {
+    const d = winDone.sort((a, b) => a - b), q = (p: number) => d.length ? d[Math.min(d.length - 1, Math.floor(p * d.length))].toFixed(1) : '-';
+    log(`[gpu] ${((now - winUnshownT) / 1000).toFixed(0)} s to t=${((now - attachedAt) / 1000).toFixed(0)} s: ${winUnshownFrames} frames, rAF ${rafHz.toFixed(1)} Hz, ` +
+        `${winUnshown} drawn over unseen, GPU done p50 ${q(0.5)} / p90 ${q(0.9)} / max ${d.length ? d[d.length - 1].toFixed(0) : '-'} ms, ` +
+        `${slotWaits - winWaits0} waited for the GPU, textures ${MB(enc.texBytes)} MB${enc.unpackBytes ? ` (${MB(enc.unpackBytes)} unpacked from DXT)` : ''}${errors ? `, ${errors} WebGPU errors so far` : ''}`);
+    winUnshown = 0; winUnshownFrames = 0; winUnshownT = now; winDone = []; winWaits0 = slotWaits;
+  };
   const encodeAndSubmit = (b: number) => {
     const t0 = performance.now();
     const ce = device.createCommandEncoder();
@@ -360,16 +372,7 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
     if (slot >= 0) { qNext = (qNext + 1) % TQ; enc.firstPassTs = { querySet: qs!, beginningOfPassWriteIndex: 2 * slot }; }
     const cur = ctx.getCurrentTexture();
     sinceRaf++; winUnshownFrames++;
-    if (t0 - winUnshownT > 30_000) {
-      // from 5 %: a content rate above the display's, or a browser that halved its rAF (at 60 on 60 Hz a late frame
-      // now and then is 0.2 to 1.3 %)
-      if (winUnshown && winUnshown * 20 >= winUnshownFrames) log(`[gpu] ${winUnshown} of ${winUnshownFrames} frames in the last ${((t0 - winUnshownT) / 1000).toFixed(0)} s were drawn over before the browser showed them (rAF ${rafHz.toFixed(1)} Hz)`);
-      winUnshown = 0; winUnshownFrames = 0; winUnshownT = t0;
-      if (Math.abs(enc.texBytes - texSaid) >= 16 << 20) {
-        texSaid = enc.texBytes;
-        log(`[gpu] textures: ${MB(enc.texBytes)} MB on the GPU${enc.unpackBytes ? `, ${MB(enc.unpackBytes)} MB of it DXT unpacked to BGRA8` : ''}`);
-      }
-    }
+    if (t0 - winUnshownT > SUMMARY_MS) summary(t0);
     const st = enc.encodeFrame(b, ce, direct ? cur : undefined);
     burn?.(ce);
     const scr = enc.screen!;   // the canvas texture itself, or the back buffer
@@ -440,7 +443,9 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
     const tSub = performance.now();
     device.queue.onSubmittedWorkDone().then(() => {
       inFlight--;
-      if (done.length < 4096) done.push(performance.now() - tSub);
+      const dms = performance.now() - tSub;
+      if (done.length < 4096) done.push(dms);
+      if (winDone.length < 16384) winDone.push(dms);
       pump();
     });
     const ms = performance.now() - t0;

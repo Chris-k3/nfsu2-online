@@ -850,5 +850,6 @@
   "Best:": "Bäst:",
   "Total": "Totalt",
   "Gain {n}X with:": "Nå {n}X med:",
-  "DRIFT": "DRIFT"
+  "DRIFT": "DRIFT",
+  "The last game ended without closing. Download log has its log.": "Det senaste spelet slutade utan att stängas. \"Ladda ned loggen\" har dess logg."
 }

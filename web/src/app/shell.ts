@@ -19,11 +19,13 @@
 // While any of them is given, the start page says whether it is in effect.
 
 import registryDefaults from '../../../app/registry-defaults.txt';
-import { browserName, check, checkBrowser, checkGpu, checkIsolation, checkStorage, firefoxVersion, fmtBytes, type Check } from './checks';
+import { browserName, check, checkBrowser, checkGpu, checkIsolation, checkStorage, fmtBytes, type Check } from './checks';
 import { codeOf, dateLocale, language as pageLanguage, lastLanguage, LANGUAGES, listOf, live, LOCALE, N, NATIVE, onLanguage, setLanguage, t, T, tn, tvars, type Msg } from './i18n';
 import { loadGame, serverRev, type Loaded } from './loader';
 import { claimInstance } from './instance';
 import { LogRing, downloadBlob, stamp } from './logs';
+import { LastGameKeeper, lastGameLine, lastGameToOffer, type LastGame } from './lastgame';
+import { browserBrief, deviceBrief } from './devicelog';
 import { canFullscreen, enterFullscreen, exitFullscreen, fromHomeScreen, homeScreenInstead, isFullscreen, keepScreenOn, measureRefresh, settledSize, trackCanvasSize } from './display';
 import { deviceDefaults, markTouch, noPinchZoom, padSeen, touchFirst } from './device';
 import { markPad, padPress, pageDialog } from './padnav';
@@ -103,6 +105,9 @@ let popAsk = 0;                          // the popup's questions so far: only t
 let away: AwayCheck | null = null;
 let renderCheck: RenderCheck | null = null;
 let lastExit: { code: number; seconds: number } | null = null;
+let keeper: LastGameKeeper;              // the running game's log, copied where a page Safari stops cannot lose it
+let lastGame: LastGame | null = null;    // the last game's copy, when that game did not get to its end (lastgame.ts)
+let hiddenAt = 0;                        // when the page was hidden during a game (0: shown)
 const checks = new Map<string, Check>();
 let instance: ReturnType<typeof claimInstance>;
 let settingsText: string | null = null;
@@ -418,7 +423,9 @@ async function startGame() {
   // more of this browser than its major version and system (the audit's PRIV-5).  These session lines stay when
   // a long game fills the log (logs.ts keep).
   log.keep(`=== NFSU2 web, ${new Date().toISOString()}, game ${loaded!.info.rev}, server ${serverKind()} ===`);
-  log.keep(`[app] save folder: OPFS ${SAVE} (/save); canvas ${size.w}x${size.h} device pixels, display ${displayHz} Hz; ${browserBrief()}; ${checks.get('gpu')?.label ?? 'WebGPU'}; movies in ${r.env.NFSU2_MOVIE_CODEC === 'av1' ? 'AV1' : 'VP6'}`);
+  log.keep(`[app] save folder: OPFS ${SAVE} (/save); canvas ${size.w}x${size.h} device pixels, display ${displayHz} Hz; ${browserBrief(navigator.userAgent, navigator.maxTouchPoints)}; ${checks.get('gpu')?.label ?? 'WebGPU'}; movies in ${r.env.NFSU2_MOVIE_CODEC === 'av1' ? 'AV1' : 'VP6'}`);
+  log.keep(`[app] device: ${deviceBrief({ screenW: screen.width, screenH: screen.height, dpr: devicePixelRatio, cores: navigator.hardwareConcurrency,
+    memoryGB: (navigator as { deviceMemory?: number }).deviceMemory, touchPoints: navigator.maxTouchPoints, homeScreen: fromHomeScreen(), displayHz })}`);
   for (const n of r.notes) log.keep(`[app] ${n}`);
   const reg = r.env.NFSU2_REGFILE.replace(/^\/save\//, '');
   if (q.get('reg')) {
@@ -483,6 +490,7 @@ async function startGame() {
     return;
   }
   setPhase('playing', T('Playing'), () => '');
+  keeper.start(loaded!.info.rev);
   document.body.dataset.phase = 'playing';
   away = new AwayCheck(session, awayLimits(), awayLine, logLine);
   // a phone's render scale (device.ts): whether it has room for all its pixels, for its next game
@@ -535,13 +543,6 @@ function serverKind(): string {
   if (h === 'localhost' || h === '::1' || /^127\./.test(h)) return 'this machine';
   if (h.endsWith('.local') || /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|f[cd]|fe80:)/.test(h)) return 'on the LAN';
   return 'remote';
-}
-/** "Chrome 155 on macOS": enough to tell what ran, nothing more */
-function browserBrief(): string {
-  const ua = navigator.userAgent;
-  const c = /(?:Chrome|Chromium)\/(\d+)/.exec(ua), f = firefoxVersion();
-  const os = /CrOS/.test(ua) ? 'ChromeOS' : /Windows/.test(ua) ? 'Windows' : /Mac OS X|Macintosh/.test(ua) ? 'macOS' : /Android/.test(ua) ? 'Android' : /Linux/.test(ua) ? 'Linux' : 'another system';
-  return `${f !== null ? `Firefox ${f}` : c ? `Chrome ${c[1]}` : 'another browser'} on ${os}`;
 }
 /** a subsystem the game cannot do without failed: the running game is stopped (what: English, for t(); code: its name) */
 function stopFatal(what: string, code?: string) {
@@ -639,6 +640,7 @@ function onExit(s: GameSession, code: number) {
   if (session !== s) return;
   const seconds = (performance.now() - s.started) / 1000;
   log.add(`[app] the game exited with code ${code} after ${seconds.toFixed(1)} s`);
+  keeper.end(code, fatal?.code ?? 'exit');
   s.terminate();
   session = null;
   quitAt = null;
@@ -1022,7 +1024,9 @@ function choiceBox(title: string, body: Node | string, ok: string, cancel: strin
 // (runtime/watchdog.c).  No answer in 2 s, or a game that cannot be asked: the log as it is.
 async function downloadLog() {
   if (session?.logReport()) await log.waitFor('[watchdog] log download ready', 2000);
-  downloadBlob(log.text(), `nfsu2-${stamp()}.log`, 'text/plain');
+  // the last game's copy first, when that game did not get to its end (lastgame.ts)
+  const prev = lastGame ? `=== the last game's log, as the page kept it while it ran ===\n${lastGame.log}=== this page's log ===\n` : '';
+  downloadBlob(prev + log.text(), `nfsu2-${stamp()}.log`, 'text/plain');
 }
 
 // --------------------------------------------------------- game module --
@@ -1192,6 +1196,13 @@ export async function boot() {
   const dev = asked && await devServer();
   const given = takeParams(dev);
   instance = claimInstance(`nfsu2-saves:${SAVE}`);
+  // the last game of this save folder that did not get to its end (Safari stopped the page, say): its log is offered
+  keeper = new LastGameKeeper(SAVE, log, logLine);
+  lastGame = lastGameToOffer(SAVE);
+  if (lastGame) {
+    log.keep(lastGameLine(lastGame));
+    $('#log-btn').hidden = $('#report').hidden = $('#lastgame').hidden = false;
+  }
   fps = new FpsOverlay($('#fps'));
   lobbyPanel = new LobbyPanel($('#lobby'), $('#lobby-cover'), logLine);
   // made here once: a closure made per game (in startGame) would keep that game's scope reachable
@@ -1269,6 +1280,15 @@ export async function boot() {
     }
   }, { capture: true });
   window.addEventListener('beforeunload', e => { if (session) { e.preventDefault(); e.returnValue = ''; } });
+  // a game running when the page goes away (closed, reloaded): said so in its copy (Safari stopping it says nothing)
+  window.addEventListener('pagehide', () => { if (session) keeper.end(-2, 'page closed'); });
+  // a hidden page is what a phone stops first: the copy then, and how long it was away in the log
+  document.addEventListener('visibilitychange', () => {
+    if (!session) return;
+    if (document.hidden) hiddenAt = performance.now();
+    else if (hiddenAt) { log.add(`[app] the page was hidden for ${((performance.now() - hiddenAt) / 1000).toFixed(1)} s (t=${((performance.now() - session.started) / 1000).toFixed(0)} s into the game)`); hiddenAt = 0; }
+    keeper.hidden(document.hidden);
+  });
   document.addEventListener('fullscreenchange', () => { if (!isFullscreen() && session) toast(t('Full screen left. {menu} has it.', { menu: cap(menuName()) }), 3000); });
   noPinchZoom();
   // the menu's button on the game: on a touch screen from the start, elsewhere from the first touch

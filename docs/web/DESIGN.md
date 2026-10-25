@@ -226,9 +226,23 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
   measurement at Play): a 30 Hz phase (Safari in Low Power Mode; Playwright's WebKit on the Mac after a minute
   without input, or with another window in front) runs the game at 30, with the 30 fps fixes
   (`runtime/framerate.c`), instead of making every other frame for nothing: in WebKit's free roam 1 of 896 frames
-  was then drawn over unseen, and the web content process took 27 % of a core instead of 42 %. The log says when 5 %
-  or more of the frames were drawn over before the browser showed them (`[gpu] N of M frames`: more than one frame
-  between two rAFs; at fps = 120 on a 60 Hz rAF half of them, on a 30 Hz one three quarters).
+  was then drawn over unseen, and the web content process took 27 % of a core instead of 42 %. The log's `[gpu]`
+  line a minute counts the frames drawn over before the browser showed them (more than one frame between two rAFs;
+  at fps = 120 on a 60 Hz rAF half of them, on a 30 Hz one three quarters).
+- **The log for a player to send** (`web/src/app/logs.ts`, Download log): besides the game's own lines (its `[status]`
+  line a minute: fps, CPU, frame times, heap), the page writes the browser and system by name (an iPhone's Safari is
+  "Safari 26 on iOS", an iPad's "on iPadOS" although it says Macintosh), a `[app] device:` line (screen, pixel ratio,
+  cores, touch, Home Screen app or tab, a 30 Hz display before Play), and a line a minute each from the renderer
+  (`[gpu] 60 s to t=…`: frames, rAF rate, frames drawn over, the GPU's time to finish a frame p50/p90/max, frames
+  that waited for the GPU, the textures' memory on the GPU) and, while blocks come from the server, from the I/O worker
+  (`[data] 60 s: …`: blocks, MB, average and slowest fetch, tries again, reads from the cache, cache files open). How
+  long the page was hidden and an AudioContext interruption lasted are in the log too. Safari stops a page whose memory
+  it needs without any event, and the log went with it: `web/src/app/lastgame.ts` keeps a copy of the running game's log
+  (`LogRing.snapshot`, 160 KB at most: the opening lines, the game's session lines, the newest lines) in localStorage
+  every 10 s while it grows, when the page is hidden or shown, and at the end. A page that finds a game that did not get
+  to its end (or one stopped for a reason, GPU-LOST say, before a reload) says so on the start page and puts that log
+  first in Download log, with a line on how it ended (the page on screen or hidden at its last copy). Tested by killing
+  WebKit's web content process during a game (`kill -9`, as Safari's memory limit does).
 - **Frame pacing on Windows:** a worker's `Atomics.wait` timeout wakes on the OS timer, which Chrome on Windows runs
   at 1 ms or at 15.6 ms (Chrome 155: a 1 ms wait took 15.5 ms at the median). The pacer's sleep
   (`runtime/win32_ext.c`) therefore waits until a learned margin before its deadline and spins on the clock for the

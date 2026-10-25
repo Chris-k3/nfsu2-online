@@ -787,5 +787,6 @@
   "Best:": "최고:",
   "Total": "합계",
   "Gain {n}X with:": "{n}X 달성 점수:",
-  "DRIFT": "드리프트"
+  "DRIFT": "드리프트",
+  "The last game ended without closing. Download log has its log.": "지난 게임이 정상적으로 닫히지 않고 끝났어요. \"로그 다운로드\"에 그 로그가 있어요."
 }
