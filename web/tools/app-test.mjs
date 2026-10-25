@@ -238,6 +238,13 @@ try {
     const resetAll = { roamRate: /^#roam_rate = 20$/m.test(file3), ask: resetAsk, left: file4.split('\n').filter(l => /^[A-Za-z_]+ = /.test(l)),
       disabled: await page.locator('#settings-reset-all').isDisabled() };
     const resetOk = resetAll.roamRate && resetAsk === 'Reset all settings?' && resetAll.left.join('|') === 'roam_name = Tester' && resetAll.disabled;
+    // the steps after this one play with movies off and the detailed counter (play's F8, saves' and restore's
+    // settings.ini): set again after the reset
+    n0 = await saved(page);
+    await page.click('.set[data-key="movies"] .switch'); await settle(page, n0++);
+    const more = page.locator('#settings details:has(> summary:has-text("More display"))');
+    if (!await more.evaluate(d => d.open)) await page.click('#settings summary:has-text("More display")');
+    await page.click('.set[data-key="fps_counter"] .opt:has-text("Detailed")'); await settle(page, n0++);
     report('settings', fileOk && envOk && /not a whole number in 0\.\.32/.test(refusedMsg) && /ignored/.test(rawMsg) &&
       /ultrawide/.test(hudState) && /roam_rate = 30/.test(otherText) && /roam_port = 47300 \(ignored: only used by the Mac app\)/.test(otherText) && after.movies === 'false' && after.fps === '120' && after.name === 'Tester' && /^#hud = wide$/m.test(file2) && /\(2 changed\)$/.test(moreDisplay) &&
       resetOk && listenPlaying === 'true' && listened,
