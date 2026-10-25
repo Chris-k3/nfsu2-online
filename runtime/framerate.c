@@ -13,8 +13,12 @@
  *   NFSU2_FPS = auto | 30 | 60 | 120 | 240 | uncapped | off
  *       auto (default): the window's screen maximumFramesPerSecond mapped to
  *       the best supported content rate (>= 239 Hz -> 240, >= 119 Hz -> 120,
- *       otherwise 60).  The game's own 30 fps requests in NIS cutscenes are
- *       kept (SetFrameRate 0x576CB0); its online/LAN cap 0x5FF67C is not
+ *       up to 31 Hz -> 30, otherwise 60).  30 Hz is a browser that halves its
+ *       animation frames (Safari in Low Power Mode, or on a Mac nobody has
+ *       touched for a minute; Chrome's Energy Saver): it shows only every
+ *       other frame of 60, so the game makes the half it shows.  The game's
+ *       own 30 fps requests in NIS cutscenes are kept (SetFrameRate
+ *       0x576CB0); its online/LAN cap 0x5FF67C is not
  *       (sub_005ff490 below).
  *       30: for a machine that cannot hold 60 (a phone): steady frames at
  *       half the rate, the game otherwise as at 60 (the fixes below).
@@ -41,7 +45,9 @@
  *                               every frame, menus too) and the exit report
  *   NFSU2_HFR_TRACE = <file>    per-frame CSV while racing (GameFlow 6),
  *                               read by tools/hfr_compare.py
- *   NFSU2_DISPLAY_HZ = <hz>     override the detected refresh rate (tests)
+ *   NFSU2_DISPLAY_HZ = <hz>     override the detected refresh rate (tests);
+ *                               on the web the page's measurement at Play,
+ *                               the rate until the renderer measures it
  *   NFSU2_PRESENT_MINDUR = 0    no presentDrawable:afterMinimumDuration: (A/B)
  *   NFSU2_NO_VSYNC_CLOCK = 1    (metal.m) no CADisplayLink: the slot grid uses
  *                               the nominal period and an arbitrary phase
@@ -131,12 +137,21 @@ static double g_rt_carry = 0, g_wt_carry = 0;   /* timer fix: RealTimer / WorldT
 
 /* mach_absolute_time in ns: the clock of CADisplayLink / presentedTime */
 static uint64_t mono_ns(void){ return clock_gettime_nsec_np(CLOCK_UPTIME_RAW); }
-/* NFSU2_DISPLAY_HZ, or the autotest "displayhz" command (a screen change) */
+/* NFSU2_DISPLAY_HZ, or the autotest "displayhz" command (a screen change).
+ * On the web NFSU2_DISPLAY_HZ is no override: the page sets it to what it
+ * measured at Play, and metal_display_hz (gpu_web.c) gives it until the
+ * renderer has measured the rate from requestAnimationFrame, then that rate as
+ * it changes.  As an override it had auto stay at the rate of the start, on a
+ * 30 Hz phase of Safari's or a move to another screen. */
 static _Atomic int g_hz_forced = -1;
 static int display_hz(void){
     int f = atomic_load(&g_hz_forced);
+#ifdef __wasm__
+    if (f < 0) f = 0;
+#else
     if (f < 0){ const char *e = getenv("NFSU2_DISPLAY_HZ"); f = e && *e ? atoi(e) : 0;
                 int un = -1; atomic_compare_exchange_strong(&g_hz_forced, &un, f); f = atomic_load(&g_hz_forced); }
+#endif
     return f > 0 ? f : metal_display_hz();
 }
 void hfr_set_display_hz(int hz){ atomic_store(&g_hz_forced, hz > 0 ? hz : 0); }
@@ -144,6 +159,7 @@ void hfr_set_display_hz(int hz){ atomic_store(&g_hz_forced, hz > 0 ? hz : 0); }
 static int rate_for_hz(int hz){
     if (hz >= 239) return 240;
     if (hz >= 119) return 120;
+    if (hz > 0 && hz <= 31) return 30;
     return 60;
 }
 static void parse_mode(void){
@@ -270,12 +286,13 @@ static int content_rate(void){
     }
     return m;
 }
-/* fps = 30 outside the game's own 30 fps requests (a cutscene runs at 30 in
- * every mode and keeps the effects it has there at 60): a frame is two of
- * 60, so effects stepped once a frame step for both (F2, F6) */
+/* fps = 30, or auto on a 30 Hz display, outside the game's own 30 fps
+ * requests (a cutscene runs at 30 in every mode and keeps the effects it has
+ * there at 60): a frame is two of 60, so effects stepped once a frame step
+ * for both (F2, F6) */
 static int at_30(void){
     float cap = MRF32(A_CAP);
-    return g_mode == 30 && !(cap > 0.f && cap != MRF32(A_CAP_DEF));
+    return mode_rate() == 30 && !(cap > 0.f && cap != MRF32(A_CAP_DEF));
 }
 /* frame-rate counter (fpscounter.m): the mode's name, its own rate (0 =
  * uncapped) and the content rate of the last frame (the game's 30 fps

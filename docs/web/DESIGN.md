@@ -220,6 +220,15 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
   folder's 965 MB of movies become 179 MB, a dubbed language's 216 MB 153 MB.
 - **Clock:** `clock_gettime(MONOTONIC)` is `performance.timeOrigin + performance.now()`, which is one clock across
   workers.
+- **Display rate:** the page measures the refresh rate from rAF, as the median of spans of 4 frames: Safari on an
+  iPhone or iPad gives rAF times in whole milliseconds, and single intervals had a median of 62.5 Hz at times at 60
+  Hz, always 125 at 120. `fps = auto` follows the rate as it changes (`NFSU2_DISPLAY_HZ` is only the page's
+  measurement at Play): a 30 Hz phase (Safari in Low Power Mode; Playwright's WebKit on the Mac after a minute
+  without input, or with another window in front) runs the game at 30, with the 30 fps fixes
+  (`runtime/framerate.c`), instead of making every other frame for nothing: in WebKit's free roam 1 of 896 frames
+  was then drawn over unseen, and the web content process took 27 % of a core instead of 42 %. The log says when 5 %
+  or more of the frames were drawn over before the browser showed them (`[gpu] N of M frames`: more than one frame
+  between two rAFs; at fps = 120 on a 60 Hz rAF half of them, on a 30 Hz one three quarters).
 - **Frame pacing on Windows:** a worker's `Atomics.wait` timeout wakes on the OS timer, which Chrome on Windows runs
   at 1 ms or at 15.6 ms (Chrome 155: a 1 ms wait took 15.5 ms at the median). The pacer's sleep
   (`runtime/win32_ext.c`) therefore waits until a learned margin before its deadline and spins on the clock for the
