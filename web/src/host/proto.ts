@@ -9,8 +9,11 @@ export const CTL_IO_DOORBELL = 1;    // bumped by a thread that posted an I/O re
 export const CTL_EXIT = 2;           // 1 once the process exited (proc_exit / _start returned)
 export const CTL_EXIT_CODE = 3;
 export const CTL_SLEEP = 4;          // a word nobody notifies: Atomics.wait on it = sleep
+export const CTL_POOL_READY = 5;     // bumped and notified as each pool worker becomes ready (thread-spawn waits on it)
 export const CTL_POOL = 64;          // pool slot i: [CTL_POOL + 4*i + 0] state, +1 tid, +2 start arg
-export const POOL_IDLE = 0, POOL_RUN_MAIN = -1;
+// a slot's state: idle (its worker waits for a thread), 1 claimed, 2 running a thread, the process entry, or no worker
+// there (yet: the page starts workers as threads need them, process.ts)
+export const POOL_IDLE = 0, POOL_RUN_MAIN = -1, POOL_NONE = -2;
 export const CTL_INTS = CTL_POOL + 4 * MAX_THREADS + 64;
 
 // rpc: one slot per pool slot (a thread only ever uses its own slot)
@@ -50,4 +53,6 @@ export type ToPage =
   | { t: 'log'; s: string; fd: number; tid: number }
   | { t: 'exit'; code: number }
   | { t: 'trap'; tid: number; msg: string; stack?: string }
-  | { t: 'ready'; slot: number };
+  | { t: 'ready'; slot: number }
+  // a thread took a pool worker, or found none idle: the page starts more (process.ts)
+  | { t: 'pool' };

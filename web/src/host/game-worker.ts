@@ -4,8 +4,8 @@
 // Everything that blocks (sleeps, waits, synchronous file I/O) blocks this
 // worker only, never the page.
 import {
-  CTL_EXIT, CTL_EXIT_CODE, CTL_IO_DOORBELL, CTL_NEXT_TID, CTL_POOL, CTL_SLEEP, E, MAX_THREADS, Op,
-  POOL_IDLE, POOL_RUN_MAIN, RPC_DONE, RPC_IDLE, RPC_POSTED, RPC_SLOT, type BootConfig, type ToPage,
+  CTL_EXIT, CTL_EXIT_CODE, CTL_IO_DOORBELL, CTL_NEXT_TID, CTL_POOL, CTL_POOL_READY, CTL_SLEEP, E, MAX_THREADS, Op,
+  POOL_IDLE, POOL_NONE, POOL_RUN_MAIN, RPC_DONE, RPC_IDLE, RPC_POSTED, RPC_SLOT, type BootConfig, type ToPage,
 } from './proto';
 
 interface Init { mod: WebAssembly.Module; memory: WebAssembly.Memory; ctl: SharedArrayBuffer; rpc: SharedArrayBuffer;
@@ -167,17 +167,30 @@ function wasi(): Record<string, (...a: any[]) => any> {
   };
 }
 
+// The page keeps a few workers idle beyond the threads running (process.ts) and starts more as threads take them.  A
+// thread that finds none idle all the same asks for one and waits for it, as a slow CreateThread would (a worker takes
+// ~50 ms to start; at most 10 s here).
+const SPAWN_WAIT_MS = 10_000;
 function threadSpawn(arg: number): number {
-  const t = Atomics.add(ctl, CTL_NEXT_TID, 1);
-  for (let s = 0; s < POOL; s++) {
-    const i = CTL_POOL + 4 * s;
-    if (Atomics.compareExchange(ctl, i, POOL_IDLE, 1) === POOL_IDLE) {   // claim the slot
-      ctl[i + 1] = t; ctl[i + 2] = arg;
-      Atomics.store(ctl, i, 2); Atomics.notify(ctl, i);
-      return t;
+  const t = Atomics.add(ctl, CTL_NEXT_TID, 1), t0 = performance.now();
+  for (let asked = false; ;) {
+    const ready = Atomics.load(ctl, CTL_POOL_READY);
+    for (let s = 0; s < POOL; s++) {
+      const i = CTL_POOL + 4 * s;
+      if (Atomics.compareExchange(ctl, i, POOL_IDLE, 1) === POOL_IDLE) {   // claim the slot
+        ctl[i + 1] = t; ctl[i + 2] = arg;
+        Atomics.store(ctl, i, 2); Atomics.notify(ctl, i);
+        post({ t: 'pool' });
+        if (asked) post({ t: 'log', s: `thread-spawn: thread ${t} waited ${(performance.now() - t0).toFixed(0)} ms for a pool worker`, fd: 2, tid });
+        return t;
+      }
     }
+    const left = SPAWN_WAIT_MS - (performance.now() - t0);
+    if (left <= 0) break;
+    if (!asked) { asked = true; post({ t: 'pool' }); }
+    Atomics.wait(ctl, CTL_POOL_READY, ready, left);
   }
-  post({ t: 'log', s: `thread-spawn: all ${POOL} pool workers busy`, fd: 2, tid });
+  post({ t: 'log', s: `thread-spawn: no pool worker for thread ${t} within ${SPAWN_WAIT_MS / 1000} s (at most ${POOL})`, fd: 2, tid });
   return -6; // EAGAIN
 }
 
@@ -235,8 +248,11 @@ onmessage = async (e: MessageEvent<Init>) => {
   }
   const inst = await WebAssembly.instantiate(m.mod, imports);
   const ex = inst.exports as Record<string, any>;
-  post({ t: 'ready', slot });
   const i = CTL_POOL + 4 * slot;
+  // ready: a thread may take this slot now (one waiting in threadSpawn is woken)
+  Atomics.compareExchange(ctl, i, POOL_NONE, POOL_IDLE);
+  Atomics.add(ctl, CTL_POOL_READY, 1); Atomics.notify(ctl, CTL_POOL_READY);
+  post({ t: 'ready', slot });
   for (;;) {
     let st: number;
     while ((st = Atomics.load(ctl, i)) === POOL_IDLE || st === 1) Atomics.wait(ctl, i, st);

@@ -1,13 +1,14 @@
 // Starting the game process from the page: the shared memory, the control
 // and RPC blocks, the I/O worker and a pool of game-thread workers.
-import { CTL_EXIT, CTL_INTS, CTL_NEXT_TID, CTL_POOL, MAX_THREADS, POOL_RUN_MAIN, RPC_BYTES, type BootConfig, type ToPage } from './proto';
+import { CTL_EXIT, CTL_INTS, CTL_NEXT_TID, CTL_POOL, MAX_THREADS, POOL_IDLE, POOL_NONE, POOL_RUN_MAIN, RPC_BYTES, type BootConfig, type ToPage } from './proto';
 import { tzEnv } from './tz';
 import { movieCodec } from './movie';
 
 export interface ProcessOptions {
   module: WebAssembly.Module;
   cfg: BootConfig;
-  pool?: number;                         // game-thread workers (the game uses ~10 threads)
+  pool?: number;                         // game-thread workers at most (started as threads need them; default 24)
+  poolStart?: number;                    // ... and at first (default POOL_START)
   initialPages?: number;                 // wasm pages (64 KiB) of the shared memory at start
   onLog?: (s: string, fd: number, tid: number) => void;
   onExit?: (code: number) => void;
@@ -34,6 +35,13 @@ function memoryPagesOf(mod: WebAssembly.Module): number | null {
   return s.length ? new DataView(s[0]).getUint32(0, true) : null;
 }
 
+/** Game-thread workers: POOL_START at first, then as threads take them so that POOL_SPARE stay idle, up to the pool's
+ *  size (a thread start that finds none idle waits for the next: game-worker.ts threadSpawn).  Each takes memory, a
+ *  phone's: a race or free roam starts 15 (at most 13 threads at once), hosting a LAN game 18, and all 24 at once held
+ *  ~55 MB more of WebKit's page process.  12 at first, fewer than any game ends with: its first second starts 10
+ *  threads, and with 8 or 10 workers at first the 10th waited up to 15 ms for one. */
+const POOL_START = 12, POOL_SPARE = 2;
+
 export async function startProcess(o: ProcessOptions): Promise<GameProcess> {
   const pool = Math.min(o.pool ?? 24, MAX_THREADS);
   // the page's time zone (WASI has none); an explicit NFSU2_TZ in the config wins
@@ -55,7 +63,11 @@ export async function startProcess(o: ProcessOptions): Promise<GameProcess> {
     const m = e.data;
     if (m.t === 'log') o.onLog?.(m.s, m.fd, m.tid);
     else if (m.t === 'trap') o.onLog?.(`TRAP in thread ${m.tid}: ${m.msg}\n${m.stack ?? ''}`, 2, m.tid);
-    else if (m.t === 'exit') { o.onExit?.(m.code); resolveExit(m.code); }
+    else if (m.t === 'pool') topUp();
+    else if (m.t === 'exit') {
+      o.onNote?.(`[pool] ${started} game workers started, at most ${mostBusy} threads at once`);
+      o.onExit?.(m.code); resolveExit(m.code);
+    }
     else if (m.t === 'register') {
       regs.set(m.kind, { ptr: m.ptr, size: m.size });
       for (const w of regWaiters.get(m.kind) ?? []) w({ ptr: m.ptr, size: m.size });
@@ -72,16 +84,27 @@ export async function startProcess(o: ProcessOptions): Promise<GameProcess> {
   });
   io.onmessage = (e) => { if (e.data.t === 'saved') o.onSaved?.(e.data.path); else if (e.data.t === 'log') o.onNote?.(e.data.s); };
 
-  const ready: Promise<void>[] = [];
-  for (let s = 0; s < pool; s++) {
-    const w = new Worker(new URL('/host/game-worker.js', import.meta.url), { type: 'module', name: `game-${s}` });
-    ready.push(new Promise<void>(res => {
-      w.onmessage = (e) => { if (e.data.t === 'ready') { w.onmessage = onMsg; res(); } else onMsg(e); };
-    }));
+  for (let s = 0; s < pool; s++) ctl[CTL_POOL + 4 * s] = POOL_NONE;   // each worker makes its slot idle when ready
+  let started = 0, starting = 0, mostBusy = 0;
+  const startWorker = () => {
+    const s = started++, w = new Worker(new URL('/host/game-worker.js', import.meta.url), { type: 'module', name: `game-${s}` });
+    starting++;
+    const ready = new Promise<void>(res => {
+      w.onmessage = (e) => { if (e.data.t === 'ready') { starting--; w.onmessage = onMsg; res(); } else onMsg(e); };
+    });
+    w.onerror = (e) => o.onNote?.(`[pool] game worker ${s}: ${e.message}`);
     w.postMessage({ mod: o.module, memory, ctl: ctlBuf, rpc, slot: s, pool, cfg });
     workers.push(w);
-  }
-  await Promise.all(ready);
+    return ready;
+  };
+  // a thread took a worker (or found none): POOL_SPARE idle or starting again
+  const topUp = () => {
+    let idle = 0;
+    for (let s = 0; s < started; s++) if (Atomics.load(ctl, CTL_POOL + 4 * s) === POOL_IDLE) idle++;
+    mostBusy = Math.max(mostBusy, started - starting - idle);
+    for (let n = idle + starting; n < POOL_SPARE && started < pool; n++) void startWorker();
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(o.poolStart ?? POOL_START, pool)) }, startWorker));
   // slot 0 runs the process entry
   Atomics.store(ctl, CTL_POOL, POOL_RUN_MAIN); Atomics.notify(ctl, CTL_POOL);
 

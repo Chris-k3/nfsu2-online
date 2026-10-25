@@ -58,7 +58,7 @@ const bench = q.has('bench');
 let loadT0 = 0;
 let r: Renderer | null = null;
 const p = await startProcess({
-  module: mod, pool: +(q.get('pool') ?? 24), initialPages: q.get('pages') ? +q.get('pages')! : undefined,
+  module: mod, pool: +(q.get('pool') ?? 24), poolStart: q.get('poolstart') ? +q.get('poolstart')! : undefined, initialPages: q.get('pages') ? +q.get('pages')! : undefined,
   cfg: { args: ['nfsu2', ...q.getAll('arg')], env: { HOME: '/save', NFSU2_DATA: '/data', ...env }, dataBase: '/data/', manifestUrl: '/data-manifest', saveDir },
   onNote: log,
   onLog: (s, fd, tid) => {

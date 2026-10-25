@@ -112,9 +112,12 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
     - heap VA 0x08000000–0x28000000
   - The runtime's data, C stacks and malloc heap sit above (`--global-base=0x28000000 --no-stack-first`).
   - Initial memory 1 GB, maximum 4 GB.
-- **Threads:** the page starts the I/O worker and a pool of 24 game workers (`web/src/host/process.ts`).
-  - `wasi thread-spawn` claims a pool slot synchronously. Workers block with `Atomics.wait`; the page's main thread
-    never runs wasm and never blocks.
+- **Threads:** the page starts the I/O worker and a pool of game workers (`web/src/host/process.ts`): 12 at first,
+  then more as threads take them so that 2 stay idle, up to 24. A race or free roam starts 15 (at most 13 threads at
+  once), hosting a LAN game 18; all 24 at once held about 55 MB more of WebKit's page process (a phone's memory).
+  - `wasi thread-spawn` claims an idle pool slot synchronously. One that finds none asks the page for a worker and
+    waits for it (up to 10 s, as a slow `CreateThread`; never more than 15 ms in the suite's 19 scenarios). Workers block with `Atomics.wait`; the
+    page's main thread never runs wasm and never blocks.
   - Guest threads still hold the GIL (`win32_ext.c`): a FIFO ticket lock (`runtime/web/ticketlock.h`). A woken
     worker sometimes runs only 3 to 4.6 ms after its notify (Chrome 155 on Windows 11: about 1 in 1,800 wakes,
     measured between two plain workers), so every hand-over of the lock to a sleeping thread can cost a 120 Hz slot.
