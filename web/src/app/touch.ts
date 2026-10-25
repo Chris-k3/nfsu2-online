@@ -17,6 +17,8 @@
 //             Not in a cutscene (a race's start); faded in and out.  A switch in the Controls sheet's touch tab.
 //   menus     the arrow keys as a D-pad bottom left, OK (Enter) and Back (Esc) bottom right, in the bars beside the
 //             game's 4:3 menus; a tap on the game stays a click.  The game repeats a held arrow itself.
+//   size      all of them (and the menu's button) bigger or smaller, from the Controls sheet's touch tab, kept in this
+//             browser: auto (autoTouchSize, for the screen) unless 80 to 150 % is picked; style.css --ts on the stage.
 // The controller part is a virtual one the input module merges with a real one (gamepad.ts withTouch).
 // The driving controls show while the game says the player drives ("drive" in its status block,
 // runtime/web/status_web.c: 1 in a race, 2 in free roam, + 4 with a manual gearbox, + 8 in a cutscene), the menu's
@@ -26,7 +28,7 @@
 import { PAD_A, PAD_LB, PAD_RB, PAD_X } from '../input/proto';
 import type { GameSession } from './game';
 import { touchFirst } from './device';
-import { N, t } from './i18n';
+import { N, percent, t } from './i18n';
 
 export type Steering = 'buttons' | 'stick' | 'tilt';
 export const STEERING: readonly Steering[] = ['buttons', 'stick', 'tilt'];
@@ -74,6 +76,55 @@ export function setLevelHorizon(on: boolean) {
 }
 /** fn runs when the switch changes */
 export function onLevelHorizon(fn: () => void) { addEventListener(LEVEL_EVENT, fn); }
+
+/** the controls' size: auto, or a share of their size at 100 % (style.css) */
+export type TouchSize = 'auto' | number;
+export const TOUCH_SIZES: readonly TouchSize[] = ['auto', 0.8, 0.9, 1, 1.1, 1.25, 1.5];
+const SIZE_STORE = 'nfsu2-touch-size', SIZE_EVENT = 'nfsu2-touch-size';
+/** the px the controls take between their margins at 100 % (style.css), the most they do (free roam with a manual
+ *  gearbox): across, the row of small buttons; down, that row over the controls under the left thumb.  Upright, the
+ *  space under the picture: across, the steering beside the pedals; down, two rows over the left thumb's */
+const ROOM = { across: 608, down: 300 }, ROOM_UPRIGHT = { across: 384, down: 372 };
+/** the controls' root, once there: its padding is their margins */
+let edges: HTMLElement | null = null;
+let sizeNow: TouchSize = (() => {
+  try { const n = Number(localStorage.getItem(SIZE_STORE)); return TOUCH_SIZES.includes(n) ? n : 'auto'; } catch { return 'auto'; }
+})();
+/** the Controls sheet's choice, kept in this browser: auto unless another was picked */
+export function touchSize(): TouchSize { return sizeNow; }
+export function setTouchSize(to: TouchSize) {
+  if (to === sizeNow || !TOUCH_SIZES.includes(to)) return;
+  sizeNow = to;
+  try { if (to === 'auto') localStorage.removeItem(SIZE_STORE); else localStorage.setItem(SIZE_STORE, String(to)); } catch { /* not kept: a private window */ }
+  dispatchEvent(new Event(SIZE_EVENT));
+}
+/** auto: 100 % (the size they were made at) on a phone, more on a tablet (125 % from 750 px across), but no more than
+ *  fits on this screen: in steps of 5 %, 80 % at the least */
+export function autoTouchSize(): number {
+  const w = innerWidth, h = innerHeight;
+  const want = Math.min(1.25, Math.max(1, Math.min(w, h) / 600));
+  // their margins: the root's padding (style.css .touch), 12 px before it is there; upright, the top's under the picture
+  const m = edges ? getComputedStyle(edges) : null, px = (v?: string) => parseFloat(v ?? '') || 12;
+  const room = document.documentElement.hasAttribute('data-touch') && h >= w ? ROOM_UPRIGHT : ROOM;
+  const fit = Math.min((w - px(m?.paddingLeft) - px(m?.paddingRight)) / room.across,
+    (h - px(m?.paddingTop) - px(m?.paddingBottom)) / room.down);
+  return Math.max(0.8, Math.floor(Math.min(want, fit) * 20 + 1e-9) / 20);
+}
+/** the size the controls have now */
+export function touchScale(): number { return sizeNow === 'auto' ? autoTouchSize() : sizeNow; }
+/** a size in the Controls sheet's list, in the page's language: auto with what it gives on this screen */
+export function touchSizeName(s: TouchSize): string {
+  return s === 'auto' ? t('Auto ({size})', { size: percent(autoTouchSize()) }) : percent(s);
+}
+/** fn runs when the choice changes, or what auto gives (the screen's size changed) */
+export function onTouchSize(fn: () => void) { addEventListener(SIZE_EVENT, fn); }
+let autoNow = 0;
+/** auto gives another size now (the screen's changed, or the controls' margins are known) */
+function autoCheck() {
+  const a = autoTouchSize();
+  if (a !== autoNow) { autoNow = a; dispatchEvent(new Event(SIZE_EVENT)); }
+}
+addEventListener('resize', autoCheck);
 
 /** label: what a screen reader says (English, translated where drawn); text: the words on it, if any; keys: the keys
  *  it holds (two controls may hold the same one: it is down while either is) */
@@ -163,8 +214,10 @@ export class TouchControls {
   private levelK = 0;
   private levelAt = 0;
   private sentRoll = 0;
+  /** the controls' size now (touchScale) */
+  private scale = 0;
 
-  constructor(stage: HTMLElement, private deps: TouchDeps) {
+  constructor(private stage: HTMLElement, private deps: TouchDeps) {
     const root = this.root = document.createElement('div');
     root.className = 'touch'; root.hidden = true; root.dataset.nfsu2Ui = '';
     root.dataset.steering = this.steering;
@@ -212,6 +265,10 @@ export class TouchControls {
     this.relabel();
     onSteering(() => this.applySteering(steering()));
     stage.append(root);
+    onTouchSize(() => this.applySize());
+    edges = root;
+    this.applySize();
+    autoCheck();
 
     root.addEventListener('pointerdown', this.onDown);
     root.addEventListener('pointermove', this.onMove);
@@ -406,9 +463,10 @@ export class TouchControls {
     navigator.vibrate?.(8);
   }
   private stickMove(e: PointerEvent) {
-    const dx = Math.max(-STICK_PX, Math.min(STICK_PX, e.clientX - this.stickX0));
+    const lock = STICK_PX * this.scale;
+    const dx = Math.max(-lock, Math.min(lock, e.clientX - this.stickX0));
     this.knobEl.style.setProperty('--dx', `${dx}px`);
-    this.lx = dx / STICK_PX;
+    this.lx = dx / lock;
     this.sendPad();
   }
   private stickUp() {
@@ -471,5 +529,16 @@ export class TouchControls {
     this.ctls.get('mode')!.el.innerHTML = path(ICONS[to]);
     if (this.mode === 'drive') { if (to === 'tilt') this.tiltOn(); this.sendPad(); }
     this.deps.log(`[app] touch controls: steering with ${NAMES[to]}`);
+  }
+
+  // ---- the size --------------------------------------------------------------------------------
+  /** the size picked, or auto's for the screen now, on the stage (style.css --ts) */
+  private applySize() {
+    const s = touchScale();
+    if (s === this.scale) return;
+    const was = this.scale;
+    this.scale = s;
+    this.stage.style.setProperty('--ts', String(s));
+    if (was) this.deps.log(`[app] touch controls: size ${Math.round(s * 100)} %${touchSize() === 'auto' ? ' (auto)' : ''}`);
   }
 }

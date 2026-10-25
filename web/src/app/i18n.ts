@@ -90,6 +90,11 @@ export function listOf(items: string[]): string {
   return new Intl.ListFormat(current === 'english' ? 'en-GB' : LOCALE[current], { type: 'conjunction' }).format(items);
 }
 
+/** x as a percentage in the page's language (1.25: 125 %) */
+export function percent(x: number): string {
+  return new Intl.NumberFormat(current === 'english' ? 'en-GB' : LOCALE[current], { style: 'percent' }).format(x);
+}
+
 /** f again whenever the page's language changes */
 export function onLanguage(f: () => void) { listeners.push(f); }
 

@@ -3,8 +3,8 @@
 // drawing of a pad with what each button the game uses does beside it, the buttons named as Xbox or PlayStation
 // names them (the switch under it; a PlayStation controller connecting, or taking over in the game, picks those
 // names).  While a steering wheel is connected (in the game: drives), the tab is the wheel's instead (wheel-setup.ts).
-// The touch tab has the steering's list and the level horizon's switch (touch.ts), the same in both copies and in step
-// with the touch controls' own steering button.
+// The touch tab has the steering's list, the level horizon's switch and the controls' size (touch.ts), the same in both
+// copies and in step with the touch controls' own steering button.
 //
 // The drawing: a front view in its own units (260 x 180, x 130 the middle, the triggers above y 0) at SCALE in the
 // SVG's 336 px, the labels in rows of px left and right of it and over its middle, each joined to its control by a
@@ -13,8 +13,8 @@
 import { drivingPad, familyOf, PAD_DRIVER_EVENT } from '../input/gamepad';
 import { PADF_PLAYSTATION } from '../input/proto';
 import { wheelSection } from './wheel-setup';
-import { askMotion, levelHorizon, onLevelHorizon, onSteering, setLevelHorizon, setSteering, steering, STEERING, steeringName,
-  type Steering } from './touch';
+import { askMotion, levelHorizon, onLevelHorizon, onSteering, onTouchSize, setLevelHorizon, setSteering, setTouchSize, steering,
+  STEERING, steeringName, TOUCH_SIZES, touchSize, touchSizeName, type Steering } from './touch';
 import { language, N, onLanguage, t } from './i18n';
 
 export type Tab = 'keys' | 'pad' | 'site';
@@ -248,6 +248,20 @@ export function controlsSheet(root: HTMLElement, id: string, opts: { tab?: Tab; 
     onLevelHorizon(show);
     onLanguage(show);
     show();
+  }
+  const size = root.querySelector<HTMLElement>('[data-size]');
+  if (size) {
+    const sel = size.querySelector('select')!;
+    sel.id = `${id}-size`; size.querySelector('label')!.htmlFor = sel.id;
+    const help = size.querySelector('.set-help')!; help.id = `${id}-size-help`; sel.setAttribute('aria-describedby', help.id);
+    const fill = () => {
+      sel.replaceChildren(...TOUCH_SIZES.map(s => { const o = document.createElement('option'); o.value = String(s); o.textContent = touchSizeName(s); return o; }));
+      sel.value = String(touchSize());
+    };
+    sel.onchange = () => setTouchSize(sel.value === 'auto' ? 'auto' : Number(sel.value));
+    onTouchSize(fill);
+    onLanguage(fill);
+    fill();
   }
   if (opts.follow) {
     const seen = (g: Gamepad) => {

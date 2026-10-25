@@ -83,7 +83,7 @@
         </div>
         <div class="tab-panel" role="tabpanel" data-tab="keys">
           <p class="hint touch-only" data-i18n>Tap the game's menus, or use the arrows, OK and Back beside them. While you drive, touch controls show on the game. A controller works too.</p>
-          <!-- the steering's list and the level horizon's switch: controls.ts -->
+          <!-- the steering's list, the level horizon's switch and the controls' size: controls.ts -->
           <div class="set touch-only" data-steer>
             <label class="set-label" data-i18n>Steering</label>
             <p class="set-help" data-i18n>How you steer while driving. The button in the game's top right corner switches it too.</p>
@@ -93,6 +93,11 @@
             <label class="set-label" data-i18n>Level horizon</label>
             <p class="set-help" data-i18n>With tilt steering, the view turns against the phone, so the road's horizon stays level.</p>
             <div class="set-control"><span class="val" aria-hidden="true"></span><input type="checkbox" class="switch" role="switch"></div>
+          </div>
+          <div class="set touch-only" data-size>
+            <label class="set-label" data-i18n>Control size</label>
+            <p class="set-help" data-i18n>How big the touch controls on the game are. Auto sizes them for this screen.</p>
+            <div class="set-control"><select></select></div>
           </div>
           <dl class="keys key-only">
             <div><dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd data-i18n>Throttle, brake and reverse</dd></div>
