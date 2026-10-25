@@ -1,5 +1,6 @@
-/* radio_unit.c -- the radio's checks of the game's song number and of the tags (runtime/radio.c), game and page stubbed.
- *   gcc -O1 -DNFSU2_RADIO_TEST -Iruntime -Igen/all -o out/radio_unit tests/radio_unit.c runtime/radio.c && out/radio_unit
+/* radio_unit.c -- the radio's checks of the game's song number and of the tags, then one test per scenario of the game's
+ * songs: starts, stops, pauses, volume (runtime/radio.c), game, mixer and page stubbed (tests/radio_mixer_stub.h).
+ *   gcc -O1 -DNFSU2_RADIO_TEST -Iruntime -Igen/all -Itests -o out/radio_unit tests/radio_unit.c && out/radio_unit
  */
 #include "cpu.h"
 #include "web/status_proto.h"
@@ -16,20 +17,18 @@ static int g_orig_calls, g_fail;
 
 HostStatusRadio *host_status_radio(void){ return &g_page; }
 uint32_t gheap_alloc(int heap, uint32_t n, int zero){ (void)heap; (void)n; (void)zero; return TEXT; }
-void sub_004580e0_orig(CPU *c){ (void)c; g_orig_calls++; }
-void sub_007292bc_orig(CPU *c){ (void)c; }
-void sub_00739030_orig(CPU *c){ (void)c; }
-void sub_004ac9f0_orig(CPU *c){ (void)c; }
-void sub_0072d18d_orig(CPU *c){ (void)c; }
-void sub_00739320(CPU *c){ (void)c; }
 void sub_004580e0(CPU *c);
 void sub_007292bc(CPU *c);
+void sub_00739030(CPU *c);
+void sub_004ac9f0(CPU *c);
+void sub_0072d18d(CPU *c);
 
-int main(void){
+#include "../runtime/radio.c"
+#include "radio_mixer_stub.h"
+
+static void unit_checks(void){
     static const unsigned long numbers[] = { 0, 26, 27, 0x8000, 0xffffffffUL };
     CPU c = { .esp = 0x00200000u };
-    g_mem = calloc(1, 0x28000000u);
-    if (!g_mem) return 1;
     g_page.on = 1;
     g_page.offer.tag_seq = 2;
     g_page.offer.places = 3;
@@ -57,6 +56,419 @@ int main(void){
         for (unsigned e = 0; e < RADIO_TRACKS; e++) CHECK(MR32(TABLE + 16u * e) == 0x1111u + e, "the table is put back", i);
     }
     for (unsigned line = 1; line <= 3; line++) CHECK(g_mem[TEXT + line * RADIO_TAG - 1u] == 0, "a tag ends with NUL", line);
-    printf("radio_unit: %d failed\n", g_fail);
-    return g_fail != 0;
+}
+
+/* ---- the game and the page, as the scenarios call them ---- */
+
+static void reset(void){
+    memset(g_mem, 0, 0x900000u);
+    free(g_radio.ring);
+    g_radio = (Radio){ .lent = NO_TAGS_LENT };
+    memset(&g_music, 0, sizeof g_music);
+    memset(&g_song, 0, sizeof g_song);
+    memset(&g_page, 0, sizeof g_page);
+    memset(&g, 0, sizeof g);
+    memset(&pg, 0, sizeof pg);
+    memset(ear, 0, sizeof ear);
+    pg.next_id = 1;
+    pg.track_steps = 100000u;
+    strcpy((char *)g_mem + NAMES, "game song");
+    for (unsigned e = 0; e < RADIO_TRACKS; e++) MR32(TABLE + 16u * e) = MR32(TABLE + 16u * e + 4u) = MR32(TABLE + 16u * e + 8u) = NAMES;
+    MR32(MIXER_INPUTS) = INPUTS;
+    MR8(SOUND_API_ACTIVE) = 1;
+    MR32(SOUND_GROUPS_OWNER) = OWNER;
+    MR32(GAME_FLOW) = FLOW;
+    MRF32(GAME_MUSIC_VOLUME) = 1.0f;
+    MR32(FLOW + FLOW_MODE) = 1u;
+    publish_tags();
+    g_page.offer.places = MENUS_AND_DRIVING;
+}
+
+static void steps(int n){ while (n-- > 0) step(); }
+static void seconds(int n){ steps(n * STEPS_PER_SECOND); }
+static void in_main_menu(void){ MR32(FLOW + FLOW_MODE) = 1u; MR32(GAME_STATE) = 0u; }
+static void in_race(void){ MR32(FLOW + FLOW_MODE) = 2u; MR32(GAME_STATE) = 6u; }
+static void radio_switched_on(void){ g_page.on = 1; steps(1); }
+static void radio_switched_off(void){ g_page.on++; }
+static void page_offers(unsigned places){ g_page.offer.places = places; }
+static void page_never_answers(void){ pg.silent = 1; }
+static void folder_song_lasts(int steps_long){ pg.track_steps = (uint32_t)steps_long; }
+static void game_music_volume(float v){ MRF32(GAME_MUSIC_VOLUME) = v; }
+static void output_muted(int on){ g.muted = on; }
+static void game_pauses(void){ call(sub_00739030, PAUSE_SOUND_GROUPS, 1, 0, 0); }
+static void game_resumes(void){ call(sub_00739030, PAUSE_SOUND_GROUPS, 0, 0, 0); }
+static void game_stops_song(void){ remove_song_readers(); }
+static void game_reuses_reader_addresses(void){ g.reuse_addresses = 1; }
+static void game_song_has_both_sides_alike(void){ g.song_on_both_sides = 1; }
+static void race_sounds_start(void){ add_input(2.0f, 0.35f, 0.35f); add_input(2.0f, 0.5f, 0.5f); }
+static void engine_gets_louder(void){ for (unsigned i = 0; i < MR8(MIXER_INPUT_COUNT); i++) MRF32(INPUTS + INPUT_SIZE * i + INPUT_GAINS) = 0.9f; }
+
+static void game_song_starts_in_place(unsigned index){
+    g.last_index = (int)index;
+    call(sub_004580e0, 0, index, 0, 0);
+    call(sub_004ac9f0, 0, 0, 0, 0);
+}
+static void game_song_starts(unsigned index){
+    g.pending = READERS_APPEAR_AFTER;
+    game_song_starts_in_place(index);
+}
+
+static void to_menus(unsigned index){
+    game_stops_song();
+    remove_race_sounds();
+    steps(3);
+    in_main_menu();
+    game_song_starts(index);
+    steps(SETTLED);
+}
+static void to_race(unsigned index){
+    game_stops_song();
+    steps(3);
+    in_race();
+    game_song_starts(index);
+    race_sounds_start();
+    steps(SETTLED);
+}
+static void to_race_without_song(void){
+    game_stops_song();
+    steps(3);
+    in_race();
+    race_sounds_start();
+    steps(SETTLED);
+}
+
+/* ---- what the player hears ---- */
+
+static void expect(int ok, const char *fact){
+    char heard[120];
+    if (ok || t_failed) return;
+    snprintf(heard, sizeof heard, "L[game=%d race=%d folder=%d] R[game=%d race=%d folder=%d] plaques=%d last_plaque_folder=%d",
+        ear[0].game_song, ear[0].race_sounds, ear[0].folder_song, ear[1].game_song, ear[1].race_sounds, ear[1].folder_song,
+        g.plaques, g.plaque_folder_song);
+    snprintf(t_note, sizeof t_note, "%s; heard %s", fact, heard);
+    t_failed = 1;
+}
+static void expect_folder_song(int id){
+    for (int e = 0; e < 2; e++) expect(ear[e].folder_song == id && !ear[e].game_song, "both ears hear this folder_song and no game_song");
+}
+static void expect_game_song(void){
+    for (int e = 0; e < 2; e++) expect(ear[e].game_song && !ear[e].folder_song, "both ears hear game_song and no folder_song");
+}
+static void expect_no_song(void){
+    for (int e = 0; e < 2; e++) expect(!ear[e].game_song && !ear[e].folder_song, "no song in either ear");
+}
+static void expect_race_sounds(void){
+    for (int e = 0; e < 2; e++) expect(ear[e].race_sounds, "race_sounds in both ears");
+}
+static void expect_plaques(int count, int folder_song){
+    expect(g.plaques == count, "plaque drawn this many times");
+    expect(g.plaque_folder_song == folder_song, "last plaque shows this folder_song (0 is game_song)");
+}
+
+/* ---- scenarios ---- */
+
+static int scenarios, scenarios_failed;
+static struct { const char *name; void (*fn)(void); } list[80];
+static void add(const char *name, void (*fn)(void)){ list[scenarios].name = name; list[scenarios++].fn = fn; }
+#define TEST(n) static void n(void); __attribute__((constructor)) static void reg_##n(void){ add(#n, n); } static void n(void)
+
+static void folder_song_plays_in_main_menu(void){ radio_switched_on(); to_menus(3); }
+static void new_folder_song_in_menu_place(unsigned index){
+    folder_song_plays_in_main_menu();
+    to_menus(index);
+    expect_folder_song(2);
+    expect_plaques(2, 2);
+}
+
+TEST(main_menu_start__folder_song_plays){
+    folder_song_plays_in_main_menu();
+    expect_folder_song(1);
+    expect_plaques(1, 1);
+}
+TEST(folder_song_ends__next_folder_song_plays){
+    folder_song_lasts(40);
+    folder_song_plays_in_main_menu();
+    steps(40);
+    expect_folder_song(2);
+}
+TEST(game_song_ends_before_folder_song__same_folder_song_goes_on){
+    folder_song_plays_in_main_menu();
+    game_song_starts_in_place(4);
+    steps(SETTLED);
+    expect_folder_song(1);
+    expect_plaques(1, 1);
+}
+TEST(long_folder_song__plays_to_end_one_plaque){
+    folder_song_lasts(300);
+    folder_song_plays_in_main_menu();
+    steps(250);
+    expect_folder_song(1);
+    expect_plaques(1, 1);
+}
+TEST(quick_race_menus_to_circuit__new_folder_song_from_start){
+    folder_song_plays_in_main_menu();
+    to_race(17);
+    expect_folder_song(2);
+    expect_race_sounds();
+}
+TEST(circuit_to_garage__new_folder_song_from_start){
+    radio_switched_on();
+    to_race(17);
+    to_menus(5);
+    expect_folder_song(2);
+    expect_plaques(2, 2);
+}
+TEST(free_roam_start__folder_song_plays){
+    radio_switched_on();
+    to_race(20);
+    expect_folder_song(1);
+    expect_plaques(1, 1);
+}
+TEST(free_roam_after_several_modes__folder_song_plays){
+    game_reuses_reader_addresses();
+    radio_switched_on();
+    to_race(17);
+    to_menus(5);
+    to_race(20);
+    expect_folder_song(3);
+}
+TEST(race_restart_after_finish__new_folder_song){
+    radio_switched_on();
+    to_race(17);
+    to_race(17);
+    expect_folder_song(2);
+}
+TEST(title_screen_game_restarts_song_on_same_readers__same_folder_song_goes_on){
+    radio_switched_on();
+    to_menus(0);
+    seconds(30);
+    game_song_starts_in_place(0);
+    steps(SETTLED);
+    expect_folder_song(1);
+    expect_plaques(1, 1);
+}
+TEST(title_screen_game_restarts_song_on_new_readers__same_folder_song_goes_on){
+    radio_switched_on();
+    to_menus(0);
+    seconds(30);
+    game_stops_song();
+    game_song_starts(0);
+    steps(SETTLED);
+    expect_folder_song(1);
+    expect_plaques(1, 1);
+}
+TEST(race_sounds_both_sides__never_taken_as_folder_song){
+    radio_switched_on();
+    in_race();
+    game_song_starts(17);
+    race_sounds_start();
+    steps(SETTLED);
+    expect_folder_song(1);
+    expect_race_sounds();
+}
+TEST(race_sounds_before_game_song_start__race_sounds_not_taken_as_song){
+    radio_switched_on();
+    in_race();
+    race_sounds_start();
+    steps(5);
+    game_song_starts(17);
+    steps(SETTLED);
+    expect_folder_song(1);
+    expect_race_sounds();
+}
+TEST(drift__silence_no_folder_song){
+    folder_song_plays_in_main_menu();
+    to_race_without_song();
+    expect_no_song();
+    expect_race_sounds();
+}
+TEST(drift__no_folder_song_when_engine_gets_louder){
+    folder_song_plays_in_main_menu();
+    to_race_without_song();
+    engine_gets_louder();
+    steps(SETTLED);
+    expect_no_song();
+    expect_race_sounds();
+}
+TEST(drift_to_garage__new_folder_song_from_start){
+    folder_song_plays_in_main_menu();
+    to_race_without_song();
+    to_menus(5);
+    expect_folder_song(2);
+    expect_plaques(2, 2);
+}
+TEST(drag__silence_like_game){
+    folder_song_plays_in_main_menu();
+    to_race_without_song();
+    expect_no_song();
+}
+TEST(game_start_index_27_or_more__game_plays_its_own_music){
+    radio_switched_on();
+    in_main_menu();
+    game_song_starts(27);
+    steps(SETTLED);
+    expect_game_song();
+    expect_plaques(1, 0);
+}
+TEST(ea_trax_screen_row_preview__folder_song_stays){
+    folder_song_plays_in_main_menu();
+    game_stops_song();
+    game_song_starts(6);
+    steps(SETTLED);
+    expect_folder_song(1);
+}
+TEST(pause_menu__silence_then_same_folder_song_continues){
+    radio_switched_on();
+    to_race(17);
+    game_pauses();
+    steps(20);
+    expect_no_song();
+    game_resumes();
+    steps(SETTLED);
+    expect_folder_song(1);
+    expect_plaques(1, 1);
+}
+TEST(options_menu__silence_then_same_folder_song_continues){
+    folder_song_plays_in_main_menu();
+    game_pauses();
+    steps(20);
+    expect_no_song();
+    game_resumes();
+    steps(SETTLED);
+    expect_folder_song(1);
+    expect_plaques(1, 1);
+}
+TEST(race_restart_from_pause__new_folder_song_both_sides){
+    radio_switched_on();
+    to_race(17);
+    game_pauses();
+    to_race(17);
+    game_resumes();
+    steps(SETTLED);
+    expect_folder_song(2);
+    expect_race_sounds();
+}
+TEST(game_music_volume_0_and_back_in_circuit__same_folder_song_returns){
+    radio_switched_on();
+    to_race(17);
+    game_music_volume(0.0f);
+    steps(20);
+    expect_no_song();
+    game_music_volume(1.0f);
+    game_song_starts_in_place(17);
+    steps(SETTLED);
+    expect_folder_song(1);
+}
+TEST(menu_music_volume_0_and_back_in_main_menu__same_folder_song_returns){
+    folder_song_plays_in_main_menu();
+    steps(20);
+    game_song_starts_in_place(3);
+    steps(SETTLED);
+    expect_folder_song(1);
+}
+TEST(alt_tab__muted_then_same_folder_song){
+    folder_song_plays_in_main_menu();
+    output_muted(1);
+    seconds(5);
+    output_muted(0);
+    steps(SETTLED);
+    expect_folder_song(1);
+    expect_plaques(1, 1);
+}
+TEST(radio_on_in_main_menu__game_song_replaced_at_once){
+    in_main_menu();
+    game_song_starts(3);
+    steps(SETTLED);
+    expect_game_song();
+    radio_switched_on();
+    steps(SETTLED);
+    expect_folder_song(1);
+}
+TEST(radio_off__game_song_comes_back){
+    folder_song_plays_in_main_menu();
+    radio_switched_off();
+    steps(SETTLED);
+    expect_game_song();
+    expect_plaques(2, 0);
+}
+TEST(radio_off_untouched__game_runs_own_code){
+    in_main_menu();
+    game_song_starts(3);
+    steps(SETTLED);
+    expect_game_song();
+    expect(g.stops == 0 && MR32(TABLE + 16u * 3u) == NAMES, "the game's table and songs untouched");
+}
+TEST(all_songs_racing_back_in_main_menu__silence_no_game_song){
+    radio_switched_on();
+    page_offers(DRIVING_ONLY);
+    in_main_menu();
+    game_song_starts(3);
+    steps(SETTLED);
+    expect_no_song();
+    expect_plaques(0, 0);
+}
+TEST(empty_place_then_folder_song_appears__folder_song_starts){
+    radio_switched_on();
+    page_offers(DRIVING_ONLY);
+    in_main_menu();
+    game_song_starts(3);
+    steps(SETTLED);
+    page_offers(MENUS_AND_DRIVING);
+    steps(SETTLED);
+    expect_folder_song(1);
+    expect_plaques(1, 1);
+}
+TEST(page_silent_20_s__silence){
+    page_never_answers();
+    folder_song_plays_in_main_menu();
+    seconds(21);
+    expect_no_song();
+}
+TEST(game_song_readers_alike_on_both_sides__game_song_plays){
+    game_song_has_both_sides_alike();
+    folder_song_plays_in_main_menu();
+    steps(1300);
+    expect_game_song();
+}
+TEST(main_menu_enter__new_folder_song_from_start){ new_folder_song_in_menu_place(0x1c % 27); }
+TEST(garage_enter__new_folder_song_from_start){ new_folder_song_in_menu_place(5); }
+TEST(car_lot_enter__new_folder_song_from_start){ new_folder_song_in_menu_place(6); }
+TEST(paint_shop_enter__new_folder_song_from_start){ new_folder_song_in_menu_place(7); }
+TEST(parts_shop_enter__new_folder_song_from_start){ new_folder_song_in_menu_place(8); }
+TEST(performance_shop_enter__new_folder_song_from_start){ new_folder_song_in_menu_place(9); }
+TEST(audio_shop_enter__new_folder_song_from_start){ new_folder_song_in_menu_place(10); }
+TEST(customize_enter__new_folder_song_from_start){ new_folder_song_in_menu_place(11); }
+TEST(quick_race_menus_enter__new_folder_song_from_start){ new_folder_song_in_menu_place(12); }
+TEST(circuit__folder_song_plays_game_song_silent){
+    radio_switched_on();
+    to_race(17);
+    expect_folder_song(1);
+    expect_race_sounds();
+}
+TEST(sprint__folder_song_plays_game_song_silent){
+    radio_switched_on();
+    to_race(18);
+    expect_folder_song(1);
+    expect_race_sounds();
+}
+TEST(free_roam__folder_song_plays){
+    radio_switched_on();
+    to_race(20);
+    expect_folder_song(1);
+    expect_plaques(1, 1);
+}
+
+int main(void){
+    g_mem = calloc(1, 0x28000000u);
+    if (!g_mem) return 1;
+    unit_checks();
+    for (int i = 0; i < scenarios; i++){
+        reset();
+        t_failed = 0;
+        list[i].fn();
+        scenarios_failed += t_failed;
+        printf("%s %s%s%s\n", t_failed ? "FAIL" : "ok  ", list[i].name, t_failed ? ": " : "", t_failed ? t_note : "");
+    }
+    printf("radio_unit: %d failed; scenarios: %d of %d failed\n", g_fail, scenarios_failed, scenarios);
+    return g_fail != 0 || scenarios_failed != 0;
 }
