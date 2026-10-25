@@ -116,6 +116,8 @@
  *     blur MS                  app deactivation for MS ms, then reactivation
  *                              (the game freezes meanwhile, see lifecycle.c)
  *     audioreset               handle a default output device change now
+ *     audiostall MS            test-only, browser: the audio pump mixes nothing
+ *                              for MS ms, so the worklet underruns
  *   real-keyboard path (runtime/keyboard_mac.m): NSEvents are made and posted
  *   into AppKit's event queue on the main thread, so they go through the
  *   same handler as keys typed on a real keyboard (Win32 messages, DIK
@@ -225,7 +227,7 @@ static void key_event(unsigned dik, int down){
 
 /* ---- script ----------------------------------------------------------- */
 enum { C_DOWN, C_UP, C_TAP, C_TYPE, C_DUMP, C_WAITMEM, C_LOG, C_QUIT, C_PEEK, C_POKE, C_WAITFNG, C_TAPUNTIL,
-       C_CLOSE, C_BLUR, C_AUDIORESET, C_WZERO, C_DISPLAYHZ, C_TEXREP, C_HEADLIGHTS,
+       C_CLOSE, C_BLUR, C_AUDIORESET, C_AUDIOSTALL, C_WZERO, C_DISPLAYHZ, C_TEXREP, C_HEADLIGHTS,
        C_PAD, C_TAPPAD, C_AXIS, C_TAPPADUNTIL,
        C_NSDOWN, C_NSUP, C_NSTAP, C_NSREPEAT, C_NSTYPE, C_NSFOCUS, C_NSMOUSE, C_NSTAPUNTIL,
        C_LOOP, C_ENDLOOP, C_STATUS, C_STALL, C_CAREER,
@@ -350,6 +352,7 @@ static void load_script(const char *path){
         else if (!strcasecmp(cmd, "close")) e.cmd = C_CLOSE;
         else if (!strcasecmp(cmd, "blur")) { e.cmd = C_BLUR; e.n = a1[0] ? atol(a1) : 3000; }
         else if (!strcasecmp(cmd, "audioreset")) e.cmd = C_AUDIORESET;
+        else if (!strcasecmp(cmd, "audiostall")) { e.cmd = C_AUDIOSTALL; e.n = a1[0] ? atol(a1) : 200; }
         else if (!strcasecmp(cmd, "wzero")){ e.cmd = C_WZERO; e.n = !strcasecmp(a1, "now"); }
         else if (!strcasecmp(cmd, "displayhz")) { e.cmd = C_DISPLAYHZ; e.n = atol(a1); }
         else if (!strcasecmp(cmd, "trace")) { e.cmd = C_TRACE; e.n = atol(a1);
@@ -698,6 +701,14 @@ static int fire(CPU *c, Ev *e, double tms){
         fprintf(stderr, "[autotest] f=%ld blur %ld ms\n", g_frame, e->n); lifecycle_simulate_blur(e->n); break; }
     case C_AUDIORESET: { void audio_device_changed(const char *);
         audio_device_changed("autotest audioreset"); break; }
+    case C_AUDIOSTALL:
+#ifdef __wasm__
+        { void audio_test_stall(int); fprintf(stderr, "[autotest] f=%ld audiostall %ld ms (test-only)\n", g_frame, e->n);
+          audio_test_stall((int)e->n); }
+#else
+        fprintf(stderr, "[autotest] f=%ld audiostall: the browser's audio pump only\n", g_frame);
+#endif
+        break;
     case C_WZERO: {
         double hfr_race_start_ms(void);
         double rs = hfr_race_start_ms();

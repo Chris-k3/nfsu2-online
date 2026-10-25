@@ -13,8 +13,9 @@
 //     gamepad button is not such a gesture (Chrome gives pads no user
 //     activation): it resumes the context only once the page already had a
 //     click or key press, e.g. the Play click.
-//   - Latency: the ring holds 512-1024 frames (12-23 ms, raised by the pump
-//     after underruns) on top of the context's own output latency.
+//   - Latency: the ring holds 512-1024 frames (12-23 ms; the pump raises it
+//     after underruns and lowers it again after 20 s without one) on top of
+//     the context's own output latency.
 //   - Hidden page: the output fades to silence (the game itself parks and
 //     mutes when it loses focus); optionally the context is suspended.
 //   - autotest "audioreset": the pump bumps AR_RESET and the context is rebuilt.
