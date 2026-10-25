@@ -13,6 +13,7 @@
 //   resizeat    <seconds>:<w>x<h>: resize the canvas then (tests the device reset that follows)
 //   gputime     measure GPU time per frame with timestamp queries (in the stats)
 //   bc=0        unpack the DXT textures on the CPU, as on a GPU without texture-compression-bc
+//   cssscale=0  at a render scale below 1, composite the picture over the canvas instead of CSS stretching the canvas
 //   poke=0|1    while a frame waits for the GPU, poll it with empty submits (default: in Firefox)
 //   gpuburn     <iterations>: busy GPU work in every frame, a slower GPU (RendererOptions.gpuBurn)
 //   detachat    <seconds>: detach the renderer then (the game drops to the null
@@ -75,7 +76,7 @@ try {
     trace: trace === 'dumps' ? 'dumps' : trace ? trace.split(',').map(Number) : undefined, logShaders: q.has('shaders'),
     dumpTex: q.get('dumptex') ? q.get('dumptex')!.split(',').map(Number) : undefined,
     watchTex: q.get('watchtex') ? q.get('watchtex')!.split(',').map(Number) : undefined, gpuTiming: q.has('gputime'),
-    direct: q.get('direct') !== '0', noBC: q.get('bc') === '0', poke: q.has('poke') ? q.get('poke') !== '0' : undefined,
+    direct: q.get('direct') !== '0', cssScale: q.get('cssscale') !== '0', noBC: q.get('bc') === '0', poke: q.has('poke') ? q.get('poke') !== '0' : undefined,
     gpuBurn: +(q.get('gpuburn') ?? 0) });
 } catch (x) { log(`renderer: ${x}`); }
 const rz = /^(\d+(?:\.\d+)?):(\d+)x(\d+)$/.exec(q.get('resizeat') ?? '');

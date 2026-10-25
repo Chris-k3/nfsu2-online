@@ -281,7 +281,11 @@ The game thread keeps `com.c` (D3D9 state, shader translation) and records throu
      never waits on JS or WebGPU except for frames in flight (≤ 2) and explicit readbacks.
 - The TypeScript side (`web/src/gpu/`) reads those structures **zero-copy** from the wasm memory and uploads arenas with
   one `queue.writeBuffer` each per frame. It keeps pipeline and bind-group caches and encodes the passes. It presents to
-  the canvas at native resolution, aspect-fit, and reads frames back for the tests' dumps and F12 screenshots (the
+  the canvas at native resolution, aspect-fit; at a render scale below 1 (a phone's 75 %) with the picture in the
+  view's shape, the canvas takes the picture's size, the frame draws straight into it and CSS stretches it, so there
+  is no composite pass over every screen pixel (Playwright WebKit, iPhone 13 geometry: GPU 0.62 -> 0.60 ms a frame on
+  an M4 Pro, the screen within 2 levels where it holds still; three canvas buffers of 1898x876 instead of 2532x1170).
+  It reads frames back for the tests' dumps and F12 screenshots (the
   PNGs are made in a worker, `png-worker.ts`, off the thread that draws). The one readback the game waits for: a
   render target it locks to read, the picture of a DVD or magazine cover. The frame drawn so far goes to the page
   early with the request, and the page writes the texture's rows into the game's lock buffer

@@ -36,6 +36,9 @@ export interface RendererOptions {
   gpuTiming?: boolean;
   /** keep canvas.width/height at the element's size in device pixels (the game resets its device to follow) */
   autoSize?: boolean;
+  /** false: at a render scale below 1 the canvas stays at the view's size and the picture is composited over it (the
+   *  path before fitPicture; A/B and diagnostics) */
+  cssScale?: boolean;
   /** most frames the GPU may have queued (default 2) */
   maxInFlight?: number;
   /** false: always draw into the back buffer and composite it (the path before direct
@@ -209,10 +212,13 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
   try { const j = localStorage.getItem(WARM_KEY); if (j) enc.loadWarm(JSON.parse(j)); } catch { /* storage off: no warm-up */ }
   const vw = vreg.ptr >> 2, vf = vreg.ptr >> 3;
 
-  // page -> game: view size, pixel ratio, features
+  // page -> game: view size, pixel ratio, features.  The view is the canvas element's box in device pixels (what
+  // canvas.width/height are when the page sizes the canvas), kept apart from canvas.width/height, which follow the
+  // game's picture at a render scale below 1 (fitPicture).
+  let viewW = canvas.width, viewH = canvas.height;
   const publishView = () => {
     const u = u32();
-    u[cw + C.viewW] = canvas.width; u[cw + C.viewH] = canvas.height;
+    u[cw + C.viewW] = viewW; u[cw + C.viewH] = viewH;
     u[cw + C.dpr1000] = Math.round(devicePixelRatio * 1000);
     u[cw + C.features] = P.FEAT_BC | (device.features.has('texture-component-swizzle') ? P.FEAT_SWIZZLE : 0);
   };
@@ -367,11 +373,31 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
         `${slotWaits - winWaits0} waited for the GPU, textures ${MB(enc.texBytes)} MB${enc.unpackBytes ? ` (${MB(enc.unpackBytes)} unpacked from DXT)` : ''}${errors ? `, ${errors} WebGPU errors so far` : ''}`);
     winUnshown = 0; winUnshownFrames = 0; winUnshownT = now; winDone = []; winWaits0 = slotWaits;
   };
+  // A render scale below 1 (a phone's 75 %): the game draws a picture smaller than the view, and the composite drew it
+  // stretched over the whole canvas, a pass over every screen pixel a frame.  When the picture has the view's shape
+  // (within 2 pixels, as the composite's aspect-fit would have it fill the canvas), the canvas's own size becomes the
+  // picture's, the frame draws straight into it (Encoder.encodeFrame's direct path), and CSS stretches the canvas over
+  // its box: the browser's compositor scales it as it puts the page on the screen anyway.  Another shape (a picture
+  // pillarboxed in the view) or the full scale: the canvas at the view's size, as before.
+  const fitPicture = (b: number) => {
+    if (opts.cssScale === false) return;
+    const U = u32(), fw = cw + C.frame + b * (P.FRAME_BYTES >> 2), bw = U[fw + F.bbW], bh = U[fw + F.bbH];
+    let w = viewW, h = viewH;
+    if (bw > 0 && bh > 0 && (bw < viewW || bh < viewH)) {
+      const sc = Math.min(viewW / bw, viewH / bh);
+      if (Math.abs(Math.round(bw * sc) - viewW) <= 2 && Math.abs(Math.round(bh * sc) - viewH) <= 2) { w = bw; h = bh; }
+    }
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w; canvas.height = h;
+      log(`[gpu] canvas ${w}x${h} for the view's ${viewW}x${viewH}${w !== viewW || h !== viewH ? ': the picture stretched by CSS, no composite' : ''}`);
+    }
+  };
   const encodeAndSubmit = (b: number) => {
     const t0 = performance.now();
     const ce = device.createCommandEncoder();
     const slot = timing && !qBusy[qNext] ? qNext : -1;
     if (slot >= 0) { qNext = (qNext + 1) % TQ; enc.firstPassTs = { querySet: qs!, beginningOfPassWriteIndex: 2 * slot }; }
+    fitPicture(b);
     const cur = ctx.getCurrentTexture();
     sinceRaf++; winUnshownFrames++;
     if (t0 - winUnshownT > SUMMARY_MS) summary(t0);
@@ -585,14 +611,16 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
     }
   })();
 
-  // canvas size: the page's choice, or with autoSize the element's size in
-  // device pixels (devicePixelContentBoxSize: exact, follows zoom and screens)
+  // the view: the element's size in device pixels (devicePixelContentBoxSize: exact, follows zoom and screens); the
+  // canvas size is the page's choice, or with autoSize that size too
   const ro = new ResizeObserver(entries => {
-    if (opts.autoSize) for (const e of entries) {
+    for (const e of entries) {
       const d = e.devicePixelContentBoxSize?.[0];
       const w = d ? d.inlineSize : Math.round(e.contentRect.width * devicePixelRatio);
       const h = d ? d.blockSize : Math.round(e.contentRect.height * devicePixelRatio);
-      if (w > 0 && h > 0 && (canvas.width !== w || canvas.height !== h)) { canvas.width = w; canvas.height = h; }
+      if (!(w > 0 && h > 0)) continue;
+      viewW = w; viewH = h;
+      if (opts.autoSize && (canvas.width !== w || canvas.height !== h)) { canvas.width = w; canvas.height = h; }
     }
     publishView();
   });
