@@ -4,8 +4,10 @@
 //   node web/tools/vault-pair.mjs --base http://127.0.0.1:8080 --backup <a "Download a backup" zip> [--state <dir>] [--play] [--headed]
 //
 // A restores the backup and makes a keyphrase; B (with a screenshot of its own) types it in, in another shape, and
-// loads the saves; a rename in A comes to B at its next page load; both rename (a conflict: B keeps its own, A takes
-// it at its next load); A deletes the saves from the server and B is told at its next load.  The profile's bytes are
+// loads the saves, but A's DVD and magazine covers (a keyphrase keeps none: each 1 MB, the server takes 256 KB); a
+// settings.ini changed in A comes to B, a cover B has of its own staying; a rename in A comes to B at its next page
+// load; both rename (a conflict: B keeps its own, A takes it at its next load); A deletes the saves from the server
+// and B is told at its next load.  The profile's bytes are
 // compared between the two, B's screenshot must stay throughout.  --state: the server's state folder as this machine
 // reads it (\\wsl.localhost\... from Windows): exactly one keyphrase file in its vault folder, which holds neither the
 // profile's name nor a byte of the profile.  --play (a server with --dev and a module): two more browsers on fresh
@@ -45,10 +47,21 @@ const fileHash = (page, rel, save = 'save') => page.evaluate(async ([rel, save])
   return [...new Uint8Array(await crypto.subtle.digest('SHA-256', await f.arrayBuffer()))].map(b => b.toString(16).padStart(2, '0')).join('');
 }, [rel, save]).catch(() => null);
 const writeFile = (page, rel, bytes) => page.evaluate(async ({ rel, bytes }) => {
-  const d = await (await navigator.storage.getDirectory()).getDirectoryHandle('save', { create: true });
-  const w = await (await d.getFileHandle(rel, { create: true })).createWritable();
+  let d = await (await navigator.storage.getDirectory()).getDirectoryHandle('save', { create: true });
+  const parts = rel.split('/');
+  for (const p of parts.slice(0, -1)) d = await d.getDirectoryHandle(p, { create: true });
+  const w = await (await d.getFileHandle(parts[parts.length - 1], { create: true })).createWritable();
   await w.write(new Uint8Array(bytes)); await w.close();
 }, { rel, bytes });
+/** a page's DVD and magazine covers ("NFS Underground 2/<NAME> DVD 1/<NAME> DVD 1") */
+const covers = page => page.evaluate(async () => {
+  const out = [];
+  try {
+    const d = await (await (await navigator.storage.getDirectory()).getDirectoryHandle('save')).getDirectoryHandle('NFS Underground 2');
+    for await (const [name, h] of d.entries()) if (h.kind === 'directory' && / (DVD|Magazine) [0-9]+$/.test(name)) out.push(name);
+  } catch { /* none */ }
+  return out.sort();
+});
 const link = (page, save = 'save') => page.evaluate(save => JSON.parse(localStorage.getItem(`nfsu2-keyphrase:${save}`) ?? 'null'), save);
 const phase = page => page.evaluate(() => window.__nfsu2?.phase);
 const profiles = page => page.$$eval('#profiles .name', els => els.map(e => e.textContent));
@@ -114,6 +127,19 @@ try {
   check((await fileHash(a, at(name))) === (await fileHash(b, at(name))) && !!(await fileHash(b, at(name))), 'the profile is the same bytes in A and B');
   check((await fileHash(a, 'settings.ini')) === (await fileHash(b, 'settings.ini')), 'settings.ini came along');
   check(!!(await fileHash(b, 'nfsu2000.tga')), 'B\'s screenshot stayed');
+  const coversA = await covers(a);
+  check(!(await covers(b)).length, `A's covers stayed in A (${coversA.join(', ') || 'the backup has none'})`);
+
+  // A changes settings.ini: B takes it, and keeps a cover of its own of the profile
+  const own = `${name} DVD 9`, ownAt = `NFS Underground 2/${own}/${own}`;
+  await writeFile(b, ownAt, [...crypto.randomBytes(4096)]);
+  const revS = (await link(a)).rev;
+  await writeFile(a, 'settings.ini', [...Buffer.from(`# changed by vault-pair\n`)]);
+  await open(a);
+  await until('A sent settings.ini', async () => (await link(a))?.rev !== revS);
+  await open(b);
+  await until('settings.ini in B', async () => (await fileHash(a, 'settings.ini')) === (await fileHash(b, 'settings.ini')));
+  check(!!(await fileHash(b, ownAt)), `B took A's settings.ini and kept its own cover (${own})`);
 
   // A renames: B has it after its next page load
   const rev0 = (await link(a)).rev;
@@ -154,7 +180,7 @@ try {
   await confirmOk(a);
   await until('A unlinked', async () => !(await link(a)));
   await open(b);
-  await until('B told', async () => /gone from the cloud/.test(await status(b)));
+  await until('B told', async () => /no saves for this keyphrase/.test(await status(b)));
   check(true, `B: "${await status(b)}"`);
   check((await profiles(b)).includes('FROMB') && !!(await fileHash(b, 'nfsu2000.tga')), 'B keeps its saves and screenshot');
 

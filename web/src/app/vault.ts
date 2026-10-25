@@ -6,9 +6,11 @@
 //   back in any case, with any separators, "nfsu2-xyz" optional;
 // - PBKDF2-SHA-256 of it (100,000 rounds, a fixed salt: the keyphrase is all there is) gives 64 bytes: an AES-GCM key
 //   and a token.  The server keeps the keyphrase under the token's SHA-256 and never sees the key;
-// - what is sent: the save folder but the F12 screenshots and a test's input script, as a stored zip (zip.ts),
-//   deflated, then sealed: a version byte (1), a 12-byte IV, the AES-256-GCM ciphertext and its tag.  A player's
-//   folder is 6-14 KB so; the server takes 256 KB;
+// - what is sent: the save folder but the F12 screenshots, the DVD and magazine covers and a test's input script, as
+//   a stored zip (zip.ts), deflated, then sealed: a version byte (1), a 12-byte IV, the AES-256-GCM ciphertext and its
+//   tag.  A player's folder is 6-14 KB so; the server takes 256 KB.  A cover is a picture of 1 MB that packs into
+//   about 500 KB (2026-10-25: since the covers are read back from the GPU, no longer all zeros), so the covers stay in
+//   the browser that took them: taking another browser's version keeps the ones of its profiles here;
 // - VaultSync: this browser's link (the keyphrase, the version it has, a hash of the files it sent or took) and the
 //   two ways of syncing.  Sending: after the game saves and when it closes, if the files changed since; taking: when
 //   the page opens and before Play, if another browser sent a newer version and the files here did not change.  Both
@@ -93,8 +95,13 @@ export async function unseal(key: CryptoKey, box: Uint8Array): Promise<Uint8Arra
 
 export interface SaveFile { path: string; data: Uint8Array; mtime?: number }
 
-/** A file of the save folder a keyphrase keeps: all but the F12 screenshots and a test's input script. */
-export const keeps = (path: string) => !isScreenshot(path) && path !== 'autotest-script.txt';
+/** A DVD or magazine cover's file ("NFS Underground 2/<NAME> DVD 1/<NAME> DVD 1"). */
+export function isCover(path: string): boolean {
+  const p = path.split('/');
+  return p.length >= 3 && p[0] === PROFILES_DIR && !!coverOf(p[1]);
+}
+/** A file of the save folder a keyphrase keeps: all but the F12 screenshots, the covers and a test's input script. */
+export const keeps = (path: string) => !isScreenshot(path) && !isCover(path) && path !== 'autotest-script.txt';
 
 /** a stream's bytes, at most max of them */
 async function bytesOf(s: ReadableStream<Uint8Array>, max = Infinity): Promise<Uint8Array> {
@@ -235,11 +242,13 @@ export interface Link {
   profiles: number;
   /** the server did not have the keyphrase at the last sync: nothing is sent by itself */
   gone?: boolean;
+  /** 2: hash leaves the covers out (a link without it counted them: VaultSync.upgraded) */
+  v?: number;
 }
 
 export interface VaultDeps {
-  /** the files of the save folder a keyphrase keeps (keeps()) */
-  files(): Promise<SaveFile[]>;
+  /** the files of the save folder a keyphrase keeps (keeps()); covers: the covers too, as before 2026-10-25 */
+  files(o?: { covers?: boolean }): Promise<SaveFile[]>;
   /** a keyphrase's version in place of the saves here (its zip): throws when it may not be written now */
   restore(zip: Uint8Array): Promise<void>;
   /** the link kept in this browser */
@@ -316,7 +325,19 @@ export class VaultSync {
   }
 
   private linked(phrase: string, r: Remote, hash: string, files: SaveFile[]) {
-    this.setLink({ phrase, rev: r.rev, hash, saved: r.saved, earlier: r.earlier, profiles: profilesIn(files).length });
+    this.setLink({ phrase, rev: r.rev, hash, saved: r.saved, earlier: r.earlier, profiles: profilesIn(files).length,
+      v: 2 });
+  }
+
+  /** The link, its hash without the covers.  One from before they stayed out (2026-10-25) counted them: when the files
+   *  here are still the ones it counted, it takes their hash without them (hash), so they still count as unchanged
+   *  since; when not, they changed. */
+  private async upgraded(hash: string): Promise<Link> {
+    const l = this.link!;
+    if (l.v === 2) return l;
+    const same = await contentHash(await this.d.files({ covers: true })) === l.hash;
+    this.setLink({ ...l, hash: same ? hash : '', v: 2 });
+    return this.link!;
   }
 
   /** The server has no version of the keyphrase: one that keeps no keyphrase saves at all now says so; else the link
@@ -362,9 +383,10 @@ export class VaultSync {
     });
   }
 
-  /** a version's files */
+  /** a version's files that a keyphrase keeps (one sent before 2026-10-25 may have covers: black ones, as they were) */
   private async filesOf(k: Keys, box: Uint8Array): Promise<SaveFile[]> {
-    return (await unzip(await unpack(await unseal(k.key, box)))).map(e => ({ path: e.name, data: e.data, mtime: e.mtime }));
+    return (await unzip(await unpack(await unseal(k.key, box)))).filter(e => keeps(e.name))
+      .map(e => ({ path: e.name, data: e.data, mtime: e.mtime }));
   }
 
   /** a version in place of the saves here, and the link to it */
@@ -385,6 +407,7 @@ export class VaultSync {
       if (l.gone) this.setLink(l = { ...l, gone: false });               // there again (a server's folder back)
       if ('same' in r) { if (r.same.earlier !== l.earlier) this.setLink({ ...l, earlier: r.same.earlier }); return; }
       const files = await this.d.files(), hash = await contentHash(files), theirs = await this.filesOf(k, r.box);
+      l = await this.upgraded(hash);
       // the same as here (a settings.ini both pages brought up to date)
       if (await contentHash(theirs) === hash) return this.linked(l.phrase, r.remote, hash, files);
       // taken only when the saves here did not change since, it is not older than theirs, and it keeps their profiles
@@ -401,9 +424,9 @@ export class VaultSync {
   push(o: { playing?: boolean } = {}): Promise<void> {
     if (!this.link || this.link.gone || this.state.s === 'conflict') return Promise.resolve();
     return this.run(N('Syncing'), async () => {
-      const l = this.link!, files = await this.d.files();
+      const files = await this.d.files();
       if (o.playing && !wholeProfiles(files)) return;
-      const hash = await contentHash(files);
+      const hash = await contentHash(files), l = await this.upgraded(hash);
       if (hash === l.hash) return;
       if (!profilesIn(files).length && l.profiles > 0) return this.set({ s: 'conflict', why: 'empty', theirs: null });
       const k = await this.keysFor(l.phrase), r = await this.api(k).put(await this.boxOf(k, files), l.rev);

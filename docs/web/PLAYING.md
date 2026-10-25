@@ -208,8 +208,8 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
     empty saves by itself: it offers the cloud's instead (keeping the empty ones asks first: every browser on the
     keyphrase loses its profiles). The page also asks before cloud saves with no profiles, or older than the ones in
     this browser (a server gone back), replace yours.
-  - The profiles, their DVD and magazine covers, the game's options and `settings.ini` go; F12 screenshots stay in
-    each browser.
+  - The profiles, the game's options and `settings.ini` go; F12 screenshots and DVD and magazine covers stay in each
+    browser (a cover is a picture of 1 MB: another browser's crib lists it, but the game says it cannot load it).
   - The server keeps the copy of an earlier day too: "Go back to ..." brings it back when a day went wrong.
   - Stop syncing leaves the saves where they are, and the keyphrase in the box; Delete from cloud deletes them on the
     server (your browsers keep theirs). A keyphrase nobody used for two years is deleted from the server. A browser

@@ -12,7 +12,7 @@
 import { listFiles, readBytes } from './savefs';
 import { backupItems, readVault, restoreVault } from './saves-ui';
 import { downloadBlob } from './logs';
-import { keeps, readPhrase, vaultAvailable, VaultError, VaultSync, type Link, type Remote, type SaveFile } from './vault';
+import { isCover, keeps, readPhrase, vaultAvailable, VaultError, VaultSync, type Link, type Remote, type SaveFile } from './vault';
 import { codeOf, dateLocale, live, N, t, tn, tvars, type Msg } from './i18n';
 
 export interface VaultPanelDeps {
@@ -122,7 +122,7 @@ export class VaultPanel {
 
   /** a VaultSync on the link kept now (another tab may have changed it while this one only looked) */
   private makeSync() {
-    const s = new VaultSync({ files: () => this.files(), restore: zip => this.restore(zip), load: () => this.load(), save: l => this.save(l) });
+    const s = new VaultSync({ files: o => this.files(o), restore: zip => this.restore(zip), load: () => this.load(), save: l => this.save(l) });
     s.onChange = () => this.show();
     s.onTaken = r => {
       this.msg(() => t('Saves from your other browser came in ({when}).', { when: short(r.saved) }));
@@ -161,11 +161,11 @@ export class VaultPanel {
   /** The tab is shown again: newer saves from another browser, at most once a minute. */
   shown() { if (Date.now() - this.checked > 60_000) this.check(); }
 
-  /** the files of the save folder a keyphrase keeps */
-  private async files(): Promise<SaveFile[]> {
+  /** the files of the save folder a keyphrase keeps (covers: the covers too) */
+  private async files(o: { covers?: boolean } = {}): Promise<SaveFile[]> {
     const out: SaveFile[] = [];
     for (const f of await listFiles(this.d.saveDir))
-      if (keeps(f.path)) out.push({ path: f.path, data: await readBytes(this.d.saveDir, f.path), mtime: f.mtime });
+      if (keeps(f.path) || o.covers && isCover(f.path)) out.push({ path: f.path, data: await readBytes(this.d.saveDir, f.path), mtime: f.mtime });
     return out;
   }
 

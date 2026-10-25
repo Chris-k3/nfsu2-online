@@ -2,12 +2,13 @@
 //   node --test web/test/vault.test.mjs
 // - keyphrases: "nfsu2-xyz-" and 8 words of the list, read back in any case and with any separators
 // - the key and the token: PBKDF2-SHA-256 as node:crypto makes it; sealed saves open only with their keyphrase
-// - packing: a player's folder (a profile, two 1 MB cover shoots, the text files) packs far below the server's 256 KB;
-//   the content hash ignores the files' times
+// - packing: a player's folder (a profile, the text files) packs far below the server's 256 KB; the content hash
+//   ignores the files' times; the DVD and magazine covers are not kept (a picture of 1 MB each)
 // - VaultSync, two browsers on a server that keeps what /vault keeps (crates/vault's rules, in memory): made in one,
 //   loaded in the other, each one's saves taken by the other, a conflict either way, the same change on both sides,
 //   a browser with no profile left, a torn profile during a game, a version with no profile or an older one (a server
-//   gone back), a keyphrase deleted elsewhere or lost on the server (still linked, sent again), the server's refusals
+//   gone back), a keyphrase deleted elsewhere or lost on the server (still linked, sent again), the server's refusals;
+//   covers staying in the browser that took them, and links from when they were sent
 // The real server and two real browsers: web/tools/vault-pair.mjs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -111,6 +112,8 @@ test('a player\'s folder packs far below what the server takes; the hash is of t
   assert.notEqual(await V.contentHash(files.map((f, i) => i === 3 ? { ...f, path: 'registry2.txt' } : f)), h);
   assert.deepEqual(V.profilesIn(files), ['THOM']);
   assert.ok(V.keeps('settings.ini') && V.keeps(at('THOM')) && !V.keeps('nfsu2000.tga') && !V.keeps('autotest-script.txt'));
+  assert.ok(!V.keeps(`${DIR}/THOM DVD 1/THOM DVD 1`) && !V.keeps(`${DIR}/THOM Magazine 12/THOM Magazine 12`));
+  assert.ok(V.isCover(`${DIR}/THOM DVD 1/THOM DVD 1`) && !V.isCover(at('THOM')) && !V.isCover('THOM DVD 1'));
   await assert.rejects(V.unpack(enc.encode('not deflate')), /damaged/);
 });
 
@@ -159,10 +162,12 @@ function server() {
 function browser(srv, link = null) {
   const b = { files: new Map(), link, taken: 0 };
   b.sync = new V.VaultSync({
-    files: async () => [...b.files].filter(([p]) => V.keeps(p)).map(([path, data]) => ({ path, data })),
+    files: async (o = {}) => [...b.files].filter(([p]) => V.keeps(p) || o.covers && V.isCover(p)).map(([path, data]) => ({ path, data })),
+    // as saves-ui.ts restoreVault: the covers of the profiles it brings stay, and a cover in it is left out (readVault)
     restore: async zip => {
-      for (const p of [...b.files.keys()]) if (V.keeps(p)) b.files.delete(p);
-      for (const e of await unzip(zip)) b.files.set(e.name, e.data);
+      const entries = await unzip(zip), names = new Set(V.profilesIn(entries.map(e => ({ path: e.name }))));
+      for (const p of [...b.files.keys()]) if (V.keeps(p) || V.isCover(p) && !names.has(P.coverOf(p.split('/')[1]).profile)) b.files.delete(p);
+      for (const e of entries) if (V.keeps(e.name)) b.files.set(e.name, e.data);
     },
     load: () => b.link && JSON.parse(b.link),
     save: l => { b.link = l && JSON.stringify(l); },
@@ -391,4 +396,90 @@ test('a version older than the one here, or with no profile, never replaces the 
   assert.equal(b.money(at('THOM')), 5000);
   await b.sync.takeTheirs();
   assert.ok(!b.files.has(at('THOM')));
+});
+
+test('covers stay in the browser that took them; a version with covers (sent before) brings none', async () => {
+  const srv = server(), a = browser(srv), b = browser(srv);
+  seed(a, 1000);
+  const dvd = n => `${DIR}/THOM DVD ${n}/THOM DVD ${n}`;
+  a.files.set(dvd(1), new Uint8Array(crypto.randomBytes(1048612)));         // a picture: packs to as much
+  const phrase = await a.sync.create();
+  const token = (await V.keysOf(phrase)).token;
+  assert.ok(srv.kept.get(token).cur.body.length < 16 << 10);
+  const got = await b.sync.peek(phrase);
+  assert.deepEqual((await unzip(got.zip)).map(e => e.name).sort(), [at('THOM'), 'settings.ini']);
+  for (const e of await unzip(got.zip)) b.files.set(e.name, e.data);
+  await b.sync.adopt(phrase, got.remote);
+  // b's own cover of THOM, and one of a profile b no longer has
+  b.files.set(dvd(2), cover());
+  b.files.set(`${DIR}/GONE DVD 1/GONE DVD 1`, cover());
+  // a cover shoot changes no file a keyphrase keeps: nothing sent
+  const rev = srv.kept.get(token).cur.rev;
+  a.files.set(dvd(3), cover());
+  await a.sync.push();
+  assert.equal(srv.kept.get(token).cur.rev, rev);
+  // a plays: b takes it, its cover of THOM stays, the other one goes
+  a.files.set(at('THOM'), profile('THOM', { money: 2000 }));
+  await a.sync.push();
+  await b.sync.pull();
+  assert.equal(b.money(at('THOM')), 2000);
+  assert.ok(b.files.has(dvd(2)) && !b.files.has(dvd(1)) && !b.files.has(`${DIR}/GONE DVD 1/GONE DVD 1`));
+  assert.ok(a.files.has(dvd(1)) && a.files.has(dvd(3)));
+  // a version sent before the covers stayed out, with a (black) cover: b takes it, without the cover, and the hash
+  // leaves it out (b is synced with it, so b sends nothing)
+  srv.now += 60_000;
+  const old = [{ path: at('THOM'), data: profile('THOM', { money: 3000 }) }, { path: dvd(1), data: cover() },
+    { path: 'settings.ini', data: enc.encode('# settings\n') }];
+  const k = await V.keysOf(phrase), etag = `"${srv.kept.get(token).cur.rev.toString(16).padStart(16, '0')}"`;
+  assert.ok('saved' in await new V.VaultApi(k.token, srv.fetch).put(await V.seal(k.key, await V.pack(old)), etag));
+  await b.sync.pull();
+  assert.equal(b.money(at('THOM')), 3000);
+  assert.ok(b.files.has(dvd(2)) && !b.files.has(dvd(1)));
+  const rev2 = srv.kept.get(token).cur.rev;
+  await b.sync.push();
+  assert.equal(srv.kept.get(token).cur.rev, rev2);
+  assert.equal(b.sync.state.s, 'synced');
+});
+
+test('a link from when covers were sent: unchanged files still count as unchanged, changed ones as changed', async () => {
+  const srv = server(), a = browser(srv);
+  seed(a, 1000);
+  const phrase = await a.sync.create();
+  const dvd = `${DIR}/THOM DVD 1/THOM DVD 1`;
+  /** b, synced with a's version as a link from before 2026-10-25 kept it: no v, the hash over the covers too */
+  async function before(change) {
+    const b = browser(srv), got = await b.sync.peek(phrase);
+    for (const e of await unzip(got.zip)) b.files.set(e.name, e.data);
+    b.files.set(dvd, cover());
+    await b.sync.adopt(phrase, got.remote);
+    const l = JSON.parse(b.link);
+    delete l.v;
+    l.hash = await V.contentHash([...b.files].filter(([p]) => !p.endsWith('.tga')).map(([path, data]) => ({ path, data })));
+    const b2 = browser(srv, JSON.stringify(l)); b2.files = b.files;      // b reloaded with the new page
+    change?.(b2);
+    return b2;
+  }
+  // b unchanged since; a sends a new version: b takes it, no question
+  const b = await before();
+  srv.now += 60_000;
+  a.files.set(at('THOM'), profile('THOM', { money: 2000 }));
+  await a.sync.push();
+  await b.sync.pull();
+  assert.equal(b.sync.state.s, 'synced');
+  assert.equal(b.money(at('THOM')), 2000);
+  assert.ok(b.files.has(dvd));
+  assert.equal(b.sync.link.v, 2);
+  // b unchanged since and nothing new: it sends nothing
+  const c = await before(), rev = srv.kept.get((await V.keysOf(phrase)).token).cur.rev;
+  await c.sync.pull(); await c.sync.push();
+  assert.equal(srv.kept.get((await V.keysOf(phrase)).token).cur.rev, rev);
+  assert.equal(c.sync.state.s, 'synced');
+  // b played since; a sends a new version: both changed, the player picks
+  const d = await before(x => x.files.set(at('THOM'), profile('THOM', { money: 9000 })));
+  srv.now += 60_000;
+  a.files.set(at('THOM'), profile('THOM', { money: 3000 }));
+  await a.sync.push();
+  await d.sync.pull();
+  assert.deepEqual([d.sync.state.s, d.sync.state.why], ['conflict', 'both']);
+  assert.equal(d.money(at('THOM')), 9000);
 });

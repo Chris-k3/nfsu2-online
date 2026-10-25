@@ -101,9 +101,11 @@ export function filesOf(saveDir: string) {
   };
 }
 
-/** Remove everything inside the save dir (the dir itself stays), but what is at its top under a name `keep` takes. */
-export async function clearSaveDir(saveDir: string, keep: (name: string) => boolean = () => false): Promise<void> {
-  const d = await saveRoot(saveDir);
+/** Remove everything inside the save dir, or its folder `under` (the folder itself stays), but what is at its top under
+ *  a name `keep` takes. */
+export async function clearSaveDir(saveDir: string, keep: (name: string) => boolean = () => false, under = ''): Promise<void> {
+  let d = await saveRoot(saveDir);
+  if (under) try { d = await dirOf(d, parts(under), false); } catch { return; }   // not there: nothing in it
   const names: string[] = [];
   for await (const [name] of (d as any).entries() as AsyncIterable<[string, FileSystemHandle]>) if (!keep(name)) names.push(name);
   for (const n of names) await d.removeEntry(n, { recursive: true });

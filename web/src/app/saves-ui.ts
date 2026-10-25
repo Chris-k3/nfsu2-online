@@ -16,6 +16,7 @@ import { fmtBytes } from './checks';
 import { resolveEnv } from './settings';
 import { gameDataKept, type DownloadState, type DownloadStatus, type Predownload } from './predownload';
 import { ScreenshotsPart } from './shots';
+import { keeps } from './vault';
 import { dateLocale, listOf, live, N, t, tn, tvars, type Msg } from './i18n';
 
 export interface SavesDeps {
@@ -187,8 +188,9 @@ export async function restoreSaves(saveDir: string, r: Restore) {
 }
 
 /**
- * A keyphrase's saves (vault.ts: a zip of the save folder but the screenshots) as a backup of this page's, whatever is
- * at their top: restoreVault puts them in place of everything here.  The same checks as a backup's.
+ * A keyphrase's saves (vault.ts: a zip of the save folder but the screenshots and the covers) as a backup of this
+ * page's, whatever is at their top: restoreVault puts them in place of everything here.  The same checks as a backup's;
+ * what a keyphrase does not keep is left out (covers in one sent before 2026-10-25: black ones, as they were then).
  */
 export async function readVault(buf: Uint8Array): Promise<Restore> {
   const refused: string[] = [];
@@ -197,12 +199,16 @@ export async function readVault(buf: Uint8Array): Promise<Restore> {
     const p = safeEntryPath(name);
     return !!p && !isScreenshot(p) && size <= MAX_ENTRY && ((other += size) <= MAX_OTHER || ((other -= size), false));
   }, refused);
-  return backupIn(all.map(e => ({ path: safeEntryPath(e.name)!, data: e.data, mtime: e.mtime })), refused);
+  const files = all.map(e => ({ path: safeEntryPath(e.name)!, data: e.data, mtime: e.mtime }));
+  return backupIn(files.filter(e => keeps(e.path)), refused);
 }
 
-/** readVault's saves in place of the ones here: everything goes but the screenshots (and a test's input script). */
+/** readVault's saves in place of the ones here: everything goes but the screenshots (and a test's input script), and
+ *  the DVD and magazine covers of the profiles they bring, which a keyphrase does not keep (vault.ts keeps). */
 export async function restoreVault(saveDir: string, r: Restore) {
-  await clearSaveDir(saveDir, name => isScreenshot(name) || name === 'autotest-script.txt');
+  const names = new Set(r.profiles.map(lower));
+  await clearSaveDir(saveDir, name => isScreenshot(name) || name === 'autotest-script.txt' || name === PROFILES_DIR);
+  await clearSaveDir(saveDir, name => names.has(lower(coverOf(name)?.profile ?? '')), PROFILES_DIR);
   for (const e of r.entries) await writeFile(saveDir, e.path, e.data);
 }
 

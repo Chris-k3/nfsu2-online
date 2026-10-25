@@ -32,8 +32,8 @@
 //!
 //! # Limits
 //!
-//! - one version at most [`VaultOptions::max_body`] bytes (256 KB: a save folder without screenshots packs into
-//!   6-14 KB, so that is dozens of profiles);
+//! - one version at most [`VaultOptions::max_body`] bytes (256 KB: a save folder without screenshots and covers packs
+//!   into 6-14 KB, so that is dozens of profiles);
 //! - new keyphrases stop once all of them take [`VaultOptions::new_until`] bytes, every write that grows a file at
 //!   [`VaultOptions::max_bytes`] (counted in 4 KB blocks, as the disk takes them); what is kept stays readable;
 //! - what the saves add to the disk comes at most [`VaultOptions::per_day`] bytes a day from all clients together, a
