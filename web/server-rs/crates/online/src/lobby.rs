@@ -163,14 +163,23 @@ const ROOM_LIMIT: usize = 50;
 
 const TIER: &str = "0,1999,4999,9999,19999,39999,59999,79999,99999,119999";
 
+/// games in one game list search: the game's page (its search asks for this many, START a page after another).  The
+/// lobby shows one search's games until the next (the +agm updates never reach its rows), and a step past the last
+/// row of a full page searches the next page (of a shorter list: the selection stays); at the game's own default, 20
+/// (SPEED2.EXE 0x4bb14b), this server's list came in pages of 20 from searches seconds apart, which skipped and
+/// repeated games and replaced the rows under the player ("Race lobby list is moving too fast", a player's report,
+/// 2026-10-25).  This many: every open game in one search.
+const GAMES_PER_UPDATE: usize = 200;
+
 /// the server config (the "news" reply, code new7) the game asks for at connect: where the buddy server is (here:
-/// this same host), the news and terms pages, the tier points per race type
+/// this same host), the news and terms pages, the tier points per race type, the game list's page
 pub fn config_fields() -> Fields {
     fields![
         ("TOSURL", "http://10.77.0.1/tos"),
         ("NEWSURL", "http://10.77.0.1/news"),
         ("BUDDY_SERVER", "10.77.0.1"),
         ("BUDDY_PORT", PORT_BUDDY),
+        ("GAMES_PER_UPDATE", GAMES_PER_UPDATE),
         ("CIRCUIT_TIER_POINTS", TIER),
         ("SPRINT_TIER_POINTS", TIER),
         ("DRIFT_TIER_POINTS", TIER),
@@ -1810,7 +1819,7 @@ impl Core {
         let (cf, cm, sf, sm) = (n("CUSTFLAGS"), n("CUSTMASK"), n("SYSFLAGS"), n("SYSMASK"));
         let only_asked = filter_set && [cf & cm, cm, sf & sm, sm] != FILTER_DEFAULT;
         let start = 0i32.max(jsx::to_int32(f.num("START", 0.0))) as usize;
-        let count = 50i32.min(0i32.max(jsx::to_int32(f.num("COUNT", 20.0)))) as usize;
+        let count = (0i32.max(jsx::to_int32(f.num("COUNT", 20.0))) as usize).min(GAMES_PER_UPDATE);
         let x = self.lobby.s(s);
         let (room, mine) = (x.room, x.game);
         let asked = |g: &Game| (g.cust_flags & cm) == (cf & cm) && (g.sys_flags & sm) == (sf & sm);

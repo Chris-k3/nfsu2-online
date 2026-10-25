@@ -347,6 +347,40 @@ fn the_game_list() {
     assert_eq!(w.c(e).l("gjoi").code, "");
 }
 
+// the game list in one search: the config sets the game's page (GAMES_PER_UPDATE), its search asks for that many, and
+// gets every open game, oldest first; past the page, the next one
+#[test]
+fn the_game_list_in_one_search() {
+    let mut w = world();
+    let hosts: Vec<C> = (0..210)
+        .map(|i| {
+            let g = w.client(&format!("10.77.{}.{}", 1 + i / 200, 2 + i % 200));
+            w.login(g, &format!("Host{i}"))
+        })
+        .collect();
+    let g = w.client("10.77.0.2");
+    let e = w.login(g, "Looker");
+    assert_eq!(w.c(e).l("news").g("GAMES_PER_UPDATE"), "200");
+    for (i, &h) in hosts.iter().enumerate() {
+        w.send(h, "gcre", fields![("NAME", format!("{i}00.Host{i}")), ("CUSTFLAGS", 0x40000f3), ("PARAMS", "TRACK=4011")]);
+    }
+    let names = |w: &mut World| -> Vec<String> {
+        w.cm(e).take().iter().filter(|m| m.kind == "+gam").map(|m| m.g("NAME").to_string()).collect()
+    };
+    let search = |s: i32, n: i32| {
+        fields![("START", s), ("COUNT", n), ("CUSTFLAGS", 0x40000f3), ("CUSTMASK", 0x40001f3), ("SYSFLAGS", 0), ("SYSMASK", 0xc0000)]
+    };
+    let made = |r: std::ops::Range<usize>| -> Vec<String> { r.map(|i| format!("{i}00.Host{i}")).collect() };
+    w.cm(e).take();
+    w.send(e, "gsea", search(0, 200));
+    assert_eq!(w.c(e).l("gsea").g("COUNT"), "200");
+    assert_eq!(names(&mut w), made(0..200), "a page of 200, oldest first");
+    w.send(e, "gsea", search(200, 200));
+    assert_eq!(names(&mut w), made(200..210));
+    w.send(e, "gsea", search(0, 1000));
+    assert_eq!(w.c(e).l("gsea").g("COUNT"), "200", "never more than a page");
+}
+
 // six players: a game asked for 8 takes 6, the seventh finds it full; +ses names all six
 #[test]
 fn six_players() {
