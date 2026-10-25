@@ -196,6 +196,10 @@ static void update_music_readers(uint32_t first, unsigned inputs){
         kept_side[kept_n] = g_music.side[k];
         kept[kept_n++] = g_music.reader[k];
     }
+    if (g_music.count && !kept_n && (g_song.who == SONG_WAITING || g_song.who == SONG_FOLDER)){
+        fprintf(stderr, "[radio] the song's readers left the mixer: the track ends\n");
+        song_start(SONG_GAME, 0);
+    }
     if (g_music.searching && (g_music.count >= MUSIC_INPUTS || ++g_music.search_steps > SEARCH_STEPS)){
         g_music.searching = 0;
     }
