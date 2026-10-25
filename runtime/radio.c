@@ -72,6 +72,7 @@ enum { SONG_GAME, SONG_WAITING, SONG_FOLDER, SONG_SILENT };   /* who makes the s
 
 typedef struct {
     uint32_t reader[MUSIC_INPUTS], count, search_steps;
+    uint32_t earlier[MIXER_MAX_INPUTS], earlier_n;   /* the readers in the mixer when the search started: not the song's */
     uint8_t side[MUSIC_INPUTS];
     int searching, paused;
 } Music;
@@ -174,21 +175,25 @@ static uint8_t side_of(uint32_t input){
     return left > right ? 0 : right > left ? 1 : SIDE_UNKNOWN;
 }
 
-/* the song's readers: those new to the mixer while the song is still looking for its pair; kept while they stay */
+/* the song's readers: two new to the mixer since the search started, one feeding the left side and one the right
+ * (a race's own streams come in too, fed to both sides); kept while they stay */
 static void update_music_readers(uint32_t first, unsigned inputs){
     uint32_t now[MIXER_MAX_INPUTS], now_n = 0, kept[MUSIC_INPUTS], kept_n = 0;
     uint8_t kept_side[MUSIC_INPUTS];
+    if (g_music.searching && g_music.search_steps == 0){
+        memcpy(g_music.earlier, g_radio.before, g_radio.before_n * sizeof g_radio.before[0]);
+        g_music.earlier_n = g_radio.before_n;
+    }
     for (unsigned i = 0; i < inputs; i++){
         uint32_t input = first + INPUT_SIZE * i, reader = stream_reader(input);
+        uint8_t side = side_of(input);
         if (!reader) continue;
         now[now_n++] = reader;
-        if (g_music.searching && g_music.count < MUSIC_INPUTS && !list_has(g_music.reader, g_music.count, reader)
-            && !list_has(g_radio.before, g_radio.before_n, reader)){
-            g_music.side[g_music.count] = SIDE_UNKNOWN;
+        if (g_music.searching && g_music.count < MUSIC_INPUTS && side != SIDE_UNKNOWN
+            && (!g_music.count || g_music.side[0] != side) && !list_has(g_music.reader, g_music.count, reader)
+            && !list_has(g_music.earlier, g_music.earlier_n, reader)){
+            g_music.side[g_music.count] = side;
             g_music.reader[g_music.count++] = reader;
-        }
-        for (uint32_t k = 0; k < g_music.count; k++){
-            if (g_music.reader[k] == reader && g_music.side[k] == SIDE_UNKNOWN) g_music.side[k] = side_of(input);
         }
     }
     for (uint32_t k = 0; k < g_music.count; k++){
