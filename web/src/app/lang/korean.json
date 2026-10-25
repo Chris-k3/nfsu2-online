@@ -572,7 +572,7 @@
   "Keyphrase made. Keep it safe: it is the only way back to these saves.": "키 문구를 만들었어요. 안전하게 보관하세요. 이 저장 데이터로 돌아올 수 있는 유일한 방법이에요.",
   "No cloud saves for this keyphrase. Check it for typos.": "이 키 문구로 된 클라우드 저장 데이터가 없어요. 오타가 없는지 확인하세요.",
   "Load cloud saves?": "클라우드 저장 데이터를 불러올까요?",
-  "They replace the profiles, game options and settings.ini here with the ones saved {when}. Screenshots stay.": "여기 있는 프로필, 게임 옵션, settings.ini가 {when}에 저장된 것으로 대체돼요. 스크린샷은 그대로 유지돼요.",
+  "They replace the profiles and settings.ini here with the ones saved {when}. Screenshots stay, and so do this device's graphics, frame rate, sound output and controller settings.": "여기 있는 프로필과 settings.ini가 {when}에 저장된 것으로 대체돼요. 스크린샷은 그대로 유지되고, 이 기기의 그래픽, 프레임 레이트, 사운드 출력, 컨트롤러 설정도 그대로 유지돼요.",
   "Load": "불러오기",
   "Loaded. This browser syncs from now on.": "불러왔어요. 이제부터 이 브라우저가 동기화돼요.",
   "These saves cannot be read: {error}.": "이 저장 데이터를 읽을 수 없어요: {error}.",

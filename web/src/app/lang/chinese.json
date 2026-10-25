@@ -572,7 +572,7 @@
   "Keyphrase made. Keep it safe: it is the only way back to these saves.": "已建立通關密語。請妥善保管：這是取回這些存檔的唯一方法。",
   "No cloud saves for this keyphrase. Check it for typos.": "此通關密語沒有雲端存檔。請檢查是否有錯字。",
   "Load cloud saves?": "要載入雲端存檔嗎？",
-  "They replace the profiles, game options and settings.ini here with the ones saved {when}. Screenshots stay.": "這會以 {when} 儲存的內容，取代此處的玩家檔案、遊戲選項與 settings.ini。截圖會保留。",
+  "They replace the profiles and settings.ini here with the ones saved {when}. Screenshots stay, and so do this device's graphics, frame rate, sound output and controller settings.": "這會以 {when} 儲存的內容，取代此處的玩家檔案與 settings.ini。截圖會保留，這台裝置的畫質、影格率、聲音輸出與控制器設定也會保留。",
   "Load": "載入",
   "Loaded. This browser syncs from now on.": "已載入。此瀏覽器從現在起會同步。",
   "These saves cannot be read: {error}.": "無法讀取這些存檔：{error}。",

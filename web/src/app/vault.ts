@@ -6,11 +6,14 @@
 //   back in any case, with any separators, "nfsu2-xyz" optional;
 // - PBKDF2-SHA-256 of it (100,000 rounds, a fixed salt: the keyphrase is all there is) gives 64 bytes: an AES-GCM key
 //   and a token.  The server keeps the keyphrase under the token's SHA-256 and never sees the key;
-// - what is sent: the save folder but the F12 screenshots, the DVD and magazine covers and a test's input script, as
-//   a stored zip (zip.ts), deflated, then sealed: a version byte (1), a 12-byte IV, the AES-256-GCM ciphertext and its
-//   tag.  A player's folder is 6-14 KB so; the server takes 256 KB.  A cover is a picture of 1 MB that packs into
-//   about 500 KB (2026-10-25: since the covers are read back from the GPU, no longer all zeros), so the covers stay in
-//   the browser that took them: taking another browser's version keeps the ones of its profiles here;
+// - what is sent (kept()): the save folder but the F12 screenshots, the DVD and magazine covers, the game's graphics
+//   options (registry.txt), a test's input script and the device's own lines of settings.ini, as a stored zip
+//   (zip.ts), deflated, then sealed: a version byte (1), a 12-byte IV, the AES-256-GCM ciphertext and its tag.  A
+//   player's folder is 6-14 KB so; the server takes 256 KB.  A cover is a picture of 1 MB that packs into about 500 KB
+//   (2026-10-25: since the covers are read back from the GPU, no longer all zeros), so the covers stay in the browser
+//   that took them: taking another browser's version keeps the ones of its profiles here.  The graphics options and
+//   settings.ini's resolution scale, frame rate, controller and the like (settings.ts KeyDef.device) are the device's,
+//   not the player's: a phone's would slow a PC down and a PC's a phone, so each browser keeps its own of those too;
 // - VaultSync: this browser's link (the keyphrase, the version it has, a hash of the files it sent or took) and the
 //   two ways of syncing.  Sending: after the game saves and when it closes, if the files changed since; taking: when
 //   the page opens and before Play, if another browser sent a newer version and the files here did not change.  Both
@@ -24,6 +27,7 @@ import { WORDS } from './vault-words';
 import { unzip, zip } from './zip';
 import { coverOf, profileName } from './profile';
 import { isScreenshot, PROFILES_DIR } from './savefs';
+import { withoutDevice } from './settings';
 import { fill, N, type Vars } from './i18n';
 
 export const PREFIX = 'nfsu2-xyz';
@@ -35,7 +39,7 @@ export const MAX_BOX = 256 << 10;
 const MAX_PLAIN = 256 << 20;
 const SALT = 'nfsu2-xyz keyphrase saves v1', AAD = 'nfsu2-xyz keyphrase saves v1';
 const WORD_SET = new Set(WORDS);
-const enc = new TextEncoder();
+const enc = new TextEncoder(), dec = new TextDecoder();
 
 /** A failure of the cloud saves: its message in English (the log, the tests); why and v: the same as written, for the
  *  page's language; code: its fixed name, the same in every language. */
@@ -100,8 +104,22 @@ export function isCover(path: string): boolean {
   const p = path.split('/');
   return p.length >= 3 && p[0] === PROFILES_DIR && !!coverOf(p[1]);
 }
-/** A file of the save folder a keyphrase keeps: all but the F12 screenshots, the covers and a test's input script. */
-export const keeps = (path: string) => !isScreenshot(path) && !isCover(path) && path !== 'autotest-script.txt';
+/** A file of the save folder a keyphrase keeps: all but the F12 screenshots, the covers, the game's graphics options
+ *  and a test's input script. */
+export const keeps = (path: string) => !isScreenshot(path) && !isCover(path) && path !== 'registry.txt' && path !== 'autotest-script.txt';
+/** A file a keyphrase kept, settings.ini whole, when a link of version v was made (Link.v; none: 1): 1, all but the
+ *  screenshots and a test's input script; 2 (2026-10-25), the covers left out too.  The version now (LINK_V) is kept(). */
+export const keptBy = (v: number) => (path: string) => !isScreenshot(path) && path !== 'autotest-script.txt' && (v < 2 || !isCover(path));
+
+/** The files of the save folder as a keyphrase keeps them: keeps()'s, settings.ini without the device's own settings
+ *  (settings.ts withoutDevice). */
+export function kept<F extends { path: string; data: Uint8Array }>(files: F[]): F[] {
+  return files.filter(f => keeps(f.path)).map(f => {
+    if (f.path !== 'settings.ini') return f;
+    const text = dec.decode(f.data), own = withoutDevice(text);
+    return own === text ? f : { ...f, data: enc.encode(own) };
+  });
+}
 
 /** a stream's bytes, at most max of them */
 async function bytesOf(s: ReadableStream<Uint8Array>, max = Infinity): Promise<Uint8Array> {
@@ -242,13 +260,14 @@ export interface Link {
   profiles: number;
   /** the server did not have the keyphrase at the last sync: nothing is sent by itself */
   gone?: boolean;
-  /** 2: hash leaves the covers out (a link without it counted them: VaultSync.upgraded) */
+  /** what hash counts: LINK_V, kept(); an older one, keptBy(v) (none: 1; VaultSync.upgraded) */
   v?: number;
 }
 
 export interface VaultDeps {
-  /** the files of the save folder a keyphrase keeps (keeps()); covers: the covers too, as before 2026-10-25 */
-  files(o?: { covers?: boolean }): Promise<SaveFile[]>;
+  /** the files of the save folder as a keyphrase keeps them (kept()); was: as a link of that version counted them
+   *  (keptBy(was), the files as they are) */
+  files(o?: { was?: number }): Promise<SaveFile[]>;
   /** a keyphrase's version in place of the saves here (its zip): throws when it may not be written now */
   restore(zip: Uint8Array): Promise<void>;
   /** the link kept in this browser */
@@ -281,6 +300,9 @@ export function failureOf(e: unknown): { msg: string; why: { t: string; v?: Vars
     : e instanceof DOMException && (e.name === 'TimeoutError' || e.name === 'AbortError') ? of(N('the server did not answer in time'), 'VAULT-TIMEOUT')
     : of(String(e instanceof Error ? e.message : e), 'VAULT-ERROR');
 }
+
+/** the link's version now: its hash counts kept() (Link.v) */
+const LINK_V = 3;
 
 export class VaultSync {
   link: Link | null;
@@ -326,17 +348,17 @@ export class VaultSync {
 
   private linked(phrase: string, r: Remote, hash: string, files: SaveFile[]) {
     this.setLink({ phrase, rev: r.rev, hash, saved: r.saved, earlier: r.earlier, profiles: profilesIn(files).length,
-      v: 2 });
+      v: LINK_V });
   }
 
-  /** The link, its hash without the covers.  One from before they stayed out (2026-10-25) counted them: when the files
-   *  here are still the ones it counted, it takes their hash without them (hash), so they still count as unchanged
-   *  since; when not, they changed. */
+  /** The link, its hash of kept().  An older one counted more (2026-10-25: the covers, the graphics options and the
+   *  device's settings stayed out): when the files here are still the ones it counted, it takes their hash as kept now
+   *  (hash), so they still count as unchanged since; when not, they changed. */
   private async upgraded(hash: string): Promise<Link> {
     const l = this.link!;
-    if (l.v === 2) return l;
-    const same = await contentHash(await this.d.files({ covers: true })) === l.hash;
-    this.setLink({ ...l, hash: same ? hash : '', v: 2 });
+    if (l.v === LINK_V) return l;
+    const same = await contentHash(await this.d.files({ was: l.v ?? 1 })) === l.hash;
+    this.setLink({ ...l, hash: same ? hash : '', v: LINK_V });
     return this.link!;
   }
 
@@ -383,10 +405,10 @@ export class VaultSync {
     });
   }
 
-  /** a version's files that a keyphrase keeps (one sent before 2026-10-25 may have covers: black ones, as they were) */
+  /** a version's files as a keyphrase keeps them (one sent before 2026-10-25 may have covers, black ones as they were,
+   *  the other browser's graphics options and its device's settings) */
   private async filesOf(k: Keys, box: Uint8Array): Promise<SaveFile[]> {
-    return (await unzip(await unpack(await unseal(k.key, box)))).filter(e => keeps(e.name))
-      .map(e => ({ path: e.name, data: e.data, mtime: e.mtime }));
+    return kept((await unzip(await unpack(await unseal(k.key, box)))).map(e => ({ path: e.name, data: e.data, mtime: e.mtime })));
   }
 
   /** a version in place of the saves here, and the link to it */

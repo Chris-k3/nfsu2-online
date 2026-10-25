@@ -623,7 +623,7 @@
   "Keyphrase made. Keep it safe: it is the only way back to these saves.": "Schlüsselphrase erstellt. Bewahre sie sicher auf: Sie ist der einzige Weg zurück zu diesen Spielständen.",
   "No cloud saves for this keyphrase. Check it for typos.": "Keine Cloud-Spielstände für diese Schlüsselphrase. Prüfe sie auf Tippfehler.",
   "Load cloud saves?": "Cloud-Spielstände laden?",
-  "They replace the profiles, game options and settings.ini here with the ones saved {when}. Screenshots stay.": "Sie ersetzen die Profile, Spieloptionen und settings.ini hier durch die gespeicherten (Stand: {when}). Screenshots bleiben.",
+  "They replace the profiles and settings.ini here with the ones saved {when}. Screenshots stay, and so do this device's graphics, frame rate, sound output and controller settings.": "Sie ersetzen die Profile und settings.ini hier durch die gespeicherten (Stand: {when}). Screenshots bleiben, ebenso die Einstellungen dieses Geräts für Grafik, Bildrate, Tonausgabe und Controller.",
   "Load": "Laden",
   "Loaded. This browser syncs from now on.": "Geladen. Dieser Browser synchronisiert ab jetzt.",
   "These saves cannot be read: {error}.": "Diese Spielstände können nicht gelesen werden: {error}.",

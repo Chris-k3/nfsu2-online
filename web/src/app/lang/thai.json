@@ -572,7 +572,7 @@
   "Keyphrase made. Keep it safe: it is the only way back to these saves.": "สร้างวลีรหัสแล้ว เก็บไว้ให้ดี: นี่เป็นทางเดียวที่จะกลับมาใช้เซฟเหล่านี้ได้",
   "No cloud saves for this keyphrase. Check it for typos.": "ไม่มีเซฟบนคลาวด์สำหรับวลีรหัสนี้ ตรวจดูว่าพิมพ์ผิดหรือเปล่า",
   "Load cloud saves?": "ต้องการโหลดเซฟบนคลาวด์หรือไม่",
-  "They replace the profiles, game options and settings.ini here with the ones saved {when}. Screenshots stay.": "โปรไฟล์ ตัวเลือกของเกม และ settings.ini ที่นี่จะถูกแทนที่ด้วยชุดที่บันทึกไว้เมื่อ {when} ภาพหน้าจอยังอยู่",
+  "They replace the profiles and settings.ini here with the ones saved {when}. Screenshots stay, and so do this device's graphics, frame rate, sound output and controller settings.": "โปรไฟล์และ settings.ini ที่นี่จะถูกแทนที่ด้วยชุดที่บันทึกไว้เมื่อ {when} ภาพหน้าจอยังอยู่ รวมถึงการตั้งค่ากราฟิก เฟรมเรต เอาต์พุตเสียง และคอนโทรลเลอร์ของอุปกรณ์นี้ด้วย",
   "Load": "โหลด",
   "Loaded. This browser syncs from now on.": "โหลดแล้ว เบราว์เซอร์นี้จะซิงค์ตั้งแต่นี้ไป",
   "These saves cannot be read: {error}.": "อ่านเซฟเหล่านี้ไม่ได้: {error}",

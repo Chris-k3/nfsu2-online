@@ -623,7 +623,7 @@
   "Keyphrase made. Keep it safe: it is the only way back to these saves.": "Nøglefrasen er oprettet. Opbevar den sikkert: den er den eneste vej tilbage til disse gemte spil.",
   "No cloud saves for this keyphrase. Check it for typos.": "Ingen gemte spil i skyen for denne nøglefrase. Tjek den for stavefejl.",
   "Load cloud saves?": "Indlæs gemte spil fra skyen?",
-  "They replace the profiles, game options and settings.ini here with the ones saved {when}. Screenshots stay.": "De erstatter profilerne, spilindstillingerne og settings.ini her med dem, der blev gemt {when}. Skærmbilleder bliver.",
+  "They replace the profiles and settings.ini here with the ones saved {when}. Screenshots stay, and so do this device's graphics, frame rate, sound output and controller settings.": "De erstatter profilerne og settings.ini her med dem, der blev gemt {when}. Skærmbilleder bliver, og det samme gør denne enheds indstillinger for grafik, billedhastighed, lydudgang og controller.",
   "Load": "Indlæs",
   "Loaded. This browser syncs from now on.": "Indlæst. Denne browser synkroniserer fra nu af.",
   "These saves cannot be read: {error}.": "Disse gemte spil kan ikke læses: {error}.",

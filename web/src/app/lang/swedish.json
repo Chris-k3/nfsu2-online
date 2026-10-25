@@ -623,7 +623,7 @@
   "Keyphrase made. Keep it safe: it is the only way back to these saves.": "Nyckelfrasen är skapad. Förvara den säkert: den är det enda sättet att komma tillbaka till de här sparfilerna.",
   "No cloud saves for this keyphrase. Check it for typos.": "Inga sparfiler i molnet för den här nyckelfrasen. Kontrollera att den är rätt stavad.",
   "Load cloud saves?": "Ladda sparfilerna från molnet?",
-  "They replace the profiles, game options and settings.ini here with the ones saved {when}. Screenshots stay.": "De ersätter profilerna, spelalternativen och settings.ini här med dem som sparades {when}. Skärmbilderna finns kvar.",
+  "They replace the profiles and settings.ini here with the ones saved {when}. Screenshots stay, and so do this device's graphics, frame rate, sound output and controller settings.": "De ersätter profilerna och settings.ini här med dem som sparades {when}. Skärmbilderna finns kvar, och det gör även den här enhetens inställningar för grafik, bildfrekvens, ljudutgång och handkontroll.",
   "Load": "Ladda",
   "Loaded. This browser syncs from now on.": "Laddat. Den här webbläsaren synkar från och med nu.",
   "These saves cannot be read: {error}.": "De här sparfilerna kan inte läsas: {error}.",

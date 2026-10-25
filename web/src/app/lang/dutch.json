@@ -623,7 +623,7 @@
   "Keyphrase made. Keep it safe: it is the only way back to these saves.": "Sleutelzin gemaakt. Bewaar hem goed: het is de enige weg terug naar deze opgeslagen spellen.",
   "No cloud saves for this keyphrase. Check it for typos.": "Geen opgeslagen spellen in de cloud voor deze sleutelzin. Controleer hem op typefouten.",
   "Load cloud saves?": "Opgeslagen spellen in de cloud laden?",
-  "They replace the profiles, game options and settings.ini here with the ones saved {when}. Screenshots stay.": "Ze vervangen de profielen, spelopties en settings.ini hier door die van {when}. Screenshots blijven.",
+  "They replace the profiles and settings.ini here with the ones saved {when}. Screenshots stay, and so do this device's graphics, frame rate, sound output and controller settings.": "Ze vervangen de profielen en settings.ini hier door die van {when}. Screenshots blijven, net als de instellingen van dit apparaat voor graphics, framerate, geluidsuitvoer en controller.",
   "Load": "Laden",
   "Loaded. This browser syncs from now on.": "Geladen. Deze browser synchroniseert vanaf nu.",
   "These saves cannot be read: {error}.": "Deze opgeslagen spellen kunnen niet worden gelezen: {error}.",

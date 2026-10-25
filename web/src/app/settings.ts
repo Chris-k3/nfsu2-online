@@ -34,6 +34,9 @@ export interface KeyDef {
   /** 'mac': only the Mac app uses it (a Mac settings.ini restored into the browser keeps working;
    *  the line is noted and ignored).  'web': meaningful in the browser. */
   scope: 'web' | 'mac';
+  /** a setting of this device (its screen, GPU, sound output, controller, address on the LAN), not the player's: a
+   *  keyphrase's saves leave it out, and each browser keeps its own (withoutDevice, withDevice) */
+  device?: boolean;
 }
 
 // bundle.m's table (mac/v12na-port 5170908: 59 keys), in its order and with its
@@ -62,15 +65,15 @@ export const KEYS: readonly KeyDef[] = [
   { key: 'sound', env: 'NOSOUND', kind: 'boolInv', scope: 'web' },
   { key: 'background', env: 'NFSU2_BACKGROUND', kind: 'enum', vals: 'pause|run', scope: 'web' },
   { key: 'quit_grace', env: 'NFSU2_QUIT_GRACE', kind: 'num', scope: 'web' },
-  { key: 'seed_registry', env: 'NFSU2_SEED_REGISTRY', kind: 'bool', scope: 'web' },
+  { key: 'seed_registry', env: 'NFSU2_SEED_REGISTRY', kind: 'bool', scope: 'web', device: true },
   // stall report in the log
   { key: 'watchdog', env: 'NFSU2_WATCHDOG', kind: 'num', scope: 'web' },
   // display
-  { key: 'fullscreen', env: 'NFSFULL', kind: 'bool', scope: 'web' },
-  { key: 'native_resolution', env: 'NFSNATIVE', kind: 'bool', scope: 'web' },
-  { key: 'resolution', env: 'NFSRES', kind: 'wxh', scope: 'web' },
-  { key: 'render', env: 'NFSU2_RENDER', kind: 'enum', vals: 'backing|panel|scale:#|#', scope: 'web' },
-  { key: 'max_pixels', env: 'NFSMAXPIX', kind: 'num', scope: 'web' },
+  { key: 'fullscreen', env: 'NFSFULL', kind: 'bool', scope: 'web', device: true },
+  { key: 'native_resolution', env: 'NFSNATIVE', kind: 'bool', scope: 'web', device: true },
+  { key: 'resolution', env: 'NFSRES', kind: 'wxh', scope: 'web', device: true },
+  { key: 'render', env: 'NFSU2_RENDER', kind: 'enum', vals: 'backing|panel|scale:#|#', scope: 'web', device: true },
+  { key: 'max_pixels', env: 'NFSMAXPIX', kind: 'num', scope: 'web', device: true },
   { key: 'hud', env: 'NFSU2_HUD', kind: 'enum', vals: 'wide|43|4:3', scope: 'web' },
   { key: 'movie_framing', env: 'NFSU2_MOVIE', kind: 'enum', vals: 'fit|fill|stretch', scope: 'web' },
   { key: 'cutscene_borders', env: 'NFSU2_CUTSCENE_BORDERS', kind: 'enum', vals: 'full|off', scope: 'web' },
@@ -80,19 +83,19 @@ export const KEYS: readonly KeyDef[] = [
   { key: 'msaa', env: 'NFSU2_MSAA', kind: 'enum', vals: 'off|2|4|auto', scope: 'mac' },
   { key: 'mirror', env: 'NFSU2_MIRROR', kind: 'enum', vals: 'original|high|#', scope: 'mac' },
   { key: 'texture_filtering', env: 'NFSU2_TEXTURE_FILTERING', kind: 'enum', vals: 'game|anisotropic', scope: 'mac' },
-  { key: 'fps_counter', env: 'NFSU2_FPS_COUNTER', kind: 'enum', vals: 'off|on|detailed', scope: 'web' },   // the page draws it
+  { key: 'fps_counter', env: 'NFSU2_FPS_COUNTER', kind: 'enum', vals: 'off|on|detailed', scope: 'web', device: true },   // the page draws it
   { key: 'metal_hud', env: 'MTL_HUD_ENABLED', kind: 'bool', scope: 'mac' },
   // frame rate
-  { key: 'fps', env: 'NFSU2_FPS', kind: 'enum', vals: 'auto|30|60|120|240|uncapped|off|native|vanilla|game|max', scope: 'web' },
-  { key: 'hfr_fixes', env: 'NFSU2_HFR_FIX', kind: 'fixes', scope: 'web' },
+  { key: 'fps', env: 'NFSU2_FPS', kind: 'enum', vals: 'auto|30|60|120|240|uncapped|off|native|vanilla|game|max', scope: 'web', device: true },
+  { key: 'hfr_fixes', env: 'NFSU2_HFR_FIX', kind: 'fixes', scope: 'web', device: true },
   { key: 'nos_trail_length', env: 'NFSU2_NOS_TRAIL_LEN', kind: 'num', scope: 'web' },
   // game controller
-  { key: 'gamepad', env: 'NFSU2_PAD', kind: 'enum', vals: 'on|off|hotplug', scope: 'web' },
-  { key: 'rumble', env: 'NFSU2_FF', kind: 'bool', scope: 'web' },
-  { key: 'gamepad_deadzone', env: 'NFSU2_PAD_DEADZONE', kind: 'num', scope: 'web' },
-  { key: 'gamepad_trigger_deadzone', env: 'NFSU2_PAD_TRIGGER_DEADZONE', kind: 'num', scope: 'web' },
-  { key: 'gamepad_trigger_click', env: 'NFSU2_PAD_TRIGGER_CLICK', kind: 'num', scope: 'web' },
-  { key: 'gamepad_menu_keys', env: 'NFSU2_PAD_FE_KEYS', kind: 'bool', scope: 'web' },
+  { key: 'gamepad', env: 'NFSU2_PAD', kind: 'enum', vals: 'on|off|hotplug', scope: 'web', device: true },
+  { key: 'rumble', env: 'NFSU2_FF', kind: 'bool', scope: 'web', device: true },
+  { key: 'gamepad_deadzone', env: 'NFSU2_PAD_DEADZONE', kind: 'num', scope: 'web', device: true },
+  { key: 'gamepad_trigger_deadzone', env: 'NFSU2_PAD_TRIGGER_DEADZONE', kind: 'num', scope: 'web', device: true },
+  { key: 'gamepad_trigger_click', env: 'NFSU2_PAD_TRIGGER_CLICK', kind: 'num', scope: 'web', device: true },
+  { key: 'gamepad_menu_keys', env: 'NFSU2_PAD_FE_KEYS', kind: 'bool', scope: 'web', device: true },
   { key: 'gamepad_background', env: 'NFSU2_PAD_BACKGROUND', kind: 'bool', scope: 'mac' },
   // Discord status (no Discord in a browser)
   { key: 'discord', env: 'NFSU2_DISCORD', kind: 'bool', scope: 'mac' },
@@ -111,7 +114,7 @@ export const KEYS: readonly KeyDef[] = [
   // and each one's colour, in the same order (crews.ts): bundle.m's K_RGBS
   { key: 'roam_crew_colours', env: 'NFSU2_ROAM_CREW_RGB', kind: 'rgbs', ic: true, scope: 'web' },
   { key: 'roam_max_players', env: 'NFSU2_ROAM_MAX_PLAYERS', kind: 'int', vals: '2..33', ic: true, scope: 'web' },
-  { key: 'roam_max_cars', env: 'NFSU2_ROAM_MAX_CARS', kind: 'int', vals: '0..32', ic: true, scope: 'web' },
+  { key: 'roam_max_cars', env: 'NFSU2_ROAM_MAX_CARS', kind: 'int', vals: '0..32', ic: true, scope: 'web', device: true },
   { key: 'roam_collide', env: 'NFSU2_ROAM_COLLIDE', kind: 'bool', ic: true, scope: 'web' },
   // quick chat's fixed phrases (web/src/app/quickchat.ts, runtime/roam_game.c say_*): the page has the picker, so not in
   // bundle.m's table
@@ -124,8 +127,8 @@ export const KEYS: readonly KeyDef[] = [
   { key: 'network', env: 'NFSU2_NET', kind: 'enum', vals: 'lan|on|off', scope: 'web' },
   { key: 'lan_interface', env: 'NFSU2_NET_IFACE', kind: 'ifname', scope: 'mac' },
   { key: 'lan_address', env: 'NFSU2_NET_ADDR', kind: 'ipv4', scope: 'mac' },
-  { key: 'lan_adapter_id', env: 'NFSU2_NET_MAC', kind: 'mac', scope: 'web' },
-  { key: 'lan_host_name', env: 'NFSU2_NET_NAME', kind: 'host', scope: 'web' },
+  { key: 'lan_adapter_id', env: 'NFSU2_NET_MAC', kind: 'mac', scope: 'web', device: true },
+  { key: 'lan_host_name', env: 'NFSU2_NET_NAME', kind: 'host', scope: 'web', device: true },
   { key: 'lan_timing', env: 'NFSU2_LAN_TIMING', kind: 'enum', vals: 'pc|exact', scope: 'web' },
   // texture packs
   { key: 'textures', env: 'NFSU2_TEXTURES', kind: 'enum', vals: 'original|upscaled', scope: 'mac' },
@@ -134,7 +137,7 @@ export const KEYS: readonly KeyDef[] = [
   { key: 'texture_dump', env: 'NFSU2_TEXDUMP', kind: 'dump', scope: 'mac' },
   { key: 'texture_budget', env: 'NFSU2_TEXBUDGET', kind: 'int', vals: '16..65536', scope: 'mac' },
   // the browser's own, web-only (read by the page; also passed on, so the runtime could use it)
-  { key: 'audio_latency', env: 'NFSU2_AUDIO_LATENCY', kind: 'enum', vals: 'interactive|balanced|playback|#', scope: 'web' },
+  { key: 'audio_latency', env: 'NFSU2_AUDIO_LATENCY', kind: 'enum', vals: 'interactive|balanced|playback|#', scope: 'web', device: true },
   // the game's Online mode against this server's own stand-in (web/server-rs/crates/online; read by runtime/winsock.c)
   { key: 'online', env: 'NFSU2_ONLINE', kind: 'bool', scope: 'web' },
   // each profile's Save option set to Autosave once, before Play (the page's own: profile.ts turnOnAutosave)
@@ -148,7 +151,7 @@ export const KEYS: readonly KeyDef[] = [
   { key: 'horn', env: 'NFSU2_HORN', kind: 'enum', vals: HORNS.join('|'), scope: 'web' },
   // the menus' and HUD's textures: a texture pack in place of the game's (runtime/web/texrep_web.c; the page fetches
   // ahead only the one picked: datacache.ts).  Not in bundle.m's table: the Mac's packs are "textures"
-  { key: 'ui_textures', env: 'NFSU2_UI_TEXTURES', kind: 'enum', vals: 'original|uhud', scope: 'web' },
+  { key: 'ui_textures', env: 'NFSU2_UI_TEXTURES', kind: 'enum', vals: 'original|uhud', scope: 'web', device: true },
 ];
 
 /** strcasecmp's and toupper's folding: ASCII letters only (String.toLowerCase would also fold the Kelvin sign to 'k') */
@@ -821,6 +824,47 @@ export function settingsPut(text: string | null, key: string, value: string | nu
     if (lines.length && lines[lines.length - 1] === '') lines.splice(lines.length - 1, 0, nl); else lines.push(nl);
   }
   return lines.join('\n');
+}
+
+/** the variables of the device's own settings (KeyDef.device): a line sets one by its key, or by the variable's name */
+const DEVICE_ENV = new Set(KEYS.filter(k => k.device).map(k => k.env));
+/** the key a line sets (not a comment, section or blank line), if it sets a device's own setting */
+function deviceKey(line: string): string | undefined {
+  const p = trim(line), eq = p.indexOf('=');
+  if (!p || p[0] === '#' || p[0] === ';' || p[0] === '[' || eq < 0) return undefined;
+  const key = trim(p.slice(0, eq));
+  return DEVICE_ENV.has(envNameOf(key)) ? key : undefined;
+}
+
+/**
+ * A settings.ini without the device's own settings (KeyDef.device), as a keyphrase keeps it: a line that sets one is
+ * its template line again ("#fps = auto"), and one that sets its variable by name ("NFSU2_FPS = 30") goes.
+ */
+export function withoutDevice(text: string): string {
+  const out: string[] = [];
+  for (const l of text.split('\n')) {
+    const key = deviceKey(l), d = key ? keyDef(key) : undefined;
+    if (!key) out.push(l);
+    else if (d) out.push(`#${d.key} = ${DEFAULTS.get(d.key) ?? ''}`.replace(/ = $/, ' ='));
+  }
+  return out.join('\n');
+}
+
+/**
+ * Another browser's settings.ini (theirs, from a keyphrase; null: none) with this browser's own device settings
+ * (mine: its settings.ini now), each in the place of its template line.  Null when there is neither.
+ */
+export function withDevice(theirs: string | null, mine: string | null): string | null {
+  let out = theirs === null ? null : withoutDevice(theirs);
+  const seen = new Set<string>();
+  for (const l of mine === null ? [] : mine.split('\n')) {
+    const key = deviceKey(l), env = key && envNameOf(key);
+    if (!key || seen.has(env!)) continue;               // only the first line of a variable sets it
+    seen.add(env!);
+    const p = trim(l), eq = p.indexOf('=');
+    out = settingsPut(out, key, trim(p.slice(eq + 1)));
+  }
+  return out;
 }
 
 /**

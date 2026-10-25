@@ -208,8 +208,11 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
     empty saves by itself: it offers the cloud's instead (keeping the empty ones asks first: every browser on the
     keyphrase loses its profiles). The page also asks before cloud saves with no profiles, or older than the ones in
     this browser (a server gone back), replace yours.
-  - The profiles, the game's options and `settings.ini` go; F12 screenshots and DVD and magazine covers stay in each
-    browser (a cover is a picture of 1 MB: another browser's crib lists it, but the game says it cannot load it).
+  - The profiles and `settings.ini` go. What belongs to the device stays in each browser: F12 screenshots, DVD and
+    magazine covers (a cover is a picture of 1 MB: another browser's crib lists it, but the game says it cannot load
+    it), the game's graphics options, and in Settings full screen, the resolution scale, render size and pixel limit,
+    Menus and HUD, the frame rate and its counter, the output latency, the controller's settings and how many
+    players' cars free roam shows. A phone keeps its own and a PC its own.
   - The server keeps the copy of an earlier day too: "Go back to ..." brings it back when a day went wrong.
   - Stop syncing leaves the saves where they are, and the keyphrase in the box; Delete from cloud deletes them on the
     server (your browsers keep theirs). A keyphrase nobody used for two years is deleted from the server. A browser

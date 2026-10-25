@@ -9,6 +9,8 @@
 //   a browser with no profile left, a torn profile during a game, a version with no profile or an older one (a server
 //   gone back), a keyphrase deleted elsewhere or lost on the server (still linked, sent again), the server's refusals;
 //   covers staying in the browser that took them, and links from when they were sent
+// - the device's own: registry.txt and settings.ini's device settings (settings.ts KeyDef.device) never sent, each
+//   browser keeping its own over a sync, also when a version sent before brings another's; links that counted them
 // The real server and two real browsers: web/tools/vault-pair.mjs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -19,11 +21,11 @@ import * as esbuild from 'esbuild';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const entry = `export * as V from './web/src/app/vault.ts'; export { WORDS } from './web/src/app/vault-words.ts';
-  export * as P from './web/src/app/profile.ts'; export { unzip } from './web/src/app/zip.ts';`;
+  export * as P from './web/src/app/profile.ts'; export { unzip } from './web/src/app/zip.ts'; export * as S from './web/src/app/settings.ts';`;
 const js = (await esbuild.build({ stdin: { contents: entry, resolveDir: ROOT, loader: 'ts' }, bundle: true, format: 'esm', write: false, platform: 'neutral' })).outputFiles[0].text;
-const { V, WORDS, P, unzip } = await import('data:text/javascript;base64,' + Buffer.from(js).toString('base64'));
+const { V, WORDS, P, unzip, S } = await import('data:text/javascript;base64,' + Buffer.from(js).toString('base64'));
 
-const enc = new TextEncoder();
+const enc = new TextEncoder(), dec = new TextDecoder();
 const DIR = 'NFS Underground 2', B = 36;
 
 /** a profile as the game saves one (as far as the page reads it), sealed; `stale`: its checksums do not hold */
@@ -112,6 +114,8 @@ test('a player\'s folder packs far below what the server takes; the hash is of t
   assert.notEqual(await V.contentHash(files.map((f, i) => i === 3 ? { ...f, path: 'registry2.txt' } : f)), h);
   assert.deepEqual(V.profilesIn(files), ['THOM']);
   assert.ok(V.keeps('settings.ini') && V.keeps(at('THOM')) && !V.keeps('nfsu2000.tga') && !V.keeps('autotest-script.txt'));
+  assert.ok(!V.keeps('registry.txt') && V.keptBy(1)('registry.txt') && V.keptBy(1)(`${DIR}/THOM DVD 1/THOM DVD 1`));
+  assert.ok(V.keptBy(2)('registry.txt') && !V.keptBy(2)(`${DIR}/THOM DVD 1/THOM DVD 1`) && !V.keptBy(2)('nfsu2000.tga'));
   assert.ok(!V.keeps(`${DIR}/THOM DVD 1/THOM DVD 1`) && !V.keeps(`${DIR}/THOM Magazine 12/THOM Magazine 12`));
   assert.ok(V.isCover(`${DIR}/THOM DVD 1/THOM DVD 1`) && !V.isCover(at('THOM')) && !V.isCover('THOM DVD 1'));
   await assert.rejects(V.unpack(enc.encode('not deflate')), /damaged/);
@@ -161,18 +165,28 @@ function server() {
 /** a browser: its save folder (path -> bytes), its localStorage link, and its VaultSync */
 function browser(srv, link = null) {
   const b = { files: new Map(), link, taken: 0 };
-  b.sync = new V.VaultSync({
-    files: async (o = {}) => [...b.files].filter(([p]) => V.keeps(p) || o.covers && V.isCover(p)).map(([path, data]) => ({ path, data })),
-    // as saves-ui.ts restoreVault: the covers of the profiles it brings stay, and a cover in it is left out (readVault)
+  b.deps = {
+    // as vault-ui.ts files
+    files: async (o = {}) => {
+      const all = [...b.files].map(([path, data]) => ({ path, data }));
+      return o.was ? all.filter(f => V.keptBy(o.was)(f.path)) : V.kept(all);
+    },
+    // as saves-ui.ts readVault and restoreVault: what a keyphrase keeps comes in (a cover in it is left out, and so are
+    // registry.txt and the device's settings); the covers of the profiles it brings stay, registry.txt stays, and
+    // settings.ini keeps the device's settings here
     restore: async zip => {
-      const entries = await unzip(zip), names = new Set(V.profilesIn(entries.map(e => ({ path: e.name }))));
+      const entries = V.kept((await unzip(zip)).map(e => ({ path: e.name, data: e.data }))), names = new Set(V.profilesIn(entries));
+      const ini = entries.find(e => e.path === 'settings.ini'), mine = b.files.get('settings.ini');
+      const settings = S.withDevice(ini ? dec.decode(ini.data) : null, mine ? dec.decode(mine) : null);
       for (const p of [...b.files.keys()]) if (V.keeps(p) || V.isCover(p) && !names.has(P.coverOf(p.split('/')[1]).profile)) b.files.delete(p);
-      for (const e of entries) if (V.keeps(e.name)) b.files.set(e.name, e.data);
+      for (const e of entries) if (e !== ini) b.files.set(e.path, e.data);
+      if (settings !== null) b.files.set('settings.ini', enc.encode(settings));
     },
     load: () => b.link && JSON.parse(b.link),
     save: l => { b.link = l && JSON.stringify(l); },
     fetch: srv.fetch,
-  });
+  };
+  b.sync = new V.VaultSync(b.deps);
   b.sync.onTaken = () => b.taken++;
   b.money = n => new DataView(b.files.get(n).buffer, b.files.get(n).byteOffset).getUint32(B + 100, true);
   return b;
@@ -468,7 +482,7 @@ test('a link from when covers were sent: unchanged files still count as unchange
   assert.equal(b.sync.state.s, 'synced');
   assert.equal(b.money(at('THOM')), 2000);
   assert.ok(b.files.has(dvd));
-  assert.equal(b.sync.link.v, 2);
+  assert.equal(b.sync.link.v, 3);
   // b unchanged since and nothing new: it sends nothing
   const c = await before(), rev = srv.kept.get((await V.keysOf(phrase)).token).cur.rev;
   await c.sync.pull(); await c.sync.push();
@@ -482,4 +496,148 @@ test('a link from when covers were sent: unchanged files still count as unchange
   await d.sync.pull();
   assert.deepEqual([d.sync.state.s, d.sync.state.why], ['conflict', 'both']);
   assert.equal(d.money(at('THOM')), 9000);
+});
+
+// ---- the device's own settings ----
+
+/** a settings.ini as the Settings panel writes one: these keys set, the rest the template's */
+const ini = (sets, extra = '') => sets.reduce((t, [k, v]) => S.settingsPut(t, k, v), S.TEMPLATE) + extra;
+/** what a settings.ini sets for the game: variable -> value, settings.ini's lines only */
+const fromFile = text => { const r = S.resolveEnv(text, {}, {}); return Object.fromEntries(Object.keys(r.byEnv).map(k => [k, r.env[k]])); };
+
+test('settings.ini without the device\'s settings, and with this browser\'s again', () => {
+  const dev = S.KEYS.filter(k => k.device).map(k => k.key);
+  assert.ok(['render', 'fps', 'resolution', 'fullscreen', 'audio_latency', 'gamepad_deadzone', 'ui_textures', 'seed_registry'].every(k => dev.includes(k)));
+  assert.ok(!['roam_name', 'language', 'roam_crew', 'horn', 'movies', 'online', 'hud'].some(k => dev.includes(k)));
+  assert.ok(S.KEYS.filter(k => k.device).every(k => k.scope === 'web'));
+  // a phone's: its own scale, frame rate and controller, a variable of one by its own name, and a lower-case key of
+  // one (pad_deadzone: NFSU2_PAD_DEADZONE); its name and language are the player's
+  const phone = ini([['render', 'scale:0.5'], ['fps', '30'], ['roam_name', 'Ann'], ['language', 'german'], ['gamepad_deadzone', '0.2']],
+    'NFSU2_FPS = 60\npad_deadzone = 0.3\nNFSU2_STATUS_EVERY = 600\n');
+  const kept = S.withoutDevice(phone);
+  assert.deepEqual(fromFile(kept), { NFSU2_ROAM_NAME: 'Ann', NFSU2_LANGUAGE: 'german', NFSU2_STATUS_EVERY: '600' });
+  assert.match(kept, /^#render = backing$/m);
+  assert.match(kept, /^#fps = auto$/m);
+  assert.doesNotMatch(kept, /^(NFSU2_FPS|pad_deadzone)/m);
+  assert.equal(S.withoutDevice(kept), kept);
+  const plain = ini([['roam_name', 'Ann']]);
+  assert.equal(S.withoutDevice(plain), plain, 'nothing of the device: the file as it is');
+  // a PC's own in the phone's: the PC's scale (its first fps line wins, as in resolveEnv), the phone's name and language
+  const pc = ini([['render', 'scale:1.5'], ['fps', '120'], ['roam_name', 'Bob']], 'fps = 240\n');
+  const got = S.withDevice(phone, pc);
+  assert.deepEqual(fromFile(got), { NFSU2_RENDER: 'scale:1.5', NFSU2_FPS: '120', NFSU2_ROAM_NAME: 'Ann', NFSU2_LANGUAGE: 'german', NFSU2_STATUS_EVERY: '600' });
+  assert.match(got, /^render = scale:1\.5$/m, 'in the place of its template line');
+  assert.equal(S.withoutDevice(got), kept);
+  // none here: the device's settings at their defaults (or this device's: device.ts); neither file: none
+  assert.equal(S.withDevice(phone, null), kept);
+  assert.equal(S.withDevice(null, null), null);
+  assert.equal(S.withDevice(null, plain), null);
+  assert.deepEqual(fromFile(S.withDevice(null, pc)), { NFSU2_RENDER: 'scale:1.5', NFSU2_FPS: '120' });
+});
+
+test('the graphics options and the device\'s settings stay in each browser', async () => {
+  const srv = server(), pc = browser(srv), phone = browser(srv);
+  seed(pc, 1000, ini([['render', 'scale:1.5'], ['fps', '120'], ['roam_name', 'Ann']]));
+  pc.files.set('registry.txt', enc.encode('d g_RacingResolution=5\n'));
+  const phrase = await pc.sync.create();
+  const got = await phone.sync.peek(phrase);
+  const sent = await unzip(got.zip);
+  assert.deepEqual(sent.map(e => e.name).sort(), [at('THOM'), 'settings.ini']);
+  assert.deepEqual(fromFile(dec.decode(sent.find(e => e.name === 'settings.ini').data)), { NFSU2_ROAM_NAME: 'Ann' });
+  // the phone, with its own, loads them: its own stay
+  phone.files.set('settings.ini', enc.encode(ini([['render', 'scale:0.5'], ['fps', '30']])));
+  phone.files.set('registry.txt', enc.encode('d g_RacingResolution=1\n'));
+  await phone.deps.restore(got.zip);
+  await phone.sync.adopt(phrase, got.remote);
+  assert.deepEqual(fromFile(dec.decode(phone.files.get('settings.ini'))), { NFSU2_RENDER: 'scale:0.5', NFSU2_FPS: '30', NFSU2_ROAM_NAME: 'Ann' });
+  assert.equal(dec.decode(phone.files.get('registry.txt')), 'd g_RacingResolution=1\n');
+  // the PC's scale, frame rate and graphics options change: nothing is sent
+  const token = (await V.keysOf(phrase)).token, rev = srv.kept.get(token).cur.rev;
+  pc.files.set('settings.ini', enc.encode(S.settingsPut(dec.decode(pc.files.get('settings.ini')), 'render', 'backing')));
+  pc.files.set('registry.txt', enc.encode('d g_RacingResolution=4\n'));
+  await pc.sync.push();
+  assert.equal(srv.kept.get(token).cur.rev, rev);
+  // its name does: the phone takes it, with its own scale, frame rate and graphics options still
+  srv.now += 60_000;
+  pc.files.set('settings.ini', enc.encode(S.settingsPut(dec.decode(pc.files.get('settings.ini')), 'roam_name', 'Bob')));
+  await pc.sync.push();
+  assert.notEqual(srv.kept.get(token).cur.rev, rev);
+  await phone.sync.pull();
+  assert.equal(phone.sync.state.s, 'synced');
+  assert.deepEqual(fromFile(dec.decode(phone.files.get('settings.ini'))), { NFSU2_RENDER: 'scale:0.5', NFSU2_FPS: '30', NFSU2_ROAM_NAME: 'Bob' });
+  assert.equal(dec.decode(phone.files.get('registry.txt')), 'd g_RacingResolution=1\n');
+  // and the phone's own changes send nothing either
+  const rev2 = srv.kept.get(token).cur.rev;
+  phone.files.set('settings.ini', enc.encode(S.settingsPut(dec.decode(phone.files.get('settings.ini')), 'fps', '60')));
+  await phone.sync.push();
+  assert.equal(srv.kept.get(token).cur.rev, rev2);
+  // a version sent before, with the other browser's graphics options and device settings: taken without them, and
+  // the phone is in sync with it (it sends nothing)
+  srv.now += 60_000;
+  const old = [{ path: at('THOM'), data: profile('THOM', { money: 3000 }) }, { path: 'registry.txt', data: enc.encode('d g_RacingResolution=5\n') },
+    { path: 'settings.ini', data: enc.encode(ini([['render', 'scale:2'], ['roam_name', 'Cy']])) }];
+  const k = await V.keysOf(phrase), etag = `"${rev2.toString(16).padStart(16, '0')}"`;
+  assert.ok('saved' in await new V.VaultApi(k.token, srv.fetch).put(await V.seal(k.key, await V.pack(old)), etag));
+  await phone.sync.pull();
+  assert.equal(phone.money(at('THOM')), 3000);
+  assert.deepEqual(fromFile(dec.decode(phone.files.get('settings.ini'))), { NFSU2_RENDER: 'scale:0.5', NFSU2_FPS: '60', NFSU2_ROAM_NAME: 'Cy' });
+  assert.equal(dec.decode(phone.files.get('registry.txt')), 'd g_RacingResolution=1\n');
+  const rev3 = srv.kept.get(token).cur.rev;
+  await phone.sync.push();
+  assert.equal(srv.kept.get(token).cur.rev, rev3);
+  assert.equal(phone.sync.state.s, 'synced');
+});
+
+test('links that counted the graphics options and the device\'s settings (versions 1 and 2): unchanged is unchanged', async () => {
+  const srv = server(), a = browser(srv);
+  seed(a, 1000);
+  const phrase = await a.sync.create();
+  const dvd = `${DIR}/THOM DVD 1/THOM DVD 1`;
+  /** b synced with a's version as a link of version v kept it, its own graphics options, scale and cover beside */
+  async function linkOf(v, change) {
+    const b = browser(srv), got = await b.sync.peek(phrase);
+    for (const e of await unzip(got.zip)) b.files.set(e.name, e.data);
+    b.files.set('settings.ini', enc.encode(S.settingsPut(dec.decode(b.files.get('settings.ini')), 'render', 'scale:0.5')));
+    b.files.set('registry.txt', enc.encode('d g_RacingResolution=1\n'));
+    b.files.set(dvd, cover());
+    await b.sync.adopt(phrase, got.remote);
+    const l = JSON.parse(b.link);
+    if (v === 1) delete l.v; else l.v = v;
+    l.hash = await V.contentHash([...b.files].filter(([p]) => V.keptBy(v)(p)).map(([path, data]) => ({ path, data })));
+    const b2 = browser(srv, JSON.stringify(l)); b2.files = b.files;      // b reloaded with the new page
+    change?.(b2);
+    return b2;
+  }
+  for (const v of [1, 2]) {
+    // unchanged since; a sends a new version: b takes it, no question, and keeps its own
+    const b = await linkOf(v);
+    srv.now += 60_000;
+    a.files.set(at('THOM'), profile('THOM', { money: 2000 + v }));
+    await a.sync.push();
+    await b.sync.pull();
+    assert.equal(b.sync.state.s, 'synced', `v${v}`);
+    assert.equal(b.money(at('THOM')), 2000 + v);
+    assert.equal(b.sync.link.v, 3);
+    assert.equal(fromFile(dec.decode(b.files.get('settings.ini'))).NFSU2_RENDER, 'scale:0.5');
+    assert.ok(b.files.has('registry.txt') && b.files.has(dvd));
+    // its scale changed since: the link counted it, so that is a change, sent once; after that one, none
+    const scale = (x, r) => x.files.set('settings.ini', enc.encode(S.settingsPut(dec.decode(x.files.get('settings.ini')), 'render', r)));
+    const c = await linkOf(v, x => scale(x, 'backing'));
+    const token = (await V.keysOf(phrase)).token, rev = srv.kept.get(token).cur.rev;
+    await c.sync.push();
+    assert.notEqual(srv.kept.get(token).cur.rev, rev);
+    const rev2 = srv.kept.get(token).cur.rev;
+    scale(c, 'scale:2');
+    await c.sync.push();
+    assert.equal(srv.kept.get(token).cur.rev, rev2);
+    await a.sync.pull();                                                 // a takes what c sent
+    assert.equal(a.sync.state.s, 'synced');
+    // played since: both changed, the player picks
+    const d = await linkOf(v, x => x.files.set(at('THOM'), profile('THOM', { money: 9000 })));
+    srv.now += 60_000;
+    a.files.set(at('THOM'), profile('THOM', { money: 3000 + v }));
+    await a.sync.push();
+    await d.sync.pull();
+    assert.deepEqual([d.sync.state.s, d.sync.state.why], ['conflict', 'both'], `v${v}`);
+  }
 });

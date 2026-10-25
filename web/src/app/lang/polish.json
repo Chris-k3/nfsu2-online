@@ -657,7 +657,7 @@
   "Keyphrase made. Keep it safe: it is the only way back to these saves.": "Fraza dostępu utworzona. Przechowuj ją bezpiecznie: to jedyny sposób, aby odzyskać te zapisy.",
   "No cloud saves for this keyphrase. Check it for typos.": "Brak zapisów w chmurze dla tej frazy dostępu. Sprawdź, czy nie ma w niej literówek.",
   "Load cloud saves?": "Wczytać zapisy z chmury?",
-  "They replace the profiles, game options and settings.ini here with the ones saved {when}. Screenshots stay.": "Zastąpią tutejsze profile, opcje gry i settings.ini tymi zapisanymi {when}. Zrzuty ekranu zostaną.",
+  "They replace the profiles and settings.ini here with the ones saved {when}. Screenshots stay, and so do this device's graphics, frame rate, sound output and controller settings.": "Zastąpią tutejsze profile i settings.ini tymi zapisanymi {when}. Zrzuty ekranu zostaną, podobnie jak ustawienia grafiki, liczby klatek, wyjścia dźwięku i kontrolera tego urządzenia.",
   "Load": "Wczytaj",
   "Loaded. This browser syncs from now on.": "Wczytano. Od teraz ta przeglądarka się synchronizuje.",
   "These saves cannot be read: {error}.": "Nie można odczytać tych zapisów: {error}.",

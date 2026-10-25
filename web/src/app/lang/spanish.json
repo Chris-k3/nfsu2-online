@@ -640,7 +640,7 @@
   "Keyphrase made. Keep it safe: it is the only way back to these saves.": "Frase clave creada. Guárdala bien: es la única forma de recuperar estas partidas guardadas.",
   "No cloud saves for this keyphrase. Check it for typos.": "No hay partidas en la nube con esta frase clave. Comprueba que esté bien escrita.",
   "Load cloud saves?": "¿Cargar las partidas de la nube?",
-  "They replace the profiles, game options and settings.ini here with the ones saved {when}. Screenshots stay.": "Sustituyen los perfiles, las opciones del juego y settings.ini de aquí por los guardados ({when}). Las capturas de pantalla se conservan.",
+  "They replace the profiles and settings.ini here with the ones saved {when}. Screenshots stay, and so do this device's graphics, frame rate, sound output and controller settings.": "Sustituyen los perfiles y settings.ini de aquí por los guardados ({when}). Las capturas de pantalla se conservan, y también los ajustes de gráficos, tasa de fotogramas, salida de sonido y mando de este dispositivo.",
   "Load": "Cargar",
   "Loaded. This browser syncs from now on.": "Cargadas. A partir de ahora, este navegador se sincroniza.",
   "These saves cannot be read: {error}.": "No se pueden leer estas partidas guardadas: {error}.",

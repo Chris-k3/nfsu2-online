@@ -640,7 +640,7 @@
   "Keyphrase made. Keep it safe: it is the only way back to these saves.": "Frase-chave criada. Guarde-a bem: é o único jeito de voltar a estes jogos salvos.",
   "No cloud saves for this keyphrase. Check it for typos.": "Não há jogos salvos na nuvem para esta frase-chave. Verifique se há erros de digitação.",
   "Load cloud saves?": "Carregar os jogos salvos da nuvem?",
-  "They replace the profiles, game options and settings.ini here with the ones saved {when}. Screenshots stay.": "Eles substituem os perfis, as opções do jogo e o settings.ini daqui pelos salvos ({when}). As capturas de tela continuam.",
+  "They replace the profiles and settings.ini here with the ones saved {when}. Screenshots stay, and so do this device's graphics, frame rate, sound output and controller settings.": "Eles substituem os perfis e o settings.ini daqui pelos salvos ({when}). As capturas de tela continuam, assim como as configurações de gráficos, taxa de quadros, saída de som e controle deste dispositivo.",
   "Load": "Carregar",
   "Loaded. This browser syncs from now on.": "Carregados. Este navegador sincroniza a partir de agora.",
   "These saves cannot be read: {error}.": "Não é possível ler estes jogos salvos: {error}.",

@@ -572,7 +572,7 @@
   "Keyphrase made. Keep it safe: it is the only way back to these saves.": "キーフレーズを作成しました。大切に保管してください。これらのセーブデータに戻る唯一の方法です。",
   "No cloud saves for this keyphrase. Check it for typos.": "このキーフレーズのクラウドセーブはありません。入力ミスがないか確認してください。",
   "Load cloud saves?": "クラウドセーブをロードしますか？",
-  "They replace the profiles, game options and settings.ini here with the ones saved {when}. Screenshots stay.": "ここにあるプロフィール、ゲームオプション、settings.iniが、{when}に保存されたものに置き換わります。スクリーンショットはそのまま残ります。",
+  "They replace the profiles and settings.ini here with the ones saved {when}. Screenshots stay, and so do this device's graphics, frame rate, sound output and controller settings.": "ここにあるプロフィールとsettings.iniが、{when}に保存されたものに置き換わります。スクリーンショットはそのまま残り、このデバイスのグラフィック、フレームレート、サウンド出力、コントローラーの設定も残ります。",
   "Load": "ロード",
   "Loaded. This browser syncs from now on.": "ロードしました。今後、このブラウザは同期されます。",
   "These saves cannot be read: {error}.": "このセーブデータを読み込めません: {error}。",

@@ -12,7 +12,7 @@
 import { listFiles, readBytes } from './savefs';
 import { backupItems, readVault, restoreVault } from './saves-ui';
 import { downloadBlob } from './logs';
-import { isCover, keeps, readPhrase, vaultAvailable, VaultError, VaultSync, type Link, type Remote, type SaveFile } from './vault';
+import { kept, keeps, keptBy, readPhrase, vaultAvailable, VaultError, VaultSync, type Link, type Remote, type SaveFile } from './vault';
 import { codeOf, dateLocale, live, N, t, tn, tvars, type Msg } from './i18n';
 
 export interface VaultPanelDeps {
@@ -161,12 +161,12 @@ export class VaultPanel {
   /** The tab is shown again: newer saves from another browser, at most once a minute. */
   shown() { if (Date.now() - this.checked > 60_000) this.check(); }
 
-  /** the files of the save folder a keyphrase keeps (covers: the covers too) */
-  private async files(o: { covers?: boolean } = {}): Promise<SaveFile[]> {
-    const out: SaveFile[] = [];
+  /** the files of the save folder as a keyphrase keeps them (was: as a link of that version counted them) */
+  private async files(o: { was?: number } = {}): Promise<SaveFile[]> {
+    const out: SaveFile[] = [], want = o.was ? keptBy(o.was) : keeps;
     for (const f of await listFiles(this.d.saveDir))
-      if (keeps(f.path) || o.covers && isCover(f.path)) out.push({ path: f.path, data: await readBytes(this.d.saveDir, f.path), mtime: f.mtime });
-    return out;
+      if (want(f.path)) out.push({ path: f.path, data: await readBytes(this.d.saveDir, f.path), mtime: f.mtime });
+    return o.was ? out : kept(out);
   }
 
   /** a version of the keyphrase's (its zip) in place of the saves here, when no game uses them */
@@ -231,7 +231,7 @@ export class VaultPanel {
     try { got = await s.peek(p.phrase); } catch { return; }
     if (!got) { this.msg(() => t('No cloud saves for this keyphrase. Check it for typos.'), true); return; }
     if (await this.replace(got, t('Load cloud saves?'),
-      t('They replace the profiles, game options and settings.ini here with the ones saved {when}. Screenshots stay.', { when: when(got.remote.saved) }), t('Load'))) {
+      t('They replace the profiles and settings.ini here with the ones saved {when}. Screenshots stay, and so do this device\'s graphics, frame rate, sound output and controller settings.', { when: when(got.remote.saved) }), t('Load'))) {
       await s.adopt(p.phrase, got.remote).catch(() => {});
       this.msg(() => t('Loaded. This browser syncs from now on.'));
       this.d.log('[app] keyphrase: loaded its saves, this browser syncs with it');
@@ -244,7 +244,7 @@ export class VaultPanel {
     try { r = await readVault(got.zip); } catch (e) { this.msg(() => t('These saves cannot be read: {error}.', { error: e instanceof Error ? e.message : String(e) }), true, 'VAULT-UNREADABLE'); return false; }
     const body = document.createElement('div'), p = document.createElement('p'), ul = document.createElement('ul');
     p.textContent = text;
-    for (const t of backupItems(r)) { const li = document.createElement('li'); li.textContent = t; ul.append(li); }
+    for (const t of backupItems(r, true)) { const li = document.createElement('li'); li.textContent = t; ul.append(li); }
     body.append(p, ul);
     if (!await this.d.confirm(title, body, ok, (await listFiles(this.d.saveDir)).some(f => keeps(f.path)))) { this.msg(''); return false; }
     if (this.d.busy()) { this.msg(() => t(QUIT_FIRST), true); return false; }
