@@ -33,14 +33,17 @@
  * The rest is the game's: the rate, the multiplier and its "Gain 2X with"
  * points, banking after 0.3 s without a drift, a wall hit losing the drift.
  * The page shows it (web/src/app/drift.ts): free roam's HUD (HUD_SingleRace)
- * has no drift part ([HUD +0x2C] is 0; the drift event's panel and DRIFT
- * popup are HUD_Drift's).  Three of the drift event's routines reach for
- * what free roam lacks once the switch is on, reading through a 0 (the
- * guest's first page: zeros in the browser, unmapped on the Mac, a crash on
- * Windows), and are skipped there (the overrides at the end):
+ * shows none of it (the drift event's panel and DRIFT popup are HUD_Drift's
+ * objects; the HUD object has its drift part, [HUD +0x2C], all the same, in
+ * the prologue and in a career).  Three of the drift event's routines are
+ * skipped while the switch is ours (the overrides at the end):
  *  - the style points' drift branch (0x4C85D0, from their update 0x4DA900):
  *    the drift part's popup, then the panel's numbers into the style points'
- *    own objects (+0x3C .. +0x54), which free roam's are other ones;
+ *    objects (+0x3C .. +0x54).  Their constructor (0x4F7AD0) looks +0x3C up
+ *    only with the switch on and otherwise leaves what the heap had there;
+ *    free roam's HUD is made with it off, so the first number went through
+ *    that (0 in the tests; for players a stale pointer, out of bounds in
+ *    0x537B30 at their first X);
  *  - the drift messages ("Good drift!", "Too slow!": FEngHud::
  *    ShowNiftyDriftyMessage 0x4AC120, the drift part's +0x74);
  *  - the drift leaderboard (DriftManager 0x56DDD0, each frame: the scores of
@@ -111,8 +114,7 @@ __attribute__((weak)) void host_status_set_n(const int *slot, const double *valu
 #define FN_CAMERA_KEY  0x005f2fa0u   /* thiscall Player (step): the next camera view */
 #define FN_FE_HIDE     0x0050ca00u   /* cdecl (FE object, 0: none) */
 #define HUD_STYLES     0x4cu         /* HUD: its style points (0x4DA900): +0x34, +0x38 the popup list's title and points */
-#define HUD_DRIFT      0x2cu         /* HUD: its drift part (0x4DA590), 0 in free roam's */
-#define HS_PLAYER      0x6cu         /* the style points: the player's number */
+#define HUD_DRIFT      0x2cu         /* HUD: its drift part (0x4DA590) */
 #define N_STYLES       39
 #define MODE_DRIFT     4u
 #define RC_DRIFTSCORE  0x1d4u        /* racer: DriftScore* (a style* per entry), DriftCar*, the style monitor */
@@ -319,15 +321,15 @@ void sub_0056ddd0(CPU *c){
     if (!D.on || MR8(G_DRIFTRACE)){ sub_0056ddd0_orig(c); return; }
     POP32(c->eip);
 }
-/* The drift event's HUD where the HUD has no drift part (free roam's): skipped.  Both thiscall with one argument. */
+/* The drift event's HUD while the switch is ours (free roam's shows none of it, the page does): skipped.  Both thiscall
+ * with one argument. */
 void sub_004c85d0_orig(CPU *c);
 void sub_004c85d0(CPU *c){                       /* the style points' drift branch (this: the style points) */
-    uint32_t n = rd32(c->ecx + HS_PLAYER), pl = n < 2u ? rd32(G_PLAYER1 + 4u * n) : 0, hud = pl ? rd32(pl + PL_HUD) : 0;
-    if (hud && rd32(hud + HUD_DRIFT)){ sub_004c85d0_orig(c); return; }
+    if (!D.on || MR8(G_DRIFTRACE)){ sub_004c85d0_orig(c); return; }
     POP32(c->eip); c->esp += 4u;
 }
 void sub_004ac120_orig(CPU *c);
 void sub_004ac120(CPU *c){                       /* FEngHud::ShowNiftyDriftyMessage (this: the HUD) */
-    if (rd32(c->ecx + HUD_DRIFT)){ sub_004ac120_orig(c); return; }
+    if ((!D.on || MR8(G_DRIFTRACE)) && rd32(c->ecx + HUD_DRIFT)){ sub_004ac120_orig(c); return; }
     POP32(c->eip); c->esp += 4u;
 }
