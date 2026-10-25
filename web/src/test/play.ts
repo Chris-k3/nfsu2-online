@@ -97,7 +97,7 @@ if (da > 0) setTimeout(async () => {
 const statTimer = setInterval(() => {
   if (!r) return;
   const s = r.stats();
-  log(`[gpu] ${s.frames} frames, last ${s.drawsLast} draws ${s.passesLast} passes ${s.encodeMsLast.toFixed(2)} ms, avg encode ${s.encodeMsAvg.toFixed(2)} ms${s.gpuMsAvg ? `, GPU ${s.gpuMsAvg.toFixed(2)} ms avg ${s.gpuMsMax.toFixed(2)} max` : ''}, rAF ${s.rafHz.toFixed(1)} Hz, ${s.pipelines} pipelines, ${s.errors} errors, ${s.slotWaits} slot waits (longest ${s.slotWaitMsMax.toFixed(0)} ms), ${s.pokes} pokes`);
+  log(`[gpu] ${s.frames} frames, last ${s.drawsLast} draws ${s.passesLast} passes ${s.encodeMsLast.toFixed(2)} ms, avg encode ${s.encodeMsAvg.toFixed(2)} ms${s.gpuMsAvg ? `, GPU ${s.gpuMsAvg.toFixed(2)} ms avg ${s.gpuMsMax.toFixed(2)} max` : ''}, rAF ${s.rafHz.toFixed(1)} Hz, ${s.pipelines} pipelines, ${s.errors} errors, ${s.slotWaits} slot waits (longest ${s.slotWaitMsMax.toFixed(0)} ms), ${s.pokes} pokes, ${s.unshown} unshown`);
 }, 10000);
 const code = await p.exited;
 clearInterval(statTimer);

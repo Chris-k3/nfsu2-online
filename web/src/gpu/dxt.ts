@@ -11,9 +11,10 @@ for (let i = 0; i < 32; i++) C5[i] = (i << 3) | (i >> 2);
 for (let i = 0; i < 64; i++) C6[i] = (i << 2) | (i >> 4);
 const pal = new Uint32Array(4), alpha = new Uint8Array(16), at = new Uint8Array(8);
 
-/** One mip level of w x h texels (pitch = bytes per row of 4x4 blocks) as BGRA8, w * 4 bytes per row. */
-export function unpackDxt(fmt: number, src: Uint8Array, off: number, pitch: number, w: number, h: number): Uint8Array {
-  const out = new Uint8Array(w * h * 4), o32 = new Uint32Array(out.buffer);
+/** One mip level of w x h texels (pitch = bytes per row of 4x4 blocks) as BGRA8, w * 4 bytes per row; into the start
+ *  of `into` when that has room (every texel is written), else into a new array. */
+export function unpackDxt(fmt: number, src: Uint8Array, off: number, pitch: number, w: number, h: number, into?: Uint8Array): Uint8Array {
+  const n = w * h * 4, out = into && into.length >= n ? into.subarray(0, n) : new Uint8Array(n), o32 = new Uint32Array(out.buffer, out.byteOffset, w * h);
   const dxt1 = fmt === P.Fmt.DXT1, dxt5 = fmt === P.Fmt.DXT5, bsz = dxt1 ? 8 : 16, co = dxt1 ? 0 : 8;
   const bw = (w + 3) >> 2, bh = (h + 3) >> 2;
   for (let by = 0; by < bh; by++) {

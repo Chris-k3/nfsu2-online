@@ -38,6 +38,8 @@ interface Tex {
   rtViews: GPUTextureView[];       // render target views: [0] = level 0 (2d) or faces 0..5 (cube)
   expandA8: boolean; bc: boolean;
   unpack: boolean;                 // DXT on a GPU without texture-compression-bc: BGRA8, unpacked on upload
+  bytes: number;                   // its size on the GPU, every level and face
+  face0?: GPUTextureView;          // a cube's face 0, level 0 as a 2D view (StretchRect from it), made at its first use
 }
 
 const enum Src { TVert = 0, Raw = 1, Pool = 2 }
@@ -104,7 +106,7 @@ export class Encoder {
   // back buffer (the game's device-size "screen"), and the texture the current frame
   // draws its screen into: the back buffer, or the canvas texture when sizes match
   bb: GPUTexture | null = null; private bbView: GPUTextureView | null = null;
-  screen: GPUTexture | null = null; private screenView: GPUTextureView | null = null;
+  screen: GPUTexture | null = null; screenView: GPUTextureView | null = null;
   /** frames that copied from the screen before drawing to it (they keep the back buffer) */
   screenReadFirst = 0;
 
@@ -116,6 +118,8 @@ export class Encoder {
 
   // stats
   totalDraws = 0; totalPasses = 0; pipelinesMade = 0; missingTarget = 0; noVs = 0; zMismatch = 0; conflicts = 0;
+  /** the game's textures on the GPU, bytes: all of them, and those unpacked from DXT (no texture-compression-bc) */
+  texBytes = 0; unpackBytes = 0;
   /** WebGPU calls made by encodeFrame, by kind (totals; what the GPU process decodes and records) */
   calls = { pipe: 0, bg0: 0, bg1: 0, bg1New: 0, blend: 0, ix: 0, draw: 0, pass: 0, copy: 0 };
   private seenFmt = new Set<string>();
@@ -168,7 +172,7 @@ export class Encoder {
     const px = new Uint8Array(24).fill(255);
     this.queue.writeTexture({ texture: t }, px, { bytesPerRow: 4, rowsPerImage: 1 }, [1, 1, cube ? 6 : 1]);
     return { serial: 0, tex: t, fmt: 21, w: 1, h: 1, levels: 1, cube, rt: false, expandA8: false, bc: false, unpack: false, rtViews: [],
-      view: t.createView({ dimension: cube ? 'cube' : '2d' }) };
+      view: t.createView({ dimension: cube ? 'cube' : '2d' }), bytes: 0 };
   }
 
   // ------------------------------------------------------------ resource queue
@@ -250,19 +254,31 @@ export class Encoder {
       if (cube) for (let f = 0; f < 6; f++) rtViews.push(tex.createView({ dimension: '2d', baseArrayLayer: f, arrayLayerCount: 1, baseMipLevel: 0, mipLevelCount: 1 }));
       else rtViews.push(tex.createView({ dimension: '2d', baseMipLevel: 0, mipLevelCount: 1 }));
     }
+    // its size on the GPU, for the log (memory runs out first on phones, whose GPUs unpack DXT)
+    const bpp = gf.bc ? (fmt === P.Fmt.DXT1 ? 0.5 : 1) : gf.f === 'r8unorm' ? 1 : 4;
+    let bytes = 0;
+    for (let l = 0; l < levels; l++) {
+      let lw = Math.max(1, w >> l), lh = Math.max(1, h >> l);
+      if (gf.bc) { lw = (lw + 3) & ~3; lh = (lh + 3) & ~3; }
+      bytes += lw * lh * bpp;
+    }
+    bytes *= cube ? 6 : 1;
+    this.texBytes += bytes; if (gf.unpack) this.unpackBytes += bytes;
     this.tex[id] = { serial: this.serial++, tex, fmt, w, h, levels, cube, rt, view: tex.createView(vd), rtViews, expandA8: gf.a8, bc: gf.bc,
-      unpack: !!gf.unpack };
+      unpack: !!gf.unpack, bytes };
   }
 
   private texFree(id: number): void {
     const t = this.tex[id];
     if (!t) return;
     t.tex.destroy();
+    this.texBytes -= t.bytes; if (t.unpack) this.unpackBytes -= t.bytes;
     this.tex[id] = undefined;
     if (this.bg1.size > 8192) this.bg1.clear();       // keys carry serials: stale entries are never hit again
   }
 
   private uploads = new Map<number, number>();   // diagnostics: uploads per texture serial
+  private unpackBuf = new Uint8Array(0);           // DXT unpacked for an upload (no texture-compression-bc)
   private texUpload(id: number, level: number, face: number, lw: number, lh: number, pitch: number, rows: number, data: number): void {
     const t = this.tex[id];
     if (t && this.traceDumps) this.uploads.set(t.serial, (this.uploads.get(t.serial) ?? 0) + 1);
@@ -277,7 +293,10 @@ export class Encoder {
       return;
     }
     if (t.unpack) {
-      this.queue.writeTexture(dst, unpackDxt(t.fmt, this.u8, data, pitch, lw, lh), { bytesPerRow: lw * 4, rowsPerImage: lh }, [lw, lh, 1]);
+      // into one buffer for every upload (writeTexture copies it at once): no array of up to 16 MB left to the page's
+      // garbage collector for every level of every texture a phone loads
+      if (this.unpackBuf.length < lw * lh * 4) this.unpackBuf = new Uint8Array(lw * lh * 4);
+      this.queue.writeTexture(dst, unpackDxt(t.fmt, this.u8, data, pitch, lw, lh, this.unpackBuf), { bytesPerRow: lw * 4, rowsPerImage: lh }, [lw, lh, 1]);
       return;
     }
     this.queue.writeTexture(dst, this.u8, { offset: data, bytesPerRow: pitch, rowsPerImage: rows }, [w, h, 1]);
@@ -337,12 +356,24 @@ export class Encoder {
     return p;
   }
 
+  // A copy's bind group, by its source view and sampler.  Made anew for every copy, the composite alone was one a
+  // frame (a phone's render scale always composites), and WebKit frees what a bind group holds in its graphics
+  // process only when the page's garbage collector gets to it.
+  private copyBgs = new WeakMap<GPUTextureView, Map<GPUSampler, GPUBindGroup>>();
+  private copyBg(src: GPUTextureView, smp: GPUSampler): GPUBindGroup {
+    let m = this.copyBgs.get(src);
+    if (!m) this.copyBgs.set(src, m = new Map());
+    let g = m.get(smp);
+    if (!g) m.set(smp, g = this.device.createBindGroup({ layout: this.copyBgl, entries: [{ binding: 0, resource: src }, { binding: 1, resource: smp }] }));
+    return g;
+  }
+
   /** draw `src` over the whole of `dst` (StretchRect between sizes, composite) */
   copyQuad(enc: GPUCommandEncoder, src: GPUTextureView, dst: GPUTextureView, format: GPUTextureFormat, smp: GPUSampler,
            vp?: [number, number, number, number], opaque = false, ts?: GPURenderPassTimestampWrites): void {
     const pass = enc.beginRenderPass({ colorAttachments: [{ view: dst, loadOp: 'clear', clearValue: [0, 0, 0, 1], storeOp: 'store' }], timestampWrites: ts });
     pass.setPipeline(this.copyPipe(format, opaque));
-    pass.setBindGroup(0, this.device.createBindGroup({ layout: this.copyBgl, entries: [{ binding: 0, resource: src }, { binding: 1, resource: smp }] }));
+    pass.setBindGroup(0, this.copyBg(src, smp));
     if (vp) pass.setViewport(vp[0], vp[1], vp[2], vp[3], 0, 1);
     pass.draw(3);
     pass.end();
@@ -601,7 +632,7 @@ export class Encoder {
         else if (sTex.width === dTex.width && sTex.height === dTex.height && sTex.format === dTex.format && sTex.depthOrArrayLayers === 1 && dTex.depthOrArrayLayers === 1)
           { enc.copyTextureToTexture({ texture: sTex }, { texture: dTex }, [sTex.width, sTex.height, 1]); this.calls.copy++; }
         else {
-          const sv = sid ? (st!.cube ? st!.tex.createView({ dimension: '2d', baseArrayLayer: 0, arrayLayerCount: 1, baseMipLevel: 0, mipLevelCount: 1 }) : st!.view) : this.screenView!;
+          const sv = sid ? (st!.cube ? st!.face0 ??= st!.tex.createView({ dimension: '2d', baseArrayLayer: 0, arrayLayerCount: 1, baseMipLevel: 0, mipLevelCount: 1 }) : st!.view) : this.screenView!;
           const dv = tgt ? dt!.rtViews[0] : this.screenView!;
           this.copyQuad(enc, sv, dv, 'bgra8unorm', this.linear);
           passes++;

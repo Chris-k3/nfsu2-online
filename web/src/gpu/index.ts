@@ -78,6 +78,8 @@ export interface RendererStats {
   /** frames that waited over 20 ms for a slot (every one taken by frames the GPU had not reported
    *  done), the longest such wait in ms, and the empty submits sent while frames waited (poke) */
   slotWaits: number; slotWaitMsMax: number; pokes: number;
+  /** frames drawn over unseen: submitted after another one between the same two rendering updates (rAF) */
+  unshown: number;
 }
 
 /** Per-frame distributions since the last reset (the perf benchmark's race window). */
@@ -344,12 +346,30 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
   let tsTarget: GPUTextureView | null = null;
   const tsView = () => tsTarget ??= device.createTexture({ size: [1, 1], format: 'bgra8unorm', usage: GPUTextureUsage.RENDER_ATTACHMENT }).createView();
 
+  // A rendering update (an rAF) shows the canvas once: of the frames submitted between two of them only the last is
+  // ever on the screen (counted in raf).  The canvas texture tells nothing here: WebKit gives every frame a texture of
+  // its own (at 120 fps on its 30 Hz rAF, 1 of 3,571 frames got the one before it).
+  let sinceRaf = 0, unshown = 0, winUnshown = 0, winUnshownFrames = 0, winUnshownT = performance.now();
+  // the textures' memory on the GPU, for the log when it moved by 16 MB (a phone's graphics process runs out of it first)
+  let texSaid = 0;
+  const MB = (b: number) => (b / 1048576).toFixed(0);
   const encodeAndSubmit = (b: number) => {
     const t0 = performance.now();
     const ce = device.createCommandEncoder();
     const slot = timing && !qBusy[qNext] ? qNext : -1;
     if (slot >= 0) { qNext = (qNext + 1) % TQ; enc.firstPassTs = { querySet: qs!, beginningOfPassWriteIndex: 2 * slot }; }
     const cur = ctx.getCurrentTexture();
+    sinceRaf++; winUnshownFrames++;
+    if (t0 - winUnshownT > 30_000) {
+      // from 5 %: a content rate above the display's, or a browser that halved its rAF (at 60 on 60 Hz a late frame
+      // now and then is 0.2 to 1.3 %)
+      if (winUnshown && winUnshown * 20 >= winUnshownFrames) log(`[gpu] ${winUnshown} of ${winUnshownFrames} frames in the last ${((t0 - winUnshownT) / 1000).toFixed(0)} s were drawn over before the browser showed them (rAF ${rafHz.toFixed(1)} Hz)`);
+      winUnshown = 0; winUnshownFrames = 0; winUnshownT = t0;
+      if (Math.abs(enc.texBytes - texSaid) >= 16 << 20) {
+        texSaid = enc.texBytes;
+        log(`[gpu] textures: ${MB(enc.texBytes)} MB on the GPU${enc.unpackBytes ? `, ${MB(enc.unpackBytes)} MB of it DXT unpacked to BGRA8` : ''}`);
+      }
+    }
     const st = enc.encodeFrame(b, ce, direct ? cur : undefined);
     burn?.(ce);
     const scr = enc.screen!;   // the canvas texture itself, or the back buffer
@@ -363,7 +383,7 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
       imgRect = { x: 0, y: 0, w: cur.width, h: cur.height };
       // GPU timing ends with a pass of its own that reads one texel of the screen, so it
       // waits for every pass that drew there (a pass without that dependency may run early)
-      if (tsEnd) enc.copyQuad(ce, cur.createView(), tsView(), 'bgra8unorm', nearest, undefined, true, tsEnd);
+      if (tsEnd) enc.copyQuad(ce, enc.screenView!, tsView(), 'bgra8unorm', nearest, undefined, true, tsEnd);
     } else {
       // composite: the back buffer aspect-fit into the canvas at its own resolution
       const cvw = cur.width, cvh = cur.height;
@@ -372,7 +392,8 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
       const one = w === scr.width && h === scr.height;
       const rect: [number, number, number, number] = [Math.floor((cvw - w) / 2), Math.floor((cvh - h) / 2), w, h];
       imgRect = { x: rect[0], y: rect[1], w, h };
-      enc.copyQuad(ce, scr.createView(), cur.createView(), canvasFormat, one ? nearest : linear, rect, true, tsEnd);
+      // the back buffer's own view: its bind group is made once (Encoder.copyBg), not every frame
+      enc.copyQuad(ce, enc.screenView!, cur.createView(), canvasFormat, one ? nearest : linear, rect, true, tsEnd);
     }
     if (slot >= 0) {
       ce.resolveQuerySet(qs!, 2 * slot, 2, qResolve!, 256 * slot);     // resolve offsets are 256-aligned
@@ -511,7 +532,10 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
     if (lastT) {
       const d = t - lastT;
       if (d > 2 && d < 100) { iv.push(d); if (iv.length > 120) iv.shift(); }
+      // frames drawn over unseen since the last one (not across a gap: a hidden tab has no rAF)
+      if (sinceRaf > 1 && d < 100) { unshown += sinceRaf - 1; winUnshown += sinceRaf - 1; }
     }
+    sinceRaf = 0;
     lastT = t;
     if (iv.length >= 30) {
       // the median over spans of 4 frames, not of single intervals: Safari on an iPhone or iPad gives rAF times in
@@ -573,7 +597,7 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
       pipelineMs: enc.pipeMs, pipelineMsMax: enc.pipeMsMax, gpuMsAvg: gpuMsN ? gpuMsTotal / gpuMsN : 0, gpuMsMax,
       encodeMsAvg: frames ? encMsTotal / frames : 0, encodeMsLast: encMsLast, drawsLast, passesLast, rafHz, inFlight,
       dumps: u32()[cw + C.dumpsDone], missingTarget: enc.missingTarget, conflicts: enc.conflicts, zMismatch: enc.zMismatch, noVs: enc.noVs,
-      direct: directFrames, screenReadFirst: enc.screenReadFirst, slotWaits, slotWaitMsMax, pokes }),
+      direct: directFrames, screenReadFirst: enc.screenReadFirst, slotWaits, slotWaitMsMax, pokes, unshown }),
     window: (reset = false) => {
       const pct = (a: number[]) => {
         if (!a.length) return [];
