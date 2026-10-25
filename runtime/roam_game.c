@@ -106,6 +106,9 @@
 #define G_PLAYER1       0x008900acu   /* Player*: +4 car */
 #define G_RACE          0x00890118u   /* race coordinator: +0 state (4 racing), +0x24 racers, +0xC40 encounters */
 #define G_CAREER_RACE   0x00863470u   /* career race being run (0 = free roam) */
+#define G_TRACK         0x0089e7a0u   /* race parameters: the track (4000 free roam; 4701.. URL, 4706 the Dyno Shop) */
+#define G_RACETYPE      0x0089e7b0u   /* race parameters: 0 free roam, 1 a race, 7 an outrun, 8 the Dyno Shop */
+#define RACETYPE_DYNO   8u
 #define G_WORLDDT       0x00865154u   /* float: this frame's world dt (s) */
 #define G_PROFILE_NAME  0x0083a9e0u   /* 16 bytes */
 #define G_CARTYPES      0x008a1cccu   /* CarTypeInfo[]: 0x890 bytes, +0 name, +0xD0 name hash */
@@ -238,10 +241,15 @@ static uint32_t player_car(void){ uint32_t p = rd32(G_PLAYER1); return p ? rd32(
 static uint32_t world(void){ uint32_t w = rd32(G_WORLD); return ok(w, 0x80) ? w : 0; }
 static int du_racing(uint32_t race);
 /* free roam: the career's world with no race but free roam's own one-racer
- * one, or an outrun with a friend (du_racing): that is still free roam */
+ * one, or an outrun with a friend (du_racing): that is still free roam.  On
+ * free roam's own track: Performance Tuning / Dyno is one racer and no
+ * career race too, but on tracks of its own (the Dyno Shop 4706, a circuit
+ * test run on URL track 4705), whose places are not the city's -- friends
+ * saw those cars stand and race in the air over them (players, 2026-10-25) */
 static int roaming(void){
     uint32_t race = rd32(G_RACE);
-    return rd32(G_FLOW) == 6u && ok(race, 0xc44) && MR32(race) == 4u && (MR32(race + 0x24u) == 1u || du_racing(race)) &&
+    return rd32(G_FLOW) == 6u && rd32(G_TRACK) % 1000u == 0 && ok(race, 0xc44) && MR32(race) == 4u &&
+           (MR32(race + 0x24u) == 1u || du_racing(race)) &&
            !rd32(G_CAREER_RACE) && !(rd32(G_GAMEMODE) & 0x200u) && world() && player_car();
 }
 static uint32_t encounter_mgr(void){ uint32_t r = rd32(G_RACE); return ok(r, 0xc44) ? r + RC_ENCOUNTERS : 0; }
@@ -2816,7 +2824,6 @@ static int64_t render_delay(int i, const rc_peer *p, int64_t frame_dt){
 #endif
 #define G_ACTIONS       0x0086eaf0u   /* the joystick actions held this frame, a bit per action, 0 = held (0x5CFD60) */
 #define ACT_ENGAGE      15u           /* Engage */
-#define G_RACETYPE      0x0089e7b0u   /* 0 free roam, 7 an outrun */
 #define G_OUTRUN_STATE  (G_ENCOUNTERS + 0x1ae8u)  /* 2: an outrun can be taken (0x500D20) */
 #define G_ENGAGE        0x00838590u
 #define PL_OPPONENT     0x250u        /* Player: the car an outrun is against */
@@ -4564,10 +4571,12 @@ static uint8_t local_status(int in_roam){
     uint32_t flow = rd32(G_FLOW);
     if (in_roam) return g_sync_paused > 1 || g_parked ? RC_ST_PAUSED : RC_ST_ROAM;
     if (flow == 6u){
-        /* a race (career event, or more than one racer); otherwise the
-         * world is still coming up */
+        /* a race (career event, or more than one racer); the Dyno Shop (its
+         * test runs, one-racer races, stay "loading"); otherwise the world
+         * is still coming up */
         uint32_t race = rd32(G_RACE);
         if (rd32(G_CAREER_RACE) || (ok(race, 0x28) && MR32(race + 0x24u) > 1u)) return RC_ST_EVENT;
+        if (rd32(G_RACETYPE) == RACETYPE_DYNO) return RC_ST_SHOP;
         return RC_ST_LOADING;
     }
     if (flow == 3u) return (rd32(G_GAMEMODE) & 1u) ? RC_ST_SHOP : RC_ST_MENUS;
