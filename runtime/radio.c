@@ -20,7 +20,7 @@
 void sub_007292bc_orig(CPU *c);   /* the mixer step, every few ms: we notice the song's two readers, stop the game's song when the track ends or the radio is switched */
 void sub_00739030_orig(CPU *c);   /* the game pauses or resumes its sound groups: the track waits with them */
 void sub_004580e0_orig(CPU *c);   /* the game starts an EA Trax song: we ask the page for a track and lend its tags to the plaque */
-void sub_004ac9f0_orig(CPU *c);   /* the game draws the plaque of the song: for silence it draws nothing */
+void sub_004ac9f0_orig(CPU *c);   /* the game draws the plaque of the song: for silence, or the same track again, it draws nothing */
 void sub_0072d18d_orig(CPU *c);   /* the stream reader, the mixer asks for frames: a song's reader gets the track's sound from the page */
 void sub_00739320(CPU *c);        /* stops a song (17 callers); we call it from the mixer step to end a song */
 
@@ -75,7 +75,7 @@ typedef struct {
     uint8_t side[MUSIC_INPUTS];
     int searching, paused;
 } Music;
-typedef struct { int who, over, ended; uint32_t place, seq, read[CHANNELS], waited, starved; } Song;   /* place: 0 menus, 1 driving */
+typedef struct { int who, over, ended, again; uint32_t place, seq, read[CHANNELS], waited, starved; } Song;   /* place: 0 menus, 1 driving */
 typedef struct {
     int was_on;
     int lent;                                      /* the table entry lent the page's tags, or NO_TAGS_LENT */
@@ -272,6 +272,7 @@ static void start_radio_song(HostStatusRadio *r, unsigned index){
     int going = (g_song.who == SONG_WAITING || (g_song.who == SONG_FOLDER && !g_song.over)) && g_song.place == place;
     if (going){
         lend_tags(index);
+        g_song.again = 1;
         fprintf(stderr, "[radio] game starts a song (entry %u): the track goes on\n", index);
     } else if (copy_tags(r, place)){
         ask_page_for_track(r, place);
@@ -369,6 +370,7 @@ void sub_004580e0(CPU *c){
     HostStatusRadio *r = host_status_radio();
     unsigned index = MR32(c->esp + TRAX_START_INDEX) & 0xffffu;
     return_tags();
+    g_song.again = 0;
     if (radio_on(r) && index < RADIO_TRACKS) start_radio_song(r, index);
     else g_song.who = SONG_GAME;
     g_radio.stop = NULL;
@@ -377,7 +379,7 @@ void sub_004580e0(CPU *c){
 
 /* a plain cdecl return: the caller takes the argument off the stack */
 void sub_004ac9f0(CPU *c){
-    if (g_song.who == SONG_SILENT && radio_on(host_status_radio())){
+    if ((g_song.who == SONG_SILENT || g_song.again) && radio_on(host_status_radio())){
         POP32(c->eip);
         return;
     }
