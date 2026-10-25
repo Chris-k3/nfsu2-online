@@ -241,8 +241,10 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
   (`LogRing.snapshot`, 160 KB at most: the opening lines, the game's session lines, the newest lines) in localStorage
   every 10 s while it grows, when the page is hidden or shown, and at the end. A page that finds a game that did not get
   to its end (or one stopped for a reason, GPU-LOST say, before a reload) says so on the start page and puts that log
-  first in Download log, with a line on how it ended (the page on screen or hidden at its last copy). Tested by killing
-  WebKit's web content process during a game (`kill -9`, as Safari's memory limit does).
+  first in Download log, with a line on how it ended (the page on screen or hidden at its last copy). A game the player
+  left by reloading or closing the page (`pagehide`) is offered as well (a frozen game, reloaded), with a quiet line and
+  no call for a bug report (`lastGameEnd`). Tested by killing WebKit's web content process during a game (`kill -9`,
+  as Safari's memory limit does).
 - **Frame pacing on Windows:** a worker's `Atomics.wait` timeout wakes on the OS timer, which Chrome on Windows runs
   at 1 ms or at 15.6 ms (Chrome 155: a 1 ms wait took 15.5 ms at the median). The pacer's sleep
   (`runtime/win32_ext.c`) therefore waits until a learned margin before its deadline and spins on the clock for the

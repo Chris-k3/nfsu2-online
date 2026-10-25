@@ -70,6 +70,12 @@ export function lastGameToOffer(save: string): LastGame | null {
   return r;
 }
 
+/** how it ended, for the start page: the browser stopped the page ('stopped'), the player reloaded or closed it
+ *  ('left'), or the game stopped for a reason and the page was reloaded since ('error') */
+export function lastGameEnd(r: LastGame): 'stopped' | 'left' | 'error' {
+  return !r.ended ? 'stopped' : r.ended.why === 'page closed' ? 'left' : 'error';
+}
+
 /** what became of it, for the log: one line */
 export function lastGameLine(r: LastGame): string {
   const at = (ms: number) => new Date(ms).toTimeString().slice(0, 8);

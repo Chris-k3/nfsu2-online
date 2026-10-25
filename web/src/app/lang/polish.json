@@ -893,5 +893,7 @@
   "Total": "Razem",
   "Gain {n}X with:": "{n}X za:",
   "DRIFT": "DRIFT",
-  "The last game ended without closing. Download log has its log.": "Ostatnia gra skończyła się bez zamknięcia. „Pobierz dziennik” zawiera jej dziennik."
+  "Reloaded because something went wrong? Download log still has what happened in your last game.": "Strona została przeładowana, bo coś poszło nie tak? „Pobierz dziennik” nadal zawiera to, co się stało w ostatniej grze.",
+  "Your last game stopped without warning. Phones do this when they run low on memory.": "Ostatnia gra zatrzymała się bez ostrzeżenia. Telefony robią tak, gdy brakuje im pamięci.",
+  "Your last game stopped with an error.": "Ostatnia gra zatrzymała się z powodu błędu."
 }

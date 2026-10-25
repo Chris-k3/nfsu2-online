@@ -24,7 +24,7 @@ import { codeOf, dateLocale, language as pageLanguage, lastLanguage, LANGUAGES, 
 import { loadGame, serverRev, type Loaded } from './loader';
 import { claimInstance } from './instance';
 import { LogRing, downloadBlob, stamp } from './logs';
-import { LastGameKeeper, lastGameLine, lastGameToOffer, type LastGame } from './lastgame';
+import { LastGameKeeper, lastGameEnd, lastGameLine, lastGameToOffer, type LastGame } from './lastgame';
 import { browserBrief, deviceBrief } from './devicelog';
 import { canFullscreen, enterFullscreen, exitFullscreen, fromHomeScreen, homeScreenInstead, isFullscreen, keepScreenOn, measureRefresh, settledSize, trackCanvasSize } from './display';
 import { deviceDefaults, markTouch, noPinchZoom, padSeen, touchFirst } from './device';
@@ -491,6 +491,7 @@ async function startGame() {
   }
   setPhase('playing', T('Playing'), () => '');
   keeper.start(loaded!.info.rev);
+  $('#lastgame').hidden = true;           // about the game before this one
   document.body.dataset.phase = 'playing';
   away = new AwayCheck(session, awayLimits(), awayLine, logLine);
   // a phone's render scale (device.ts): whether it has room for all its pixels, for its next game
@@ -1201,7 +1202,14 @@ export async function boot() {
   lastGame = lastGameToOffer(SAVE);
   if (lastGame) {
     log.keep(lastGameLine(lastGame));
-    $('#log-btn').hidden = $('#report').hidden = $('#lastgame').hidden = false;
+    // a reload or a closed tab is the player's own doing: the log stays at hand (a frozen game, reloaded), unasked for
+    const end = lastGameEnd(lastGame), why = lastGame.ended?.why;
+    live($('#lastgame'), end === 'stopped' ? T('Your last game stopped without warning. Phones do this when they run low on memory.')
+      : end === 'error' ? T('Your last game stopped with an error.')
+      : T('Reloaded because something went wrong? Download log still has what happened in your last game.'),
+      end === 'error' && why !== 'exit' ? why : undefined);
+    $('#log-btn').hidden = $('#lastgame').hidden = false;
+    $('#report').hidden = end === 'left';
   }
   fps = new FpsOverlay($('#fps'));
   lobbyPanel = new LobbyPanel($('#lobby'), $('#lobby-cover'), logLine);

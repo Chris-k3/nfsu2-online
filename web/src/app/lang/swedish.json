@@ -851,5 +851,7 @@
   "Total": "Totalt",
   "Gain {n}X with:": "Nå {n}X med:",
   "DRIFT": "DRIFT",
-  "The last game ended without closing. Download log has its log.": "Det senaste spelet slutade utan att stängas. \"Ladda ned loggen\" har dess logg."
+  "Reloaded because something went wrong? Download log still has what happened in your last game.": "Laddade du om för att något gick fel? \"Ladda ned loggen\" har fortfarande det som hände i ditt senaste spel.",
+  "Your last game stopped without warning. Phones do this when they run low on memory.": "Ditt senaste spel stoppades utan förvarning. Det gör telefoner när de får ont om minne.",
+  "Your last game stopped with an error.": "Ditt senaste spel stoppades av ett fel."
 }

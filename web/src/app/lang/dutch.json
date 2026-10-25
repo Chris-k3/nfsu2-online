@@ -851,5 +851,7 @@
   "Total": "Totaal",
   "Gain {n}X with:": "Verdien {n}X met:",
   "DRIFT": "DRIFT",
-  "The last game ended without closing. Download log has its log.": "Het vorige spel is gestopt zonder af te sluiten. \"Log downloaden\" bevat het log ervan."
+  "Reloaded because something went wrong? Download log still has what happened in your last game.": "Herladen omdat er iets misging? \"Log downloaden\" bevat nog wat er in je vorige spel gebeurde.",
+  "Your last game stopped without warning. Phones do this when they run low on memory.": "Je vorige spel stopte zonder waarschuwing. Telefoons doen dat als ze bijna geen geheugen meer hebben.",
+  "Your last game stopped with an error.": "Je vorige spel is gestopt door een fout."
 }

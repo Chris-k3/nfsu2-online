@@ -9,7 +9,7 @@ import * as esbuild from 'esbuild';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const bundle = async f => import('data:text/javascript;base64,' + Buffer.from((await esbuild.build({ entryPoints: [path.join(ROOT, f)], bundle: true, format: 'esm', write: false })).outputFiles[0].text).toString('base64'));
-const { LastGameKeeper, lastGameToOffer, lastGameLine } = await bundle('web/src/app/lastgame.ts');
+const { LastGameKeeper, lastGameToOffer, lastGameLine, lastGameEnd } = await bundle('web/src/app/lastgame.ts');
 const { LogRing } = await bundle('web/src/app/logs.ts');
 
 const store = new Map();
@@ -35,6 +35,7 @@ test('a game the page did not end is offered, with its log as it was last copied
   assert.equal(r.rev, 'abc1234'); assert.equal(r.ended, null); assert.equal(r.hidden, true);
   assert.match(r.log, /the last line before Safari stopped the page/);
   assert.match(lastGameLine(r), /^\[app\] the last game \(game abc1234, started \d\d:\d\d:\d\d, last copy \d\d:\d\d:\d\d, [\d.]+ min in\) ended without the page closing it, the page hidden/);
+  assert.equal(lastGameEnd(r), 'stopped');
   clearInterval(k.timer);
 });
 
@@ -44,7 +45,10 @@ test('a normal close and a Stop are not offered; a stop for a reason, a crash an
     const { k } = game();
     k.end(code, why);
     assert.equal(!!lastGameToOffer('save'), offered, `${code} ${why}`);
-    if (offered) assert.match(lastGameLine(lastGameToOffer('save')), why === 'page closed' ? /was running when the page was closed or reloaded/ : /stopped \(/);
+    if (!offered) continue;
+    assert.match(lastGameLine(lastGameToOffer('save')), why === 'page closed' ? /was running when the page was closed or reloaded/ : /stopped \(/);
+    // the start page: a reload or a closed tab is the player's own, not an error
+    assert.equal(lastGameEnd(lastGameToOffer('save')), why === 'page closed' ? 'left' : 'error', `${code} ${why}`);
   }
 });
 
