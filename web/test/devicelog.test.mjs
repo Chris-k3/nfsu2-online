@@ -9,6 +9,8 @@ import * as esbuild from 'esbuild';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const js = (await esbuild.build({ entryPoints: [path.join(ROOT, 'web/src/app/devicelog.ts')], bundle: true, format: 'esm', write: false })).outputFiles[0].text;
 const { browserBrief, deviceBrief } = await import('data:text/javascript;base64,' + Buffer.from(js).toString('base64'));
+const djs = (await esbuild.build({ entryPoints: [path.join(ROOT, 'web/src/app/device.ts')], bundle: true, format: 'esm', write: false })).outputFiles[0].text;
+const { phoneScreen } = await import('data:text/javascript;base64,' + Buffer.from(djs).toString('base64'));
 
 test('iPhone and iPad are named as such, not macOS (their user agents say "like Mac OS X" or Macintosh)', () => {
   assert.equal(browserBrief('Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1', 5), 'Safari 26 on iOS');
@@ -16,6 +18,18 @@ test('iPhone and iPad are named as such, not macOS (their user agents say "like 
   assert.equal(browserBrief('Mozilla/5.0 (iPad; CPU OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1', 5), 'Safari 18 on iPadOS');
   assert.equal(browserBrief('Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/140.0.7339.122 Mobile/15E148 Safari/604.1', 5), 'Chrome 140 (WebKit) on iOS');
   assert.equal(browserBrief('Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/142.0 Mobile/15E148 Safari/605.1.15', 5), 'Firefox 142 (WebKit) on iOS');
+});
+
+test('an iPhone whose Safari asks for desktop websites: Macintosh in its user agent, a phone by its screen', () => {
+  // 2026-10-25, a player's log: "Safari 26 on iPadOS" on a 390x844 screen, and no phone defaults
+  const ua = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15';
+  assert.equal(phoneScreen(5, 390, 844), true);
+  assert.equal(phoneScreen(5, 844, 390), true);                  // turned
+  assert.equal(phoneScreen(5, 744, 1133), false);                // iPad mini
+  assert.equal(phoneScreen(0, 390, 844), false);                 // no touch: a small window of a desktop
+  assert.equal(phoneScreen(10, 1280, 720), false);               // a touch laptop
+  assert.equal(browserBrief(ua, 5, phoneScreen(5, 390, 844)), 'Safari 26 on iOS (desktop website)');
+  assert.equal(browserBrief(ua, 5, phoneScreen(5, 820, 1180)), 'Safari 26 on iPadOS');
 });
 
 test('the desktops as before, Safari on a Mac by name', () => {

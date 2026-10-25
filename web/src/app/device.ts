@@ -2,14 +2,23 @@
 // differ on phones and touch screens.
 //   phone:       the browser says it is a mobile one (Chrome's User-Agent
 //                Client Hints; "Mobile" or "iPhone" in the user agent of the
-//                others).  Tablets are not phones.
+//                others), or it asks for desktop websites (Safari's Request
+//                Desktop Website, Chrome's Desktop site: Macintosh or Linux,
+//                no "Mobile") on a touch screen whose short side is a phone's
+//                (under 600 CSS px; an iPad mini's is 744).  Tablets are not
+//                phones.
 //   touch first: the primary pointer is a finger (phones, tablets), not a
 //                laptop whose screen also takes touch.
 // The Controls sheet and the hints follow touch first (html[data-touch]).
 
 export function isPhone(): boolean {
   const uad = (navigator as unknown as { userAgentData?: { mobile?: boolean } }).userAgentData;
-  return uad?.mobile === true || /Android.+Mobile|iPhone|iPod/.test(navigator.userAgent);
+  return uad?.mobile === true || /Android.+Mobile|iPhone|iPod/.test(navigator.userAgent) || phoneScreen(navigator.maxTouchPoints);
+}
+
+/** a touch screen with a phone's short side (a phone whatever its browser says), from the screen in CSS px */
+export function phoneScreen(touchPoints: number, w = screen.width, h = screen.height): boolean {
+  return touchPoints > 1 && Math.min(w, h) < 600;
 }
 
 export function touchFirst(): boolean { return matchMedia('(pointer: coarse)').matches; }

@@ -1,9 +1,12 @@
 // The browser and the device as the log names them (the session lines, shell.ts): enough to tell what ran and what it
 // had to run on, nothing that tells who (the audit's PRIV-5: the browser's major version and the system, no more).
 
-/** "Chrome 155 on Windows", "Safari 26 on iOS", "Safari 26 on iPadOS" (an iPad's Safari says Macintosh, but has touch) */
-export function browserBrief(ua: string, touchPoints = 0): string {
-  const ios = /iPhone|iPod/.test(ua) ? 'iOS' : /iPad/.test(ua) || (/Macintosh/.test(ua) && touchPoints > 1) ? 'iPadOS' : null;
+/** "Chrome 155 on Windows", "Safari 26 on iOS", "Safari 26 on iPadOS" (an iPad's Safari says Macintosh, but has touch),
+ *  "Safari 26 on iOS (desktop website)" (an iPhone's Safari asked for desktop websites: Macintosh, touch, a phone's
+ *  screen; phone: device.ts phoneScreen) */
+export function browserBrief(ua: string, touchPoints = 0, phone = false): string {
+  const mac = /Macintosh/.test(ua) && touchPoints > 1;
+  const ios = /iPhone|iPod/.test(ua) ? 'iOS' : mac && phone ? 'iOS (desktop website)' : /iPad/.test(ua) || mac ? 'iPadOS' : null;
   const os = ios ?? (/CrOS/.test(ua) ? 'ChromeOS' : /Windows/.test(ua) ? 'Windows' : /Mac OS X|Macintosh/.test(ua) ? 'macOS'
     : /Android/.test(ua) ? 'Android' : /Linux/.test(ua) ? 'Linux' : 'another system');
   const v = (re: RegExp) => re.exec(ua)?.[1];
