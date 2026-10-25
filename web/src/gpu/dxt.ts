@@ -6,7 +6,8 @@
 // the GPU memory: the textures of a Quick Race, 30 MB packed, become 210 MB.
 import * as P from './proto';
 
-const C5 = new Uint8Array(32), C6 = new Uint8Array(64);
+/** 5- and 6-bit colour values expanded to 8 bits (bit replication, as WebGPU's bc formats do; astc.ts too) */
+export const C5 = new Uint8Array(32), C6 = new Uint8Array(64);
 for (let i = 0; i < 32; i++) C5[i] = (i << 3) | (i >> 2);
 for (let i = 0; i < 64; i++) C6[i] = (i << 2) | (i >> 4);
 const pal = new Uint32Array(4), alpha = new Uint8Array(16), at = new Uint8Array(8);

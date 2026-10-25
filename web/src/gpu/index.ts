@@ -47,6 +47,9 @@ export interface RendererOptions {
   /** unpack DXT textures on the CPU even when the GPU has texture-compression-bc (tests the
    *  path of PowerVR and Mali phones on a desktop GPU) */
   noBC?: boolean;
+  /** without BC, unpack DXT1 too rather than rewrite it as ASTC (astc.ts) where the GPU has texture-compression-astc
+   *  (A/B and diagnostics) */
+  noASTC?: boolean;
   /** while a frame waits for a slot, poll the GPU with empty submits (default: in Firefox, whose
    *  onSubmittedWorkDone otherwise waits for its 100 ms poll timer; see pokeLoop) */
   poke?: boolean;
@@ -83,8 +86,9 @@ export interface RendererStats {
   slotWaits: number; slotWaitMsMax: number; pokes: number;
   /** frames drawn over unseen: submitted after another one between the same two rendering updates (rAF) */
   unshown: number;
-  /** the game's textures on the GPU now, bytes: all of them, and those unpacked from DXT (no texture-compression-bc) */
-  texBytes: number; unpackBytes: number;
+  /** the game's textures on the GPU now, bytes: all of them, those unpacked from DXT, and those DXT1 as ASTC (no
+   *  texture-compression-bc) */
+  texBytes: number; unpackBytes: number; astcBytes: number;
 }
 
 /** Per-frame distributions since the last reset (the perf benchmark's race window). */
@@ -122,6 +126,13 @@ export interface Renderer {
   detach(): void;
 }
 
+/** how much of the textures' MB the log's lines give is DXT unpacked or as ASTC: " (40 unpacked from DXT, 30 DXT1 as
+ *  ASTC)", '' with BC */
+export function texSplit(unpacked: number, astc: number): string {
+  const MB = (b: number) => (b / 1048576).toFixed(0);
+  const parts = [unpacked ? `${MB(unpacked)} unpacked from DXT` : '', astc ? `${MB(astc)} DXT1 as ASTC` : ''].filter(Boolean);
+  return parts.length ? ` (${parts.join(', ')})` : '';
+}
 /** WebGPU calls that failed this many times in a row (one try per frame, a second at 60 fps): the device is gone */
 const LOST_AFTER = 60;
 /** an exception for the log: Safari's stack has no line with the message, Chrome's starts with it */
@@ -137,10 +148,12 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
   if (!navigator.gpu) throw new Error('WebGPU is not available in this browser');
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
   if (!adapter) throw new Error('no WebGPU adapter');
-  // without BC the encoder unpacks the DXT textures as they upload (dxt.ts)
+  // without BC the encoder unpacks the DXT textures as they upload (dxt.ts), but for DXT1 on a GPU with ASTC (Apple's),
+  // which it rewrites as ASTC 4x4 (astc.ts): a quarter of the memory unpacked takes
   const bc = adapter.features.has('texture-compression-bc') && !opts.noBC;
-  if (!bc) log(`[gpu] ${opts.noBC ? 'noBC' : 'no texture-compression-bc'}: DXT textures are unpacked to BGRA8 as they upload`);
-  const want: GPUFeatureName[] = bc ? ['texture-compression-bc'] : [];
+  const astc = !bc && adapter.features.has('texture-compression-astc') && !opts.noASTC;
+  if (!bc) log(`[gpu] ${opts.noBC ? 'noBC' : 'no texture-compression-bc'}: ${astc ? 'DXT1 textures go up as ASTC 4x4, DXT3 and DXT5 (and DXT1 with transparent texels) unpacked to BGRA8' : 'DXT textures are unpacked to BGRA8 as they upload'}`);
+  const want: GPUFeatureName[] = bc ? ['texture-compression-bc'] : astc ? ['texture-compression-astc'] : [];
   for (const f of ['texture-component-swizzle', 'texture-compression-unaligned', 'timestamp-query'])
     if (adapter.features.has(f as GPUFeatureName)) want.push(f as GPUFeatureName);
   const device = await adapter.requestDevice({ requiredFeatures: want, requiredLimits: {
@@ -370,7 +383,7 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
     const d = winDone.sort((a, b) => a - b), q = (p: number) => d.length ? d[Math.min(d.length - 1, Math.floor(p * d.length))].toFixed(1) : '-';
     log(`[gpu] ${((now - winUnshownT) / 1000).toFixed(0)} s to t=${((now - attachedAt) / 1000).toFixed(0)} s: ${winUnshownFrames} frames, rAF ${rafHz.toFixed(1)} Hz, ` +
         `${winUnshown} drawn over unseen, GPU done p50 ${q(0.5)} / p90 ${q(0.9)} / max ${d.length ? d[d.length - 1].toFixed(0) : '-'} ms, ` +
-        `${slotWaits - winWaits0} waited for the GPU, textures ${MB(enc.texBytes)} MB${enc.unpackBytes ? ` (${MB(enc.unpackBytes)} unpacked from DXT)` : ''}${errors ? `, ${errors} WebGPU errors so far` : ''}`);
+        `${slotWaits - winWaits0} waited for the GPU, textures ${MB(enc.texBytes)} MB${texSplit(enc.unpackBytes, enc.astcBytes)}${errors ? `, ${errors} WebGPU errors so far` : ''}`);
     winUnshown = 0; winUnshownFrames = 0; winUnshownT = now; winDone = []; winWaits0 = slotWaits;
   };
   // A render scale below 1 (a phone's 75 %): the game draws a picture smaller than the view, and the composite drew it
@@ -633,7 +646,7 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
       encodeMsAvg: frames ? encMsTotal / frames : 0, encodeMsLast: encMsLast, drawsLast, passesLast, rafHz, inFlight,
       dumps: u32()[cw + C.dumpsDone], missingTarget: enc.missingTarget, conflicts: enc.conflicts, zMismatch: enc.zMismatch, noVs: enc.noVs,
       direct: directFrames, screenReadFirst: enc.screenReadFirst, slotWaits, slotWaitMsMax, pokes, unshown,
-      texBytes: enc.texBytes, unpackBytes: enc.unpackBytes }),
+      texBytes: enc.texBytes, unpackBytes: enc.unpackBytes, astcBytes: enc.astcBytes }),
     window: (reset = false) => {
       const pct = (a: number[]) => {
         if (!a.length) return [];

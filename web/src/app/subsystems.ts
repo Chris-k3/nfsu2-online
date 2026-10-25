@@ -24,7 +24,7 @@ export const attachRenderer: AttachRenderer = async (proc, canvas, o) => {
     imageRect: () => r.imageRect(),
     dump: (name: string) => r.dump(name),
     doneMs: () => r.doneMs(),
-    textures: () => { const s = r.stats(); return { bytes: s.texBytes, unpacked: s.unpackBytes }; },
+    textures: () => { const s = r.stats(); return { bytes: s.texBytes, unpacked: s.unpackBytes, astc: s.astcBytes }; },
     stats: () => {
       const s = r.stats();
       return { 'gpu encode ms': s.encodeMsAvg, 'draws': s.drawsLast, 'passes': s.passesLast, 'pipelines': s.pipelines, 'gpu errors': s.errors };

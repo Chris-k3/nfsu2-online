@@ -242,7 +242,7 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
   every 10 s while it grows, when the page is hidden or shown, and at the end. A page that finds a game that did not get
   to its end (or one stopped for a reason, GPU-LOST say, before a reload) says so on the start page and puts that log
   first in Download log, with a line on how it ended (the page on screen or hidden at its last copy) and what the game
-  held at that copy: the textures' MB (and those unpacked from DXT) and, in free roam, the friends' cars in the game
+  held at that copy: the textures' MB (and those unpacked from DXT or DXT1 as ASTC) and, in free roam, the friends' cars in the game
   and the friends connected (the status table's `roam_cars` and `roam_friends`, `runtime/web/status_web.c`). Safari
   gives the page no memory figure, and the first kept iPhone kill came between two renderer lines. A game the player
   left by reloading or closing the page (`pagehide`) is offered as well (a frozen game, reloaded), with a quiet line and
@@ -298,6 +298,16 @@ The game thread keeps `com.c` (D3D9 state, shader translation) and records throu
   7× the texture memory (30 MB packed, 213 MB unpacked) and about 0.4 s of page-thread work, all of it in the menus
   and on the loading screen (pauses up to ~0.2 s there), none during the race. `?bc=0` on the test page takes this
   path on any GPU.
+- Where such a GPU has `texture-compression-astc` (Apple's: every iPhone and iPad), DXT1 goes up as ASTC 4x4 instead
+  (`web/src/gpu/astc.ts`): block for block, the two RGB565 colours kept exactly (endpoint mode 8, 8 bits) and the codes
+  as weights (2-bit 0/21/43/64 for four colours, trits 0/32/64 for three). On an Apple GPU (`web/tools/astc-check.mjs`,
+  Chrome and WebKit) a texel is at most 2 of 255 from the CPU's unpacking, as close as that GPU's own BC1 (mean 0.469
+  against 0.471); in game frames at most 4, 87-91 % of the pixels identical. Textures 228 → 112 MB in free roam
+  (Quick Race 229 → 113): DXT1 is 4x smaller than unpacked, and rewriting a level is quicker than unpacking it
+  (1.2 against 1.7 ms for 1024x1024). A DXT1 texture with transparent texels (a three-colour block's fourth code) in
+  the first level that goes up is unpacked as before: one plane cannot give transparent black. One met only in a later
+  level gets two-plane blocks (alpha exact, the colour under a transparent texel the darker endpoint, not black).
+  DXT3 and DXT5 stay unpacked. `?astc=0` on the test page unpacks DXT1 too.
 - C and TS layouts come from one source: a C header with `_Static_assert` offsets, plus a generated or hand-mirrored
   `proto.ts` checked by a test.
 

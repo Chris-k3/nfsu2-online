@@ -54,6 +54,7 @@ import { pageId } from './page-id';
 import { RenderCheck, RENDER_CHECK_TIMES, type RenderCheckTimes } from './rendercheck';
 import { moviesKept, Predownload } from './predownload';
 import { movieCodec } from '../host/movie';
+import { texSplit } from '../gpu/index';
 
 type Phase = 'boot' | 'ready' | 'error' | 'waiting' | 'starting' | 'playing' | 'exited';
 
@@ -1033,7 +1034,7 @@ async function downloadLog() {
 function gameHeld(): string {
   const parts: string[] = [];
   const tx = session?.renderer?.textures?.(), MB = (b: number) => (b / 1048576).toFixed(0);
-  if (tx) parts.push(`textures ${MB(tx.bytes)} MB${tx.unpacked ? ` (${MB(tx.unpacked)} unpacked from DXT)` : ''}`);
+  if (tx) parts.push(`textures ${MB(tx.bytes)} MB${texSplit(tx.unpacked, tx.astc)}`);
   const st = session?.status?.read(), cars = st?.get('roam_cars') ?? 0, friends = st?.get('roam_friends') ?? 0;
   if (cars || friends) parts.push(`${cars} friends' cars in the game, ${friends} friends connected`);
   return parts.join(', ');
