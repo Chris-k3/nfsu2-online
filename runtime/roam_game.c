@@ -3455,6 +3455,7 @@ static struct {
     int64_t  alone_us;                           /* MP_ALONE_US, or the test's */
     uint32_t asked_host, asked_id; int64_t asked_at;   /* the lobby we last sent a JOIN to (its host, its id), and when */
     char     names[RC_LOBBY_MAX][RC_NAME_MAX + 1];   /* on the trip: the lobby's players' names (their links end in the menus) */
+    char     lan[RC_LOBBY_MAX][13];              /* ...and their LAN names (lan_names), the race's results' */
 } g_mp;
 static const char *race_kind(uint32_t r){
     if (!r) return "race";
@@ -3755,7 +3756,10 @@ static void mp_trip(int64_t host){
     t.mode = race_net_mode(r);
     t.track = MR16(r + 0x18u); t.reverse = MR8(r + 0x1au) & 1u; t.laps = MR8(r + 0x1bu);
     t.players = g_mp.l.n;
-    for (int i = 0; i < g_mp.l.n && i < RC_LOBBY_MAX; i++) snprintf(g_mp.names[i], sizeof g_mp.names[i], "%s", mp_name(g_mp.l.ids[i]));
+    for (int i = 0; i < g_mp.l.n && i < RC_LOBBY_MAX; i++){
+        snprintf(g_mp.names[i], sizeof g_mp.names[i], "%s", mp_name(g_mp.l.ids[i]));
+        memcpy(g_mp.lan[i], nm12[i], sizeof g_mp.lan[i]);
+    }
     char nm[40]; race_name(r, nm, sizeof nm);
     rlog("[roam] f=%ld race lobby %08x: the trip to the LAN race: %s (mode %d, track %d%s, %d laps), %d players, %s\n", rh_frame(), g_mp.l.id, nm,
          t.mode, t.track, t.reverse ? " reverse" : "", t.laps, t.players, t.host ? "we host" : "we join");
@@ -4033,6 +4037,27 @@ static void js_players(MpJs *j, const MpLobby *l){
     js_raw(j, "]");
     js_int(j, "me", me); js_int(j, "max", l->max);
 }
+/* the race's results, once the game showed them (mprace_results, by the LAN names the trip gave the lobby's players):
+ * res, the rows in their order, each {n: the player's name, f: 1 finished, t: its time (s) or p: a drift's points,
+ * me: 1 ours}; prize: ours */
+static void js_results(MpJs *j){
+    MpResult r[MPRACE_RESULTS_MAX]; int n = mprace_results(r, MPRACE_RESULTS_MAX);
+    if (n <= 0) return;
+    js_key(j, "res"); js_raw(j, "[");
+    for (int k = 0; k < n; k++){
+        const char *nm = r[k].name[0] ? r[k].name : "?";
+        for (int i = 0; i < g_mp.l.n && i < RC_LOBBY_MAX; i++) if (r[k].name[0] && !strcasecmp(g_mp.lan[i], r[k].name)){ nm = g_mp.names[i]; break; }
+        char t[48];
+        js_raw(j, k ? ",{\"n\":" : "{\"n\":"); js_val(j, nm);
+        snprintf(t, sizeof t, ",\"f\":%d", r[k].finished); js_raw(j, t);
+        if (r[k].finished && r[k].points > 0){ snprintf(t, sizeof t, ",\"p\":%d", r[k].points); js_raw(j, t); }
+        else if (r[k].finished && r[k].time > 0.f){ snprintf(t, sizeof t, ",\"t\":%.2f", (double)r[k].time); js_raw(j, t); }
+        if (r[k].ours) js_raw(j, ",\"me\":1");
+        js_raw(j, "}");
+    }
+    js_raw(j, "]");
+    if (mprace_prize() > 0) js_int(j, "prize", mprace_prize());
+}
 static void mp_panel(int64_t host, int in_roam){
     static char last[1200];
     if (!g_mp_panel) return;
@@ -4040,7 +4065,7 @@ static void mp_panel(int64_t host, int in_roam){
     js_raw(&j, "{");
     int hud = in_roam && host - g_mp_hud_at < 250000;
     if (g_mp.st == MP_TRIP){
-        if (mprace_covered()){ js_str(&j, "v", "trip"); js_str(&j, "step", mprace_step()); js_race(&j, g_mp.l.race); js_players(&j, &g_mp.l); }
+        if (mprace_covered()){ js_str(&j, "v", "trip"); js_str(&j, "step", mprace_step()); js_race(&j, g_mp.l.race); js_players(&j, &g_mp.l); js_results(&j); }
     } else if (hud && g_mp.st != MP_IDLE){
         static const char *const st[] = { "", "host", "asked", "in", "count" };
         js_str(&j, "v", "lobby"); js_str(&j, "st", st[g_mp.st]);

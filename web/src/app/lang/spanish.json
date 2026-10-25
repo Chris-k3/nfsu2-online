@@ -879,5 +879,12 @@
   "DRIFT": "DERRAPE",
   "Reloaded because something went wrong? Download log still has what happened in your last game.": "¿Recargaste porque algo salió mal? «Descargar registro» todavía tiene lo que pasó en tu última partida.",
   "Your last game stopped without warning. Phones do this when they run low on memory.": "Tu última partida se detuvo sin aviso. Los teléfonos lo hacen cuando se quedan sin memoria.",
-  "Your last game stopped with an error.": "Tu última partida se detuvo por un error."
+  "Your last game stopped with an error.": "Tu última partida se detuvo por un error.",
+  "Results": "Resultados",
+  "DNF": "No terminó",
+  "{n} points": {
+    "one": "{n} punto",
+    "many": "{n} de puntos",
+    "other": "{n} puntos"
+  }
 }

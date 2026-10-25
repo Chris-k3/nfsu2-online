@@ -761,6 +761,14 @@ html:has(> body > .stage:not([hidden])) { overflow: hidden; }
 .lobby-cover[hidden] { display: none; }
 .lobby-card { width: min(calc(400 * var(--u)), calc(100% - 32px)); min-width: min(300px, calc(100% - 32px)); }
 .lobby-card .lobby-title { font-size: 1.4em; }
+/* the race's results on the way back (lobby.ts results) */
+.lobby-results { margin-top: 0.8em; }
+.lobby-head { font-size: 0.75em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.lobby-results .lobby-places { margin-top: 0.25em; }
+.lobby-places li.mine .lobby-name { font-weight: 700; }
+.lobby-time { font-variant-numeric: tabular-nums; color: var(--muted); }
+.lobby-places li.mine .lobby-time { color: var(--text); }
+.lobby-prize { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--lime); }
 .lobby-step { display: flex; gap: 0.6em; align-items: center; margin-top: 1em; color: var(--muted); }
 .lobby-spin {
   width: 1em; height: 1em; border: 2px solid rgba(255, 255, 255, 0.2); border-top-color: var(--lime); border-radius: 50%;

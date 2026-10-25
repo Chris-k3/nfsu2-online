@@ -900,5 +900,13 @@
   "DRIFT": "ДРИФТ",
   "Reloaded because something went wrong? Download log still has what happened in your last game.": "Перезагрузили страницу, потому что что-то пошло не так? В «Скачать журнал» по-прежнему есть то, что произошло в последней игре.",
   "Your last game stopped without warning. Phones do this when they run low on memory.": "Последняя игра остановилась без предупреждения. Телефоны так делают, когда им не хватает памяти.",
-  "Your last game stopped with an error.": "Последняя игра остановилась из-за ошибки."
+  "Your last game stopped with an error.": "Последняя игра остановилась из-за ошибки.",
+  "Results": "Результаты",
+  "DNF": "Сход",
+  "{n} points": {
+    "one": "{n} очко",
+    "few": "{n} очка",
+    "many": "{n} очков",
+    "other": "{n} очка"
+  }
 }

@@ -795,5 +795,8 @@
   "DRIFT": "ドリフト",
   "Reloaded because something went wrong? Download log still has what happened in your last game.": "問題が起きて再読み込みしましたか？「ログをダウンロード」には前回のゲームで起きたことが残っています。",
   "Your last game stopped without warning. Phones do this when they run low on memory.": "前回のゲームは予告なく停止しました。スマートフォンはメモリが不足するとこうなることがあります。",
-  "Your last game stopped with an error.": "前回のゲームはエラーで停止しました。"
+  "Your last game stopped with an error.": "前回のゲームはエラーで停止しました。",
+  "Results": "結果",
+  "DNF": "リタイア",
+  "{n} points": "{n}ポイント"
 }

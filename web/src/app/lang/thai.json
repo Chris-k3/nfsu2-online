@@ -795,5 +795,8 @@
   "DRIFT": "ดริฟต์",
   "Reloaded because something went wrong? Download log still has what happened in your last game.": "โหลดหน้าใหม่เพราะมีบางอย่างผิดพลาดใช่ไหม \"ดาวน์โหลดล็อก\" ยังมีสิ่งที่เกิดขึ้นในเกมล่าสุดของคุณอยู่",
   "Your last game stopped without warning. Phones do this when they run low on memory.": "เกมล่าสุดของคุณหยุดลงโดยไม่มีการเตือน โทรศัพท์จะทำแบบนี้เมื่อหน่วยความจำเหลือน้อย",
-  "Your last game stopped with an error.": "เกมล่าสุดของคุณหยุดลงเพราะเกิดข้อผิดพลาด"
+  "Your last game stopped with an error.": "เกมล่าสุดของคุณหยุดลงเพราะเกิดข้อผิดพลาด",
+  "Results": "ผลการแข่งขัน",
+  "DNF": "ไม่จบการแข่งขัน",
+  "{n} points": "{n} คะแนน"
 }

@@ -879,5 +879,12 @@
   "DRIFT": "DÉRAPAGE",
   "Reloaded because something went wrong? Download log still has what happened in your last game.": "Hai ricaricato perché qualcosa è andato storto? «Scarica il log» contiene ancora quello che è successo nella tua ultima partita.",
   "Your last game stopped without warning. Phones do this when they run low on memory.": "La tua ultima partita si è fermata senza preavviso. I telefoni lo fanno quando la memoria scarseggia.",
-  "Your last game stopped with an error.": "La tua ultima partita si è fermata per un errore."
+  "Your last game stopped with an error.": "La tua ultima partita si è fermata per un errore.",
+  "Results": "Risultati",
+  "DNF": "Non arrivato",
+  "{n} points": {
+    "one": "{n} punto",
+    "many": "{n} punti",
+    "other": "{n} punti"
+  }
 }

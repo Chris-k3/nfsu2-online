@@ -1,7 +1,7 @@
 // Free roam's race lobby over the game (roam_game.c mp_panel, NET_KIND_LOBBY): at a race's start what Enter does
 // there, a lobby's six places with its players and its countdown; during the trip to the race and back a cover over
-// the game's menus (the race and its results stay the game's own).  The game sends its state as JSON when it
-// changes, "{}" for nothing to show.
+// the game's menus (the race and its results stay the game's own; the way back shows the results again).  The game
+// sends its state as JSON when it changes, "{}" for nothing to show.
 
 import { language, N, t, tn } from './i18n';
 
@@ -18,7 +18,14 @@ interface LobbyState {
    *  even: the race evens out the cars (their engines) */
   names?: string[]; me?: number; max?: number; t?: number; closes?: number; fee?: number; even?: number;
   why?: string; step?: string; text?: string;
+  /** trip, once the race's results came: their rows in order; prize: what ours won */
+  res?: RaceResult[]; prize?: number;
 }
+/** a row of the race's results: the player's name, f 1 finished, t its time (s) or p a drift's points, me 1 ours */
+interface RaceResult { n: string; f: number; t?: number; p?: number; me?: number }
+
+/** a race's time as the game shows it: 1:02.34 */
+const raceTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(2).padStart(5, '0')}`;
 
 // The game's own English in the state (roam_game.c race_kind, mpw_text, mp_note; mprace.c's steps), translated here:
 // in English the page shows it as the game sent it.
@@ -173,9 +180,28 @@ export class LobbyPanel {
     p.replaceChildren(...kids);
   }
 
+  /** the race's results on the way back: place, name, time (or points), ours marked with its prize */
+  private results(s: LobbyState) {
+    const box = el('div', 'lobby-results');
+    box.append(el('div', 'lobby-head', t('Results')));
+    const ol = el('ol', 'lobby-places');
+    let place = 0;
+    for (const r of s.res ?? []) {
+      const li = el('li', r.me ? 'taken mine' : 'taken');
+      li.append(el('span', 'lobby-n', r.f ? String(++place) : '–'), el('span', 'lobby-name', r.n));
+      if (r.me) li.append(el('span', 'lobby-tag', t('you')));
+      const what = !r.f ? t('DNF') : r.p !== undefined ? tn(r.p, '{n} point', '{n} points') : r.t !== undefined ? raceTime(r.t) : '';
+      if (what) li.append(el('span', 'lobby-time', what));
+      if (r.me && s.prize) li.append(el('span', 'lobby-prize', `+$${s.prize}`));
+      ol.append(li);
+    }
+    box.append(ol);
+    return box;
+  }
+
   private drawCover(s: LobbyState) {
     const card = el('div', 'lobby-card');
-    card.append(...this.title(s, undefined), this.places(s));
+    card.append(...this.title(s, undefined), s.res?.length ? this.results(s) : this.places(s));
     const step = el('div', 'lobby-step');
     step.append(el('span', 'lobby-spin'), el('span', '', `${s.step ? game(s.step) : t('Loading')}…`));
     card.append(step);

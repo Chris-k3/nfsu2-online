@@ -858,5 +858,11 @@
   "DRIFT": "DRIFT",
   "Reloaded because something went wrong? Download log still has what happened in your last game.": "Herladen omdat er iets misging? \"Log downloaden\" bevat nog wat er in je vorige spel gebeurde.",
   "Your last game stopped without warning. Phones do this when they run low on memory.": "Je vorige spel stopte zonder waarschuwing. Telefoons doen dat als ze bijna geen geheugen meer hebben.",
-  "Your last game stopped with an error.": "Je vorige spel is gestopt door een fout."
+  "Your last game stopped with an error.": "Je vorige spel is gestopt door een fout.",
+  "Results": "Uitslag",
+  "DNF": "Niet gefinisht",
+  "{n} points": {
+    "one": "{n} punt",
+    "other": "{n} punten"
+  }
 }

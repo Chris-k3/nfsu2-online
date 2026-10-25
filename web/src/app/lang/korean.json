@@ -795,5 +795,8 @@
   "DRIFT": "드리프트",
   "Reloaded because something went wrong? Download log still has what happened in your last game.": "문제가 생겨서 새로고침했나요? \"로그 다운로드\"에 지난 게임에서 있었던 일이 아직 남아 있어요.",
   "Your last game stopped without warning. Phones do this when they run low on memory.": "지난 게임이 예고 없이 멈췄어요. 휴대폰은 메모리가 부족하면 이렇게 해요.",
-  "Your last game stopped with an error.": "지난 게임이 오류로 멈췄어요."
+  "Your last game stopped with an error.": "지난 게임이 오류로 멈췄어요.",
+  "Results": "결과",
+  "DNF": "완주 실패",
+  "{n} points": "{n}점"
 }

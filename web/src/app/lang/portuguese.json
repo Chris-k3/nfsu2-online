@@ -879,5 +879,12 @@
   "DRIFT": "DRIFT",
   "Reloaded because something went wrong? Download log still has what happened in your last game.": "Recarregou porque algo deu errado? \"Baixar log\" ainda tem o que aconteceu no seu último jogo.",
   "Your last game stopped without warning. Phones do this when they run low on memory.": "Seu último jogo parou sem aviso. Celulares fazem isso quando ficam sem memória.",
-  "Your last game stopped with an error.": "Seu último jogo parou por causa de um erro."
+  "Your last game stopped with an error.": "Seu último jogo parou por causa de um erro.",
+  "Results": "Resultados",
+  "DNF": "Não terminou",
+  "{n} points": {
+    "one": "{n} ponto",
+    "many": "{n} de pontos",
+    "other": "{n} pontos"
+  }
 }

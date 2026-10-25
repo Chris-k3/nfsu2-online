@@ -795,5 +795,8 @@
   "DRIFT": "甩尾",
   "Reloaded because something went wrong? Download log still has what happened in your last game.": "因為出了問題才重新載入？「下載記錄檔」裡仍有上一局遊戲的經過。",
   "Your last game stopped without warning. Phones do this when they run low on memory.": "上一局遊戲毫無預警地停止了。手機記憶體不足時會這樣。",
-  "Your last game stopped with an error.": "上一局遊戲因錯誤而停止。"
+  "Your last game stopped with an error.": "上一局遊戲因錯誤而停止。",
+  "Results": "結果",
+  "DNF": "未完賽",
+  "{n} points": "{n} 分"
 }

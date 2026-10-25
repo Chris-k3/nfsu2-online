@@ -858,5 +858,11 @@
   "DRIFT": "DRIFT",
   "Reloaded because something went wrong? Download log still has what happened in your last game.": "Genindlæste du, fordi noget gik galt? \"Hent loggen\" har stadig, hvad der skete i dit sidste spil.",
   "Your last game stopped without warning. Phones do this when they run low on memory.": "Dit sidste spil stoppede uden varsel. Det gør telefoner, når de mangler hukommelse.",
-  "Your last game stopped with an error.": "Dit sidste spil stoppede med en fejl."
+  "Your last game stopped with an error.": "Dit sidste spil stoppede med en fejl.",
+  "Results": "Resultater",
+  "DNF": "Ikke i mål",
+  "{n} points": {
+    "one": "{n} point",
+    "other": "{n} point"
+  }
 }

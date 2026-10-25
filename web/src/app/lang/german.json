@@ -858,5 +858,11 @@
   "DRIFT": "DRIFT",
   "Reloaded because something went wrong? Download log still has what happened in your last game.": "Neu geladen, weil etwas schiefging? „Log herunterladen“ enthält noch, was in deinem letzten Spiel passiert ist.",
   "Your last game stopped without warning. Phones do this when they run low on memory.": "Dein letztes Spiel wurde ohne Vorwarnung beendet. Das machen Handys, wenn ihnen der Speicher ausgeht.",
-  "Your last game stopped with an error.": "Dein letztes Spiel wurde durch einen Fehler beendet."
+  "Your last game stopped with an error.": "Dein letztes Spiel wurde durch einen Fehler beendet.",
+  "Results": "Ergebnisse",
+  "DNF": "Nicht im Ziel",
+  "{n} points": {
+    "one": "{n} Punkt",
+    "other": "{n} Punkte"
+  }
 }
