@@ -71,29 +71,43 @@ function dataFile(rel: string): DNode | null {
   return (a && dataLookup(a)) || n;
 }
 
-// block cache: memory LRU over OPFS-persisted blocks over HTTP
+// block cache: memory LRU over OPFS-persisted blocks over HTTP.  While OPFS keeps the blocks, the memory only saves
+// a read from it (a 1 MB block in 0.14 ms in WebKit, M4 Pro): 64 MB, the blocks being read.  The memory is the only
+// cache without OPFS (no cache folder, or no room left on the disk): 768 MB then.
 const memBlocks = new Map<string, Uint8Array>();
 let memBytes = 0;
-const MEM_BUDGET = 768 << 20;
+const MEM_KEPT = 64 << 20, MEM_ALONE = 768 << 20;
 const inflight = new Map<string, Promise<Uint8Array>>();
 let cacheDir: FileSystemDirectoryHandle | null = null;
+// The cache files open now, the least recently used first.  WebKit gives a page 251 sync access handles at once
+// (Playwright WebKit 27.2; then "UnknownError: Invalid platform file handle"), and a cache file holds two: kept open
+// for good, the files of a long free roam took them all in 13 min, the game data's cache stopped, and so would have
+// any file of the save folder the game opened after.  At most CACHE_OPEN stay open; opening one again takes < 1 ms.
+const CACHE_OPEN = 64;
 const cacheFiles = new Map<string, Promise<CacheFile | null>>();
 let keeping = true, kept = 0;                              // blocks still go into the cache (keepBlock)
 
+// Use the file at once, in the same task: a file that is not among the CACHE_OPEN newest is closed.
 async function cacheFile(n: DNode) {
   if (!cacheDir) return null;
   const k = cacheKey(n);
   let p = cacheFiles.get(k);
-  if (!p) {
-    p = openCacheFile(cacheDir, n).catch(e => { if (keeping) note(`[data] ${n.path} is not kept on this PC: ${e}`); return null; });
-    cacheFiles.set(k, p);
+  if (p) { cacheFiles.delete(k); cacheFiles.set(k, p); return p; }
+  p = openCacheFile(cacheDir, n).catch(e => { if (keeping) note(`[data] ${n.path} is not kept on this PC: ${e}`); return null; });
+  cacheFiles.set(k, p);
+  for (const [ok, op] of cacheFiles) {
+    if (cacheFiles.size <= CACHE_OPEN) break;
+    cacheFiles.delete(ok);
+    // after the reactions already waiting for it (a reader that just opened it uses it first)
+    void op.then(cf => { if (cf) { cf.h.flush(); cf.h.close(); cf.haveH.flush(); cf.haveH.close(); } }).catch(() => {});
   }
   return p;
 }
 
 function memPut(key: string, b: Uint8Array) {
   memBlocks.set(key, b); memBytes += b.length;
-  for (const [k, v] of memBlocks) { if (memBytes <= MEM_BUDGET) break; memBlocks.delete(k); memBytes -= v.length; }
+  const budget = cacheDir && keeping ? MEM_KEPT : MEM_ALONE;
+  for (const [k, v] of memBlocks) { if (memBytes <= budget) break; memBlocks.delete(k); memBytes -= v.length; }
 }
 // a line for the game's log (F9 > Download log), as "[data] ...": what a read waited for on the server
 const note = (s: string) => (self as unknown as Worker).postMessage({ t: 'log', s });
@@ -202,10 +216,14 @@ async function getBlock(n: DNode, bi: number): Promise<Uint8Array> {
     const start = bi * BLOCK, len = Math.min(BLOCK, n.size - start);
     const cf = await cacheFile(n);
     if (cf && cf.have[bi]) {
-      const b = new Uint8Array(len); cf.h.read(b, { at: start }); memPut(key, b); return b;
+      try {
+        const b = new Uint8Array(len); cf.h.read(b, { at: start }); memPut(key, b); return b;
+      } catch (e) { note(`[data] ${n.path} block ${bi}: the cache file did not read (${e}); from the server`); }
     }
     const b = await fetchBlock(n, bi, start, len);
-    if (cf) keepBlock(cf, n, bi, b);
+    // the file again: the one from before the fetch may have been closed meanwhile (CACHE_OPEN)
+    const cf2 = await cacheFile(n);
+    if (cf2) keepBlock(cf2, n, bi, b);
     memPut(key, b);
     return b;
   })();

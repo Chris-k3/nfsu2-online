@@ -133,10 +133,14 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
 - **Files:** WASI preview1 calls go to the I/O worker over per-thread RPC slots (SAB + `Atomics.wait`). Results are
   written straight into wasm memory. Mounts:
   - `/data`: the install folder. Manifest from the server, case-insensitive lookup, 1 MiB blocks, memory LRU,
-    persistent OPFS block cache (`web/src/host/datacache.ts`). Blocks come from the server's `/data-blocks/` (named by
-    the manifest: `/data-blocks/v2/`): runs of up to 8 blocks as one answer, compressed with zstd, br or gzip as
-    Content-Encoding, which the browser undoes itself; a run whose first 64 KB does not compress goes as it is. One
-    block (all the page asks for) goes to a client that takes br as the server keeps it: compressed once at brotli's
+    persistent OPFS block cache (`web/src/host/datacache.ts`). The memory holds 64 MB while OPFS keeps the blocks (a
+    block reads from OPFS in 0.14 ms in WebKit), 768 MB without it. At most 64 cache files are open at once: each
+    holds two sync access handles, and WebKit gives a page 251 in all (then "Invalid platform file handle", for the
+    save folder's files too); kept open for good, a long free roam used them up in 13 min. Blocks come from the
+    server's `/data-blocks/` (named by the manifest: `/data-blocks/v2/`): runs of up to 8 blocks as one answer,
+    compressed with zstd, br or gzip as Content-Encoding, which the browser undoes itself; a run whose first 64 KB
+    does not compress goes as it is. One block (all the page asks for) goes to a client that takes br as the server
+    keeps it: compressed once at brotli's
     best in its state folder (`web/server-rs/src/app/kept.rs`, threads of its own at the lowest priority that wait
     while the CPU quota is 70 % used, the blocks asked for first, then the manifest's), or as it is where that found
     it does not compress; until it is kept, as
