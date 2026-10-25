@@ -479,7 +479,7 @@ async function startGame() {
       netBack, netQueue, onSaved,
       netId: net ? pageId() : undefined, netRemoved,
       artifacts: q.get('artifacts') ?? undefined, dumpScale: q.get('dumpscale') ? +q.get('dumpscale')! : undefined,
-      toggleFullscreen, padPage: PAD_PAGE, log: logLine, onFatal: stopFatal,
+      toggleFullscreen, padPage: PAD_PAGE, log: logLine, onFatal: stopFatal, onOtherBuild: otherBuild,
     });
   } catch (e) {
     log.add(`[app] the game could not start: ${e}`);
@@ -552,6 +552,26 @@ function stopFatal(what: string, code?: string) {
   if (!s || s.ended) return;
   fatal = { what, code };
   log.add(`[app] ${what}: stopping the game`);
+  s.terminate();
+}
+/** The renderer is of another build than the game module (game.ts onOtherBuild): this page came from offline mode's
+ *  copies (sw.ts) and the module from the server, or from a server swapping its module.  The game is stopped and the
+ *  page loaded again from the server: once a tab and module, while the server answers; else as any renderer that
+ *  did not start. */
+const OTHER_KEY = 'nfsu2-other-build';
+let reloadAtExit = false;
+function otherBuild(why: string) {
+  const s = session, rev = loaded!.info.rev;
+  if (!s || s.ended) return;
+  let again = true;
+  try { again = sessionStorage.getItem(OTHER_KEY) === rev; if (!again) sessionStorage.setItem(OTHER_KEY, rev); } catch { /* no storage: no reload that could repeat */ }
+  if (again || offline) {
+    log.add(`[app] this page is of another build than game ${rev} (${why}), ${offline ? 'and the server does not answer' : 'after a reload for that too'}`);
+    stopFatal(N('the graphics could not start'), 'GPU-RENDERER');
+    return;
+  }
+  log.add(`[app] this page is of another build than game ${rev} (${why}): stopping the game, then the page again from the server`);
+  reloadAtExit = true;
   s.terminate();
 }
 
@@ -650,6 +670,7 @@ function onExit(s: GameSession, code: number) {
   endStage();
   players?.now();
   download.resume();
+  if (reloadAtExit) { reloadAtExit = false; setPhase('boot', T('Loading'), T('Loading the game.')); void reloadFromServer(); return; }
   $('#log-btn').hidden = false;
   // a crash, or a game stopped for want of a subsystem: where to send the log (not a normal close or a Stop)
   $('#report').hidden = !fatal && (code === 0 || code === -1);
@@ -1170,6 +1191,13 @@ function showNewer() {
 async function reload() {
   await saves.settled();              // a rename or restore the Saves section is writing ends first
   await swOnline();
+  location.reload();
+}
+/** A reload offline mode's copies do not answer (otherBuild): the service worker goes first.  The page registers it
+ *  again once the module has loaded, and its install takes new copies from the server. */
+async function reloadFromServer() {
+  await saves.settled();
+  try { await (await navigator.serviceWorker?.getRegistration())?.unregister(); } catch { /* none, or not here */ }
   location.reload();
 }
 /** Offline mode's copies answer first for a while after the server did not (sw.ts); it answers now, so the start

@@ -133,6 +133,9 @@ export function texSplit(unpacked: number, astc: number): string {
   const parts = [unpacked ? `${MB(unpacked)} unpacked from DXT` : '', astc ? `${MB(astc)} DXT1 as ASTC` : ''].filter(Boolean);
   return parts.length ? ` (${parts.join(', ')})` : '';
 }
+/** The game's control block has another layout than this renderer's (gpu_proto.h GW_LAYOUT): the page and the game
+ *  module are of different builds (the page from offline mode's copies, sw.ts, the module from the server) */
+export class OtherBuild extends Error {}
 /** WebGPU calls that failed this many times in a row (one try per frame, a second at 60 fps): the device is gone */
 const LOST_AFTER = 60;
 /** an exception for the log: Safari's stack has no line with the message, Chrome's starts with it */
@@ -206,8 +209,10 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
   const cw = reg.ptr >> 2;
   {
     const u = u32();
-    if (u[cw + C.magic] !== P.GW_MAGIC || u[cw + C.layout] !== P.LAYOUT)
-      giveUp(new Error(`GPU control block mismatch: magic ${u[cw + C.magic].toString(16)} layout ${u[cw + C.layout].toString(16)} (page ${P.LAYOUT.toString(16)})`));
+    if (u[cw + C.magic] !== P.GW_MAGIC || u[cw + C.layout] !== P.LAYOUT) {
+      const what = `GPU control block mismatch: magic ${u[cw + C.magic].toString(16)} layout ${u[cw + C.layout].toString(16)} (page ${P.LAYOUT.toString(16)})`;
+      giveUp(u[cw + C.magic] === P.GW_MAGIC ? new OtherBuild(what) : new Error(what));
+    }
     // one renderer per control block, ever: a second one (or one after a detach) would
     // not have the textures and shaders queued before it.  The game marks the block
     // detached itself when it stopped waiting for a renderer (30 s, gpu_web.c)
