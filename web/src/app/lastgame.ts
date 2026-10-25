@@ -2,7 +2,9 @@
 // the game plays or soon after it went to the background) without any event, and the log (logs.ts) goes with it, just
 // when a player would send it.  So while a game runs the page keeps a short copy (LogRing.snapshot) in localStorage:
 // every 10 s when the log grew, at once when the page is hidden or shown, and with the game's end.  The next page finds
-// a game that never got to its end and offers that copy with Download log (shell.ts).
+// a game that never got to its end and offers that copy with Download log (shell.ts).  Each copy also notes what the
+// game held then (its textures, friends' cars): Safari gives the page no memory figure, and the renderer's line comes
+// only once a minute.
 import type { LogRing } from './logs';
 
 export interface LastGame {
@@ -14,6 +16,8 @@ export interface LastGame {
   /** how it ended: the exit code and why ('exit', a stop's code, 'page closed'); null: it did not get to an end */
   ended: { code: number; why: string } | null;
   log: string;
+  /** what the game held at that copy, "textures 412 MB (380 unpacked from DXT), 19 friends' cars, ..." ('': nothing known) */
+  held?: string;
 }
 
 const KEY = 'nfsu2.lastgame.';
@@ -26,11 +30,13 @@ export class LastGameKeeper {
   private timer: ReturnType<typeof setInterval> | undefined;
   private written = -1;
   private failed = false;
+  private held: () => string = () => '';
   constructor(private save: string, private log: LogRing, private note: (s: string) => void) {}
 
-  /** a game started: a copy now, then every EVERY_MS while the log grows */
-  start(rev: string) {
+  /** a game started: a copy now, then every EVERY_MS while the log grows; held: what the game holds now, for each copy */
+  start(rev: string, held?: () => string) {
     this.rec = { v: 1, started: Date.now(), rev, saved: 0, hidden: document.hidden, ended: null, log: '' };
+    this.held = held ?? (() => '');
     this.write();
     clearInterval(this.timer);
     this.timer = setInterval(() => { if (this.log.added !== this.written) this.write(); }, EVERY_MS);
@@ -52,6 +58,8 @@ export class LastGameKeeper {
   private write() {
     const r = this.rec!;
     r.saved = Date.now(); r.log = this.log.snapshot(BUDGET); this.written = this.log.added;
+    // the copy at the end may come after the renderer went: the last figures seen then
+    try { r.held = this.held() || r.held || ''; } catch { /* the last ones */ }
     try { localStorage.setItem(KEY + this.save, JSON.stringify(r)); }
     catch (e) {
       // storage off or full: the log stays in memory as before
@@ -84,5 +92,6 @@ export function lastGameLine(r: LastGame): string {
     ? `ended without the page closing it, ${r.hidden ? 'the page hidden (in the background)' : 'the page on screen'} at its last copy: the browser stopped the page (an iPhone mostly for memory), or the browser or device restarted`
     : r.ended.why === 'page closed' ? `was running when the page was closed or reloaded`
       : `stopped (${r.ended.why}, code ${r.ended.code}), and the page was reloaded since`;
-  return `[app] the last game (game ${r.rev}, started ${at(r.started)}, last copy ${at(r.saved)}, ${mins} min in) ${what}; its log is at the start of this file`;
+  const held = typeof r.held === 'string' && r.held ? `; at that copy it held ${r.held}` : '';
+  return `[app] the last game (game ${r.rev}, started ${at(r.started)}, last copy ${at(r.saved)}, ${mins} min in) ${what}${held}; its log is at the start of this file`;
 }

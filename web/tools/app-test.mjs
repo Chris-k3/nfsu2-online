@@ -42,7 +42,8 @@
 //             points to #bug-reports on Discord
 //   gpulost   every WebGPU call failing in the middle of a game, as in Safari once its graphics process went away
 //             (createCommandEncoder throws, device.lost never comes): the game is stopped with GPU-LOST instead of a
-//             frozen picture, the page says Play reloads it, and Play does reload it (then plays)
+//             frozen picture, the page says Play reloads it, and Play does reload it (then plays); the reloaded
+//             page's line on the last game says what it held at its last copy (its textures)
 //   crash     a trap (exit 134): "Stopped" with the error code, the trap in the log, the pointer to
 //             #bug-reports on Discord; a normal close after it takes the pointer away
 //   leak     three Play -> Stop rounds with sound on in one tab (the second with free roam on, so
@@ -829,12 +830,15 @@ try {
     r.reloaded = await nav;
     if (r.reloaded) {
       await waitPhase(p, ['ready', 'error'], 60000);
-      r.logAfter = (await p.evaluate(() => window.__nfsu2.log.tail(50))).some(l => /the last game lost its graphics/.test(l));
+      const after = await p.evaluate(() => window.__nfsu2.log.tail(50));
+      r.logAfter = after.some(l => /the last game lost its graphics/.test(l));
+      // the line on the last game says what it held at its last copy (lastgame.ts): the textures, at least
+      r.held = after.find(l => /^\[app\] the last game .*; at that copy it held textures [1-9]\d* MB/.test(l)) ?? null;
       await p.click('#play');
       r.playsAgain = await waitPhase(p, ['playing'], 60000).then(() => true, () => false);
     }
     report('gpulost', r.phase === 'exited' && r.headline === 'Stopped' && r.failed >= 1 && r.gone && r.stopped &&
-      /the graphics stopped working\. Play reloads this page/.test(r.sub) && r.bugReport && r.reloaded && !r.logAfter && r.playsAgain, r);
+      /the graphics stopped working\. Play reloads this page/.test(r.sub) && r.bugReport && r.reloaded && !r.logAfter && !!r.held && r.playsAgain, r);
     await c2.close();
   }
 

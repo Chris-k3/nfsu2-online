@@ -490,7 +490,7 @@ async function startGame() {
     return;
   }
   setPhase('playing', T('Playing'), () => '');
-  keeper.start(loaded!.info.rev);
+  keeper.start(loaded!.info.rev, gameHeld);
   $('#lastgame').hidden = true;           // about the game before this one
   document.body.dataset.phase = 'playing';
   away = new AwayCheck(session, awayLimits(), awayLine, logLine);
@@ -1028,6 +1028,15 @@ async function downloadLog() {
   // the last game's copy first, when that game did not get to its end (lastgame.ts)
   const prev = lastGame ? `=== the last game's log, as the page kept it while it ran ===\n${lastGame.log}=== this page's log ===\n` : '';
   downloadBlob(prev + log.text(), `nfsu2-${stamp()}.log`, 'text/plain');
+}
+/** what the running game holds now, for each copy of its log (lastgame.ts): what fills a phone's memory as it plays */
+function gameHeld(): string {
+  const parts: string[] = [];
+  const tx = session?.renderer?.textures?.(), MB = (b: number) => (b / 1048576).toFixed(0);
+  if (tx) parts.push(`textures ${MB(tx.bytes)} MB${tx.unpacked ? ` (${MB(tx.unpacked)} unpacked from DXT)` : ''}`);
+  const st = session?.status?.read(), cars = st?.get('roam_cars') ?? 0, friends = st?.get('roam_friends') ?? 0;
+  if (cars || friends) parts.push(`${cars} friends' cars in the game, ${friends} friends connected`);
+  return parts.join(', ');
 }
 
 // --------------------------------------------------------- game module --

@@ -80,6 +80,8 @@ export interface RendererStats {
   slotWaits: number; slotWaitMsMax: number; pokes: number;
   /** frames drawn over unseen: submitted after another one between the same two rendering updates (rAF) */
   unshown: number;
+  /** the game's textures on the GPU now, bytes: all of them, and those unpacked from DXT (no texture-compression-bc) */
+  texBytes: number; unpackBytes: number;
 }
 
 /** Per-frame distributions since the last reset (the perf benchmark's race window). */
@@ -602,7 +604,8 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
       pipelineMs: enc.pipeMs, pipelineMsMax: enc.pipeMsMax, gpuMsAvg: gpuMsN ? gpuMsTotal / gpuMsN : 0, gpuMsMax,
       encodeMsAvg: frames ? encMsTotal / frames : 0, encodeMsLast: encMsLast, drawsLast, passesLast, rafHz, inFlight,
       dumps: u32()[cw + C.dumpsDone], missingTarget: enc.missingTarget, conflicts: enc.conflicts, zMismatch: enc.zMismatch, noVs: enc.noVs,
-      direct: directFrames, screenReadFirst: enc.screenReadFirst, slotWaits, slotWaitMsMax, pokes, unshown }),
+      direct: directFrames, screenReadFirst: enc.screenReadFirst, slotWaits, slotWaitMsMax, pokes, unshown,
+      texBytes: enc.texBytes, unpackBytes: enc.unpackBytes }),
     window: (reset = false) => {
       const pct = (a: number[]) => {
         if (!a.length) return [];

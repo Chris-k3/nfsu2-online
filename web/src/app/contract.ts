@@ -88,6 +88,8 @@ export interface RendererSubsystem extends Subsystem {
   dump?(name: string): Promise<Blob>;
   /** each frame's time from its submit until the GPU had done it, ms, since the last call (rendercheck.ts) */
   doneMs?(): number[];
+  /** the game's textures on the GPU now, bytes, and those unpacked from DXT (the log's copy, lastgame.ts) */
+  textures?(): { bytes: number; unpacked: number };
 }
 
 export interface AudioSubsystem extends Subsystem {

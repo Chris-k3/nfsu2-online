@@ -241,7 +241,10 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
   (`LogRing.snapshot`, 160 KB at most: the opening lines, the game's session lines, the newest lines) in localStorage
   every 10 s while it grows, when the page is hidden or shown, and at the end. A page that finds a game that did not get
   to its end (or one stopped for a reason, GPU-LOST say, before a reload) says so on the start page and puts that log
-  first in Download log, with a line on how it ended (the page on screen or hidden at its last copy). A game the player
+  first in Download log, with a line on how it ended (the page on screen or hidden at its last copy) and what the game
+  held at that copy: the textures' MB (and those unpacked from DXT) and, in free roam, the friends' cars in the game
+  and the friends connected (the status table's `roam_cars` and `roam_friends`, `runtime/web/status_web.c`). Safari
+  gives the page no memory figure, and the first kept iPhone kill came between two renderer lines. A game the player
   left by reloading or closing the page (`pagehide`) is offered as well (a frozen game, reloaded), with a quiet line and
   no call for a bug report (`lastGameEnd`). Tested by killing WebKit's web content process during a game (`kill -9`,
   as Safari's memory limit does).

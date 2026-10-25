@@ -18,13 +18,35 @@ globalThis.localStorage = { getItem: k => store.get(k) ?? null, setItem: (k, v) 
 globalThis.document = { hidden: false };
 beforeEach(() => { store.clear(); full = false; document.hidden = false; });
 
-function game() {
+function game(held) {
   const log = new LogRing(1 << 20, false), notes = [];
   log.keep('=== NFSU2 web, a game ==='); log.add('[4!] [status] f=3600 t=60.0s fps=60.0');
   const k = new LastGameKeeper('save', log, s => notes.push(s));
-  k.start('abc1234');
+  k.start('abc1234', held);
   return { log, k, notes };
 }
+
+test('each copy notes what the game held then, and the line says it', () => {
+  let held = 'textures 230 MB (201 unpacked from DXT)';
+  const { k } = game(() => held);
+  clearInterval(k.timer);
+  assert.match(lastGameLine(lastGameToOffer('save')), /\) ended without the page closing it, .*; at that copy it held textures 230 MB \(201 unpacked from DXT\); its log is at the start of this file$/);
+  held = "textures 412 MB (380 unpacked from DXT), 19 friends' cars in the game, 34 friends connected";
+  k.hidden(true);
+  assert.match(lastGameLine(lastGameToOffer('save')), /at that copy it held textures 412 MB \(380 unpacked from DXT\), 19 friends' cars in the game, 34 friends connected;/);
+});
+
+test('nothing known, a held() that throws, and an older copy without it: the line as before', () => {
+  for (const held of [undefined, () => '', () => { throw new Error('renderer gone'); }]) {
+    store.clear();
+    const { k } = game(held);
+    clearInterval(k.timer);
+    const r = lastGameToOffer('save');
+    assert.doesNotMatch(lastGameLine(r), /it held/);
+    delete r.held;
+    assert.match(lastGameLine(r), /the page on screen at its last copy: [^;]*; its log is at the start of this file$/);
+  }
+});
 
 test('a game the page did not end is offered, with its log as it was last copied', () => {
   const { log, k } = game();

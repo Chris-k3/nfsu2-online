@@ -6265,6 +6265,14 @@ int roam_game_friends(void){
     roam_plat_unlock();
     return n;
 }
+/* status_web.c, on the guest thread: friends' cars the game holds now, being
+ * made, loading, shown or parked (a parked one keeps its ride) */
+int roam_game_cars(void){
+    if (!O.on) return 0;
+    int n = 0;
+    for (int k = 0; k < NSLOT; k++) n += g_sl[k].st != SL_FREE;
+    return n;
+}
 /* headlights.c, on the guest thread: is this a friend's car being shown? */
 int roam_game_friend_car(uint32_t car){
     if (!O.on || !car) return 0;

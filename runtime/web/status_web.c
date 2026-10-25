@@ -129,6 +129,18 @@ static int pause_state(void){
     const char *top = autotest_top_fng();
     return top && !strcasecmp(top, "UI_Pause.fng");
 }
+/* "roam_cars", "roam_friends": friends' cars the game holds and friends
+ * connected in free roam (roam_game.c), for the page's copy of the log
+ * (web/src/app/lastgame.ts): what a phone held when Safari stopped the page.
+ * The friends take the session lock, so every 30th frame. */
+int roam_game_cars(void); int roam_game_friends(void);
+static void roam_state(void){
+    static int slot[2] = { -2, -2 }, n;
+    static double last[2] = { -1, -1 };
+    if (slot[0] == -2){ slot[0] = host_status_slot("roam_cars"); slot[1] = host_status_slot("roam_friends"); }
+    double v[2] = { (double)roam_game_cars(), n++ % 30 ? last[1] : (double)roam_game_friends() };
+    if (v[0] != last[0] || v[1] != last[1]){ last[0] = v[0]; last[1] = v[1]; host_status_set_n(slot, v, 2); }
+}
 void status_web_frame(void){
     static int slot = -2, last = -1, rslot = -2, rlast = -1, pslot = -2, plast = -1;
     if (slot == -2){ slot = host_status_slot("drive"); rslot = host_status_slot("rate"); pslot = host_status_slot("pause"); }
@@ -138,6 +150,7 @@ void status_web_frame(void){
     if (r != rlast && rslot >= 0){ rlast = r; host_status_set(rslot, r); }
     int p = pause_state();
     if (p != plast && pslot >= 0){ plast = p; host_status_set(pslot, p); }
+    roam_state();
 }
 
 /* main_web.c, before the guest starts */
