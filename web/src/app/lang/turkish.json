@@ -841,5 +841,11 @@
   "Orbit or free": "Yörünge ya da serbest",
   "Wheel": "Tekerlek",
   "Hide the panel": "Paneli gizle",
-  "Photo mode while you drive, F12 again for the photo (shown in Saves)": "Sürerken fotoğraf modu, fotoğraf için yeniden F12 (Kayıtlar'da gösterilir)"
+  "Photo mode while you drive, F12 again for the photo (shown in Saves)": "Sürerken fotoğraf modu, fotoğraf için yeniden F12 (Kayıtlar'da gösterilir)",
+  "Radio: {mode}": "Radyo: {mode}",
+  "Music folder": "Müzik klasörü",
+  "All": "Tümü",
+  "Playlist": "Çalma listesi",
+  "No music yet: pick a folder first.": "Henüz müzik yok: önce bir klasör seç.",
+  "Shuffle": "Karıştır"
 }
