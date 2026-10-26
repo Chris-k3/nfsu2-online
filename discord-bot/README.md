@@ -36,6 +36,15 @@ and it says something only when it is worth it:
   people translate it, and a thread's language is kept too, so later translations in it send no other messages
   along. At most 30 new translations a person an hour.
 
+- **Forum tags**: each look adds the forum's tags that say what the thread is about, at most two (the problem, and the
+  device when it is a phone or tablet), picked from the forum's tags but the four below, the moderated ones and
+  Complete and Denied. Four it keeps itself, by name, in a forum that has them: **Needs info** while its last reply
+  asked the poster for something, **Dev aware** once the developer has the report, **Fix live** once it told the thread
+  that a fix went live, and **Solved** when the poster says the problem is gone (a message of theirs that passes a word
+  filter, then one short Haiku call over the end of the thread; also in threads staff answered). It takes off only its
+  own Needs info and Fix live: the poster's and staff's tags stay. It needs Manage Threads in the forums (Set up, step
+  3); nothing in a dry run (the log says what it would set).
+
 Otherwise it says nothing. It reads every channel it can see, but posts only in forum threads, those replies in the
 general channels, and the staff channel. It
 stays out of a thread once staff wrote in it (the server owner, `BOT_STAFF`, anyone who can manage threads), and replies
@@ -73,6 +82,7 @@ something to say, until the bot has replied `BOT_MAX_TALK` times (6) in the thre
   `state/threads.json`, and looks at the ones opened in that time that it never looked at, so a restart misses no post.
 - `general.mjs`: the general channels: the replies that point to the forums, the spike alerts and the daily note.
 - `translate.mjs`: the Translate command. The bot registers it at start; the `bot` scope of the invite covers it.
+- `tags.mjs`: the forum tags. A look's verdict names the tags it picked from "Tags you may add" in the thread's text.
 - `eval.mjs`: the bot against past threads (below).
 
 `docker compose logs -f` shows each step as it happens: when a post is seen and when its look is due, what the look
@@ -96,8 +106,14 @@ the tools used, the tokens and the cost.
 2. **Staff channel.** Make a private channel for staff. In its permissions, add the bot with View Channel, Send
    Messages, Attach Files, Read Message History, Create Public Threads and Send Messages in Threads. Turn on Developer Mode (User Settings, Advanced), right-click the
    channel, Copy Channel ID.
-3. **Claude.** Create an API key at https://console.anthropic.com, and set a monthly spend limit there.
-4. **`.env`**:
+3. **Forum tags.** In each forum's permissions, add the bot with Manage Threads: only the poster and those who can
+   manage threads can set a post's tags. Without it the bot says so once in the log and goes on without tags. It
+   picks from the tags each forum has, so a new tag needs nothing else; name its own four exactly Needs info, Dev
+   aware, Fix live and Solved (any letter case). Tags players should not set themselves (Needs info, Dev aware, Fix
+   live, Complete, Denied): "Only allow moderators to apply this tag" in the forum's tag settings. The bot never picks
+   a moderated tag, its own four aside.
+4. **Claude.** Create an API key at https://console.anthropic.com, and set a monthly spend limit there.
+5. **`.env`**:
 
    ```sh
    DISCORD_TOKEN=...
@@ -164,7 +180,7 @@ Run it with `BOT_DRY_RUN=1` for a day. Every reply it would have posted goes to 
 | Variable | Default | |
 |---|---|---|
 | `BOT_STAFF_CHANNEL` | | the staff channel's id; without it, reports for the developer are only in `verdicts.jsonl` |
-| `BOT_DRY_RUN` | off | `1`: post nothing in the forums or the general channels; forum replies go to the staff channel, general-channel ones only to the log and the daily note |
+| `BOT_DRY_RUN` | off | `1`: post nothing in the forums or the general channels, and set no tags; forum replies go to the staff channel, general-channel ones only to the log and the daily note |
 | `BOT_FORUMS` | every forum | forum channel ids to answer in |
 | `BOT_STAFF` | | user or role ids of staff, besides the owner and anyone who can manage threads |
 | `BOT_MODEL` | `claude-sonnet-5-5` | |

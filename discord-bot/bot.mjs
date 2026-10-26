@@ -16,6 +16,7 @@ import { matchFixes } from './fixes.mjs';
 import { General } from './general.mjs';
 import { blocks, investigate, newClient, picture, vet } from './investigate.mjs';
 import { Repo, defaultSource } from './repo.mjs';
+import { Tags } from './tags.mjs';
 import { COMMAND as TRANSLATE, Translator } from './translate.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -97,6 +98,7 @@ function isStaff(member, channel) {
 }
 
 const translator = new Translator({ client, anthropic, state: CFG.state });   // Apps, Translate on a message
+const tags = new Tags({ client, anthropic, isStaff, dryRun: CFG.dryRun });       // forum tags (tags.mjs)
 
 // the general channels (general.mjs): nudges to the forums, spikes and a daily digest for the staff
 const general = new General({
@@ -235,6 +237,7 @@ async function look(threadId, why, extra) {
   if (fix) {                                     // a fix notice changes nothing else about the thread
     st.fixChecked = extra.rev;
     if (post) st.fixed = extra.rev;
+    if (post) await tags.add(thread, 'fixLive').catch(e => console.error(`[tags] ${threadId}: ${e.message}`));
     if (post && CFG.staffChannel && st.staffMsg) {
       const staff = await client.channels.fetch(CFG.staffChannel).catch(() => null);
       const th = staff && await reportThread(staff, threads[st.reportOf] ?? st);
@@ -255,6 +258,7 @@ async function look(threadId, why, extra) {
     st.status = !v ? 'failed' : post ? (v.action === 'ask' ? 'asked' : 'answered') : st.status === 'asked' ? 'asked-none' : 'none';
   }
   if (v && CFG.staffChannel) await tellStaff(thread, st, v, post, [workDir, staffDir], posted).catch(e => console.error(`[bot] staff channel: ${e.message}`));
+  if (v) await tags.afterLook(thread, st, v, post).catch(e => console.error(`[tags] ${threadId}: ${e.message}`));
   save();
   fs.appendFileSync(VERDICTS, JSON.stringify({
     at: new Date().toISOString(), thread: threadId, title: st.title, why, outcome, dryRun: CFG.dryRun, post,
@@ -266,8 +270,10 @@ async function look(threadId, why, extra) {
 /** the thread as the model reads it: text attachments saved to workDir (whatever their name: a chrome://gpu report
  *  comes as .txt.phps, a long paste as message.txt), save backups to staffDir for the staff report, images inlined */
 async function transcript(thread, msgs, workDir, staffDir, why, extra) {
-  const tags = (thread.appliedTags ?? []).map(id => thread.parent.availableTags?.find(t => t.id === id)?.name).filter(Boolean);
-  const lines = [`Forum: #${thread.parent.name}`, `Title: ${thread.name}`, `Tags: ${tags.join(', ') || 'none'}`,
+  const applied = (thread.appliedTags ?? []).map(id => thread.parent.availableTags?.find(t => t.id === id)?.name).filter(Boolean);
+  const topics = Tags.of(thread.parent).topics.map(t => t.name);
+  const lines = [`Forum: #${thread.parent.name}`, `Title: ${thread.name}`, `Tags: ${applied.join(', ') || 'none'}`,
+    ...(topics.length ? [`Tags you may add: ${topics.join(', ')}`] : []),
     `Why the bot looks now: ${WHY[why] ?? why}`, ...(extra?.text ? [extra.text] : []), ''];
   const images = [];
   let n = 0;
@@ -410,6 +416,8 @@ async function tellStaff(thread, st, v, post, dirs, posted) {
     Object.assign(root, { staffMsg: m.id, staffThread: th?.id, reportOf: thread.id });
     st.reports = 2;
     await countReports(staff, st);
+    const rt = await client.channels.fetch(rootId).catch(() => null);
+    if (rt) await tags.add(rt, 'aware').catch(e => console.error(`[tags] ${rootId}: ${e.message}`));
   }
 }
 
@@ -615,6 +623,7 @@ client.on(Events.MessageCreate, guard('message', m => {
   const st = threads[thread.id];
   if (!st) return;
   st.active = m.createdAt.toISOString();
+  tags.onMessage(m);                             // the poster saying it works now: Solved
   if (st.staffMsg && CFG.staffChannel && m.attachments.size && !isStaff(m.member, thread)) {
     relay(m, st).catch(e => console.error(`[bot] relay to the report: ${e.message}`));
   }

@@ -1,6 +1,7 @@
 // The bot against past threads: each case goes through a look as a new post would (investigate.mjs, vet), with the
 // earlier cases as the forum's threads, and the report puts the bot's verdict beside what staff or members answered.
 //   node --env-file=.env eval.mjs <cases.json> [--limit 20] [--only id,id] [--staff] [--forum bug-reports] [--budget 5]
+//     [--tags "Crash,WebGPU error,Bug"]  (the tags a look may add, as the forum would list them)
 // cases.json: [{ id, forum, title, posts: [{ at, text, files: [paths relative to cases.json, or "missing:name"] }],
 // reference }] (made from a Discord export; it stays out of the repository: it holds players' posts and logs).
 // The report goes next to cases.json as eval-<time>.md.
@@ -16,6 +17,7 @@ const opt = (name, dflt) => { const i = args.indexOf(name); return i < 0 ? dflt 
 const flag = name => { const i = args.indexOf(name); return i >= 0 && !!args.splice(i, 1); };
 const limit = Number(opt('--limit', 20)), only = opt('--only', ''), forum = opt('--forum', ''), budget = Number(opt('--budget', 5));
 const staffOnly = flag('--staff');
+const topics = opt('--tags', '').split(',').map(t => t.trim()).filter(Boolean);
 const file = args[0];
 if (!file) { console.error('usage: eval.mjs <cases.json> [--limit N] [--only id,id] [--staff] [--forum F] [--budget USD]'); process.exit(2); }
 
@@ -46,7 +48,8 @@ let spent = 0;
 for (const c of cases) {
   if (spent >= budget) { report.push(`Stopped at the budget ($${budget}).`); break; }
   const workDir = fs.mkdtempSync(path.join(state, 'eval-'));
-  const lines = [`Forum: #${c.forum}`, `Title: ${c.title}`, 'Tags: none', 'Why the bot looks now: a new post', ''];
+  const lines = [`Forum: #${c.forum}`, `Title: ${c.title}`, 'Tags: none',
+    ...(topics.length ? [`Tags you may add: ${topics.join(', ')}`] : []), 'Why the bot looks now: a new post', ''];
   const images = [];
   let n = 0;
   for (const p of c.posts) {
@@ -88,6 +91,7 @@ for (const c of cases) {
     `${c.posts.some(p => p.files.length) ? ` [${c.posts.flatMap(p => p.files).map(f => path.basename(f).replace(/^missing:/, '')).join(', ')}]` : ''}`,
     `**Then:** ${c.reference.replace(/\s+/g, ' ')}`,
     `**Bot:** ${key}, ${v?.confidence ?? '-'} confidence${v?.duplicate_of ? `, same as ${v.duplicate_of}` : ''} (${why}); ${v?.summary ?? res.log.at(-1) ?? ''}`,
+    ...(topics.length ? [`**Tags:** ${v?.tags?.join(', ') || 'none'}`] : []),
     ...(post ? ['', post.split('\n').map(l => `> ${l}`).join('\n')] : []),
     ...(v?.escalate && v.notes ? ['', '**Staff note:**', '', v.notes] : []),
     '', `-# ${res.turns} turns, $${(res.cost ?? 0).toFixed(3)}`, '');

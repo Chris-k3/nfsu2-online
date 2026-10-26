@@ -1,5 +1,5 @@
 // One look at a made-up forum post, without Discord: what the bot would post, and why.
-//   node --env-file=.env try.mjs [--title T] [--forum F] "the post's text" [attachment ...]
+//   node --env-file=.env try.mjs [--title T] [--forum F] [--tags "Crash,Bug"] "the post's text" [attachment ...]
 // Text attachments are read as the bot reads a thread's; images (.png .jpg .gif .webp) go in as pictures.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -13,8 +13,9 @@ const args = process.argv.slice(2);
 const opt = (name, dflt) => { const i = args.indexOf(name); return i < 0 ? dflt : args.splice(i, 2)[1]; };
 const title = opt('--title', 'Bug');
 const forum = opt('--forum', 'bug-reports');
+const topics = opt('--tags', '');                // the forum's tags a look may add (bot.mjs: Tags.of(forum).topics)
 const [text, ...files] = args;
-if (!text) { console.error('usage: try.mjs [--title T] [--forum F] "post text" [attachment ...]'); process.exit(2); }
+if (!text) { console.error('usage: try.mjs [--title T] [--forum F] [--tags "A,B"] "post text" [attachment ...]'); process.exit(2); }
 
 const env = process.env;
 const state = path.resolve(HERE, env.BOT_STATE || 'state');
@@ -29,7 +30,8 @@ fs.mkdirSync(state, { recursive: true });
 const workDir = fs.mkdtempSync(path.join(state, 'try-'));
 
 const TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' };
-const lines = [`Forum: #${forum}`, `Title: ${title}`, 'Tags: none', 'Why the bot looks now: a new post', '',
+const lines = [`Forum: #${forum}`, `Title: ${title}`, 'Tags: none',
+  ...(topics ? [`Tags you may add: ${topics.split(',').map(t => t.trim()).join(', ')}`] : []), 'Why the bot looks now: a new post', '',
   `[${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC] player (the poster):`, text];
 const images = [];
 for (const [i, f] of files.entries()) {

@@ -14,7 +14,7 @@ const MAX_REPEATS = 2;                           // calls made again word for wo
 
 export const VERDICT = {
   type: 'object', additionalProperties: false,
-  required: ['action', 'category', 'language', 'reply', 'summary', 'notes', 'escalate', 'duplicate_of', 'confidence'],
+  required: ['action', 'category', 'language', 'reply', 'summary', 'notes', 'escalate', 'duplicate_of', 'confidence', 'tags'],
   properties: {
     action: { type: 'string', enum: ['none', 'ask', 'answer'] },
     category: { type: 'string', enum: ['crash', 'graphics', 'performance', 'controls', 'online', 'saves', 'audio', 'phone', 'suggestion', 'question', 'other'] },
@@ -25,6 +25,7 @@ export const VERDICT = {
     escalate: { type: 'boolean', description: 'the developer should look at this' },
     duplicate_of: { type: 'string' },
     confidence: { type: 'string', enum: ['low', 'medium', 'high'] },
+    tags: { type: 'array', items: { type: 'string' }, description: 'names from "Tags you may add" in the thread\'s header; [] for none' },
   },
 };
 
