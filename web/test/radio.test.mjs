@@ -154,9 +154,9 @@ test('the radio goes off on the page when the runtime switched it off, and a sta
   assert.equal(s.w[W.ready_seq], 1);
 });
 
-test('the plaque shows "and" for "&", no artist in the title, lines that fit, ASCII letters, no empty line', () => {
+test('the plaque keeps "&", has no artist in the title, lines that fit, ASCII letters, no empty line', () => {
   assert.deepEqual(plaqueTags({ artist: 'Rook & Vale', title: 'Rook & Vale - Long Way Back Home (Quiet Hours Remix) [LP]', album: 'x' }),
-    { artist: 'Rook and Vale', title: 'Long Way Back Home (Quiet Hours Remix...', album: 'x' });
+    { artist: 'Rook & Vale', title: 'Long Way Back Home (Quiet Hours Remix...', album: 'x' });
   assert.equal(gameText('Щука Zoë Łódź ★'), 'Shchuka Zoe Lodz ?');
   assert.deepEqual(plaqueTags({ artist: '', title: 'Привет', album: '' }, 'Моя'), { artist: 'Unknown artist', title: 'Privet', album: 'Moya' });
 });

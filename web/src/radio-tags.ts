@@ -30,9 +30,9 @@ export function gameText(text: string): string {
   return out;
 }
 
-/** What the game's plaque can show: no artist in the title, "&" as "and" (the game eats it), a line no longer than its own longest. */
+/** What the game's plaque can show: no artist in the title, a line no longer than its own longest ("&" is drawn as it is). */
 export function plaqueTags(tags: Lines, album = 'My music'): Lines {
-  const fit = (s: string) => { const t = gameText(s).replace(/&/g, 'and').replace(/\s+/g, ' ').trim(); return t.length > PLAQUE_CHARS ? t.slice(0, PLAQUE_CHARS - 3).trimEnd() + '...' : t; };
+  const fit = (s: string) => { const t = gameText(s).replace(/\s+/g, ' ').trim(); return t.length > PLAQUE_CHARS ? t.slice(0, PLAQUE_CHARS - 3).trimEnd() + '...' : t; };
   const own = tags.artist + ' - ';
   const title = tags.artist && tags.title.toLowerCase().startsWith(own.toLowerCase()) ? tags.title.slice(own.length) : tags.title;
   return { artist: fit(tags.artist) || 'Unknown artist', title: fit(title), album: fit(tags.album) || fit(album) || 'My music' };
