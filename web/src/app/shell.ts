@@ -35,6 +35,7 @@ import { TouchControls } from './touch';
 import { TextField } from './textentry';
 import { PauseHint } from './pausehint';
 import { DriftPanel } from './drift';
+import { PhotoMode } from './photo';
 import type { PadPage } from '../input/gamepad';
 import type { NetQueue, NetRemoved } from '../net';
 import { checkSetting, HOST_FIXED, pageOnly, resolveEnv, settingsUpgrade, TEMPLATE, type Resolved } from './settings';
@@ -568,6 +569,7 @@ async function startGame() {
   textField.start(session);
   pauseHint.start(session);
   driftPanel.start(session);
+  photo.start(session);
   quickChat.start(session, net && r.env.NFSU2_ROAM === '1' && r.env.NFSU2_ROAM_SAY !== '0');
   fps.memory = session.proc.memory;
   const st = session;
@@ -693,6 +695,7 @@ const PAD_PAGE: PadPage = {
   dialog: () => !!pageDialog(),
   press: padPress,
   stick: (x, y) => quickChat.stick(x, y),
+  capture: (s, pressed) => photo.pad(s, pressed),
 };
 
 let awake: (() => void) | null = null;   // the running game's Wake Lock (display.ts keepScreenOn)
@@ -700,12 +703,14 @@ let touch: TouchControls;                // the controls on the game while a fin
 let textField: TextField;               // the field for a phone's keyboard while the game asks for text (textentry.ts)
 let pauseHint: PauseHint;               // the line to the page's menu under the game's pause menu (pausehint.ts)
 let driftPanel: DriftPanel;             // free roam's drift mode: its score under the game's Bank panel, a note at F2 (drift.ts)
+let photo: PhotoMode;                   // photo mode: F12 in the world, its panel and its keys (photo.ts)
 
 function endStage() {
   touch.stop();
   textField.stop();
   pauseHint.stop();
   driftPanel.stop();
+  photo.stop();
   quickChat.stop();
   awake?.(); awake = null;
   away?.stop(); away = null;
@@ -936,7 +941,8 @@ function toast(msg: string, ms: number) {
   (toast as any).timer = setTimeout(() => { t.hidden = true; }, ms);
 }
 
-/** F12: the next frame the renderer draws, as a PNG beside the saves (Saves on the start page shows it) */
+/** F12 (photo.ts: photo mode's picture, or where it cannot open): the next frame the renderer draws, as a PNG beside the
+ *  saves (Saves on the start page shows it) */
 async function screenshot() {
   const r = session?.renderer;
   if (!r?.dump) { toast(t('No screenshot: the picture is not there yet.'), 2500); return; }
@@ -1385,13 +1391,14 @@ export async function boot() {
 
   // F8 / F9 belong to the page while the game runs (the game binds neither,
   // Chrome reserves neither); caught first, so the game never sees them.  F12
-  // too: the page's screenshot, not the game's (whose copy of the frame comes
-  // out black in this port) nor the browser's developer tools.
+  // too: photo mode in the world, its picture while it is on, else the page's
+  // screenshot (not the game's, whose copy of the frame comes out black in
+  // this port, nor the browser's developer tools).
   window.addEventListener('keydown', e => {
     if (session && (e.code === 'F8' || e.code === 'F9' || e.code === 'F12')) {
       e.preventDefault(); e.stopImmediatePropagation();
       if (e.repeat) return;
-      if (e.code === 'F8') toast(fpsLabel(fps.cycle()), 1500); else if (e.code === 'F9') openMenu(); else void screenshot();
+      if (e.code === 'F8') toast(fpsLabel(fps.cycle()), 1500); else if (e.code === 'F9') openMenu(); else photo.f12();
       return;
     }
     // Enter plays only when nothing else has the focus (or Play itself does): a
@@ -1436,6 +1443,7 @@ export async function boot() {
     fullscreen: () => canFullscreen() || !fromHomeScreen(),
   });
   driftPanel = new DriftPanel($('#stage'), { toast, wide: () => hudWide, log: logLine });
+  photo = new PhotoMode($('#stage'), { shoot: screenshot, screenshot: () => void screenshot(), log: logLine });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { void checkNewer(); vault.shown(); } });
   setInterval(() => { if (document.visibilityState === 'visible') void checkNewer(); }, NEWER_EVERY_MS);
 

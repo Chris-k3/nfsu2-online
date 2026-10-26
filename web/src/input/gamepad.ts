@@ -174,6 +174,9 @@ export interface PadPage {
   /** the right stick (x, y: -1..1, +y down) each time the controller is read while no dialog is open (quick chat's
    *  picker); true: the page uses it now, the game gets it at rest */
   stick?(x: number, y: number): boolean;
+  /** the whole controller each time it is read while no dialog is open (photo mode: runtime/photo.c), with the
+   *  buttons pressed since the last read; true: the page has it now, the game gets it at rest */
+  capture?(s: PadSnapshot, pressed: number): boolean;
 }
 
 /** the touch controls' share of the pad (web/src/app/touch.ts): PAD_* button bits and the left stick's x */
@@ -390,6 +393,10 @@ export class PadPoller {
     const tap = now < this.tapUntil ? this.tap : 0;
     const dirs = stickDirs(s.axes[PAD_AXIS_LX], s.axes[PAD_AXIS_LY], this.stick), turned = dirs & ~this.stick;
     this.stick = dirs;
+    if (!page.dialog() && !menu && page.capture?.(s, pressed)) {
+      this.held = s.buttons;
+      return { ...s, buttons: 0, axes: [0, 0, 0, 0, 0, 0] };
+    }
     if (!page.dialog()) {
       this.held &= s.buttons;
       const buttons = (s.buttons & ~this.held & ~wait) | tap;

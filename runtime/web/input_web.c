@@ -464,6 +464,7 @@ static void lifecycle_poll(void){
  * focus still are: nothing stays held) */
 int mprace_owns_input(void);
 void sms_request(int id);
+void photo_input(int cmd, int a, int b);                 /* photo.c */
 static int g_muted;
 static void handle(const InEv *e){
     int mute = mprace_owns_input();
@@ -503,6 +504,7 @@ static void handle(const InEv *e){
         break;
     case IEV_LOG: watchdog_log_download(); break;
     case IEV_SMS: sms_request(e->a); break;
+    case IEV_PHOTO: photo_input(e->dik, e->a, e->b); break;
     default: break;
     }
 }

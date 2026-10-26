@@ -61,6 +61,7 @@ export const IEV_QUIT = 10;
 export const IEV_TEXT = 11;
 export const IEV_LOG = 12;
 export const IEV_SMS = 13;
+export const IEV_PHOTO = 14;
 
 export const IKF_REPEAT = 1;
 export const IKF_ALT = 2;
