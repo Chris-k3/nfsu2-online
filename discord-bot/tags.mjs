@@ -3,10 +3,11 @@
 //   Needs info   while its last reply in the thread asked the poster for something;
 //   Dev aware    once the developer has the report (the staff channel);
 //   Fix live     once it told the thread that a fix went live;
+//   Complete     once it told a suggestion's thread that a release added what it asks for;
 //   Solved       when the poster says the problem is gone: a message of theirs that passes a local word filter, then
 //                one short Haiku call over the end of the thread.
-// It only adds, except its own Needs info and Fix live; the poster's and staff's tags stay.  Moderated tags and a
-// suggestion's verdict (Complete, Denied) are staff's: never a topic.  Tags on someone else's post take Manage Threads
+// It only adds, except its own Needs info and Fix live; the poster's and staff's tags stay.  Moderated tags and Denied
+// are staff's: never a topic.  Tags on someone else's post take Manage Threads
 // in the forum; without it the bot says so once and goes on without.  Nothing in a dry run (logged).
 import { PermissionFlagsBits } from 'discord.js';
 
@@ -14,8 +15,8 @@ const MODEL = 'claude-haiku-5-5';                // "is it solved?" on a few sho
 const MAX_TAGS = 5;                              // Discord's limit a thread
 const MAX_TOPICS = 2;
 const SOLVED_WAIT_MS = 2 * 60_000;               // the poster may add "oh wait, no"
-export const OWN = { info: 'needs info', aware: 'dev aware', fixLive: 'fix live', solved: 'solved' };
-const STAFF_ONLY = ['complete', 'denied'];       // the developer's verdicts on suggestions
+export const OWN = { info: 'needs info', aware: 'dev aware', fixLive: 'fix live', solved: 'solved', complete: 'complete' };
+const STAFF_ONLY = ['denied'];                   // the developer's no to a suggestion
 const key = name => name.trim().toLowerCase().replace(/\s+/g, ' ');
 
 // the poster saying it works now (or that it does not: the model sorts that out), in the server's languages
@@ -42,6 +43,12 @@ export class Tags {
     for (const [k, name] of Object.entries(OWN)) { const t = all.find(t => key(t.name) === name); if (t) own[k] = t.id; }
     const names = [...Object.values(OWN), ...STAFF_ONLY];
     return { own, topics: all.filter(t => !t.moderated && !names.includes(key(t.name))) };
+  }
+
+  /** a suggestion that is decided: tagged Complete or Denied */
+  static decided(thread) {
+    const names = (thread.appliedTags ?? []).map(id => key(thread.parent?.availableTags?.find(t => t.id === id)?.name ?? ''));
+    return names.includes(OWN.complete) || names.some(n => STAFF_ONLY.includes(n));
   }
 
   /** adds (in this order, up to Discord's 5) and removes tags (ids) on a thread; no call when nothing changes */

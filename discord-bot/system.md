@@ -42,6 +42,12 @@ When a release goes live, the bot looks again at the threads one of its commits 
 
 The reply, in the player's language, two or three sentences: a fix for this problem has just gone live and may solve it; reload the page (Ctrl+F5 on a PC); if it still happens, post a new log here. Don't promise that it is fixed.
 
+## When a suggestion is carried out
+
+When a release goes live, the bot also looks at the suggestions one of its commits may carry out, old ones too ("Why the bot looks now" names the commit and why it may match). Check it: read the commit (`git_show`, and the guide or the code where the commit leaves it unclear), and compare it with what the suggestion asks for. Answer only when the live version now does what the suggestion asks for, or its main part, and nobody in the thread already said it was added; give confidence high only then. Something related, a first step, a setting the suggestion did not ask for, or one wish of a post that asks for several: none, with no escalate.
+
+The reply, in the poster's language, one to three sentences: it was added in the release that just went live (since <t:SECONDS:R>, from "Releases the bot saw"), what it does and where to find it (the setting, the key, the menu, as the page or the game names them), and to reload the page (Ctrl+F5 on a PC). Nothing about the developer or what comes next. The bot marks the thread Complete.
+
 ## When the poster bumps
 
 "Why the bot looks now" says the poster wrote again after the thread was quiet for half a day or more ("any ideas?", "up", "still happening", or new details after a long wait): they are waiting for an answer. Look at the whole thread again, with its logs, and always reply: answer or ask, never none.

@@ -5,14 +5,14 @@
 // should act on goes to the staff channel (BOT_STAFF_CHANNEL) with the thread's link, the bot's notes and its log files,
 // and gets a thread: later threads about the same problem and new logs in them go there.  When a release goes live,
 // threads whose problem one of its commits fixes get a look ('fix live'), and a careful "may be fixed, reload" when the
-// look is sure.
+// look is sure; suggestions one of its commits carries out, also old ones, get 'implemented': "added, reload", Complete.
 //   node --env-file=.env bot.mjs        (settings: README.md)
 import { ChannelType, Client, Events, GatewayIntentBits, Partials, PermissionFlagsBits } from 'discord.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Archive } from './archive.mjs';
-import { matchFixes } from './fixes.mjs';
+import { matchFeatures, matchFixes } from './fixes.mjs';
 import { General } from './general.mjs';
 import { blocks, investigate, newClient, picture, vet } from './investigate.mjs';
 import { Repo, defaultSource } from './repo.mjs';
@@ -57,6 +57,10 @@ const STARTUP_MS = 48 * 3600_000;                // at start, the forums' posts 
 const RELEASE_CHECK_MS = 5 * 60_000;             // how often the bot checks whether a new version went live
 const FIX_DAYS = 14, FIX_MAX = 3;                // a release is checked against threads of the last 14 days, 3 looks at most
 const FIX_EFFORT = 'low', FIX_TURNS = 8;          // a fix check reads one commit against one thread: a short look
+const FEATURE_MAX = 5;                           // a release is checked against every open suggestion, 5 looks at most
+const SUGGESTIONS = /suggest/i;                  // the suggestion forums, by name
+const SUGGESTION_INDEX = 500;                    // a release reads the newest 500 archived threads of each of them
+const SUGGESTION_DAYS = 365;                     // suggestions are kept in threads.json this long, other threads 30 days
 const BUMP_QUIET_MS = 12 * 3600_000;             // the poster writing after this long a silence is a bump: they wait
 
 fs.mkdirSync(CFG.state, { recursive: true });
@@ -71,8 +75,8 @@ const LIVE_FILE = path.join(CFG.state, 'live.json');      // the live version th
 let threads = {};
 try { threads = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch { /* first start */ }
 function save() {
-  const cut = Date.now() - 30 * 86400_000;
-  for (const [id, t] of Object.entries(threads)) if (Date.parse(t.created) < cut) delete threads[id];
+  const cut = Date.now() - 30 * 86400_000, wishCut = Date.now() - SUGGESTION_DAYS * 86400_000;
+  for (const [id, t] of Object.entries(threads)) if (Date.parse(t.created) < (isSuggestion(t) ? wishCut : cut)) delete threads[id];
   fs.writeFileSync(STATE_FILE + '.tmp', JSON.stringify(threads, null, 1));
   fs.renameSync(STATE_FILE + '.tmp', STATE_FILE);
 }
@@ -87,6 +91,8 @@ const client = new Client({
 });
 
 const isForum = ch => ch?.type === ChannelType.GuildForum || ch?.type === ChannelType.GuildMedia;
+/** a known thread that suggests something: in a suggestion forum, or one the look called a suggestion */
+function isSuggestion(t) { return t.category === 'suggestion' || SUGGESTIONS.test(t.forum ?? ''); }
 function watched(thread) {
   return thread?.isThread() && isForum(thread.parent) && (!CFG.forums.length || CFG.forums.includes(thread.parentId));
 }
@@ -106,7 +112,7 @@ const general = new General({
   releasedAt: () => repo.releases.at(-1)?.at ?? 0,
   bugForum: guild => guild?.channels.cache.find(ch => isForum(ch) && /bug/i.test(ch.name)) ?? null,
   forumThreads: () => Object.entries(threads)
-    .filter(([, t]) => !t.closed && t.category !== 'suggestion' && !/suggest/i.test(t.forum ?? ''))
+    .filter(([, t]) => !t.closed && !isSuggestion(t))
     .sort(byActivity).slice(0, 40)
     .map(([id, t]) => ({ id, line: `${id} | ${t.title} | ${(t.summary || t.snippet || '').slice(0, 120)}` })),
 });
@@ -158,13 +164,14 @@ async function look(threadId, why, extra) {
   const st = threads[threadId];
   const say = s => console.log(`[look] ${threadId} ${s}`);
   if (!thread || !st || !watched(thread)) return say('skipped: the thread is gone or not in a watched forum');
-  const fix = why === 'fix live';
+  const fix = why === 'fix live' || why === 'implemented';      // a release's look: a fix, or a suggestion it adds
   if (thread.locked || (thread.archived && !fix)) return say('skipped: closed or locked');
   st.guild ??= thread.guildId;
   const byStaff = why === 'asked by staff', bumped = why === 'bump', logged = why === 'log', talk = why === 'reply';
   // looks that go ahead where staff wrote and past the reply cap; replies to the bot up to their own cap
   const anyway = byStaff || fix || bumped || logged || talk;
-  if (fix && st.fixed) return say('skipped: already told that a fix went live');
+  if (fix && st.fixed) return say(`skipped: already told that ${why === 'implemented' ? 'it was added' : 'a fix went live'}`);
+  if (why === 'implemented' && Tags.decided(thread)) return say('skipped: the suggestion is Complete or Denied already');
   if (talk && st.replies >= CFG.maxTalk) return say(`skipped: ${st.replies} replies already, the most for answering replies`);
   if (!anyway && st.status === 'staff') return say('skipped: staff are in the thread');
   if (!anyway && st.replies >= CFG.maxReplies) return say(`skipped: ${st.replies} replies already`);
@@ -237,12 +244,14 @@ async function look(threadId, why, extra) {
   if (fix) {                                     // a fix notice changes nothing else about the thread
     st.fixChecked = extra.rev;
     if (post) st.fixed = extra.rev;
-    if (post) await tags.add(thread, 'fixLive').catch(e => console.error(`[tags] ${threadId}: ${e.message}`));
+    if (posted) await thread.fetch(true).catch(() => {});      // the reply took it out of the archive
+    const added = why === 'implemented';
+    if (post) await tags.add(thread, added ? 'complete' : 'fixLive').catch(e => console.error(`[tags] ${threadId}: ${e.message}`));
     if (post && CFG.staffChannel && st.staffMsg) {
       const staff = await client.channels.fetch(CFG.staffChannel).catch(() => null);
       const th = staff && await reportThread(staff, threads[st.reportOf] ?? st);
-      await th?.send({ content: `**Fix live** (${extra.commit}): ${CFG.dryRun ? 'the bot would have told' : 'the bot told'} ` +
-        `${linkOf(thread.guildId, thread.id)} that it may be fixed.`, allowedMentions: { parse: [] } }).catch(() => {});
+      await th?.send({ content: `**${added ? 'Added' : 'Fix live'}** (${extra.commit}): ${CFG.dryRun ? 'the bot would have told' : 'the bot told'} ` +
+        `${linkOf(thread.guildId, thread.id)} that ${added ? 'it was added' : 'it may be fixed'}.`, allowedMentions: { parse: [] } }).catch(() => {});
     }
     if (!posted && post && CFG.staffChannel) await tellStaff(thread, st, { ...v, escalate: false, duplicate_of: '' }, post, [workDir, staffDir], posted).catch(() => {});
     save();
@@ -457,6 +466,7 @@ const WHY = {
   'reply': 'someone replied to the bot or mentioned it (see "When someone replies to the bot")',
   'asked by staff': 'staff mentioned the bot and want its reply: answer or ask, never none; with no fix and nothing to ask, answer with a short account of what you found (what the log shows, whether it is known or fixed)',
   'fix live': 'a release just went live, and a commit in it may fix this thread\'s problem (see "When a fix goes live")',
+  'implemented': 'a release just went live, and a commit in it may add what this suggestion asks for (see "When a suggestion is carried out")',
   'bump': 'the poster wrote again after the thread was quiet for half a day or more: they are waiting for an answer (see "When the poster bumps")',
   'log': 'someone posted a log (or another text file) in the thread (see "When a log is posted")',
 };
@@ -489,21 +499,58 @@ async function checkRelease() {
   const commits = (await repo.git(['log', '--no-merges', '-n', '60', '--format=commit %h %s%n%b', `${last}..${rev}`])).trim();
   if (!commits) { seen(); return console.log(`[release] live ${last} -> ${rev}: no new commits (a rollback?)`); }
   const since = new Date(Date.now() - FIX_DAYS * 86400_000).toISOString();
+  const open = t => !t.fixed && t.fixChecked !== rev;
   const candidates = Object.entries(threads)
-    .filter(([, t]) => t.created >= since && !t.fixed && t.fixChecked !== rev && !['suggestion', 'question'].includes(t.category))
+    .filter(([, t]) => t.created >= since && open(t) && !isSuggestion(t) && t.category !== 'question')
     .sort(byActivity).slice(0, 200)
     .map(([id, t]) => ({ id, line: `${id} | #${t.forum} | ${t.created.slice(0, 10)} | ${t.category ?? '?'} | ${t.title} | ${t.summary || t.snippet || ''}` }));
+  await indexSuggestions().catch(e => console.error(`[release] reading the suggestions: ${e.message}`));
+  const wishes = Object.entries(threads).filter(([, t]) => isSuggestion(t) && open(t) && !t.decided)
+    .sort(byActivity).slice(0, 400)
+    .map(([id, t]) => ({ id, line: `${id} | #${t.forum} | ${t.created.slice(0, 10)} | ${t.title} | ${t.summary || t.snippet || ''}` }));
   const n = commits.split('\ncommit ').length;
-  console.log(`[release] live ${last} -> ${rev}: ${n} commit(s), checking ${candidates.length} thread(s)`);
-  const { matches, error } = await matchFixes({ client: anthropic, model: CFG.model, effort: CFG.effort, commits: commits.slice(0, 60_000), candidates });
-  if (error) return console.log(`[release] matching failed, again at the next check: ${error}`);
+  console.log(`[release] live ${last} -> ${rev}: ${n} commit(s), checking ${candidates.length} thread(s) and ${wishes.length} suggestion(s)`);
+  const o = { client: anthropic, model: CFG.model, effort: CFG.effort, commits: commits.slice(0, 60_000) };
+  const [fixes, features] = await Promise.all([matchFixes({ ...o, candidates }), matchFeatures({ ...o, candidates: wishes })]);
+  if (fixes.error || features.error) return console.log(`[release] matching failed, again at the next check: ${fixes.error || features.error}`);
   seen();
-  console.log(`[release] ${matches.length} thread(s) may be fixed${matches.length ? `: ${matches.map(m => `${m.thread} (${m.commit})`).join(', ')}` : ''}`);
-  for (const m of matches.slice(0, FIX_MAX)) {
-    const body = (await repo.git(['show', '--no-patch', '--format=%h %s%n%n%b', m.commit]).catch(() => '')).trim().slice(0, 1500);
-    console.log(`[release] ${m.thread}: ${m.why}`);
-    enqueue(m.thread, 'fix live', { rev, commit: m.commit, text: `The commit that went live:\n${body || m.commit}\nWhy it may be this thread's problem: ${m.why}` });
+  const list = ms => ms.length ? `: ${ms.map(m => `${m.thread} (${m.commit})`).join(', ')}` : '';
+  console.log(`[release] ${fixes.matches.length} thread(s) may be fixed${list(fixes.matches)}; ` +
+    `${features.matches.length} suggestion(s) may be carried out${list(features.matches)}`);
+  for (const [ms, max, why, what] of [[fixes.matches, FIX_MAX, 'fix live', "this thread's problem"],
+    [features.matches, FEATURE_MAX, 'implemented', 'what this suggestion asks for']]) {
+    for (const m of ms.slice(0, max)) {
+      const body = (await repo.git(['show', '--no-patch', '--format=%h %s%n%n%b', m.commit]).catch(() => '')).trim().slice(0, 1500);
+      console.log(`[release] ${m.thread}: ${m.why}`);
+      enqueue(m.thread, why, { rev, commit: m.commit, text: `The commit that went live:\n${body || m.commit}\nWhy it may be ${what}: ${m.why}` });
+    }
   }
+}
+
+/** the suggestion forums' threads, the archived ones too (the newest SUGGESTION_INDEX of each), into `threads` with
+ *  their first posts and whether they are decided (Complete, Denied, locked): what a release may carry out */
+async function indexSuggestions() {
+  const forums = client.channels.cache.filter(ch => isForum(ch) && SUGGESTIONS.test(ch.name) && (!CFG.forums.length || CFG.forums.includes(ch.id)));
+  let fresh = 0;
+  for (const forum of forums.values()) {
+    const found = [...(await forum.threads.fetchActive()).threads.values()];
+    for (let before, more = true; more && found.length < SUGGESTION_INDEX;) {
+      const page = await forum.threads.fetchArchived({ type: 'public', before, limit: 100 });
+      found.push(...page.threads.values());
+      before = page.threads.last();
+      more = page.hasMore && !!before;
+    }
+    for (const t of found) {
+      if (!threads[t.id]) fresh++;
+      const st = threads[t.id] ??= { title: t.name, forum: forum.name, guild: forum.guildId, created: t.createdAt.toISOString(), status: 'seen', replies: 0 };
+      Object.assign(st, { title: t.name, decided: t.locked || Tags.decided(t) });
+      if (st.snippet || st.summary) continue;
+      const m = await t.fetchStarterMessage().catch(() => null);   // one at a time: discord.js waits out the rate limits
+      if (m) st.snippet = m.content.replace(/\s+/g, ' ').slice(0, 200);
+    }
+  }
+  save();
+  if (fresh) console.log(`[release] ${fresh} suggestion thread(s) read for the first time`);
 }
 
 async function download(url) {
@@ -574,7 +621,8 @@ client.on(Events.ClientReady, c => {
     `${CFG.staffChannel ? `staff channel ${CFG.staffChannel}` : 'no staff channel'}, model ${CFG.model} (${CFG.effort})`);
   repo.sync(true).catch(e => console.error(`[repo] ${e.message}`));
   c.application.commands.set([TRANSLATE]).catch(e => console.error(`[translate] the command: ${e.message}`));
-  const release = () => checkRelease().catch(e => console.error(`[release] ${e.message}`));
+  let checking = null;                           // one check at a time: the first one reads every suggestion
+  const release = () => checking ??= checkRelease().catch(e => console.error(`[release] ${e.message}`)).finally(() => { checking = null; });
   indexForums().catch(e => console.error(`[bot] forum index: ${e.message}`)).finally(release);
   setInterval(release, RELEASE_CHECK_MS);
   setInterval(() => general.tick().catch(e => console.error(`[general] ${e.message}`)), 60_000);

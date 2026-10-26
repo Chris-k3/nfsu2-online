@@ -19,6 +19,13 @@ and it says something only when it is worth it:
   it, to reload the page, and to post a new log if it still happens. Only when a full look at the thread is sure; at
   most once a thread, at most 3 threads a release (short, low-effort looks), threads of the last 14 days. The report's thread notes it.
 
+- **when a suggestion is carried out**, in a suggestion thread (a forum named `suggest…`, or a post the bot took for a
+  suggestion) that one of the release's commits does what it asks for: that it was added, since when it is live, where
+  to find it, and to reload the page; then it tags the thread Complete. Only when a full look is sure (the whole wish
+  or its main part, not something related); at most once a thread, at most 5 threads a release. Old suggestions count
+  too: at each release the bot reads the suggestion forums' threads, archived ones included (the newest 500 of each),
+  and keeps them a year. Suggestions tagged Complete or Denied, or locked, are left out.
+
 - **in the general channels** (text channels named `general…`), sparingly: someone who reports a problem there gets
   one short templated reply in their language, pointing to the forum thread about it or to the bug-reports forum,
   with how to get the log. Nothing for questions or chat, nothing when staff or another member already pointed them
@@ -37,12 +44,12 @@ and it says something only when it is worth it:
   along. At most 30 new translations a person an hour.
 
 - **Forum tags**: each look adds the forum's tags that say what the thread is about, at most two (the problem, and the
-  device when it is a phone or tablet), picked from the forum's tags but the four below, the moderated ones and
-  Complete and Denied. Four it keeps itself, by name, in a forum that has them: **Needs info** while its last reply
-  asked the poster for something, **Dev aware** once the developer has the report, **Fix live** once it told the thread
-  that a fix went live, and **Solved** when the poster says the problem is gone (a message of theirs that passes a word
-  filter, then one short Haiku call over the end of the thread; also in threads staff answered). It takes off only its
-  own Needs info and Fix live: the poster's and staff's tags stay. It needs Manage Threads in the forums (Set up, step
+  device when it is a phone or tablet), picked from the forum's tags but the five below, the moderated ones and
+  Denied. Five it keeps itself, by name, in a forum that has them: **Needs info** while its last reply asked the poster
+  for something, **Dev aware** once the developer has the report, **Fix live** once it told the thread that a fix went
+  live, **Complete** once it told a suggestion that it was added, and **Solved** when the poster says the problem is
+  gone (a message of theirs that passes a word filter, then one short Haiku call over the end of the thread; also in
+  threads staff answered). It takes off only its own Needs info and Fix live: the poster's and staff's tags stay. It needs Manage Threads in the forums (Set up, step
   3); nothing in a dry run (the log says what it would set).
 
 Otherwise it says nothing. It reads every channel it can see, but posts only in forum threads, those replies in the
@@ -108,10 +115,10 @@ the tools used, the tokens and the cost.
    channel, Copy Channel ID.
 3. **Forum tags.** In each forum's permissions, add the bot with Manage Threads: only the poster and those who can
    manage threads can set a post's tags. Without it the bot says so once in the log and goes on without tags. It
-   picks from the tags each forum has, so a new tag needs nothing else; name its own four exactly Needs info, Dev
-   aware, Fix live and Solved (any letter case). Tags players should not set themselves (Needs info, Dev aware, Fix
-   live, Complete, Denied): "Only allow moderators to apply this tag" in the forum's tag settings. The bot never picks
-   a moderated tag, its own four aside.
+   picks from the tags each forum has, so a new tag needs nothing else; name its own five exactly Needs info, Dev
+   aware, Fix live, Complete and Solved (any letter case). Tags players should not set themselves (Needs info, Dev
+   aware, Fix live, Complete, Denied): "Only allow moderators to apply this tag" in the forum's tag settings. The bot
+   never picks a moderated tag, its own five aside.
 4. **Claude.** Create an API key at https://console.anthropic.com, and set a monthly spend limit there.
 5. **`.env`**:
 
