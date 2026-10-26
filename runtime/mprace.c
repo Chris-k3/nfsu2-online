@@ -497,24 +497,33 @@ static int race_cars(uint32_t *car, uint32_t *pi, int *n){
     return all;
 }
 /* the cars as evened out: each one's car, its power, and the curve's first point as left (a rebuilt info has
- * its own again) */
-static struct { int n; uint32_t car[RACE_CARS_MAX]; float f[RACE_CARS_MAX], t0[RACE_CARS_MAX]; long check_at; } g_bal;
+ * its own again); the car's first word (its class), to know it again */
+static struct { int n; uint32_t car[RACE_CARS_MAX], vt[RACE_CARS_MAX]; float f[RACE_CARS_MAX], t0[RACE_CARS_MAX]; long check_at; } g_bal;
 static void balance_apply(int i){
     uint32_t pi = perf_info(g_bal.car[i]);
     if (!pi) return;
     if (g_bal.f[i] != 1.f) mprace_torque_scale(g_bal.car[i], g_bal.f[i]);
     MRF32(pi + PI_LIMIT_MPH) = 0.f;
     g_bal.t0[i] = MRF32(pi + PI_TORQUE);
+    g_bal.vt[i] = MR32(g_bal.car[i]);
 }
 /* in the race, every second: a car whose info was built again (its curve is not as left) gets its power and
- * no governor again */
+ * no governor again.  Only while the race's world is up, and only a car still among its racers, the same one:
+ * once the results' Continue unloads the world its cars are freed and the front end's screens get their memory,
+ * and the power written there broke a screen (its free of a script's tracks, no heap block, when UI_OLMain came
+ * on the way back: error 134, 2026-10-26) */
 static void balance_hold(long f){
     if (!g_bal.n || f < g_bal.check_at) return;
+    if (rd(G_FLOW) != 6u || !(rd(G_GAMEMODE) & 0x200u)){ g_bal.n = 0; mlog("balance: the race's world is gone, its cars let go%s", ""); return; }
     g_bal.check_at = f + 60;
+    uint32_t car[RACE_CARS_MAX], pis[RACE_CARS_MAX]; int n;
+    race_cars(car, pis, &n);
     for (int i = 0; i < g_bal.n; i++){
-        uint32_t pi = perf_info(g_bal.car[i]);
+        int in = 0;
+        for (int k = 0; k < n; k++) in |= car[k] == g_bal.car[i];
+        uint32_t pi = in && rd(g_bal.car[i]) == g_bal.vt[i] ? perf_info(g_bal.car[i]) : 0;
         if (!pi || (MRF32(pi + PI_TORQUE) == g_bal.t0[i] && MRF32(pi + PI_LIMIT_MPH) == 0.f)) continue;
-        fprintf(stderr, "[mprace] f=%ld balance: racer %d's car was built again (curve %.4f, not %.4f): power x%.3f again\n", f, i,
+        fprintf(stderr, "[mprace] f=%ld balance: racer %d's car was built again (curve %.4f, not %.4f): power x%.3f again\n", autotest_frame(), i,
                 (double)MRF32(pi + PI_TORQUE), (double)g_bal.t0[i], (double)g_bal.f[i]);
         balance_apply(i);
     }
@@ -557,7 +566,7 @@ static float balance_race(uint32_t ours, int mode){
                 "-> none, nitrous %.3f -> %.3f kN m\n", i, car[i] == ours ? " (ours)" : "", p.name, (double)r[i], (double)was, (double)goal,
                 (double)f, (double)(p.power / 1000.f), (double)now, (double)lim, (double)n2o, (double)MRF32(pi[i] + PI_NITROUS));
     }
-    g_bal.check_at = autotest_frame() + 60;
+    g_bal.check_at = clk() + 60;                                               /* (balance_hold's clock) */
     return our_f;
 }
 /* (test aid) the car's numbers for working out by hand: rating, mass, drag, speed limit, the engine's curves
