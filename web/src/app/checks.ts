@@ -113,8 +113,9 @@ export async function checkGpu(): Promise<Check & { adapter?: string }> {
     // Firefox has one list of graphics drivers it leaves out, and on Windows, as Chrome, Direct3D 12 only
     if (ff) return fail(N('Firefox will not use this computer\'s graphics for the game. The graphics or their driver may be too old: update the graphics driver, or try Chrome. about:support, Graphics, says why.'), 'GPU-ADAPTER-FIREFOX');
     if (chromium) {
-      // Chrome 121: Android 12 and newer, on some graphics chips (Samsung's Xclipse not yet)
-      if (android) return fail(N('Chrome cannot use the graphics of this phone or tablet yet: it needs Android 12 or newer, and not every graphics chip is supported. Update Android and Chrome; otherwise the game cannot run on this device for now.'), 'GPU-ADAPTER-ANDROID');
+      // Chrome 121: Android 12 and newer, on some graphics chips; the unsafe flag lifts its blocklist (Samsung's
+      // Xclipse runs the game with it)
+      if (android) return fail(N('Chrome cannot use the graphics of this phone or tablet yet: it needs Android 12 or newer, and not every graphics chip is supported. Update Android and Chrome. If that does not help, turn on chrome://flags/#enable-unsafe-webgpu (type it into the address bar), then restart Chrome: on some phones, such as Samsungs with Xclipse graphics, the game then runs. If it still does not, set the flag back to Default.'), 'GPU-ADAPTER-ANDROID');
       // graphics acceleration off in Chrome's settings (or graphics it uses for nothing): WebGL draws in software, or not at all
       const gl = webglRenderer();
       if (gl === null || /SwiftShader|llvmpipe|softpipe|Basic Render/i.test(gl))
