@@ -368,7 +368,7 @@
   "Online mode": "Игра через Интернет",
   "The game's Online menu takes you straight to the Online Main Menu under your name, without the EA Login screens: lobby, chat and races with everyone playing from this server.": "Пункт «Игра через Интернет» в игре сразу ведёт в «Меню коллективной игры» под вашим именем, без экранов «Вход в систему» EA: лобби, чат и гонки со всеми, кто играет с этого сервера.",
   "Players' cars shown": "Видимые машины игроков",
-  "The nearest, 0 to 32.": "Ближайшие, от 0 до 32.",
+  "The nearest. Phones start at 16 and tablets at 24: many cars loading at once can take more memory than they have.": "Ближайшие. На телефонах по умолчанию 16, на планшетах 24: много машин, загружаемых сразу, может потребовать больше памяти, чем у них есть.",
   "Game": "Игра",
   "More game settings": "Дополнительные настройки игры",
   "Language": "Язык",

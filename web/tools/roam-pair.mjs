@@ -31,6 +31,8 @@
 //        [--page play [--size 960x540] [--play-only Bob]]   the renderer's test page (test/play.html, WebGPU)
 //                    instead: frame dumps go to the server's /artifacts/ as <name>-*.png (a server of our own
 //                    gets --artifacts <out>); --play-only: only that instance renders, the others run hostcheck
+//        [--page-arg bc=0]  more of the page address (each page's, repeated for several): play.html's bc=0 takes a
+//                    phone's texture path (DXT1 as ASTC, the rest unpacked) on this Mac
 //        [--fetch snd.raw]  a file of each page's save folder (OPFS) copied out as <out>/<name>.<file>,
 //                    e.g. the sound output of --env SNDDUMP=/save/snd.raw (s16le stereo, 44.1 kHz)
 //        [--hide Bob:60:8]  that page reports itself hidden (document.hidden + visibilitychange, as when
@@ -38,6 +40,7 @@
 //                    after the first page opened, for 8 s
 //        [--crowd <n>]  web/tools/roam-crowd.mjs's n simulated players on the same server for the whole run
 //                    (<out>/crowd.log): with 5 or more friends the first cars of our own come into use, in the AI range
+//        [--crowd-args "--cars all"]  more of roam-crowd's options, as one argument
 //        [--crowd-race 1-3:200:320]  roam-crowd's --race: those players are in a race meanwhile
 //        [--seed <save tree>]  every page starts from that save (web/tools/save-seed.mjs, as run-suite's
 //                    NFSU2_SAVE_SEED: e.g. a player's "Download a backup" unzipped) instead of a fresh one
@@ -126,6 +129,7 @@ function url(i, name, script, own) {
   const play = PLAY && (!PLAY_ONLY || PLAY_ONLY === name);
   if (play) { q.set('w', String(SIZE[0])); q.set('h', String(SIZE[1])); q.set('artifacts', `/artifacts/${name}-`); q.set('dumpscale', '1'); }
   for (const [k, v] of Object.entries(env)) if (!(APP && (k === 'NFSU2_SAVEDIR'))) q.append('env', `${k}=${v}`);
+  for (const kv of opts('page-arg')) q.append(kv.slice(0, kv.indexOf('=')), kv.slice(kv.indexOf('=') + 1));
   const fresh = seeded(name) ? '' : '&fresh';
   return APP ? `${BASE}/?${q}${fresh}` : `${BASE}/test/${play ? 'play' : 'hostcheck'}.html?${q}${fresh}`;
 }
@@ -161,7 +165,7 @@ let crowd = null;
 if (CROWD) {
   const log = fs.openSync(path.join(OUT, 'crowd.log'), 'w');
   crowd = spawn(process.execPath, [path.join(REPO, 'web/tools/roam-crowd.mjs'), '--base', BASE, '--n', String(CROWD), '--seconds', String(TMO / 1000),
-    ...(opt('crowd-race', '') ? ['--race', opt('crowd-race', '')] : [])],
+    ...(opt('crowd-race', '') ? ['--race', opt('crowd-race', '')] : []), ...opt('crowd-args', '').split(' ').filter(Boolean)],
     { cwd: REPO, stdio: ['ignore', log, log] });
 }
 

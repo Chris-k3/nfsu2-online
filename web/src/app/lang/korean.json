@@ -298,7 +298,7 @@
   "Online mode": "온라인 모드",
   "The game's Online menu takes you straight to the Online Main Menu under your name, without the EA Login screens: lobby, chat and races with everyone playing from this server.": "게임의 온라인 메뉴에서 EA 로그인 화면 없이 내 이름으로 바로 온라인 메인 메뉴로 들어가요. 이 서버에서 플레이하는 모두와 로비, 채팅, 레이스를 즐길 수 있어요.",
   "Players' cars shown": "표시할 플레이어 차",
-  "The nearest, 0 to 32.": "가까운 순서로 0~32대.",
+  "The nearest. Phones start at 16 and tablets at 24: many cars loading at once can take more memory than they have.": "가까운 순서로 보여요. 휴대폰은 16대, 태블릿은 24대에서 시작해요. 많은 차를 한꺼번에 불러오면 기기의 메모리보다 더 많이 필요할 수 있어요.",
   "Game": "게임",
   "More game settings": "게임 설정 더 보기",
   "Language": "언어",

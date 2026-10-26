@@ -54,7 +54,7 @@ const GROUPS: Group[] = [
     { key: 'roam_collide', label: N('Ghost mode'), help: N('You drive through the other players\' cars, and they through yours. Off: you collide with them, and a car that appears on yours lets you through until you are apart.'), c: { t: 'switch', inv: true } },
     { key: 'quick_chat', label: N('Quick chat'), help: N('Say one of sixteen set phrases to the players near you in free roam: 1 to 4, then 1 to 4 (on a controller, the right stick twice; on a touch screen, the chat button). Theirs show over their cars.'), c: { t: 'switch' } },
     { key: 'online', label: N('Online mode'), help: N('The game\'s Online menu takes you straight to the Online Main Menu under your name, without the EA Login screens: lobby, chat and races with everyone playing from this server.'), c: { t: 'switch' }, more: true },
-    { key: 'roam_max_cars', label: N('Players\' cars shown'), help: N('The nearest, 0 to 32.'), c: { t: 'num', min: 0, max: 32, step: 1 }, more: true },
+    { key: 'roam_max_cars', label: N('Players\' cars shown'), help: N('The nearest. Phones start at 16 and tablets at 24: many cars loading at once can take more memory than they have.'), c: { t: 'seg', opts: [['16', '16'], ['20', '20'], ['24', '24'], ['28', '28'], ['32', '32']] }, more: true },
   ] },
   { title: N('Game'), more: N('More game settings'), items: [
     { key: 'language', label: N('Language'), help: N('The game\'s menus and subtitles, the voices in languages with a dub, and this page.'), c: { t: 'select', opts: LANGUAGE_OPTS } },
