@@ -11,18 +11,19 @@
  * A track the page cannot decode is skipped; a page that does not answer in 20 s gives silence, and one that stops
  * writing in the middle of a track ends it; memory that does not look right switches the radio off (radio_fail),
  * never the game.  Radio off: every wrapper calls the game's own code.  Log lines are "[radio] ...".
+ * The track's place in the game's mixer is the song's own: the game's music stream, its voice, the voice's two channels
+ * and their inputs (read every step); the game stopping a song ends the track, a song going on to its next part does not.
  * Every address read from the game's memory is checked with in_guest before it is followed; what the page writes is
  * only used through the sequence locks, the ring mask, the `have` bound and the sample limit.
  * Outside the browser (the Mac port and its tests) the wrappers at the end call the game's own code. */
 #include "cpu.h"
 
 /* ---- the game's functions (sub_ names are the lifter's; tools/genstamp.sh reads the _orig ones from here) ---- */
-void sub_007292bc_orig(CPU *c);   /* the mixer step, every few ms: we notice the song's two readers, stop the game's song when the track ends or the radio is switched */
-void sub_00739030_orig(CPU *c);   /* the game pauses or resumes its sound groups: the track waits with them */
+void sub_007292bc_orig(CPU *c);   /* the mixer step, every few ms: we find the song's two readers, stop the game's song when the track ends or the radio is switched */
 void sub_004580e0_orig(CPU *c);   /* the game starts an EA Trax song: we ask the page for a track and lend its tags to the plaque */
 void sub_004ac9f0_orig(CPU *c);   /* the game draws the plaque of the song: for silence, or the same track again, it draws nothing */
 void sub_0072d18d_orig(CPU *c);   /* the stream reader, the mixer asks for frames: a song's reader gets the track's sound from the page */
-void sub_00739320(CPU *c);        /* stops a song (17 callers); we call it from the mixer step to end a song */
+void sub_00739320_orig(CPU *c);   /* stops a song (24 places in the game): the track ends with it; we call it from the mixer step to end a song */
 
 #if defined(__wasm__) || defined(NFSU2_RADIO_TEST)
 #include "web/status_proto.h"
@@ -53,10 +54,18 @@ void guest_noyield(int d);        /* win32_ext.c: no fair yield, a free mutex ta
 #define MIXER_MAX_FRAMES   4096u         /* the mixer asks a reader for 256 */
 #define GUEST_START        0x10000u
 #define GUEST_END          0x28000000u   /* the guest's memory ends here (web/build.sh) */
+#define READER_SPEED       0x1cu         /* in the reader: 0 while the game has the sound paused */
 #define MUSIC_INPUTS       2u            /* a song is a pair of inputs, left and right */
-#define SEARCH_STEPS       1200u         /* mixer steps a song may take to show both its readers */
-#define EARLIER_STEPS      100u          /* then the readers there before count too: the game restarts a song on them (Game Music Volume back from 0) */
-#define PAUSE_SOUND_GROUPS 0xf0000000u   /* 0x00739030: the groups the pause menu and the loading screen pass */
+#define MUSIC_STREAM       0x18u         /* in the music player: the handle of its sound stream */
+#define STREAM_HANDLES     0x008b44deu   /* byte */
+#define STREAM_TABLE       0x008b4068u   /* one pointer per handle */
+#define STREAM_VOICE       4u            /* in a stream: the voice number, negative for none */
+#define VOICE_COUNT        0x008b460cu   /* word */
+#define VOICE_TABLE        0x008b466cu   /* pointer to the first voice */
+#define VOICE_SIZE         0x90u
+#define VOICE_CHANNELS     4u            /* in a voice: the mixer input of each channel, a word apiece */
+#define VOICE_CHANNEL_N    0x23u         /* byte */
+#define VOICE_ALIVE        0x6du         /* byte */
 #define END_OF_STREAM      0xffffffffu
 #define SOUND_API_ACTIVE   0x008b7bbcu   /* byte: the music's event system is up */
 #define SOUND_API_BUSY     0x008b7bc0u   /* word: the event system's tick or one of its calls is under way; a call that finds it set does nothing (overrides.c, sub_0073b900) */
@@ -72,13 +81,8 @@ void guest_noyield(int d);        /* win32_ext.c: no fair yield, a free mutex ta
 
 enum { SONG_GAME, SONG_WAITING, SONG_FOLDER, SONG_SILENT };   /* who makes the sound of the song playing now */
 
-typedef struct {
-    uint32_t reader[MUSIC_INPUTS], count, search_steps;
-    uint32_t earlier[MIXER_MAX_INPUTS], earlier_n;   /* the readers in the mixer when the search started: not the song's */
-    uint8_t side[MUSIC_INPUTS];
-    int searching, paused;
-} Music;
-typedef struct { int who, over, ended, again, refind; uint32_t place, seq, read[CHANNELS], waited, starved; } Song;   /* place: 0 menus, 1 driving */
+typedef struct { uint32_t reader[MUSIC_INPUTS], count; uint8_t side[MUSIC_INPUTS]; int paused; } Music;   /* the song's readers: none while the game has no song in the mixer */
+typedef struct { int who, over, ended, again; uint32_t place, seq, read[CHANNELS], waited, starved; } Song;   /* place: 0 menus, 1 driving */
 typedef struct {
     int was_on;
     int lent;                                      /* the table entry lent the page's tags, or NO_TAGS_LENT */
@@ -86,7 +90,6 @@ typedef struct {
     uint32_t on_seen;
     uint32_t text; float *ring;                    /* the tags' guest address; the rings, malloc'd outside the game's heap, in the memory the page sees */
     uint32_t native[TRAX_WORDS];                   /* the lent entry's own words */
-    uint32_t before[MIXER_MAX_INPUTS], before_n;   /* the readers of the mixer's inputs at its last step */
     const char *stop;                              /* set: the game's song is stopped at the next mixer step; why */
 } Radio;
 
@@ -113,11 +116,6 @@ static void song_start(int who, unsigned place){
     memset(&g_song, 0, sizeof g_song);
     g_song.who = who;
     g_song.place = place;
-}
-
-static void start_searching(void){
-    g_music.searching = 1;
-    g_music.search_steps = 0;
 }
 
 static void radio_fail(HostStatusRadio *r, const char *why){
@@ -162,7 +160,7 @@ static void return_tags(void){
 static uint32_t stream_reader(uint32_t input){
     if (MR8(input + INPUT_KIND) != 2u) return 0;
     uint32_t reader = MR32(input + INPUT_READER);
-    return in_guest(reader, 4u) && MR32(reader) == READER_FN && MR32(input + INPUT_READER_TAIL) == 0u ? reader : 0;
+    return in_guest(reader, READER_SPEED + 4u) && MR32(reader) == READER_FN && MR32(input + INPUT_READER_TAIL) == 0u ? reader : 0;
 }
 
 static int list_has(const uint32_t *list, uint32_t n, uint32_t v){
@@ -177,56 +175,37 @@ static uint8_t side_of(uint32_t input){
     return left > right ? 0 : right > left ? 1 : SIDE_UNKNOWN;
 }
 
-/* the song's readers: two new to the mixer since the search started, one feeding the left side and one the right
- * (a race's own streams come in too, fed to both sides); kept while they stay */
-static void update_music_readers(uint32_t first, unsigned inputs){
-    uint32_t now[MIXER_MAX_INPUTS], now_n = 0, kept[MUSIC_INPUTS], kept_n = 0;
-    uint8_t kept_side[MUSIC_INPUTS];
-    if (g_music.searching && g_music.search_steps == 0){
-        memcpy(g_music.earlier, g_radio.before, g_radio.before_n * sizeof g_radio.before[0]);
-        g_music.earlier_n = g_radio.before_n;
-    }
-    for (unsigned i = 0; i < inputs; i++){
-        uint32_t input = first + INPUT_SIZE * i, reader = stream_reader(input);
-        uint8_t side = side_of(input);
-        if (!reader) continue;
-        now[now_n++] = reader;
-        if (g_music.searching && g_music.count < MUSIC_INPUTS && side != SIDE_UNKNOWN
-            && (!g_music.count || g_music.side[0] != side) && !list_has(g_music.reader, g_music.count, reader)
-            && (g_music.search_steps > EARLIER_STEPS || !list_has(g_music.earlier, g_music.earlier_n, reader))){
-            g_music.side[g_music.count] = side;
-            g_music.reader[g_music.count++] = reader;
-        }
-    }
-    for (uint32_t k = 0; k < g_music.count; k++){
-        if (!list_has(now, now_n, g_music.reader[k])) continue;
-        kept_side[kept_n] = g_music.side[k];
-        kept[kept_n++] = g_music.reader[k];
-    }
-    if (g_music.count && !kept_n && g_song.refind){
-        g_song.refind = 0;
-        fprintf(stderr, "[radio] the game moved its song to other readers: the track goes on there\n");
-        start_searching();
-    } else if (g_music.count && !kept_n && (g_song.who == SONG_WAITING || g_song.who == SONG_FOLDER)){
-        fprintf(stderr, "[radio] the song's readers left the mixer: the track ends\n");
-        song_start(SONG_GAME, 0);
-    }
-    if (g_music.searching && (kept_n >= MUSIC_INPUTS || ++g_music.search_steps > SEARCH_STEPS)){
-        g_music.searching = 0;
-    }
-    memcpy(g_radio.before, now, now_n * sizeof now[0]);
-    g_radio.before_n = now_n;
-    memcpy(g_music.reader, kept, kept_n * sizeof kept[0]);
-    memcpy(g_music.side, kept_side, kept_n);
-    g_music.count = kept_n;
-}
-
+/* the song's two readers by the game's own path: the music player's sound stream, its voice, the voice's two channels,
+ * the mixer input of each.  A link that is missing (no song, the voice between two songs) leaves the game's sound alone */
 static void follow_music_inputs(HostStatusRadio *r){
-    uint32_t first = MR32(MIXER_INPUTS);
-    unsigned inputs = MR8(MIXER_INPUT_COUNT);
+    uint32_t first = MR32(MIXER_INPUTS), player = MR32(SOUND_GROUPS_OWNER), table = MR32(VOICE_TABLE);
+    unsigned inputs = MR8(MIXER_INPUT_COUNT), voices = MR16(VOICE_COUNT);
+    uint32_t reader[MUSIC_INPUTS], stream, voice, entry, speed = 0;
+    uint8_t side[MUSIC_INPUTS];
+    g_music.count = 0;
     if (inputs > MIXER_MAX_INPUTS) inputs = MIXER_MAX_INPUTS;
-    if (inputs && !in_guest(first, INPUT_SIZE * inputs)) radio_fail(r, "the mixer's inputs are not in the game's memory");
-    else update_music_readers(first, inputs);
+    if (inputs && !in_guest(first, INPUT_SIZE * inputs)){
+        radio_fail(r, "the mixer's inputs are not in the game's memory");
+        return;
+    }
+    if (!in_guest(player, MUSIC_STREAM + 4u) || MR32(player + MUSIC_STREAM) >= MR8(STREAM_HANDLES)) return;
+    stream = MR32(STREAM_TABLE + 4u * MR32(player + MUSIC_STREAM));
+    if (!in_guest(stream, STREAM_VOICE + 4u) || (int)(voice = MR32(stream + STREAM_VOICE)) < 0) return;
+    if ((voice & 0xffu) >= voices || !in_guest(table, VOICE_SIZE * voices)) return;
+    entry = table + VOICE_SIZE * (voice & 0xffu);
+    if (!MR8(entry + VOICE_ALIVE) || MR32(entry) != voice || MR8(entry + VOICE_CHANNEL_N) != MUSIC_INPUTS) return;
+    for (unsigned k = 0; k < MUSIC_INPUTS; k++){
+        unsigned channel = MR16(entry + VOICE_CHANNELS + 2u * k);
+        uint32_t input = first + INPUT_SIZE * channel;
+        if (channel >= inputs || !(reader[k] = stream_reader(input))) return;
+        side[k] = side_of(input);
+        speed |= MR32(reader[k] + READER_SPEED);
+    }
+    if (side[0] + side[1] != 1u) return;   /* one reader feeds the left side and the other the right, or it is not a song of ours */
+    memcpy(g_music.reader, reader, sizeof reader);
+    memcpy(g_music.side, side, sizeof side);
+    g_music.count = MUSIC_INPUTS;
+    g_music.paused = speed == 0;
 }
 
 /* The game stops its song with the call at the top, here from the start of the mixer step, on a copy of the
@@ -238,7 +217,7 @@ static void follow_music_inputs(HostStatusRadio *r){
  * run the mixer step or start a song again. */
 static void stop_game_song(CPU *c){
     uint32_t owner = MR32(SOUND_GROUPS_OWNER);
-    if (g_radio.stopping || g_music.paused || !in_guest(owner, OWNER_SONG_GROUPS + 4u)
+    if (g_radio.stopping || (g_music.count && g_music.paused) || !in_guest(owner, OWNER_SONG_GROUPS + 4u)
         || !MR8(SOUND_API_ACTIVE) || MR32(SOUND_API_BUSY)) return;
     fprintf(stderr, "[radio] stops the game's song: %s\n", g_radio.stop);
     g_radio.stopping = 1;
@@ -249,7 +228,7 @@ static void stop_game_song(CPU *c){
     PUSH32(MR32(owner + OWNER_SONG_GROUPS));
     PUSH32(0x007292bcu);
     guest_noyield(+1);
-    sub_00739320(c);
+    sub_00739320_orig(c);
     guest_noyield(-1);
     *c = save;
     g_radio.stopping = 0;
@@ -293,7 +272,7 @@ static void start_radio_song(HostStatusRadio *r, unsigned index){
     int going = (g_song.who == SONG_WAITING || (g_song.who == SONG_FOLDER && !g_song.over)) && g_song.place == place;
     if (going){
         lend_tags(index);
-        g_song.again = g_song.refind = 1;
+        g_song.again = 1;
         fprintf(stderr, "[radio] game starts a song (entry %u): the track goes on\n", index);
     } else if (copy_tags(r, place)){
         ask_page_for_track(r, place);
@@ -303,8 +282,6 @@ static void start_radio_song(HostStatusRadio *r, unsigned index){
         song_start(SONG_SILENT, place);
         fprintf(stderr, "[radio] silence: no track fits %s\n", place ? "driving" : "menus");
     }
-    if (!going) g_music.count = 0;
-    start_searching();
 }
 
 static void follow_page(const HostStatusRadio *r){
@@ -352,12 +329,8 @@ static int read_folder_track(HostStatusRadio *r, unsigned ch, uint32_t out, uint
     return g_song.over;
 }
 
-/* the ring of a reader: the side its input feeds, unless the other reader feeds the same one */
-static unsigned ring_of_reader(uint32_t reader){
-    unsigned k = g_music.reader[0] == reader ? 0u : 1u;
-    int pair_agrees = g_music.count < MUSIC_INPUTS || g_music.side[0] != g_music.side[1];
-    return g_music.side[k] != SIDE_UNKNOWN && pair_agrees ? g_music.side[k] : k;
-}
+/* the ring of a reader: the side its input feeds (the two sides differ, follow_music_inputs) */
+static unsigned ring_of_reader(uint32_t reader){ return g_music.side[g_music.reader[0] == reader ? 0u : 1u]; }
 
 /* ---- the wrappers: the radio in the browser, the game's own code elsewhere ---- */
 
@@ -378,13 +351,12 @@ void sub_007292bc(CPU *c){
     sub_007292bc_orig(c);
 }
 
-void sub_00739030(CPU *c){
-    uint32_t groups = MR32(c->esp + 4u), pause = MR32(c->esp + 8u) & 0xffu;
-    if (radio_on(host_status_radio()) && (groups & PAUSE_SOUND_GROUPS)){
-        g_music.paused = pause != 0;
-        if (!pause) start_searching();
+void sub_00739320(CPU *c){
+    if (radio_on(host_status_radio()) && g_song.who != SONG_GAME){
+        fprintf(stderr, "[radio] the game stops its song: the track ends\n");
+        song_start(SONG_GAME, 0);
     }
-    sub_00739030_orig(c);
+    sub_00739320_orig(c);
 }
 
 void sub_004580e0(CPU *c){
@@ -428,7 +400,7 @@ void sub_0072d18d(CPU *c){
 }
 #else
 void sub_007292bc(CPU *c){ sub_007292bc_orig(c); }
-void sub_00739030(CPU *c){ sub_00739030_orig(c); }
+void sub_00739320(CPU *c){ sub_00739320_orig(c); }
 void sub_004580e0(CPU *c){ sub_004580e0_orig(c); }
 void sub_004ac9f0(CPU *c){ sub_004ac9f0_orig(c); }
 void sub_0072d18d(CPU *c){ sub_0072d18d_orig(c); }

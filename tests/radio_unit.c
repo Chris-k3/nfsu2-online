@@ -20,7 +20,7 @@ HostStatusRadio *host_status_radio(void){ return &g_page; }
 uint32_t gheap_alloc(int heap, uint32_t n, int zero){ (void)heap; (void)n; (void)zero; return TEXT; }
 void sub_004580e0(CPU *c);
 void sub_007292bc(CPU *c);
-void sub_00739030(CPU *c);
+void sub_00739320(CPU *c);
 void sub_004ac9f0(CPU *c);
 void sub_0072d18d(CPU *c);
 
@@ -78,6 +78,12 @@ static void reset(void){
     MR32(MIXER_INPUTS) = INPUTS;
     MR8(SOUND_API_ACTIVE) = 1;
     MR32(SOUND_GROUPS_OWNER) = OWNER;
+    MR32(OWNER + MUSIC_STREAM) = 0;
+    MR8(STREAM_HANDLES) = 1;
+    MR32(STREAM_TABLE) = STREAM;
+    MR32(STREAM + STREAM_VOICE) = END_OF_STREAM;
+    MR32(VOICE_TABLE) = VOICES;
+    MR16(VOICE_COUNT) = 4;
     MR32(GAME_FLOW) = FLOW;
     MRF32(GAME_MUSIC_VOLUME) = 1.0f;
     MR32(FLOW + FLOW_MODE) = 1u;
@@ -96,9 +102,12 @@ static void page_never_answers(void){ pg.silent = 1; }
 static void folder_song_lasts(int steps_long){ pg.track_steps = (uint32_t)steps_long; }
 static void game_music_volume(float v){ MRF32(GAME_MUSIC_VOLUME) = v; }
 static void output_muted(int on){ g.muted = on; }
-static void game_pauses(void){ call(sub_00739030, PAUSE_SOUND_GROUPS, 1, 0, 0); }
-static void game_resumes(void){ call(sub_00739030, PAUSE_SOUND_GROUPS, 0, 0, 0); }
-static void game_stops_song(void){ remove_song_readers(); }
+static void song_speed(uint32_t speed){
+    for (int k = 0; k < 2; k++) if (g.song_slot[k]) MR32(MR32(INPUTS + INPUT_SIZE * (unsigned)(g.song_slot[k] - 1) + INPUT_READER) + READER_SPEED) = speed;
+}
+static void game_pauses(void){ g.paused = 1; song_speed(0); }
+static void game_resumes(void){ g.paused = 0; song_speed(0x10000u); }
+static void game_stops_song(void){ call(sub_00739320, 0, 0, 0, 0); }
 static void game_reuses_reader_addresses(void){ g.reuse_addresses = 1; }
 static void game_song_has_both_sides_alike(void){ g.song_on_both_sides = 1; }
 static void race_sounds_start(void){ add_input(2.0f, 0.35f, 0.35f); add_input(2.0f, 0.5f, 0.5f); }
@@ -248,15 +257,43 @@ TEST(title_screen_game_restarts_song_on_same_readers__same_folder_song_goes_on){
     expect_folder_song(1);
     expect_plaques(1, 1);
 }
-TEST(title_screen_game_restarts_song_on_new_readers__same_folder_song_goes_on){
+TEST(title_screen_game_stops_and_restarts_song__new_folder_song){
     radio_switched_on();
     to_menus(0);
     seconds(30);
     game_stops_song();
     game_song_starts(0);
     steps(SETTLED);
+    expect_folder_song(2);
+    expect_plaques(2, 2);
+}
+TEST(finish_restart_before_results__new_folder_song){
+    radio_switched_on();
+    to_race(18);
+    seconds(10);
+    to_race(18);
+    expect_folder_song(2);
+    expect_race_sounds();
+}
+TEST(game_song_ends_by_itself_then_restart__new_folder_song){
+    radio_switched_on();
+    to_race(18);
+    game_song_starts_in_place(19);
+    steps(SETTLED);
     expect_folder_song(1);
-    expect_plaques(1, 1);
+    to_race(18);
+    expect_folder_song(2);
+    expect_plaques(2, 2);
+}
+TEST(race_sounds_one_side_each__never_taken_as_folder_song){
+    radio_switched_on();
+    in_race();
+    game_song_starts(18);
+    steps(SETTLED);
+    add_input(2.0f, 0.4f, 0.0f);
+    add_input(2.0f, 0.0f, 0.4f);
+    steps(SETTLED);
+    expect_folder_song(1);
 }
 TEST(race_sounds_both_sides__never_taken_as_folder_song){
     radio_switched_on();
@@ -311,12 +348,12 @@ TEST(game_start_index_27_or_more__game_plays_its_own_music){
     expect_game_song();
     expect_plaques(1, 0);
 }
-TEST(ea_trax_screen_row_preview__folder_song_stays){
+TEST(game_stops_song_and_starts_another__new_folder_song){
     folder_song_plays_in_main_menu();
     game_stops_song();
     game_song_starts(6);
     steps(SETTLED);
-    expect_folder_song(1);
+    expect_folder_song(2);
 }
 TEST(pause_menu__silence_then_same_folder_song_continues){
     radio_switched_on();
@@ -349,23 +386,25 @@ TEST(race_restart_from_pause__new_folder_song_both_sides){
     expect_folder_song(2);
     expect_race_sounds();
 }
-TEST(game_music_volume_0_and_back_in_circuit__same_folder_song_returns){
+TEST(game_music_volume_0_and_back_in_circuit__new_folder_song){
     radio_switched_on();
     to_race(17);
     game_music_volume(0.0f);
     steps(20);
     expect_no_song();
     game_music_volume(1.0f);
-    game_song_starts_in_place(17);
+    game_stops_song();
+    game_song_starts(17);
     steps(SETTLED);
-    expect_folder_song(1);
+    expect_folder_song(2);
 }
-TEST(menu_music_volume_0_and_back_in_main_menu__same_folder_song_returns){
+TEST(menu_music_volume_0_and_back_in_main_menu__new_folder_song){
     folder_song_plays_in_main_menu();
     steps(20);
-    game_song_starts_in_place(3);
+    game_stops_song();
+    game_song_starts(3);
     steps(SETTLED);
-    expect_folder_song(1);
+    expect_folder_song(2);
 }
 TEST(alt_tab__muted_then_same_folder_song){
     folder_song_plays_in_main_menu();
