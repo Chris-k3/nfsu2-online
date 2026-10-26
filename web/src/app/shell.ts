@@ -42,6 +42,7 @@ import { turnOnAutosave } from './profile';
 import { crewControl, putKey, SettingsPanel, showCrewCounts } from './settings-ui';
 import { askCrews, queueText, roomHash, serverAnswers, watchPlayers, type PlayerCounts } from './players';
 import { crewList, crewsOf, crewsValue, rgbsValue, rgbWords, type Crew } from './crews';
+import { privacy, SCRUB_NOTE } from './privacy';
 import { SavesPanel } from './saves-ui';
 import { saveScreenshot } from './shots';
 import { forgetLink, VaultPanel } from './vault-ui';
@@ -91,6 +92,7 @@ async function devServer(): Promise<boolean> {
 }
 
 const log = new LogRing(8 << 20);
+log.onLine = s => { privacy.learn(s); };    // the names a downloaded log must not carry (privacy.ts)
 let phase: Phase = 'boot';
 let loaded: Loaded | null = null;
 let displayHz = 60;
@@ -454,6 +456,11 @@ async function startGame() {
     NFSU2_WIDTH: String(size.w & ~1), NFSU2_HEIGHT: String(size.h & ~1), NFSU2_DISPLAY_HZ: String(displayHz),
   };
   const r = resolved(host);
+  // the names this game goes by, for the log as it leaves the browser (privacy.ts)
+  privacy.name(r.env.NFSU2_ROAM_NAME, 'you');
+  for (const c of crewList(r.env.NFSU2_ROAM_CREW ?? '')) privacy.name(c, 'crew');
+  privacy.name(r.env.NFSU2_ROAM_ROOM, 'room');
+  for (const p of await listProfiles(SAVE).catch(() => [])) privacy.name(p.name, 'profile');
   // offline mode: the server does not answer.  The movies stream from it, so unless every one of them is in this
   // browser they are off for this game (a movie the game could not read would stop it).
   setReach(await serverAnswers(2000));
@@ -800,6 +807,7 @@ function openHelp() {
  *  on the server they came too often */
 const FRIEND_NOTICES = false;
 function notice(text: string, who?: string) {
+  privacy.name(who, 'player');
   log.add(`[notice] ${text}`);
   if (who && !FRIEND_NOTICES) return;
   const box = $('#notices'), line = document.createElement('div');
@@ -1105,8 +1113,10 @@ function choiceBox(title: string, body: Node | string, ok: string, cancel: strin
 async function downloadLog() {
   if (session?.logReport()) await log.waitFor('[watchdog] log download ready', 2000);
   // the last game's copy first, when that game did not get to its end (lastgame.ts)
-  const prev = lastGame ? `=== the last game's log, as the page kept it while it ran ===\n${lastGame.log}=== this page's log ===\n` : '';
-  downloadBlob(prev + log.text(), `nfsu2-${stamp()}.log`, 'text/plain');
+  // as it may leave the browser (privacy.ts): no names, no addresses; a copy from a page before that scrubbed nothing
+  const kept = lastGame ? (lastGame.scrubbed ? lastGame.log : privacy.scrub(lastGame.log)) : '';
+  const prev = lastGame ? `=== the last game's log, as the page kept it while it ran ===\n${kept}=== this page's log ===\n` : '';
+  downloadBlob(`${SCRUB_NOTE}\n${prev}${privacy.scrub(log.text())}`, `nfsu2-${stamp()}.log`, 'text/plain');
 }
 /** what the running game holds now, for each copy of its log (lastgame.ts): what fills a phone's memory as it plays */
 function gameHeld(): string {
@@ -1293,7 +1303,7 @@ export async function boot() {
   const given = takeParams(dev);
   instance = claimInstance(`nfsu2-saves:${SAVE}`);
   // the last game of this save folder that did not get to its end (Safari stopped the page, say): its log is offered
-  keeper = new LastGameKeeper(SAVE, log, logLine);
+  keeper = new LastGameKeeper(SAVE, log, logLine, text => privacy.scrub(text));
   lastGame = lastGameToOffer(SAVE);
   if (lastGame) {
     log.keep(lastGameLine(lastGame));

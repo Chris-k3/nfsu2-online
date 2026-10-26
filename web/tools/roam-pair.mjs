@@ -33,6 +33,8 @@
 //                    gets --artifacts <out>); --play-only: only that instance renders, the others run hostcheck
 //        [--page-arg bc=0]  more of the page address (each page's, repeated for several): play.html's bc=0 takes a
 //                    phone's texture path (DXT1 as ASTC, the rest unpacked) on this Mac
+//        [--download-log]  with --page app: at the end each page's Download log, as a player gets it (privacy.ts:
+//                    no names or addresses), as <out>/<name>.download.log
 //        [--fetch snd.raw]  a file of each page's save folder (OPFS) copied out as <out>/<name>.<file>,
 //                    e.g. the sound output of --env SNDDUMP=/save/snd.raw (s16le stereo, 44.1 kHz)
 //        [--hide Bob:60:8]  that page reports itself hidden (document.hidden + visibilitychange, as when
@@ -93,6 +95,7 @@ const SPECS = (argv.includes('--solo') ? [opt('a', 'Alice:roam_mp_drive.txt')]
   .filter(Boolean).map(x => x.split(':'));
 const N = SPECS.length;
 const APP = opt('page', 'test') === 'app';
+const DOWNLOAD_LOG = APP && argv.includes('--download-log');
 const PLAY = opt('page', 'test') === 'play', SIZE = opt('size', opt('page', 'test') === 'app' ? '1600x900' : '960x540').split('x').map(Number), PLAY_ONLY = opt('play-only', '');
 const FETCH = opts('fetch');                 // files of each page's save folder to copy out, as <out>/<name>.<file>
 const SEED = opt('seed', '');               // a save tree each page starts from
@@ -174,7 +177,7 @@ const t0 = Date.now();
 const inst = [];
 async function start(i, name, script, own) {
   const ctx = await browser.newContext({ ...(HTTPS ? { ignoreHTTPSErrors: true } : {}), ...(APP ? { viewport: { width: SIZE[0], height: SIZE[1] } } : {}),
-    ...(TOUCH ? { hasTouch: true } : {}) });
+    ...(TOUCH ? { hasTouch: true } : {}), ...(DOWNLOAD_LOG ? { acceptDownloads: true } : {}) });
   const page = await ctx.newPage();
   const log = fs.createWriteStream(path.join(OUT, `${name}.log`));
   const w = (s) => log.write(`${((Date.now() - t0) / 1000).toFixed(3)} ${s}\n`);
@@ -309,6 +312,13 @@ for (const x of inst) {
       fs.writeFileSync(path.join(OUT, as), buf);
       console.log(`roam-pair: ${as} ${buf.length} bytes`);
     } catch (e) { console.log(`roam-pair: no ${f} from ${x.name}: ${e}`); }
+  }
+  if (DOWNLOAD_LOG) {
+    try {
+      const [dl] = await Promise.all([x.page.waitForEvent('download', { timeout: 15000 }), x.page.click('#log-btn', { timeout: 15000 })]);
+      await dl.saveAs(path.join(OUT, `${x.name}.download.log`));
+      console.log(`roam-pair: ${x.name}.download.log`);
+    } catch (e) { console.log(`roam-pair: no downloaded log from ${x.name}: ${e}`); }
   }
   x.log.end();
 }
