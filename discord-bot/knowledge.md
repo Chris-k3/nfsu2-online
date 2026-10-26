@@ -33,8 +33,9 @@ The log is the most useful thing in a bug report. Say exactly how:
 - After a "The game was stopped" (GPU-LOST) or a new version: download the log before pressing Play or Reload, the
   reload clears it.
 - Attach the .log file to the post (drag it into Discord, or the + button). Not a photo of the screen, not pasted text.
-- What it contains, if they ask: browser and system, graphics chip, time zone, and the names of players they met. No
-  passwords, no keyphrase, no address of theirs.
+- What it contains, if they ask: browser and system, graphics chip, the time zone's UTC offset. Names (theirs, other
+  players', crews, rooms) and addresses are replaced by stand-ins such as `you` and `player-…` since the change "Download
+  log: no names or addresses" (once it is live; older pages' logs still have them). No passwords, no keyphrase.
 
 ## What a report needs, by problem
 
