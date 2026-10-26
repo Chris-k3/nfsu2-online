@@ -5,7 +5,7 @@ import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as esbuild from 'esbuild';
 
@@ -278,10 +278,15 @@ test('Shuffle plays any track that suits the place but the last one, is kept, an
   } finally { Math.random = random; }
 });
 
-test('the runtime: the song number, the tags and the scenarios of the game\'s songs (tests/radio_unit.c)', () => {
+// The unit test is built for this machine: the clang of deps/wasi-sdk-* (as web/build.sh finds it) when it can build for the host (wasi-sdk's
+// has the WebAssembly target only), else the system clang; with neither the test is skipped, as the wasi-sdk ones are.
+const wasi = fs.existsSync(path.join(ROOT, 'deps')) ? fs.readdirSync(path.join(ROOT, 'deps')).filter(d => d.startsWith('wasi-sdk-')).map(d => path.join(ROOT, 'deps', d, 'bin/clang')) : [];
+const hostClang = [...wasi.slice(-1), 'clang'].find(cc => /x86|aarch64|arm64/i.test(spawnSync(cc, ['--print-targets'], { encoding: 'utf8' }).stdout ?? ''));
+
+test('the runtime: the song number, the tags and the scenarios of the game\'s songs (tests/radio_unit.c)', { skip: !hostClang && 'no clang that builds for this machine (deps/wasi-sdk-* builds WebAssembly only)' }, () => {
   const out = path.join(ROOT, 'out/web/test'), bin = path.join(out, 'radio_unit');
   fs.mkdirSync(out, { recursive: true });
-  execFileSync('clang', ['-O1', '-Wall', '-Wextra', '-Werror', '-DNFSU2_RADIO_TEST', '-I', path.join(ROOT, 'runtime'), '-I', path.join(ROOT, 'tests'),
+  execFileSync(hostClang, ['-O1', '-Wall', '-Wextra', '-Werror', '-DNFSU2_RADIO_TEST', '-I', path.join(ROOT, 'runtime'), '-I', path.join(ROOT, 'tests'),
     '-o', bin, path.join(ROOT, 'tests/radio_unit.c')]);
   const got = execFileSync(bin, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   assert.match(got, /radio_unit: 0 failed; scenarios: 0 of \d+ failed$/, got.split('\n').filter(l => !l.startsWith('ok ')).join('\n'));
