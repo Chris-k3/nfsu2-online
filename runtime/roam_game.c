@@ -117,6 +117,7 @@
 #define G_PARTOWNERS    0x008a1cb8u   /* CarPart byte +7 -> owner (car type) hash table */
 #define G_CARPARTDB     0x008a2b68u
 #define G_CARLOADER     0x008a3288u   /* entries on +0x58, handle at entry +0x123C */
+#define G_RIDEPOOL      0x008a1d00u   /* bSlotPool* of its entries: +0x18 in use, +0x2C entries (0x43CD10: all taken) */
 #define G_CARPOOL_KB    0x007fa9d4u   /* free-roam "Cars" pool size (KB), read at the track load */
 #define CARPOOL_KB_GAME 11000         /* its size in the game */
 #define CARPOOL_KB      48000         /* free roam's (NFSU2_ROAM_CARPOOL_KB) */
@@ -1318,8 +1319,58 @@ static void restore(CPU *c, int k){
  * on with it.  So it runs only with the loader idle, as the game's own purge
  * does (0x63AE70 services the loader until +0x14 is 0); busy: the next frame. */
 #define POOL_NEED (3600u * 1024u)
+/* Room among the loader's ride entries (RIDE_ENTRIES) too.  An unloaded
+ * ride keeps its entry until a purge, and the game purges only in Load
+ * (0x63AE70), once every entry is taken -- after servicing the loader until
+ * it is idle, and each step's callback goes straight on to the next load,
+ * so the frame waited for the load under way and all those queued behind
+ * it.  With friends coming and going all the time (the hub relinks as the
+ * player drives), about 128 rides in, every load was a 30-530 ms frame (a
+ * crowded 2026-10-26 session: none before the 128th load since the crib,
+ * 95 of the 410 after).  So the unused entries go here, with the loader
+ * idle, before they run out: one a frame (rides_tidy), two before a load.
+ * A purge takes ~0.5 ms (a ride's models out): never a batch (20 at once
+ * were a 6-16 ms frame).  RIDES_FREE stay free for a crowd arriving at once
+ * (a jump: 32 loads queued while the old rides are still held; with only
+ * 16 free the rest waited for the loader one by one, all 32 cars shown
+ * after 4.1 s instead of 3.0), and two at the least: this load's and one
+ * for a load of the game's own (traffic).  Busy and short of those: the
+ * next frame. */
+#define RIDES_FREE      40
+#define RIDES_STEP      2
+static struct { int n; int64_t us; } g_rides_out;
+static void rides_out(CPU *c, uint32_t p, int most){
+    uint32_t n = MR32(p + 0x2cu);
+    if (MR32(p + 0x18u) + RIDES_FREE <= n || rd32(G_CARLOADER + LOADER_BUSY)) return;
+    int k = 0;
+    int64_t t0 = roam_plat_now_us();
+    while (MR32(p + 0x18u) + RIDES_FREE > n && k < most && (gcall1(c, FN_LOADER_PURGE, G_CARLOADER, 0) & 0xffu)) k++;
+    g_rides_out.n += k; g_rides_out.us += roam_plat_now_us() - t0;
+    if (g_rides_out.n >= 50){
+        rlog("[roam] f=%ld car loader: %d unused rides out (%.1f ms in all), %u of %u entries in use\n", rh_frame(), g_rides_out.n,
+             g_rides_out.us / 1000.0, MR32(p + 0x18u), n);
+        g_rides_out.n = 0; g_rides_out.us = 0;
+    }
+}
+static void rides_tidy(CPU *c){
+    uint32_t p = rd32(G_RIDEPOOL);
+    if (ok(p, 0x30)) rides_out(c, p, 1);
+}
+static int ride_room(CPU *c){
+    uint32_t p = rd32(G_RIDEPOOL);
+    if (!ok(p, 0x30)) return 1;
+    uint32_t n = MR32(p + 0x2cu);
+    rides_out(c, p, RIDES_STEP);
+    if (MR32(p + 0x18u) + 2 <= n) return 1;
+    static long said;
+    if (!said || rh_frame() - said > 1200){ said = rh_frame();
+        rlog("[roam] f=%ld car loader: %u of %u entries taken, the loader %s: loads wait\n", rh_frame(), MR32(p + 0x18u), n,
+             rd32(G_CARLOADER + LOADER_BUSY) ? "busy" : "holding no unused ride"); }
+    return 0;
+}
 static struct { uint32_t id; long next; } g_memnote[RC_TABLE];
 static int pool_room(CPU *c, const Slot *s, const char *car /* 0: a car of our own */){
+    if (!ride_room(c)) return 0;
     if (pool_free() >= POOL_NEED) return 1;
     if (rd32(G_CARLOADER + LOADER_BUSY)) return 0;
     int n = 0;
@@ -5229,6 +5280,7 @@ void roam_game_frame(CPU *c){
         spots_read(c, host);
 #endif
         g_heavy = 0;
+        rides_tidy(c);
         assign(c, host);
         for (int k = 0; k < NSLOT; k++){
             Slot *s = &g_sl[k];
