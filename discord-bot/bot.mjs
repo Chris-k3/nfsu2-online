@@ -14,8 +14,9 @@ import { fileURLToPath } from 'node:url';
 import { Archive } from './archive.mjs';
 import { matchFixes } from './fixes.mjs';
 import { General } from './general.mjs';
-import { imageType, investigate, newClient, vet } from './investigate.mjs';
+import { blocks, imageType, investigate, newClient, vet } from './investigate.mjs';
 import { Repo, defaultSource } from './repo.mjs';
+import { COMMAND as TRANSLATE, Translator } from './translate.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const env = process.env;
@@ -30,6 +31,7 @@ const CFG = {
   dryRun: env.BOT_DRY_RUN === '1',
   waitS: Number(env.BOT_WAIT_S || 120),
   maxReplies: Number(env.BOT_MAX_REPLIES || 2),
+  maxTalk: Number(env.BOT_MAX_TALK || 6),        // replies per thread in all, answering people who reply to the bot
   maxPerDay: Number(env.BOT_MAX_PER_DAY || 80),
   minConfidence: env.BOT_MIN_CONFIDENCE || 'medium',
   archive: env.BOT_ARCHIVE !== '0',
@@ -44,6 +46,11 @@ const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 const MAX_TEXT = 10 << 20, MAX_IMAGE = 3_500_000, MAX_IMAGES = 4;
 const MAX_UPLOAD = 8 << 20, MAX_UPLOADS = 3;    // files copied into a staff report (Discord takes 10 MB a message)
 const SAVES_ZIP = /^nfsu2-saves-.*\.zip$/i;      // Saves, Download backup: for the developer, not for the model
+const LOG_FILE = /\.(log|txt)$/i;                // F9, Download log; a long paste comes as message.txt
+const hasLog = m => [...m.attachments.values()].some(a => LOG_FILE.test(a.name));
+/** a message that mentions the bot or replies to one of its messages (also with the reply's ping turned off) */
+const toBot = m => m.mentions.repliedUser?.id === client.user.id ||
+  m.mentions.has(client.user, { ignoreEveryone: true, ignoreRoles: true, ignoreRepliedUser: true });
 const MAX_WAIT_MS = 10 * 60_000;                 // a thread that keeps growing is looked at after 10 minutes anyway
 const STARTUP_MS = 48 * 3600_000;                // at start, the forums' posts of the last 48 hours, nothing older
 const RELEASE_CHECK_MS = 5 * 60_000;             // how often the bot checks whether a new version went live
@@ -88,6 +95,8 @@ function isStaff(member, channel) {
   if (member.roles?.cache?.some(r => CFG.staff.includes(r.id))) return true;
   return !!channel && member.permissionsIn(channel).has(PermissionFlagsBits.ManageThreads);
 }
+
+const translator = new Translator({ client, anthropic, state: CFG.state });   // Apps, Translate on a message
 
 // the general channels (general.mjs): nudges to the forums, spikes and a daily digest for the staff
 const general = new General({
@@ -150,9 +159,11 @@ async function look(threadId, why, extra) {
   const fix = why === 'fix live';
   if (thread.locked || (thread.archived && !fix)) return say('skipped: closed or locked');
   st.guild ??= thread.guildId;
-  const byStaff = why === 'asked by staff', bumped = why === 'bump';
-  const anyway = byStaff || fix || bumped;       // looks that go ahead where staff wrote and past the reply cap
+  const byStaff = why === 'asked by staff', bumped = why === 'bump', logged = why === 'log', talk = why === 'reply';
+  // looks that go ahead where staff wrote and past the reply cap; replies to the bot up to their own cap
+  const anyway = byStaff || fix || bumped || logged || talk;
   if (fix && st.fixed) return say('skipped: already told that a fix went live');
+  if (talk && st.replies >= CFG.maxTalk) return say(`skipped: ${st.replies} replies already, the most for answering replies`);
   if (!anyway && st.status === 'staff') return say('skipped: staff are in the thread');
   if (!anyway && st.replies >= CFG.maxReplies) return say(`skipped: ${st.replies} replies already`);
   if (!underCap()) return say(`skipped: ${CFG.maxPerDay} looks today already`);
@@ -204,12 +215,20 @@ async function look(threadId, why, extra) {
   if (post) say(`reply: ${post.split('\n')[0].slice(0, 160)}`);
 
   if (posted) {
-    const lastOp = [...msgs].reverse().find(m => m.author.id === thread.ownerId);
-    await thread.send({
-      content: post,
-      allowedMentions: { parse: [], repliedUser: false },
-      ...(st.replies && lastOp ? { reply: { messageReference: lastOp.id, failIfNotExists: false } } : {}),
-    }).finally(() => clearInterval(typing));
+    // a reply to the poster's last post once the bot replied before; to the log it read, or to who talked to it, when
+    // that brought it here
+    const newest = [...msgs].reverse();
+    const ref = (logged && newest.find(m => hasLog(m) && !isStaff(m.member, thread))) ||
+      (talk && newest.find(m => m.author.id !== client.user.id && toBot(m))) ||
+      (st.replies && newest.find(m => m.author.id === thread.ownerId));
+    try {
+      for (const [n, content] of blocks(post).entries()) {    // a long reply: several messages, split between its parts
+        await thread.send({
+          content, allowedMentions: { parse: [], repliedUser: false },
+          ...(n === 0 && ref ? { reply: { messageReference: ref.id, failIfNotExists: false } } : {}),
+        });
+      }
+    } finally { clearInterval(typing); }
   }
   clearInterval(typing);
   if (fix) {                                     // a fix notice changes nothing else about the thread
@@ -231,7 +250,7 @@ async function look(threadId, why, extra) {
   if (post) st.replies++;
   if (bump) st.bump = bump.id;
   if (v) Object.assign(st, { summary: v.summary, category: v.category });
-  if (!(bumped && st.status === 'staff')) {      // a bump in a thread staff wrote in leaves it theirs
+  if (!((bumped || logged || talk) && st.status === 'staff')) {   // a thread staff wrote in stays theirs
     st.status = !v ? 'failed' : post ? (v.action === 'ask' ? 'asked' : 'answered') : st.status === 'asked' ? 'asked-none' : 'none';
   }
   if (v && CFG.staffChannel) await tellStaff(thread, st, v, post, [workDir, staffDir], posted).catch(e => console.error(`[bot] staff channel: ${e.message}`));
@@ -251,10 +270,13 @@ async function transcript(thread, msgs, workDir, staffDir, why, extra) {
     `Why the bot looks now: ${WHY[why] ?? why}`, ...(extra?.text ? [extra.text] : []), ''];
   const images = [];
   let n = 0;
+  const who = m => m.author.id === client.user.id ? 'this bot' : m.author.id === thread.ownerId ? 'the poster'
+    : isStaff(m.member, thread) ? 'staff' : 'another member';
+  const time = m => m.createdAt.toISOString().slice(0, 16).replace('T', ' ');
   for (const m of msgs) {
-    const who = m.author.id === client.user.id ? 'this bot' : m.author.id === thread.ownerId ? 'the poster'
-      : isStaff(m.member, thread) ? 'staff' : 'another member';
-    lines.push(`[${m.createdAt.toISOString().slice(0, 16).replace('T', ' ')} UTC] ${m.member?.displayName ?? m.author.username} (${who}):`);
+    const to = m.reference?.messageId && msgs.find(x => x.id === m.reference.messageId);
+    const re = to ? `, in reply to ${to.member?.displayName ?? to.author.username} (${who(to)}) at ${time(to)}` : '';
+    lines.push(`[${time(m)} UTC] ${m.member?.displayName ?? m.author.username} (${who(m)}${re}):`);
     if (m.content) lines.push(m.content);
     for (const a of m.attachments.values()) {
       const kb = `${Math.round(a.size / 1024)} KB`;
@@ -423,10 +445,11 @@ function forClaude(lines, files, max) {
 const WHY = {
   'new post': 'a new post',
   'follow-up': 'the poster wrote again after the bot asked for information',
-  'mentioned': 'the poster mentioned the bot or replied to it',
+  'reply': 'someone replied to the bot or mentioned it (see "When someone replies to the bot")',
   'asked by staff': 'staff mentioned the bot and want its reply: answer or ask, never none; with no fix and nothing to ask, answer with a short account of what you found (what the log shows, whether it is known or fixed)',
   'fix live': 'a release just went live, and a commit in it may fix this thread\'s problem (see "When a fix goes live")',
   'bump': 'the poster wrote again after the thread was quiet for half a day or more: they are waiting for an answer (see "When the poster bumps")',
+  'log': 'someone posted a log (or another text file) in the thread (see "When a log is posted")',
 };
 
 /** the poster's newest bump in these messages (oldest first) that neither staff nor the bot answered since, or null.
@@ -541,6 +564,7 @@ client.on(Events.ClientReady, c => {
     `${CFG.forums.length ? `forums ${CFG.forums.join(', ')}` : 'every forum'}, ` +
     `${CFG.staffChannel ? `staff channel ${CFG.staffChannel}` : 'no staff channel'}, model ${CFG.model} (${CFG.effort})`);
   repo.sync(true).catch(e => console.error(`[repo] ${e.message}`));
+  c.application.commands.set([TRANSLATE]).catch(e => console.error(`[translate] the command: ${e.message}`));
   const release = () => checkRelease().catch(e => console.error(`[release] ${e.message}`));
   indexForums().catch(e => console.error(`[bot] forum index: ${e.message}`)).finally(release);
   setInterval(release, RELEASE_CHECK_MS);
@@ -593,9 +617,8 @@ client.on(Events.MessageCreate, guard('message', m => {
   if (st.staffMsg && CFG.staffChannel && m.attachments.size && !isStaff(m.member, thread)) {
     relay(m, st).catch(e => console.error(`[bot] relay to the report: ${e.message}`));
   }
-  // a mention by name; for the poster a reply to the bot's message counts too
+  // staff ask by a mention by name; anyone else talks to the bot by a mention or a reply to its message
   const named = m.mentions.has(client.user, { ignoreEveryone: true, ignoreRoles: true, ignoreRepliedUser: true });
-  const replied = m.mentions.has(client.user, { ignoreEveryone: true, ignoreRoles: true });
   if (isStaff(m.member, thread)) {
     if (named) { schedule(thread.id, 'asked by staff'); return; }
     if (st.status !== 'staff') console.log(`[bot] ${thread.id} "${st.title}": staff wrote, the bot stays out`);
@@ -605,15 +628,23 @@ client.on(Events.MessageCreate, guard('message', m => {
   }
   const op = m.author.id === thread.ownerId;
   if (st.status === 'new') { if (op) schedule(thread.id, 'new post'); return; }
-  if (!op) return;
-  if (st.status === 'asked') { schedule(thread.id, 'follow-up'); return; }
+  if (op && st.status === 'asked') { schedule(thread.id, 'follow-up'); return; }
+  // a log, from the poster or anyone else: always a look, also past the reply cap and where staff wrote
+  if (hasLog(m)) { schedule(thread.id, 'log'); return; }
+  // someone talking to the bot: an answer, up to BOT_MAX_TALK replies in the thread, also where staff wrote
+  if (!op) { if (toBot(m)) schedule(thread.id, 'reply'); return; }
   // the poster after a quiet half day: a bump, also in a thread staff wrote in before and left
   thread.messages.fetch({ before: m.id, limit: 1 }).then(before => {
     const prev = before.first();
     if (prev && m.createdTimestamp - prev.createdTimestamp >= BUMP_QUIET_MS) schedule(thread.id, 'bump');
-    else if (replied && st.status !== 'staff') schedule(thread.id, 'mentioned');
+    else if (toBot(m)) schedule(thread.id, 'reply');
   }).catch(e => console.error(`[bot] ${thread.id}: ${e.message}`));
 }));
+client.on(Events.InteractionCreate, i => {
+  if (i.isMessageContextMenuCommand() && i.commandName === TRANSLATE.name) {
+    translator.handle(i).catch(e => console.error(`[translate] ${i.targetId}: ${e.stack || e}`));
+  }
+});
 client.on(Events.Error, e => console.error(`[bot] discord: ${e.message}`));
 process.on('unhandledRejection', e => console.error(`[bot] ${e?.stack || e}`));
 

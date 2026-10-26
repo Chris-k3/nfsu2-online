@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Archive } from './archive.mjs';
-import { imageType, investigate, newClient, vet } from './investigate.mjs';
+import { blocks, imageType, investigate, newClient, vet } from './investigate.mjs';
 import { Repo, defaultSource } from './repo.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -47,7 +47,7 @@ try {
   });
   console.log(JSON.stringify(res.verdict, null, 2));
   const { post, why } = vet(res.verdict, { minConfidence: env.BOT_MIN_CONFIDENCE || 'medium' });
-  console.log(`\n${post ? `--- would post (${why}) ---\n${post}\n---` : `--- would post nothing (${why}) ---`}`);
+  console.log(`\n${post ? `--- would post (${why}) ---\n${blocks(post).join('\n--- next message ---\n')}\n---` : `--- would post nothing (${why}) ---`}`);
   console.log(`${res.turns} turns${res.cost != null ? `, $${res.cost.toFixed(3)}` : ''}, tokens ${JSON.stringify(res.usage)}`);
 } finally {
   fs.rmSync(workDir, { recursive: true, force: true });

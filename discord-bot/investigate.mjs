@@ -13,13 +13,12 @@ const MAX_TURNS = 16;                            // a look that needs more is cu
 
 export const VERDICT = {
   type: 'object', additionalProperties: false,
-  required: ['action', 'category', 'language', 'reply', 'disclaimer', 'summary', 'notes', 'escalate', 'duplicate_of', 'confidence'],
+  required: ['action', 'category', 'language', 'reply', 'summary', 'notes', 'escalate', 'duplicate_of', 'confidence'],
   properties: {
     action: { type: 'string', enum: ['none', 'ask', 'answer'] },
     category: { type: 'string', enum: ['crash', 'graphics', 'performance', 'controls', 'online', 'saves', 'audio', 'phone', 'suggestion', 'question', 'other'] },
     language: { type: 'string', description: 'the language of the reply, as a BCP 47 tag (en, pt-BR, ...)' },
     reply: { type: 'string', description: 'the message to post; "" for none' },
-    disclaimer: { type: 'string' },
     summary: { type: 'string' },
     notes: { type: 'string', description: 'for the developer; posted in the staff channel when escalate is true' },
     escalate: { type: 'boolean', description: 'the developer should look at this' },
@@ -165,15 +164,34 @@ export function vet(v, { minConfidence = 'medium' } = {}) {
   for (const block of reply.match(/```[\s\S]*?```/g) ?? []) {
     if (block.split('\n').length > 8) return { post: null, why: 'a long code block' };
   }
-  const disclaimer = (v.disclaimer ?? '').trim().replace(/\n+/g, ' ').slice(0, 150) || 'Automated AI reply, it may be wrong.';
-  const room = 1990 - disclaimer.length - 6;
-  let body = reply;
-  if (body.length > room) {
-    const nl = body.lastIndexOf('\n', room);
-    body = body.slice(0, nl > room / 2 ? nl : room).trimEnd() + ' …';
-  }
-  return { post: `${body}\n\n-# ${disclaimer}`, why: v.action };
+  return { post: reply, why: v.action };
 }
+
+/** a reply as Discord messages of at most `max` characters: its blank-line parts (never split inside a code block),
+ *  as many to a message as fit; a part too long for one is split between lines, a line between words */
+export function blocks(text, max = 2000) {
+  const parts = [];
+  let cur = [], code = false;
+  for (const line of text.split('\n')) {
+    if (/^\s*```/.test(line)) code = !code;
+    if (!code && !line.trim()) { if (cur.length) parts.push(cur.join('\n')); cur = []; continue; }
+    cur.push(line);
+  }
+  if (cur.length) parts.push(cur.join('\n'));
+  const lines = p => p.split('\n').flatMap(l => l.length <= max ? [l] : words(l, max));
+  return pack(parts.flatMap(p => p.length <= max ? [p] : pack(lines(p), '\n', max)), '\n\n', max);
+}
+/** strings, each at most `max` long, joined by `sep` into as few strings of at most `max` as they fit */
+function pack(items, sep, max) {
+  const out = [];
+  for (const s of items) {
+    if (out.length && out.at(-1).length + sep.length + s.length <= max) out[out.length - 1] += sep + s;
+    else out.push(s);
+  }
+  return out;
+}
+/** a line too long for a message, in pieces between words (a word too long for one, cut) */
+const words = (line, max) => pack(line.split(/(?<=\s)/).flatMap(w => w.length <= max ? [w] : w.match(new RegExp(`[^]{1,${max}}`, 'g'))), '', max);
 
 export const newClient = () => new Anthropic();
 
