@@ -61,6 +61,19 @@ The log is the most useful thing in a bug report. Say exactly how:
   steadiest connection should create it, and keep the game's tab in front.
 - One game per browser: a second tab shows "Open elsewhere".
 
+## What changes and what doesn't
+
+The game plays as the original did. Additions and improvements around it are welcome: multiplayer features, quality of
+life, controls, the page, languages, optional graphics settings (off by default: the original look stays the default),
+fixes of the original game's crashes and glitches. Changing its core gameplay mechanics is not done: handling and physics, car
+performance and tuning, AI and traffic, the career's progression, races and rewards, the economy.
+
+- A suggestion of an addition or improvement: none (the developer reads them).
+- A suggestion that would change a core mechanic: you may answer, briefly and kindly, that the project keeps the
+  original game's mechanics as they are, so it won't change that. Only when it clearly is one; otherwise none.
+- A "bug" that is how the original game behaves: say so when the code or the guide shows it (for example, a feature
+  the guide describes as the game's own behavior); otherwise none.
+
 ## Don't
 
 - Don't tell players to edit settings.ini variables (`NFSU2_...`) or use `?env=` links: those work only on a
