@@ -13,6 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Archive } from './archive.mjs';
 import { matchFixes } from './fixes.mjs';
+import { General } from './general.mjs';
 import { investigate, newClient, vet } from './investigate.mjs';
 import { Repo, defaultSource } from './repo.mjs';
 
@@ -44,7 +45,7 @@ const MAX_TEXT = 10 << 20, MAX_IMAGE = 3_500_000, MAX_IMAGES = 4;
 const MAX_UPLOAD = 8 << 20, MAX_UPLOADS = 3;    // files copied into a staff report (Discord takes 10 MB a message)
 const SAVES_ZIP = /^nfsu2-saves-.*\.zip$/i;      // Saves, Download backup: for the developer, not for the model
 const MAX_WAIT_MS = 10 * 60_000;                 // a thread that keeps growing is looked at after 10 minutes anyway
-const STARTUP_MS = 24 * 3600_000;                // at start, the forums' posts of the last 24 hours, nothing older
+const STARTUP_MS = 48 * 3600_000;                // at start, the forums' posts of the last 48 hours, nothing older
 const RELEASE_CHECK_MS = 5 * 60_000;             // how often the bot checks whether a new version went live
 const FIX_DAYS = 14, FIX_MAX = 10;               // a release is checked against threads of the last 14 days, 10 messages at most
 
@@ -83,6 +84,18 @@ function isStaff(member, channel) {
   if (member.roles?.cache?.some(r => CFG.staff.includes(r.id))) return true;
   return !!channel && member.permissionsIn(channel).has(PermissionFlagsBits.ManageThreads);
 }
+
+// the general channels (general.mjs): nudges to the forums, spikes and a daily digest for the staff
+let releasedAt = 0;
+const general = new General({
+  client, anthropic, model: CFG.model, isStaff, staffChannel: CFG.staffChannel, dryRun: CFG.dryRun, state: CFG.state,
+  releasedAt: () => releasedAt,
+  bugForum: guild => guild?.channels.cache.find(ch => isForum(ch) && /bug/i.test(ch.name)) ?? null,
+  forumThreads: () => Object.entries(threads)
+    .filter(([, t]) => !t.archived && t.category !== 'suggestion' && !/suggest/i.test(t.forum ?? ''))
+    .sort(byActivity).slice(0, 40)
+    .map(([id, t]) => ({ id, line: `${id} | ${t.title} | ${(t.summary || t.snippet || '').slice(0, 120)}` })),
+});
 
 // ---------------------------------------------------------------------------------------------- when to look --
 const timers = new Map();                        // thread id -> { timer, first }
@@ -393,6 +406,7 @@ async function checkRelease() {
   const { matches, error } = await matchFixes({ client: anthropic, model: CFG.model, effort: CFG.effort, commits: commits.slice(0, 60_000), candidates });
   if (error) return console.log(`[release] matching failed, again at the next check: ${error}`);
   seen();
+  releasedAt = Date.now();
   console.log(`[release] ${matches.length} thread(s) may be fixed${matches.length ? `: ${matches.map(m => `${m.thread} (${m.commit})`).join(', ')}` : ''}`);
   for (const m of matches.slice(0, FIX_MAX)) {
     const body = (await repo.git(['show', '--no-patch', '--format=%h %s%n%n%b', m.commit]).catch(() => '')).trim().slice(0, 1500);
@@ -462,6 +476,7 @@ client.on(Events.ClientReady, c => {
   const release = () => checkRelease().catch(e => console.error(`[release] ${e.message}`));
   indexForums().catch(e => console.error(`[bot] forum index: ${e.message}`)).finally(release);
   setInterval(release, RELEASE_CHECK_MS);
+  setInterval(() => general.tick().catch(e => console.error(`[general] ${e.message}`)), 60_000);
   // posts that came in shortly before a restart still get their look
   for (const [id, t] of Object.entries(threads)) if (t.status === 'new' && Date.now() - Date.parse(t.created) < STARTUP_MS) schedule(id, 'new post');
 });
@@ -479,6 +494,7 @@ client.on(Events.ThreadCreate, guard('new thread', (thread, created) => {
 
 client.on(Events.MessageCreate, guard('message', m => {
   if (m.system) return;                          // "changed the post title", pins, joins
+  general.onMessage(m);
   if (archive && m.guild) {
     archive.add({
       id: m.id, at: m.createdAt.toISOString(),

@@ -17,7 +17,16 @@ and it says something only when it is worth it:
   it, to reload the page, and to post a new log if it still happens. Only when a full look at the thread is sure; at
   most once a thread, at most 10 threads a release, threads of the last 14 days. The report's thread notes it.
 
-Otherwise it says nothing. It reads every channel it can see, but posts only in forum threads and the staff channel. It
+- **in the general channels** (text channels named `general…`), sparingly: someone who reports a problem there gets
+  one short templated reply in their language, pointing to the forum thread about it or to the bug-reports forum,
+  with how to get the log. Nothing for questions or chat, nothing when staff or another member already pointed them
+  to the forum; at most once a person a week and 6 an hour a channel. A local word filter picks the candidates (about
+  7% of the messages), and one Haiku call sorts each batch, so it costs a few cents a day. Spikes of complaints
+  (connection, crashes, controllers, sound, graphics) go to the staff channel at once, without a model, and a daily
+  note at 06:00 UTC sums up what the general channels kept bringing up.
+
+Otherwise it says nothing. It reads every channel it can see, but posts only in forum threads, those replies in the
+general channels, and the staff channel. It
 stays out of a thread once staff wrote in it (the server owner, `BOT_STAFF`, anyone who can manage threads), and replies
 at most twice in a thread: after it asked for something, the poster's next post gets one more look. Staff can mention
 the bot in a thread to have it look anyway.
@@ -38,8 +47,9 @@ the bot in a thread to have it look anyway.
   and the guide are read from that clone, so a pushed change to them applies within minutes, without a new image or a
   restart. The live version comes from `https://nfsu2.xyz/game.json`.
 - `archive.mjs`: every message of every channel the bot sees, kept 7 days in `state/archive/`. At start the bot reads
-  the forums' threads with posts in the last 24 hours, nothing older: it lists them (titles and first posts) in
+  the forums' threads with posts in the last 48 hours, nothing older: it lists them (titles and first posts) in
   `state/threads.json`, and looks at the ones opened in that time that it never looked at, so a restart misses no post.
+- `general.mjs`: the general channels: the replies that point to the forums, the spike alerts and the daily note.
 - `eval.mjs`: the bot against past threads (below).
 
 `docker compose logs -f` shows each step as it happens: when a post is seen and when its look is due, what the look
@@ -58,7 +68,8 @@ the tools used, the tokens and the cost.
    `https://discord.com/oauth2/authorize?client_id=<application id>&scope=bot&permissions=274877973504`.
    That gives it View Channels, Read Message History and Send Messages in Threads, and nothing else. Without Send
    Messages it cannot write in ordinary channels or open posts. If a forum hides itself from @everyone, give the bot
-   View Channel there too.
+   View Channel there too. For the replies in the general channels, allow it Send Messages in those channels'
+   permissions; without that it only counts them for the staff.
 2. **Staff channel.** Make a private channel for staff. In its permissions, add the bot with View Channel, Send
    Messages, Attach Files, Read Message History, Create Public Threads and Send Messages in Threads. Turn on Developer Mode (User Settings, Advanced), right-click the
    channel, Copy Channel ID.
@@ -130,7 +141,7 @@ Run it with `BOT_DRY_RUN=1` for a day. Every reply it would have posted goes to 
 | Variable | Default | |
 |---|---|---|
 | `BOT_STAFF_CHANNEL` | | the staff channel's id; without it, reports for the developer are only in `verdicts.jsonl` |
-| `BOT_DRY_RUN` | off | `1`: post nothing in the forums; the replies go to the staff channel |
+| `BOT_DRY_RUN` | off | `1`: post nothing in the forums or the general channels; forum replies go to the staff channel, general-channel ones only to the log and the daily note |
 | `BOT_FORUMS` | every forum | forum channel ids to answer in |
 | `BOT_STAFF` | | user or role ids of staff, besides the owner and anyone who can manage threads |
 | `BOT_MODEL` | `claude-sonnet-5-5` | |
