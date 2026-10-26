@@ -869,5 +869,6 @@
   "Music folder": "Musikmapp",
   "All": "Alla",
   "Playlist": "Spellista",
-  "No music yet: pick a folder first.": "Ingen musik än: välj först en mapp."
+  "No music yet: pick a folder first.": "Ingen musik än: välj först en mapp.",
+  "Shuffle": "Blanda"
 }

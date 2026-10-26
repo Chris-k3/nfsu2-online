@@ -815,6 +815,7 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.64); }
 .track { display: flex; align-items: center; justify-content: space-between; gap: 12px; content-visibility: auto; contain-intrinsic-size: auto 44px; }
 .track > span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .track > :last-child { flex: none; }
+#playlist-shuffle { margin-bottom: 8px; }
 .track-folder { color: var(--muted); font-size: 14px; line-height: 20px; padding-top: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .menu-radio svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 #menu-save { margin-top: -12px; }

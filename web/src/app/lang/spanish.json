@@ -891,5 +891,6 @@
   "Music folder": "Carpeta de música",
   "All": "Todos",
   "Playlist": "Lista de reproducción",
-  "No music yet: pick a folder first.": "Aún no hay música: elige primero una carpeta."
+  "No music yet: pick a folder first.": "Aún no hay música: elige primero una carpeta.",
+  "Shuffle": "Aleatorio"
 }

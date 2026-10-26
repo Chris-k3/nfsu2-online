@@ -803,5 +803,6 @@
   "Music folder": "음악 폴더",
   "All": "전체",
   "Playlist": "재생 목록",
-  "No music yet: pick a folder first.": "아직 음악이 없습니다. 먼저 폴더를 선택하세요."
+  "No music yet: pick a folder first.": "아직 음악이 없습니다. 먼저 폴더를 선택하세요.",
+  "Shuffle": "셔플"
 }

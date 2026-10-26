@@ -1,6 +1,7 @@
 // The radio: the game's own EA Trax plays the music files of a folder on this device.  The game asks for a track when it starts a song
 // (runtime/radio.c, through RadioLink); this decodes the next one of the place the song is for (0 menus, 1 driving) and hands the sound over.
-// Each track has a mode (Menu, Race, All, Off) and each place its own queue.  Nothing here runs until the radio is used.
+// Each track has a mode (Menu, Race, All, Off) and each place its own queue, which goes on from where it stopped last time, or plays at random
+// when the player asks for Shuffle.  Nothing here runs until the radio is used.
 import type { Lines, Place, RadioLink } from './app/radio-link';
 import { keptFolder, keepFolder, reopenFolder, sortedTracks, subfolderOf, type Folder, type Picked } from './radio-folder';
 import { plaqueTags, tagsOf } from './radio-tags';
@@ -9,8 +10,11 @@ export type Mode = 'menu' | 'racing' | 'all' | 'off';
 export const MODES: readonly Mode[] = ['menu', 'racing', 'all', 'off'];
 export type PickFolder = () => Promise<Picked | null>;
 const MODES_KEY = 'nfsu2.radio.modes', ON_KEY = 'nfsu2.radio.on';   // {path in the folder: mode} without the All ones; '1': left on
+const NEXT_KEY = 'nfsu2.radio.next', SHUFFLE_KEY = 'nfsu2.radio.shuffle';   // [path of the next track of the menus, of driving]; '1': at random
 export const radioWasOn = () => { try { return localStorage.getItem(ON_KEY) === '1'; } catch { return false; } };
 const keepRadioOn = (on: boolean) => { try { localStorage.setItem(ON_KEY, on ? '1' : '0'); } catch { /* a private window keeps nothing */ } };
+const readShuffle = () => { try { return localStorage.getItem(SHUFFLE_KEY) === '1'; } catch { return false; } };
+const readNext = (): unknown[] => { try { const kept = JSON.parse(localStorage.getItem(NEXT_KEY) ?? '[]'); return Array.isArray(kept) ? kept : []; } catch { return []; } };
 const readModes = (): Map<string, Mode> => {
   try {
     const kept = Object.entries(JSON.parse(localStorage.getItem(MODES_KEY) ?? '{}') ?? {});
@@ -38,6 +42,8 @@ export class Radio {
   private decoder: OfflineAudioContext | null = null;
   private decoding: Promise<unknown> = Promise.resolve();   // the decode under way: one track is decoded at a time
   private next: Pair = [0, 0];            // per place: where its queue goes on
+  private last: Pair = [-1, -1];          // per place: the track chosen last, which Shuffle does not repeat at once
+  private shuffled = readShuffle();
   private offered: Pair = [-1, -1];       // per place: the track whose tags the game was shown
   private tags = new Map<number, Promise<Lines>>();
   private playing: { index: number; place: Place } | null = null;
@@ -49,10 +55,20 @@ export class Radio {
   get on() { return this.timer !== null; }
   /** The tracks as paths in the folder ("a.mp3", "Album/a.mp3") in playlist order; the same array until another folder is chosen. */
   get trackPaths() { return this.paths; }
+  get shuffle() { return this.shuffled; }
   mode(name: string): Mode { return this.modes.get(name) ?? 'all'; }
   private suits(name: string, place: Place) { const m = this.mode(name); return m === 'all' || m === (place ? 'racing' : 'menu'); }
   private saveModes() { try { localStorage.setItem(MODES_KEY, JSON.stringify(Object.fromEntries(this.modes))); } catch { /* a private window keeps nothing */ } }
   private fail = (e: unknown) => this.stop(`error: ${e}`);
+
+  /** Shuffle on: the next track of a place is any that suits it but the last one; off: the queue goes on from where it stood. */
+  setShuffle(on: boolean) {
+    if (on === this.shuffled) return;
+    this.shuffled = on;
+    try { localStorage.setItem(SHUFFLE_KEY, on ? '1' : '0'); } catch { /* a private window keeps nothing */ }
+    this.log(`player sets shuffle ${on ? 'on' : 'off'}`);
+    if (this.on) void this.offer().catch(this.fail);
+  }
 
   /** A track that no longer suits the place it plays in gives way to the next one that does; the others count from the next song on. */
   setMode(name: string, mode: Mode) {
@@ -87,7 +103,8 @@ export class Radio {
 
   private setFiles(p: { files: readonly FileSystemFileHandle[]; paths?: readonly string[] }) {
     ({ files: this.files, paths: this.paths } = sortedTracks(p.files, p.paths));
-    this.next = [0, 0]; this.tags = new Map();
+    const kept = readNext();
+    this.next = [0, 1].map(place => Math.max(0, this.paths.indexOf(String(kept[place])))) as Pair; this.last = [-1, -1]; this.tags = new Map();
     if (!this.paths.length) return;
     const gone = [...this.modes.keys()].filter(k => !this.paths.includes(k));
     gone.forEach(k => this.modes.delete(k));
@@ -123,9 +140,19 @@ export class Radio {
   /** A game starts and the radio was left on. */
   async resume() { await this.restored; await this.start(); }
 
-  /** The next track of the place from where its queue stands, the first whose mode suits it (-1: none). */
+  private keepNext() {
+    const n = this.paths.length;
+    try { localStorage.setItem(NEXT_KEY, JSON.stringify(this.next.map(i => this.paths[i % n]))); } catch { /* a private window keeps nothing */ }
+  }
+
+  /** The next track of the place from where its queue stands, the first whose mode suits it; with Shuffle any that suits it but the last (-1: none). */
   private choose(place: Place): number {
     const n = this.files.length;
+    if (this.shuffled) {
+      const fit = [...this.paths.keys()].filter(i => this.suits(this.paths[i], place)), other = fit.filter(i => i !== this.last[place]);
+      const from = other.length ? other : fit;
+      return from.length ? from[Math.floor(Math.random() * from.length)] : -1;
+    }
     for (let k = 0; k < n; k++) {
       const i = (this.next[place] + k) % n;
       if (this.suits(this.paths[i], place)) return i;
@@ -185,7 +212,7 @@ export class Radio {
     this.seq = want.seq; this.song = null; this.playing = null;
     let i = this.offered[place];
     for (let tried = 0; i >= 0 && tried < this.files.length && this.bad < this.files.length; tried++, i = this.choose(place)) {
-      this.next[place] = i + 1;
+      this.next[place] = i + 1; this.last[place] = i; this.keepNext();
       const got = await this.load(link, want.seq, i, epoch);
       if (got === 'stale') return;
       if (got === 'played') {

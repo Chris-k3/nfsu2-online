@@ -869,5 +869,6 @@
   "Music folder": "Musikmappe",
   "All": "Alle",
   "Playlist": "Afspilningsliste",
-  "No music yet: pick a folder first.": "Ingen musik endnu: vælg først en mappe."
+  "No music yet: pick a folder first.": "Ingen musik endnu: vælg først en mappe.",
+  "Shuffle": "Bland"
 }

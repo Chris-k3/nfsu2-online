@@ -803,5 +803,6 @@
   "Music folder": "音樂資料夾",
   "All": "全部",
   "Playlist": "播放清單",
-  "No music yet: pick a folder first.": "尚無音樂：請先選擇資料夾。"
+  "No music yet: pick a folder first.": "尚無音樂：請先選擇資料夾。",
+  "Shuffle": "隨機播放"
 }

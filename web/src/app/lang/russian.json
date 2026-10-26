@@ -913,5 +913,6 @@
   "Music folder": "Папка с музыкой",
   "All": "Все",
   "Playlist": "Плейлист",
-  "No music yet: pick a folder first.": "Музыки пока нет: сначала выберите папку."
+  "No music yet: pick a folder first.": "Музыки пока нет: сначала выберите папку.",
+  "Shuffle": "Случайный порядок"
 }

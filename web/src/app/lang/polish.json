@@ -913,5 +913,6 @@
   "Music folder": "Folder z muzyką",
   "All": "Wszystkie",
   "Playlist": "Lista odtwarzania",
-  "No music yet: pick a folder first.": "Brak muzyki: najpierw wybierz folder."
+  "No music yet: pick a folder first.": "Brak muzyki: najpierw wybierz folder.",
+  "Shuffle": "Losowo"
 }

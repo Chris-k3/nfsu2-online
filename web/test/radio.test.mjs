@@ -239,6 +239,45 @@ test('modes are kept by path, a damaged value is not believed, a track not in th
   }
 });
 
+test('each place goes on from where it stopped: kept by path, a path not in the folder or a damaged value starts at the first track', async () => {
+  const kept = storage();
+  const s = setup(['a.mp3', 'b.mp3', 'c.mp3']);
+  await s.started();
+  await s.game(0, 1);
+  await s.game(0, 2);
+  assert.deepEqual([JSON.parse(kept['nfsu2.radio.next']), text(s.memory, 0, 1)], [['c.mp3', 'a.mp3'], 'c']);
+  s.radio.stop();
+  const again = setup(['a.mp3', 'b.mp3', 'c.mp3']);
+  await again.started();
+  assert.deepEqual([text(again.memory, 0, 1), text(again.memory, 1, 1)], ['c', 'a']);
+  for (const damaged of ['{broken', 'null', '7', '["gone.mp3",5]']) {
+    kept['nfsu2.radio.next'] = damaged;
+    const first = setup(['a.mp3', 'b.mp3']);
+    await first.started();
+    assert.deepEqual([text(first.memory, 0, 1), text(first.memory, 1, 1)], ['a', 'a'], damaged);
+    first.radio.stop();
+  }
+});
+
+test('Shuffle plays any track that suits the place but the last one, is kept, and off goes back to the queue', async () => {
+  const kept = storage();
+  const random = Math.random;
+  Math.random = () => 0.99;
+  try {
+    const s = setup(['a.mp3', 'b.mp3', 'c.mp3']);
+    s.radio.setMode('b.mp3', 'racing');
+    s.radio.setShuffle(true);
+    assert.deepEqual([kept['nfsu2.radio.shuffle'], setup([]).radio.shuffle], ['1', true]);
+    await s.started();
+    assert.deepEqual([text(s.memory, 0, 1), text(s.memory, 1, 1)], ['c', 'c']);
+    await s.game(0, 1);
+    assert.deepEqual([text(s.memory, 0, 1), text(s.memory, 1, 1)], ['a', 'c']);
+    s.radio.setShuffle(false); await settle();
+    assert.deepEqual([kept['nfsu2.radio.shuffle'], text(s.memory, 0, 1), text(s.memory, 1, 1)], ['0', 'a', 'a']);
+    s.radio.stop();
+  } finally { Math.random = random; }
+});
+
 test('the runtime: the song number, the tags and the scenarios of the game\'s songs (tests/radio_unit.c)', () => {
   const out = path.join(ROOT, 'out/web/test'), bin = path.join(out, 'radio_unit');
   fs.mkdirSync(out, { recursive: true });

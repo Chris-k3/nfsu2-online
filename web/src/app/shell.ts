@@ -991,8 +991,11 @@ function openPlaylist() {
     body.replaceChildren(rows);
     if (!paths.length) body.textContent = t('No music yet: pick a folder first.');
   }
+  $('#playlist-shuffle').hidden = !paths.length;
+  $<HTMLInputElement>('#playlist-shuffle input').checked = radio?.shuffle ?? false;
   $<HTMLDialogElement>('#playlist').showModal();
 }
+const setShuffle = (e: Event) => radio?.setShuffle((e.target as HTMLInputElement).checked);
 function setTrackMode(e: Event) {
   const r = e.target as HTMLInputElement, name = playlistDrawn?.[Number(r.dataset.track)];
   if (name !== undefined) radio?.setMode(name, r.value as Mode);
@@ -1333,6 +1336,7 @@ export async function boot() {
   $<HTMLButtonElement>('#log-btn').onclick = downloadLog;
   $('#menu').addEventListener('click', e => { const a = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-act]'); if (a) void menuAction(a.dataset.act!); });
   $('#playlist-body').addEventListener('change', setTrackMode);
+  $('#playlist-shuffle').addEventListener('change', setShuffle);
   $('#menu').addEventListener('close', () => {
     const pop = $<HTMLDialogElement>('#crews-pop'); if (pop.open) pop.close();      // the menu's Crews go with it
     $('#stage').classList.remove('cursor'); $('#stage').querySelector('canvas')?.focus();
