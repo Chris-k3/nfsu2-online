@@ -898,5 +898,10 @@
   "Continue": "Continuer",
   "Copy": "Copier",
   "To load your saves, enter it under Cloud saves on the start page.": "Pour charger vos sauvegardes, saisissez cette phrase-clé dans « Sauvegardes cloud » sur la page d'accueil.",
-  "Your keyphrase": "Votre phrase-clé"
+  "Your keyphrase": "Votre phrase-clé",
+  "Stage {n}": "Étape {n}",
+  "You seem away: the lobby closes in {n} s unless you press a key": "Vous semblez absent : le salon se ferme dans {n} s si vous n'appuyez sur aucune touche",
+  "{host} seems away: the lobby closes in {n} s": "{host} semble absent : le salon se ferme dans {n} s",
+  "You seemed away: the lobby is closed": "Vous sembliez absent : le salon est fermé",
+  "{name} seemed away: the race is called off": "{name} semblait absent : la course est annulée"
 }

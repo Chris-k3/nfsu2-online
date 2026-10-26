@@ -920,5 +920,10 @@
   "Continue": "Dalej",
   "Copy": "Kopiuj",
   "To load your saves, enter it under Cloud saves on the start page.": "Aby wczytać zapisy, wpisz tę frazę dostępu w sekcji „Zapisy w chmurze” na stronie startowej.",
-  "Your keyphrase": "Twoja fraza dostępu"
+  "Your keyphrase": "Twoja fraza dostępu",
+  "Stage {n}": "Etap {n}",
+  "You seem away: the lobby closes in {n} s unless you press a key": "Chyba cię nie ma: poczekalnia zamknie się za {n} s, jeśli nie naciśniesz klawisza",
+  "{host} seems away: the lobby closes in {n} s": "Gracza {host} chyba nie ma: poczekalnia zamknie się za {n} s",
+  "You seemed away: the lobby is closed": "Chyba cię nie było: poczekalnia została zamknięta",
+  "{name} seemed away: the race is called off": "Gracza {name} chyba nie było: wyścig odwołany"
 }

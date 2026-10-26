@@ -898,5 +898,10 @@
   "Continue": "Continua",
   "Copy": "Copia",
   "To load your saves, enter it under Cloud saves on the start page.": "Per caricare i tuoi salvataggi, inserisci questa frase chiave in \"Salvataggi cloud\" nella pagina iniziale.",
-  "Your keyphrase": "La tua frase chiave"
+  "Your keyphrase": "La tua frase chiave",
+  "Stage {n}": "Livello {n}",
+  "You seem away: the lobby closes in {n} s unless you press a key": "Sembri assente: la sala d'attesa si chiude tra {n} s se non premi un tasto",
+  "{host} seems away: the lobby closes in {n} s": "{host} sembra assente: la sala d'attesa si chiude tra {n} s",
+  "You seemed away: the lobby is closed": "Sembravi assente: la sala d'attesa è chiusa",
+  "{name} seemed away: the race is called off": "{name} sembrava assente: la gara è annullata"
 }

@@ -810,5 +810,10 @@
   "Continue": "ดำเนินการต่อ",
   "Copy": "คัดลอก",
   "To load your saves, enter it under Cloud saves on the start page.": "หากต้องการโหลดเซฟ ให้ใส่วลีรหัสนี้ในส่วน “เซฟบนคลาวด์” ของหน้าเริ่มต้น",
-  "Your keyphrase": "วลีรหัสของคุณ"
+  "Your keyphrase": "วลีรหัสของคุณ",
+  "Stage {n}": "ด่าน {n}",
+  "You seem away: the lobby closes in {n} s unless you press a key": "ดูเหมือนคุณไม่อยู่: ล็อบบี้จะปิดใน {n} วินาที หากคุณไม่กดแป้นใด",
+  "{host} seems away: the lobby closes in {n} s": "ดูเหมือน {host} ไม่อยู่: ล็อบบี้จะปิดใน {n} วินาที",
+  "You seemed away: the lobby is closed": "ดูเหมือนคุณไม่อยู่ ล็อบบี้จึงถูกปิดแล้ว",
+  "{name} seemed away: the race is called off": "ดูเหมือน {name} ไม่อยู่ การแข่งจึงถูกยกเลิก"
 }

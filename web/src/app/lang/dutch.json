@@ -876,5 +876,10 @@
   "Continue": "Doorgaan",
   "Copy": "Kopiëren",
   "To load your saves, enter it under Cloud saves on the start page.": "Voer deze sleutelzin in onder Opgeslagen spellen in de cloud op de startpagina om je opgeslagen spellen te laden.",
-  "Your keyphrase": "Je sleutelzin"
+  "Your keyphrase": "Je sleutelzin",
+  "Stage {n}": "Niveau {n}",
+  "You seem away: the lobby closes in {n} s unless you press a key": "Je lijkt weg te zijn: de lobby sluit over {n} s als je geen toets indrukt",
+  "{host} seems away: the lobby closes in {n} s": "{host} lijkt weg te zijn: de lobby sluit over {n} s",
+  "You seemed away: the lobby is closed": "Je leek weg te zijn: de lobby is gesloten",
+  "{name} seemed away: the race is called off": "{name} leek weg te zijn: de race is afgeblazen"
 }

@@ -876,5 +876,10 @@
   "Continue": "Fortsæt",
   "Copy": "Kopiér",
   "To load your saves, enter it under Cloud saves on the start page.": "Indtast nøglefrasen under Gemte spil i skyen på startsiden for at indlæse dine gemte spil.",
-  "Your keyphrase": "Din nøglefrase"
+  "Your keyphrase": "Din nøglefrase",
+  "Stage {n}": "Niveau {n}",
+  "You seem away: the lobby closes in {n} s unless you press a key": "Du lader til at være væk: lobbyen lukker om {n} sek., medmindre du trykker på en tast",
+  "{host} seems away: the lobby closes in {n} s": "{host} lader til at være væk: lobbyen lukker om {n} sek.",
+  "You seemed away: the lobby is closed": "Du lod til at være væk: lobbyen er lukket",
+  "{name} seemed away: the race is called off": "{name} lod til at være væk: løbet er aflyst"
 }

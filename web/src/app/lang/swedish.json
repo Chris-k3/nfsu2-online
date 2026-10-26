@@ -876,5 +876,10 @@
   "Continue": "Fortsätt",
   "Copy": "Kopiera",
   "To load your saves, enter it under Cloud saves on the start page.": "Ange nyckelfrasen under Sparfiler i molnet på startsidan för att ladda dina sparfiler.",
-  "Your keyphrase": "Din nyckelfras"
+  "Your keyphrase": "Din nyckelfras",
+  "Stage {n}": "Nivå {n}",
+  "You seem away: the lobby closes in {n} s unless you press a key": "Du verkar vara borta: lobbyn stängs om {n} s om du inte trycker på en tangent",
+  "{host} seems away: the lobby closes in {n} s": "{host} verkar vara borta: lobbyn stängs om {n} s",
+  "You seemed away: the lobby is closed": "Du verkade vara borta: lobbyn är stängd",
+  "{name} seemed away: the race is called off": "{name} verkade vara borta: racet är inställt"
 }

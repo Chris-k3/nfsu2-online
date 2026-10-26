@@ -382,13 +382,16 @@ Good to know:
     none while a story task runs, and none where the game has something of its own to enter at the same place (a race
     open in your career there, a cover shoot): Enter is the game's there, and an open race's card asks Solo or
     Multiplayer as above.
-  - **Multiplayer opens a lobby** at the start: the panel shows it, its race, track and laps and its six places (drag
+  - **Multiplayer opens a lobby** at the start: the panel shows it, its race, career stage, track and laps and its six places (drag
     4, 3 on the three-lane track) with the players in them, the host first and yours marked. The players near see
     "Thom's circuit (1/6)" over the start (from about 250 m); everyone in free roam sees its race's icon on the world
     map (M), and the nearest four lobbies their words beside it ("Circuit 1/6"). They join at the start: within 15 m
     of it the panel shows the lobby and Enter joins (at an open race: its card's Accept, then **Join**). Up to 6
     players; at a full one the panel says so, and Enter starts another. Drive more than 40 m from the start to leave
-    a lobby; the host leaving calls it off, and a lobby nobody joins closes after 5 minutes. A lobby is within your Room, as everything in free roam. At a race's
+    a lobby; the host leaving calls it off, and a lobby nobody joins closes after 5 minutes. A host who seems away
+    (none of the game's keys or controller buttons and no driving for 2 minutes while others wait) gets a 30-second
+    countdown on every panel of the lobby, then it closes; one of those keys keeps it. A lobby is within your Room, as
+    everything in free roam. At a race's
     start Enter is for the race: no outrun is offered there.
   - **The host presses Enter** to start once another player is in. After a 5-second countdown every game in the lobby
     goes to the race by itself, behind a screen with the lobby on it and where the trip is ("Loading the race"): out

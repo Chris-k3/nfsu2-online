@@ -810,5 +810,10 @@
   "Continue": "繼續",
   "Copy": "複製",
   "To load your saves, enter it under Cloud saves on the start page.": "要載入存檔，請在開始頁面的「雲端存檔」中輸入這組通關密語。",
-  "Your keyphrase": "你的通關密語"
+  "Your keyphrase": "你的通關密語",
+  "Stage {n}": "第 {n} 階段",
+  "You seem away: the lobby closes in {n} s unless you press a key": "你似乎不在：若不按任一鍵，大廳將於 {n} 秒後關閉",
+  "{host} seems away: the lobby closes in {n} s": "{host} 似乎不在：大廳將於 {n} 秒後關閉",
+  "You seemed away: the lobby is closed": "你似乎不在，大廳已關閉",
+  "{name} seemed away: the race is called off": "{name} 似乎不在，比賽已取消"
 }

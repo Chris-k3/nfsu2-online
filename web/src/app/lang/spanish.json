@@ -898,5 +898,10 @@
   "Continue": "Continuar",
   "Copy": "Copiar",
   "To load your saves, enter it under Cloud saves on the start page.": "Para cargar tus partidas guardadas, escribe esta frase clave en Partidas en la nube, en la página de inicio.",
-  "Your keyphrase": "Tu frase clave"
+  "Your keyphrase": "Tu frase clave",
+  "Stage {n}": "Etapa {n}",
+  "You seem away: the lobby closes in {n} s unless you press a key": "Parece que estás ausente: el punto de encuentro se cierra en {n} s si no pulsas una tecla",
+  "{host} seems away: the lobby closes in {n} s": "{host} parece ausente: el punto de encuentro se cierra en {n} s",
+  "You seemed away: the lobby is closed": "Parecía que estabas ausente: el punto de encuentro se ha cerrado",
+  "{name} seemed away: the race is called off": "{name} parecía ausente: la carrera se ha cancelado"
 }

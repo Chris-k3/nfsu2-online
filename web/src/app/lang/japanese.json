@@ -810,5 +810,10 @@
   "Continue": "続ける",
   "Copy": "コピー",
   "To load your saves, enter it under Cloud saves on the start page.": "セーブデータをロードするには、スタートページの「クラウドセーブ」でこのキーフレーズを入力してください。",
-  "Your keyphrase": "あなたのキーフレーズ"
+  "Your keyphrase": "あなたのキーフレーズ",
+  "Stage {n}": "ステージ{n}",
+  "You seem away: the lobby closes in {n} s unless you press a key": "離席中のようです。キーを押さないと{n}秒後にロビーが閉じます",
+  "{host} seems away: the lobby closes in {n} s": "{host}は離席中のようです。{n}秒後にロビーが閉じます",
+  "You seemed away: the lobby is closed": "離席中のようだったため、ロビーを閉じました",
+  "{name} seemed away: the race is called off": "{name}が離席中のようだったため、レースは中止になりました"
 }

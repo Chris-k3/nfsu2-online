@@ -876,5 +876,10 @@
   "Continue": "Weiter",
   "Copy": "Kopieren",
   "To load your saves, enter it under Cloud saves on the start page.": "Um deine Spielstände zu laden, gib die Schlüsselphrase auf der Startseite unter Cloud-Spielstände ein.",
-  "Your keyphrase": "Deine Schlüsselphrase"
+  "Your keyphrase": "Deine Schlüsselphrase",
+  "Stage {n}": "Stufe {n}",
+  "You seem away: the lobby closes in {n} s unless you press a key": "Du scheinst weg zu sein: Die Lobby schließt in {n} s, wenn du keine Taste drückst",
+  "{host} seems away: the lobby closes in {n} s": "{host} scheint weg zu sein: Die Lobby schließt in {n} s",
+  "You seemed away: the lobby is closed": "Du schienst weg zu sein: Die Lobby ist geschlossen",
+  "{name} seemed away: the race is called off": "{name} schien weg zu sein: Das Rennen ist abgesagt"
 }

@@ -810,5 +810,10 @@
   "Continue": "계속",
   "Copy": "복사",
   "To load your saves, enter it under Cloud saves on the start page.": "저장 데이터를 불러오려면 시작 페이지의 '클라우드 저장'에서 이 키 문구를 입력하세요.",
-  "Your keyphrase": "내 키 문구"
+  "Your keyphrase": "내 키 문구",
+  "Stage {n}": "{n}단계",
+  "You seem away: the lobby closes in {n} s unless you press a key": "자리를 비우신 것 같아요: 키를 누르지 않으면 {n}초 후에 로비가 닫혀요",
+  "{host} seems away: the lobby closes in {n} s": "{host} 님이 자리를 비운 것 같아요: {n}초 후에 로비가 닫혀요",
+  "You seemed away: the lobby is closed": "자리를 비우신 것 같아 로비를 닫았어요",
+  "{name} seemed away: the race is called off": "{name} 님이 자리를 비운 것 같아 레이스가 취소됐어요"
 }

@@ -898,5 +898,10 @@
   "Continue": "Continuar",
   "Copy": "Copiar",
   "To load your saves, enter it under Cloud saves on the start page.": "Para carregar seus jogos salvos, digite esta frase-chave em Jogos salvos na nuvem, na página inicial.",
-  "Your keyphrase": "Sua frase-chave"
+  "Your keyphrase": "Sua frase-chave",
+  "Stage {n}": "Fase {n}",
+  "You seem away: the lobby closes in {n} s unless you press a key": "Parece que você está ausente: o lobby fecha em {n} s se você não pressionar uma tecla",
+  "{host} seems away: the lobby closes in {n} s": "{host} parece estar ausente: o lobby fecha em {n} s",
+  "You seemed away: the lobby is closed": "Parece que você estava ausente: o lobby foi fechado",
+  "{name} seemed away: the race is called off": "{name} parecia estar ausente: a corrida foi cancelada"
 }

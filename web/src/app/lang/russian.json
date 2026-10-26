@@ -920,5 +920,10 @@
   "Continue": "Продолжить",
   "Copy": "Копировать",
   "To load your saves, enter it under Cloud saves on the start page.": "Чтобы загрузить сохранения, введите эту ключевую фразу в разделе «Облачные сохранения» на стартовой странице.",
-  "Your keyphrase": "Ваша ключевая фраза"
+  "Your keyphrase": "Ваша ключевая фраза",
+  "Stage {n}": "Этап {n}",
+  "You seem away: the lobby closes in {n} s unless you press a key": "Похоже, вас нет: лобби закроется через {n} с, если вы не нажмёте клавишу",
+  "{host} seems away: the lobby closes in {n} s": "Похоже, игрока {host} нет: лобби закроется через {n} с",
+  "You seemed away: the lobby is closed": "Похоже, вас не было: лобби закрыто",
+  "{name} seemed away: the race is called off": "Похоже, игрока {name} не было: гонка отменена"
 }
