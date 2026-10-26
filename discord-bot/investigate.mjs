@@ -10,6 +10,7 @@ import { TOOL_DEFS, Tools } from './tools.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const MAX_TURNS = 16;                            // a look that needs more is cut short: the long ones cost the most
+const MAX_REPEATS = 2;                           // calls made again word for word: a look going round in circles answers
 
 export const VERDICT = {
   type: 'object', additionalProperties: false,
@@ -103,9 +104,11 @@ export async function investigate({ client, model, effort, maxTurns = MAX_TURNS,
   const usage = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
   const log = [];
   let verdict = null;
+  const seen = new Set();
+  let repeats = 0;
 
   for (let turn = 1; turn <= maxTurns && !verdict; turn++) {
-    const last = turn === maxTurns;
+    const last = turn === maxTurns || repeats >= MAX_REPEATS;
     const res = await client.beta.messages.create({
       model, max_tokens: 16000, system, messages,
       tools: TOOL_DEFS,
@@ -127,6 +130,15 @@ export async function investigate({ client, model, effort, maxTurns = MAX_TURNS,
     const calls = res.content.filter(b => b.type === 'tool_use');
     if (res.stop_reason === 'tool_use' && calls.length) {
       const results = await Promise.all(calls.map(async c => {
+        const key = `${c.name} ${JSON.stringify(c.input)}`;
+        if (seen.has(key)) {                     // the same call again (one look read a log's first line 7 times)
+          repeats++;
+          log.push(`${key} -> repeated, not run`);
+          step(`${brief(c.name, c.input)} -> repeated, not run`);
+          return { type: 'tool_result', tool_use_id: c.id,
+            content: 'You made this same call before in this look: its result is above. Read something else, or give your verdict.' };
+        }
+        seen.add(key);
         const out = await tools.run(c.name, c.input);
         const text = typeof out === 'string' ? out : JSON.stringify(out);
         log.push(`${c.name} ${JSON.stringify(c.input)} -> ${text.length} chars${out?.error ? ` (error: ${out.error})` : ''}`);
@@ -134,7 +146,7 @@ export async function investigate({ client, model, effort, maxTurns = MAX_TURNS,
         return { type: 'tool_result', tool_use_id: c.id, content: text, ...(out?.error ? { is_error: true } : {}) };
       }));
       const content = [...results];
-      if (turn + 1 === maxTurns) content.push({ type: 'text', text: 'That was the last tool call: give your verdict now.' });
+      if (turn + 1 === maxTurns || repeats >= MAX_REPEATS) content.push({ type: 'text', text: 'That was the last tool call: give your verdict now.' });
       messages.push({ role: 'user', content });
       continue;
     }
@@ -203,4 +215,49 @@ export function imageType(b) {
   if (b.length >= 6 && /^GIF8[79]a$/.test(b.toString('latin1', 0, 6))) return 'image/gif';
   if (b.length >= 12 && b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP') return 'image/webp';
   return null;
+}
+
+// A picture costs a visual token per 28x28 pixels, and Sonnet 5.5 reads them up to 4,784 tokens (2,576 px a side).
+// The bot sends them at most at the size every Claude before Opus 4.7 read them, 1,568 tokens and 1,568 px a side: a
+// page's message or a screenshot of the game reads as well, for a third of the tokens of a 4K screenshot
+const PICTURE_EDGE = 1568, PICTURE_TOKENS = 1568;
+const ORIGINAL_MAX = 3_500_000;                  // a picture sent as it is (5 MB the API's limit, base64)
+const visualTokens = (w, h) => Math.ceil(w / 28) * Math.ceil(h / 28);
+const evenRound = x => { const f = Math.floor(x); return x - f !== 0.5 ? Math.round(x) : f % 2 ? f + 1 : f; };
+
+/** the largest size of the same shape within PICTURE_EDGE and PICTURE_TOKENS, as the API computes its own shrinking
+ *  (https://platform.claude.com/docs/en/build-with-claude/vision-coordinates) */
+export function fitted(w, h, edge = PICTURE_EDGE, max = PICTURE_TOKENS) {
+  const fits = (a, b) => Math.ceil(a / 28) * 28 <= edge && Math.ceil(b / 28) * 28 <= edge && visualTokens(a, b) <= max;
+  if (fits(w, h)) return [w, h];
+  if (h > w) return fitted(h, w, edge, max).reverse();
+  const ratio = w / h, short = l => Math.max(evenRound(l / ratio), 1);
+  let lo = 1, hi = w;                            // lo fits, hi does not
+  while (lo + 1 < hi) { const mid = (lo + hi) >> 1; if (fits(mid, short(mid))) lo = mid; else hi = mid; }
+  return [lo, short(lo)];
+}
+
+/** a picture as the model gets it, { type, data (base64), tokens }: as it is when small enough, else shrunk (the
+ *  first frame of an animation, turned upright).  null when it is none the API takes or does not decode: the API
+ *  would refuse the whole look */
+export async function picture(buf) {
+  const type = imageType(buf);
+  if (!type) return null;
+  let sharp;
+  try { sharp = (await import('sharp')).default; } catch (e) {     // no image library: as before, the picture as it is
+    console.error(`[pictures] sharp: ${e.message}`);
+    return buf.length <= ORIGINAL_MAX ? { type, data: buf.toString('base64'), tokens: null } : null;
+  }
+  try {
+    const m = await sharp(buf).metadata();
+    const fh = m.pages > 1 && m.pageHeight ? m.pageHeight : m.height;
+    const [w, h] = (m.orientation ?? 1) >= 5 ? [fh, m.width] : [m.width, fh];
+    const [tw, th] = fitted(w, h);
+    if (tw === w && th === h && buf.length <= ORIGINAL_MAX) return { type, data: buf.toString('base64'), tokens: visualTokens(w, h) };
+    const img = sharp(buf).rotate().resize(tw, th, { fit: 'fill' });
+    const [out, data] = type === 'image/jpeg' ? ['image/jpeg', await img.jpeg({ quality: 90 }).toBuffer()]
+      : type === 'image/webp' ? ['image/webp', await img.webp({ quality: 90 }).toBuffer()]
+      : ['image/png', await img.png().toBuffer()];
+    return { type: out, data: data.toString('base64'), tokens: visualTokens(tw, th) };
+  } catch { return null; }
 }

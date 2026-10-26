@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { Archive } from './archive.mjs';
 import { matchFixes } from './fixes.mjs';
 import { General } from './general.mjs';
-import { blocks, imageType, investigate, newClient, vet } from './investigate.mjs';
+import { blocks, investigate, newClient, picture, vet } from './investigate.mjs';
 import { Repo, defaultSource } from './repo.mjs';
 import { COMMAND as TRANSLATE, Translator } from './translate.mjs';
 
@@ -43,7 +43,7 @@ const CFG = {
 if (!CFG.token) { console.error('DISCORD_TOKEN is not set (README.md)'); process.exit(2); }
 
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
-const MAX_TEXT = 10 << 20, MAX_IMAGE = 3_500_000, MAX_IMAGES = 4;
+const MAX_TEXT = 10 << 20, MAX_IMAGE = 10 << 20, MAX_IMAGES = 4;   // pictures are shrunk for the model (picture())
 const MAX_UPLOAD = 8 << 20, MAX_UPLOADS = 3;    // files copied into a staff report (Discord takes 10 MB a message)
 const SAVES_ZIP = /^nfsu2-saves-.*\.zip$/i;      // Saves, Download backup: for the developer, not for the model
 const LOG_FILE = /\.(log|txt)$/i;                // F9, Download log; a long paste comes as message.txt
@@ -182,7 +182,8 @@ async function look(threadId, why, extra) {
   for (const d of [workDir, staffDir]) { fs.rmSync(d, { recursive: true, force: true }); fs.mkdirSync(d, { recursive: true }); }
   const { text, images } = await transcript(thread, msgs.filter(m => !m.system), workDir, staffDir, why, extra);
   say(`"${st.title}" (${why}): ${msgs.length} message(s), ${fs.readdirSync(workDir).length} file(s), ` +
-    `${fs.readdirSync(staffDir).length} save backup(s), ${images.length} picture(s)`);
+    `${fs.readdirSync(staffDir).length} save backup(s), ${images.length} picture(s)` +
+    `${images.length ? ` (${images.reduce((s, p) => s + (p.tokens ?? 0), 0)} tokens)` : ''}`);
 
   day.n++;
   const started = Date.now();
@@ -202,7 +203,7 @@ async function look(threadId, why, extra) {
   }
   const v = res.verdict;
   let { post, why: outcome } = fix && v?.action !== 'answer' ? { post: null, why: v?.action ?? 'no verdict' }
-    : vet(v, { minConfidence: fix ? 'high' : byStaff ? 'low' : CFG.minConfidence });
+    : vet(v, { minConfidence: fix ? 'high' : byStaff || why === 'follow-up' ? 'low' : CFG.minConfidence });   // a poster who brought what the bot asked for always hears back
   if (byStaff && !post) {                        // staff asked: always a reply, at least what the look found
     const text = v ? `${v.summary}` : 'I could not finish a look at this thread just now; the developer has the details.';
     post = vet({ ...(v ?? {}), action: 'answer', confidence: 'high', reply: text }, {}).post;
@@ -282,8 +283,8 @@ async function transcript(thread, msgs, workDir, staffDir, why, extra) {
       const kb = `${Math.round(a.size / 1024)} KB`;
       const type = (a.contentType ?? '').split(';')[0];
       if (IMAGE_TYPES.includes(type) && a.size <= MAX_IMAGE && images.length < MAX_IMAGES) {
-        const data = await download(a.url), real = data && imageType(data);
-        if (real) { images.push({ type: real, data: data.toString('base64') }); lines.push(`  [picture ${images.length}: ${a.name}]`); continue; }
+        const data = await download(a.url), pic = data && await picture(data);
+        if (pic) { images.push(pic); lines.push(`  [picture ${images.length}: ${a.name}]`); continue; }
       }
       const name = `${++n}-${a.name.replace(/[^\w.-]+/g, '_')}`;
       if (SAVES_ZIP.test(a.name) && a.size <= MAX_UPLOAD) {

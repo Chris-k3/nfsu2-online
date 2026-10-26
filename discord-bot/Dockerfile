@@ -6,6 +6,9 @@ RUN apk add --no-cache git openssh-client
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
+# sharp (the pictures, shrunk for the model) brings its libvips for this platform (musl, amd64 or arm64): a build
+# without it fails here instead of a bot that sends pictures at full size
+RUN node -e "require('sharp')"
 COPY *.mjs *.md ./
 # GitHub's host key, as https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints
 # publishes it: the clone checks it instead of trusting whatever answers

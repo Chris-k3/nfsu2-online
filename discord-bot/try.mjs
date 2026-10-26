@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Archive } from './archive.mjs';
-import { blocks, imageType, investigate, newClient, vet } from './investigate.mjs';
+import { blocks, investigate, newClient, picture, vet } from './investigate.mjs';
 import { Repo, defaultSource } from './repo.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -32,13 +32,17 @@ const TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg'
 const lines = [`Forum: #${forum}`, `Title: ${title}`, 'Tags: none', 'Why the bot looks now: a new post', '',
   `[${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC] player (the poster):`, text];
 const images = [];
-files.forEach((f, i) => {
-  const data = TYPES[path.extname(f).toLowerCase()] && fs.readFileSync(f), type = data && imageType(data);
-  if (type) { images.push({ type, data: data.toString('base64') }); lines.push(`  [picture ${images.length}: ${path.basename(f)}]`); return; }
+for (const [i, f] of files.entries()) {
+  const data = TYPES[path.extname(f).toLowerCase()] && fs.readFileSync(f), pic = data && await picture(data);
+  if (pic) {
+    images.push(pic); lines.push(`  [picture ${images.length}: ${path.basename(f)}]`);
+    console.log(`  picture ${path.basename(f)}: ${pic.tokens ?? '?'} tokens`);
+    continue;
+  }
   const name = `${i + 1}-${path.basename(f).replace(/[^\w.-]+/g, '_')}`;
   fs.copyFileSync(f, path.join(workDir, name));
   lines.push(`  [attachment: attachments/${name}, ${Math.round(fs.statSync(f).size / 1024)} KB]`);
-});
+}
 
 try {
   const res = await investigate({

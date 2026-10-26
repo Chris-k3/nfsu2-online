@@ -39,7 +39,9 @@ and it says something only when it is worth it:
 Otherwise it says nothing. It reads every channel it can see, but posts only in forum threads, those replies in the
 general channels, and the staff channel. It
 stays out of a thread once staff wrote in it (the server owner, `BOT_STAFF`, anyone who can manage threads), and replies
-at most twice in a thread: after it asked for something, the poster's next post gets one more look. Staff can mention
+at most twice in a thread: after it asked for something, the poster's next post gets one more look and always a reply
+(a fix, or what their log shows and that the developer has it), so nobody who did what it asked hears nothing. A look
+that repeats a tool call word for word gets told so, and the second time it has to answer. Staff can mention
 the bot in a thread to have it look anyway. A bump, the poster writing again after the thread was quiet for 12 hours
 ("any ideas?"), gets a look and a reply too (a fix, a question, or where it stands), also in a thread staff wrote in
 before, unless staff answer it first; bumps while the bot was away get theirs at start. A log (a `.log` or `.txt`
@@ -50,7 +52,9 @@ something to say, until the bot has replied `BOT_MAX_TALK` times (6) in the thre
 ## How it works
 
 - `bot.mjs`: Discord (discord.js). It decides when to look, builds the thread's text, saves attachments, inlines
-  pictures (PNG, JPEG, GIF, WebP up to 3.5 MB, 4 a look) and posts.
+  pictures (PNG, JPEG, GIF, WebP up to 10 MB, 4 a look) and posts. Each picture goes to the model at most 1,568
+  visual tokens big (`picture()` in `investigate.mjs`, with sharp), the size Claude read pictures at before Opus 4.7:
+  a phone screenshot costs 1,456 tokens instead of 3,354, a 4K one 1,560 instead of 4,784.
 - `investigate.mjs`: one look. It sends Claude the rules (`system.md`), the maintainer's notes (`knowledge.md`),
   `docs/web/PLAYING.md`, the live version, recent commits and recent threads. Claude reads what it needs through the
   tools, then returns a verdict as JSON: none, ask or answer, and whether to tell the developer. `vet()` drops weak
