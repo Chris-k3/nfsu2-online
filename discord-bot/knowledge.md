@@ -79,6 +79,14 @@ Checked against the guide or the code, and confirmed by players in threads:
 - Stuck behind a barrier or off the map: R respawns.
 - Firefox: when a problem shows only in Firefox (its log has Firefox errors, or Chrome works), Chrome is the browser
   most tested.
+- A phone that stutters or shakes at 60 fps but runs smoothly at 30: its GPU no longer finishes a frame in 16.7 ms,
+  often only after a few minutes, as the phone warms up (the log: `[gpu] … waited over 20 ms for the GPU` lines,
+  `GPU done p50` above 16 ms). Settings, Display, Frame rate 30 is the steady choice for such a phone. To keep 60: the
+  lighter graphics. A phone starts with them, but not one where a graphics option was changed before (the log says
+  `phone graphics: the graphics options were changed in this browser, they stay`); then the game's Options, Display:
+  car and road reflections, motion blur, depth of field, overbright and bleach bypass off, and the resolution on the
+  row with a size such as 1916x884 (the screen's own at the page's resolution scale), not 1080p or 1440p, which draw
+  more pixels than a phone's default 75%.
 
 ## Known open problems (as of 2026-10-26)
 
