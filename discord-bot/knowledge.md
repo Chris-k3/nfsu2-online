@@ -131,10 +131,11 @@ performance and tuning, AI and traffic, the career's progression, races and rewa
   run it either.
 - Samsung Xclipse graphics (some Galaxy phones; `GPU-ADAPTER-ANDROID`, chrome://gpu says "Limited support / testing
   currently available on Android"): Chrome blocklists them, and chrome://flags/#enable-unsafe-webgpu, then restarting
-  Chrome, lifts that. A player's Xclipse 540 (Android 16) runs the game with it (2026-10-26); other Xclipse chips are
-  not tried yet. On the phone: type the address into Chrome's address bar, or open chrome://flags and search for
-  "Unsafe WebGPU". Don't tell players to set it back to Default afterwards: it doesn't matter. The flag is worth a try for any
-  `GPU-ADAPTER-ANDROID` (the page says so from the release after c0b379c on), not only Xclipse.
+  Chrome, lifts that. A player's Xclipse 540 (Android 16; the Exynos 1580 in the Galaxy A56) runs the game with it
+  (2026-10-26); other Xclipse chips are not tried yet. On the phone: type the address into Chrome's address bar, or
+  open chrome://flags and search for "Unsafe WebGPU". Don't tell players to set it back to Default afterwards: it
+  doesn't matter. The flag is worth a try for any `GPU-ADAPTER-ANDROID` (the page says so from the release after
+  c0b379c on), not only Xclipse.
 - iPhone: a web page cannot go full screen. Adding the page to the Home Screen (Share menu) opens it without the
   browser's bars. That copy has its own saves: cloud saves bring them over. Only controllers iOS knows (Xbox,
   PlayStation, Switch, MFi) reach the page.
