@@ -8,8 +8,10 @@ and it says something only when it is worth it:
   browser and device, the controller's model), with how to get it. In the poster's language, and every reply ends
   with a line saying it is an automated AI reply that may be wrong;
 - **in the staff channel**, a report the developer should act on, with everything needed to start: what happens,
-  device, browser and version, the key log lines, the likely cause, the thread's link and its log files. A later
-  report of the same problem is added to that message ("Also reported: ..."), which notifies nobody.
+  device, browser and version, the key log lines, the likely cause, the thread's link and its log files and saves.
+  Each report gets a thread: later threads about the same problem (with what they add and their logs) and new logs
+  or pictures posted in any of them go there, and the report counts the threads. Only the thread's followers are
+  notified. A forum channel works as the staff channel too: each report is a post.
 
 Otherwise it says nothing. It reads every channel it can see, but posts only in forum threads and the staff channel. It
 stays out of a thread once staff wrote in it (the server owner, `BOT_STAFF`, anyone who can manage threads), and replies
@@ -31,8 +33,9 @@ the bot in a thread to have it look anyway.
 - `repo.mjs`: the bot's own clone of the code in `state/repo`, fetched at most every 5 minutes. The rules, the notes
   and the guide are read from that clone, so a pushed change to them applies within minutes, without a new image or a
   restart. The live version comes from `https://nfsu2.xyz/game.json`.
-- `archive.mjs`: every message of every channel the bot sees, kept 7 days in `state/archive/`. At start the bot also
-  lists the forums' existing threads (titles and first posts) in `state/threads.json`, without looking at them.
+- `archive.mjs`: every message of every channel the bot sees, kept 7 days in `state/archive/`. At start the bot reads
+  the forums' threads with posts in the last 6 hours, nothing older: it lists them (titles and first posts) in
+  `state/threads.json`, and looks at the ones opened in that time that it never looked at, so a restart misses no post.
 - `eval.mjs`: the bot against past threads (below).
 
 Each look adds one line to `state/verdicts.jsonl`: the verdict with the developer notes, what was posted (or why not),
@@ -51,7 +54,7 @@ the tools used, the tokens and the cost.
    Messages it cannot write in ordinary channels or open posts. If a forum hides itself from @everyone, give the bot
    View Channel there too.
 2. **Staff channel.** Make a private channel for staff. In its permissions, add the bot with View Channel, Send
-   Messages, Attach Files and Read Message History. Turn on Developer Mode (User Settings, Advanced), right-click the
+   Messages, Attach Files, Read Message History, Create Public Threads and Send Messages in Threads. Turn on Developer Mode (User Settings, Advanced), right-click the
    channel, Copy Channel ID.
 3. **Claude.** Create an API key at https://console.anthropic.com, and set a monthly spend limit there.
 4. **`.env`**:

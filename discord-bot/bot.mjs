@@ -2,8 +2,8 @@
 // gets one look (investigate.mjs) once its author has stopped adding to it.  It says something only when it has a
 // verified fix or needs information the post lacks; after it asked, the author's next post gets one more look.  It
 // stays out of threads the staff answered and stops after BOT_MAX_REPLIES replies in a thread.  A report the developer
-// should act on goes to the staff channel (BOT_STAFF_CHANNEL) with the thread's link, the bot's notes and its log files;
-// a later report of the same problem is added to that message, not posted again.
+// should act on goes to the staff channel (BOT_STAFF_CHANNEL) with the thread's link, the bot's notes and its log files,
+// and gets a thread: later threads about the same problem and new logs in them go there.
 //   node --env-file=.env bot.mjs        (settings: README.md)
 import { ChannelType, Client, Events, GatewayIntentBits, Partials, PermissionFlagsBits } from 'discord.js';
 import fs from 'node:fs';
@@ -41,13 +41,15 @@ const MAX_TEXT = 10 << 20, MAX_IMAGE = 3_500_000, MAX_IMAGES = 4;
 const MAX_UPLOAD = 8 << 20, MAX_UPLOADS = 3;    // files copied into a staff report (Discord takes 10 MB a message)
 const SAVES_ZIP = /^nfsu2-saves-.*\.zip$/i;      // Saves, Download backup: for the developer, not for the model
 const MAX_WAIT_MS = 10 * 60_000;                 // a thread that keeps growing is looked at after 10 minutes anyway
+const STARTUP_MS = 6 * 3600_000;                 // at start, the forums' posts of the last 6 hours, nothing older
 
 fs.mkdirSync(CFG.state, { recursive: true });
 const STATE_FILE = path.join(CFG.state, 'threads.json');
 const VERDICTS = path.join(CFG.state, 'verdicts.jsonl');
 /** per thread: { title, forum, guild, created, active, status: new|seen|none|asked|answered|staff|failed, replies,
- *  summary, category, snippet (its first post, for threads the bot only indexed), staffMsg: the staff channel message
- *  about it (its own, or the earlier report it was added to) } */
+ *  summary, category, snippet (its first post, for threads the bot only indexed); for a problem reported to the staff:
+ *  staffMsg, staffThread (the report and its thread), reports (how many threads, on the first one), reportOf (on the
+ *  later ones: the first thread's id) } */
 let threads = {};
 try { threads = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch { /* first start */ }
 function save() {
@@ -202,36 +204,120 @@ async function transcript(thread, msgs, workDir, staffDir, why) {
 }
 
 // ------------------------------------------------------------------------------------------- the staff channel --
-/** a report for the developer: a new message, or a line added to the message about the same problem */
+// A report is a message in the staff channel with a thread on it (in a forum channel: a post), and every thread about
+// that problem points to it: the first one has staffMsg/staffThread/reports, the later ones reportOf and the same ids.
+// Later threads about the problem, and new logs or pictures in any of them, go into the report's thread; the report
+// message counts the threads.  Only the thread's followers are notified.
+
+/** the report's first message (in a forum channel: its post's starter) */
+async function reportMessage(staff, root) {
+  if (staff.type === ChannelType.GuildForum) {
+    const th = await client.channels.fetch(root.staffThread).catch(() => null);
+    return th?.fetchStarterMessage().catch(() => null) ?? null;
+  }
+  return staff.messages.fetch(root.staffMsg).catch(() => null);
+}
+
+/** the report's thread, opened on a report from before there were threads */
+async function reportThread(staff, root) {
+  if (root.staffThread) return client.channels.fetch(root.staffThread).catch(() => null);
+  const m = await reportMessage(staff, root);
+  const th = await m?.startThread({ name: (root.summary || root.title).slice(0, 100), autoArchiveDuration: 10080 }).catch(() => null);
+  if (th) root.staffThread = th.id;
+  return th;
+}
+
+/** "Reports: N threads" on the report message */
+async function countReports(staff, root) {
+  const m = await reportMessage(staff, root);
+  if (!m) return;
+  const line = `-# Reports: ${root.reports} threads, the later ones in this report's thread.`;
+  const content = /^-# Reports: .*$/m.test(m.content) ? m.content.replace(/^-# Reports: .*$/m, line) : `${m.content}\n${line}`;
+  if (content.length <= 2000) await m.edit({ content, allowedMentions: { parse: [] } });
+}
+
+const linkOf = (guild, id) => `https://discord.com/channels/${guild}/${id}`;
+
+/** files of this look for the staff: logs, other text and save backups, at most MAX_UPLOADS */
+const staffFiles = dirs => dirs.flatMap(d => fs.readdirSync(d).map(f => path.join(d, f)))
+  .filter(f => fs.statSync(f).size <= MAX_UPLOAD).slice(0, MAX_UPLOADS)
+  .map(f => ({ attachment: f, name: path.basename(f).replace(/^\d+-/, '') }));
+
+/** a look's verdict for the staff: a new report, an update in the report about the same problem, or nothing */
 async function tellStaff(thread, st, v, post, dirs) {
-  const link = `https://discord.com/channels/${thread.guildId}/${thread.id}`;
-  const earlier = v.duplicate_of && v.duplicate_of !== thread.id ? threads[v.duplicate_of]?.staffMsg : null;
-  if (!v.escalate && !earlier && !(post && CFG.dryRun)) return;
+  const link = linkOf(thread.guildId, thread.id);
+  const dup = v.duplicate_of && v.duplicate_of !== thread.id && threads[v.duplicate_of] ? v.duplicate_of : null;
+  const rootId = dup ? (threads[dup].reportOf ?? dup) : null;
+  const root = rootId ? threads[rootId] : null;
+  const reported = root?.staffMsg ? root : null;     // the problem already has a report
+  if (!v.escalate && !reported && !(post && CFG.dryRun)) return;
   const staff = await client.channels.fetch(CFG.staffChannel);
-  if (!staff?.isTextBased()) throw new Error(`${CFG.staffChannel} is not a text channel the bot can see`);
+  if (!staff?.isTextBased() && staff?.type !== ChannelType.GuildForum) throw new Error(`${CFG.staffChannel} is not a channel the bot can post in`);
   const did = !post ? 'did not reply' : v.action === 'ask' ? 'asked the poster for more' : 'answered the poster';
   const dry = CFG.dryRun && post ? `\n-# Dry run, not posted. The reply:\n${quote(post)}` : '';
 
-  if (earlier && !st.staffMsg) {                 // the same problem again: one more link on that message, no new ping
-    const m = await staff.messages.fetch(earlier).catch(() => null);
-    if (m) {
-      const also = m.content.match(/^Also reported: .*$/m);
-      const content = also ? m.content.replace(also[0], `${also[0]}, ${link}`) : `${m.content}\nAlso reported: ${link}`;
-      if (content.length <= 2000) { await m.edit({ content, allowedMentions: { parse: [] } }); st.staffMsg = earlier; }
+  if (reported && !st.staffMsg) {                 // the same problem again: an update in its report's thread
+    const th = await reportThread(staff, reported);
+    if (th) {
+      await th.send({ content: `**Also reported:** ${link} · ${v.summary}\n${v.notes.trim()}\n-# The bot ${did}.${dry}`.slice(0, 2000),
+        files: staffFiles(dirs), allowedMentions: { parse: [] } });
+      Object.assign(st, { staffMsg: reported.staffMsg, staffThread: reported.staffThread, reportOf: rootId });
+      reported.reports = (reported.reports ?? 1) + 1;
+      await countReports(staff, reported);
+      return;
+    }
+    const m = await reportMessage(staff, reported);   // no thread (no right to open one): a link on the report
+    const content = `${m?.content}\nAlso reported: ${link}`;
+    if (m && content.length <= 2000) {
+      await m.edit({ content, allowedMentions: { parse: [] } });
+      Object.assign(st, { staffMsg: reported.staffMsg, reportOf: rootId });
+      reported.reports = (reported.reports ?? 1) + 1;
+      return;
     }
   }
   if (!v.escalate || st.staffMsg) {              // nothing new for the developer; in a dry run, the reply for review
     if (dry) await staff.send({ content: `${link} · ${v.summary}${dry}`.slice(0, 2000), allowedMentions: { parse: [] } });
     return;
   }
-  const files = dirs.flatMap(d => fs.readdirSync(d).map(f => path.join(d, f)))
-    .filter(f => fs.statSync(f).size <= MAX_UPLOAD).slice(0, MAX_UPLOADS)
-    .map(f => ({ attachment: f, name: path.basename(f).replace(/^\d+-/, '') }));
-  const head = `**${v.summary}**\n${link} · ${st.forum} · ${v.category}`;
+  // a new report; an earlier thread about the problem that nobody reported joins it
+  const earlier = root && !root.staffMsg ? `\nEarlier: ${linkOf(thread.guildId, rootId)} · ${root.title}` : '';
+  const head = `**${v.summary}**\n${link} · ${st.forum} · ${v.category}${earlier}`;
   const tail = `-# The bot ${did}.${dry}`;
-  const body = v.notes.trim().slice(0, Math.max(0, 2000 - head.length - tail.length - 2));
-  const m = await staff.send({ content: `${head}\n${body}\n${tail}`.slice(0, 2000), files, allowedMentions: { parse: [] } });
-  st.staffMsg = m.id;
+  const body = v.notes.trim().slice(0, Math.max(0, 1900 - head.length - tail.length));
+  const content = `${head}\n${body}\n${tail}`.slice(0, 1900);
+  const name = (v.summary || st.title).slice(0, 100);
+  let m, th;
+  if (staff.type === ChannelType.GuildForum) {
+    th = await staff.threads.create({ name, message: { content, files: staffFiles(dirs), allowedMentions: { parse: [] } } });
+    m = { id: th.id };
+  } else {
+    m = await staff.send({ content, files: staffFiles(dirs), allowedMentions: { parse: [] } });
+    th = await m.startThread({ name, autoArchiveDuration: 10080 }).catch(e => { console.error(`[bot] report thread: ${e.message}`); return null; });
+  }
+  Object.assign(st, { staffMsg: m.id, staffThread: th?.id, reports: 1 });
+  if (earlier) {
+    Object.assign(root, { staffMsg: m.id, staffThread: th?.id, reportOf: thread.id });
+    st.reports = 2;
+    await countReports(staff, st);
+  }
+}
+
+/** a new log or picture in a thread that has a report: into the report's thread, with the files */
+async function relay(m, st) {
+  const staff = await client.channels.fetch(CFG.staffChannel).catch(() => null);
+  const root = threads[st.reportOf] ?? st;
+  const th = staff && await reportThread(staff, root);
+  if (!th) return;
+  const files = [];
+  for (const a of m.attachments.values()) {
+    if (a.size > MAX_UPLOAD || files.length >= MAX_UPLOADS) continue;
+    const data = await download(a.url);
+    if (data) files.push({ attachment: data, name: a.name });
+  }
+  const who = m.author.id === m.channel.ownerId ? 'the poster' : 'a member';
+  const text = m.content.replace(/\s+/g, ' ').slice(0, 400);
+  await th.send({ content: `**New in** ${linkOf(m.guildId, m.channelId)} (${who})${text ? `: ${text}` : ''}`.slice(0, 2000),
+    files, allowedMentions: { parse: [] } });
 }
 
 const quote = s => s.split('\n').map(l => `> ${l}`).join('\n');
@@ -267,31 +353,27 @@ function threadIndex(except) {
     .map(e => ({ line: threadLine(e), text: `${e[1].title}\n${e[1].summary ?? ''}\n${e[1].snippet ?? ''}` }));
 }
 
-/** the forums' threads from before the bot started (titles, tags, first posts), so it can point to them; no looks */
+/** the forums' threads with posts in the last STARTUP_MS (titles, first posts), so the bot can point to them; the
+ *  ones opened in that time that it never looked at get their look now, so a restart misses no post.  Nothing older */
 async function indexForums() {
+  const since = Date.now() - STARTUP_MS;
+  const snowflakeTime = id => Number((BigInt(id) >> 22n) + 1420070400000n);
   const found = [];
   for (const guild of client.guilds.cache.values()) {
-    const forums = guild.channels.cache.filter(ch => isForum(ch) && (!CFG.forums.length || CFG.forums.includes(ch.id)));
     const active = await guild.channels.fetchActiveThreads().catch(() => null);
-    for (const forum of forums.values()) {
-      const list = [...(active?.threads.filter(t => t.parentId === forum.id).values() ?? [])];
-      let before;
-      for (let page = 0; page < 10; page++) {           // up to 1000 archived posts, newest first
-        const r = await forum.threads.fetchArchived({ type: 'public', limit: 100, before }).catch(() => null);
-        if (!r?.threads.size) break;
-        list.push(...r.threads.values());
-        if (!r.hasMore) break;
-        before = [...r.threads.values()].at(-1).archiveTimestamp;
-      }
-      for (const t of list) {
-        const st = threads[t.id] ??= { title: t.name, forum: forum.name, guild: guild.id, created: t.createdAt.toISOString(), status: 'seen', replies: 0 };
-        Object.assign(st, { title: t.name, guild: guild.id, archived: t.archived });
-        if (!st.snippet && !st.summary) found.push(t);
-      }
+    for (const t of active?.threads.values() ?? []) {
+      if (!watched(t) || Math.max(t.createdTimestamp, t.lastMessageId ? snowflakeTime(t.lastMessageId) : 0) < since) continue;
+      const fresh = !threads[t.id] && t.createdTimestamp >= since;
+      const st = threads[t.id] ??= { title: t.name, forum: t.parent.name, guild: guild.id, created: t.createdAt.toISOString(),
+        status: fresh ? 'new' : 'seen', replies: 0 };
+      st.title = t.name;
+      if (fresh) schedule(t.id, 'new post');
+      if (!st.snippet && !st.summary) found.push(t);
     }
   }
   save();
-  console.log(`[bot] forums indexed: ${Object.keys(threads).length} threads, reading ${found.length} first posts`);
+  console.log(`[bot] forums: ${found.length} threads with posts in the last ${STARTUP_MS / 3600_000} h read, ` +
+    `${Object.values(threads).filter(t => t.status === 'new').length} waiting for a look`);
   for (const t of found) {                         // one at a time: discord.js waits out the rate limits
     const m = await t.fetchStarterMessage().catch(() => null);
     if (m) threads[t.id].snippet = m.content.replace(/\s+/g, ' ').slice(0, 200);
@@ -307,7 +389,7 @@ client.on(Events.ClientReady, c => {
   repo.sync(true).catch(e => console.error(`[repo] ${e.message}`));
   indexForums().catch(e => console.error(`[bot] forum index: ${e.message}`));
   // posts that came in shortly before a restart still get their look
-  for (const [id, t] of Object.entries(threads)) if (t.status === 'new' && Date.now() - Date.parse(t.created) < 86400_000) schedule(id, 'new post');
+  for (const [id, t] of Object.entries(threads)) if (t.status === 'new' && Date.now() - Date.parse(t.created) < STARTUP_MS) schedule(id, 'new post');
 });
 
 /** an event handler that logs what goes wrong instead of taking the bot down */
@@ -335,6 +417,9 @@ client.on(Events.MessageCreate, guard('message', m => {
   const st = threads[thread.id];
   if (!st) return;
   st.active = m.createdAt.toISOString();
+  if (st.staffMsg && CFG.staffChannel && m.attachments.size && !isStaff(m.member, thread)) {
+    relay(m, st).catch(e => console.error(`[bot] relay to the report: ${e.message}`));
+  }
   // a mention by name; for the poster a reply to the bot's message counts too
   const named = m.mentions.has(client.user, { ignoreEveryone: true, ignoreRoles: true, ignoreRepliedUser: true });
   const replied = m.mentions.has(client.user, { ignoreEveryone: true, ignoreRoles: true });
