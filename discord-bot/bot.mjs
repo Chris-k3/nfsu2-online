@@ -48,6 +48,7 @@ const MAX_WAIT_MS = 10 * 60_000;                 // a thread that keeps growing 
 const STARTUP_MS = 48 * 3600_000;                // at start, the forums' posts of the last 48 hours, nothing older
 const RELEASE_CHECK_MS = 5 * 60_000;             // how often the bot checks whether a new version went live
 const FIX_DAYS = 14, FIX_MAX = 10;               // a release is checked against threads of the last 14 days, 10 messages at most
+const BUMP_QUIET_MS = 12 * 3600_000;             // the poster writing after this long a silence is a bump: they wait
 
 fs.mkdirSync(CFG.state, { recursive: true });
 const STATE_FILE = path.join(CFG.state, 'threads.json');
@@ -148,19 +149,22 @@ async function look(threadId, why, extra) {
   const fix = why === 'fix live';
   if (thread.locked || (thread.archived && !fix)) return say('skipped: closed or locked');
   st.guild ??= thread.guildId;
-  const byStaff = why === 'asked by staff';
+  const byStaff = why === 'asked by staff', bumped = why === 'bump';
+  const anyway = byStaff || fix || bumped;       // looks that go ahead where staff wrote and past the reply cap
   if (fix && st.fixed) return say('skipped: already told that a fix went live');
-  if (!byStaff && !fix && st.status === 'staff') return say('skipped: staff are in the thread');
-  if (!byStaff && !fix && st.replies >= CFG.maxReplies) return say(`skipped: ${st.replies} replies already`);
+  if (!anyway && st.status === 'staff') return say('skipped: staff are in the thread');
+  if (!anyway && st.replies >= CFG.maxReplies) return say(`skipped: ${st.replies} replies already`);
   if (!underCap()) return say(`skipped: ${CFG.maxPerDay} looks today already`);
 
   const msgs = [...(await thread.messages.fetch({ limit: 100 })).values()].reverse();
   const starter = await thread.fetchStarterMessage().catch(() => null);
   if (starter && !msgs.some(m => m.id === starter.id)) msgs.unshift(starter);
-  if (!byStaff && !fix && msgs.some(m => m.author.id !== client.user.id && isStaff(m.member, thread))) {
+  if (!anyway && msgs.some(m => m.author.id !== client.user.id && isStaff(m.member, thread))) {
     st.status = 'staff'; save();
     return say('skipped: staff are in the thread');
   }
+  const bump = bumped && openBump(msgs.filter(m => !m.system), thread.ownerId);
+  if (bumped && (!bump || st.bump === bump.id)) return say('skipped: the bump was answered already');
 
   const workDir = path.join(CFG.state, 'work', threadId), staffDir = `${workDir}-staff`;
   for (const d of [workDir, staffDir]) { fs.rmSync(d, { recursive: true, force: true }); fs.mkdirSync(d, { recursive: true }); }
@@ -224,8 +228,11 @@ async function look(threadId, why, extra) {
     return;
   }
   if (post) st.replies++;
+  if (bump) st.bump = bump.id;
   if (v) Object.assign(st, { summary: v.summary, category: v.category });
-  st.status = !v ? 'failed' : post ? (v.action === 'ask' ? 'asked' : 'answered') : st.status === 'asked' ? 'asked-none' : 'none';
+  if (!(bumped && st.status === 'staff')) {      // a bump in a thread staff wrote in leaves it theirs
+    st.status = !v ? 'failed' : post ? (v.action === 'ask' ? 'asked' : 'answered') : st.status === 'asked' ? 'asked-none' : 'none';
+  }
   if (v && CFG.staffChannel) await tellStaff(thread, st, v, post, [workDir, staffDir], posted).catch(e => console.error(`[bot] staff channel: ${e.message}`));
   save();
   fs.appendFileSync(VERDICTS, JSON.stringify({
@@ -403,7 +410,20 @@ const WHY = {
   'mentioned': 'the poster mentioned the bot or replied to it',
   'asked by staff': 'staff mentioned the bot and want its reply: answer or ask, never none; with no fix and nothing to ask, answer with a short account of what you found (what the log shows, whether it is known or fixed)',
   'fix live': 'a release just went live, and a commit in it may fix this thread\'s problem (see "When a fix goes live")',
+  'bump': 'the poster wrote again after the thread was quiet for half a day or more: they are waiting for an answer (see "When the poster bumps")',
 };
+
+/** the poster's newest bump in these messages (oldest first) that neither staff nor the bot answered since, or null.
+ *  A bump: the poster writes after nobody wrote for BUMP_QUIET_MS ("any ideas?", or new details after a long wait) */
+function openBump(msgs, ownerId) {
+  let bump = null;
+  for (let i = 1; i < msgs.length; i++) {
+    const m = msgs[i];
+    if (m.author.id === client.user.id || (m.author.id !== ownerId && isStaff(m.member, m.channel))) bump = null;
+    else if (m.author.id === ownerId && m.createdTimestamp - msgs[i - 1].createdTimestamp >= BUMP_QUIET_MS) bump = m;
+  }
+  return bump;
+}
 
 // ---------------------------------------------------------------------------------------------- a release --
 /** a new live version: the threads its commits may fix get a 'fix live' look; at most FIX_MAX of them */
@@ -467,7 +487,7 @@ function threadIndex(except) {
 async function indexForums() {
   const since = Date.now() - STARTUP_MS;
   const snowflakeTime = id => Number((BigInt(id) >> 22n) + 1420070400000n);
-  const found = [];
+  const found = [], recent = [];
   for (const guild of client.guilds.cache.values()) {
     const active = await guild.channels.fetchActiveThreads().catch(() => null);
     // a known thread that is not active was archived (or deleted) while the bot was away
@@ -479,6 +499,7 @@ async function indexForums() {
         status: fresh ? 'new' : 'seen', replies: 0 };
       st.title = t.name;
       if (fresh) schedule(t.id, 'new post');
+      else if (st.status !== 'new') recent.push(t);
       if (!st.snippet && !st.summary) found.push(t);
     }
   }
@@ -490,6 +511,12 @@ async function indexForums() {
     if (m) threads[t.id].snippet = m.content.replace(/\s+/g, ' ').slice(0, 200);
   }
   save();
+  // bumps while the bot was away
+  for (const t of recent) {
+    const msgs = await t.messages.fetch({ limit: 25 }).catch(() => null);
+    const bump = msgs && openBump([...msgs.values()].reverse().filter(m => !m.system), t.ownerId);
+    if (bump && bump.createdTimestamp >= since && threads[t.id].bump !== bump.id) schedule(t.id, 'bump');
+  }
 }
 
 // ------------------------------------------------------------------------------------------------- events --
@@ -538,6 +565,12 @@ client.on(Events.MessageCreate, guard('message', m => {
   }
   const thread = m.channel;
   if (m.author.bot || !watched(thread)) return;
+  // a thread from before the forum index (no posts in the hours it reads at start): known from now on.  A new one
+  // waits for its ThreadCreate, which gives it its first look
+  if (!threads[thread.id] && Date.now() - thread.createdTimestamp > 10 * 60_000) {
+    threads[thread.id] = { title: thread.name, forum: thread.parent.name, guild: thread.guildId, created: thread.createdAt.toISOString(),
+      status: 'seen', replies: 0 };
+  }
   const st = threads[thread.id];
   if (!st) return;
   st.active = m.createdAt.toISOString();
@@ -554,10 +587,16 @@ client.on(Events.MessageCreate, guard('message', m => {
     const t = timers.get(thread.id); if (t) { clearTimeout(t.timer); timers.delete(thread.id); }
     return;
   }
-  if (st.status === 'staff') return;
-  if (st.status === 'new') { if (m.author.id === thread.ownerId) schedule(thread.id, 'new post'); return; }
-  if (st.status === 'asked' && m.author.id === thread.ownerId) { schedule(thread.id, 'follow-up'); return; }
-  if (replied && m.author.id === thread.ownerId) schedule(thread.id, 'mentioned');
+  const op = m.author.id === thread.ownerId;
+  if (st.status === 'new') { if (op) schedule(thread.id, 'new post'); return; }
+  if (!op) return;
+  if (st.status === 'asked') { schedule(thread.id, 'follow-up'); return; }
+  // the poster after a quiet half day: a bump, also in a thread staff wrote in before and left
+  thread.messages.fetch({ before: m.id, limit: 1 }).then(before => {
+    const prev = before.first();
+    if (prev && m.createdTimestamp - prev.createdTimestamp >= BUMP_QUIET_MS) schedule(thread.id, 'bump');
+    else if (replied && st.status !== 'staff') schedule(thread.id, 'mentioned');
+  }).catch(e => console.error(`[bot] ${thread.id}: ${e.message}`));
 }));
 client.on(Events.Error, e => console.error(`[bot] discord: ${e.message}`));
 process.on('unhandledRejection', e => console.error(`[bot] ${e?.stack || e}`));

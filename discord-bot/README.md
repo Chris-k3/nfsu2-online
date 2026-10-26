@@ -31,7 +31,9 @@ Otherwise it says nothing. It reads every channel it can see, but posts only in 
 general channels, and the staff channel. It
 stays out of a thread once staff wrote in it (the server owner, `BOT_STAFF`, anyone who can manage threads), and replies
 at most twice in a thread: after it asked for something, the poster's next post gets one more look. Staff can mention
-the bot in a thread to have it look anyway.
+the bot in a thread to have it look anyway. A bump, the poster writing again after the thread was quiet for 12 hours
+("any ideas?"), gets a look and a reply too (a fix, a question, or where it stands), also in a thread staff wrote in
+before, unless staff answer it first; bumps while the bot was away get theirs at start.
 
 ## How it works
 
