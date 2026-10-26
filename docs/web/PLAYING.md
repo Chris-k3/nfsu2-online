@@ -470,7 +470,8 @@ Good to know:
 - **A name that reads as a slur** is not taken: Settings does not save it as **Your name**, the Online mode
   refuses it, and in free roam the other players see `Player` over your car. Digits or signs for letters (`1` for
   `i`), gaps and repeated letters read as the word they spell; a number (a year, two digits at the end) is a number
-  (`Hakan1995` and `Dani99` are names).
+  (`Hakan1995` and `Dani99` are names). The same goes for Nazi names (and `1488` in a name), hate aimed at a group,
+  terror and sexual violence. Swear words are fine.
 - **Your name is yours while you are online**, and while you race. Someone else can use it when you are not; the
   rankings and your EA Messenger lists follow the name, so whoever plays under it while you are away sees your
   friends, the players you block, your friend requests and the messages waiting for you, and can change them. If
