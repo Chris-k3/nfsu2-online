@@ -9,17 +9,24 @@ and it says something only when it is worth it:
   In the poster's language, dates as Discord timestamps (each reader sees their own time zone), web addresses in
   inline code; a reply too long for one message goes out as several, split between its parts;
 - **in the staff channel**, a report the developer should act on, with everything needed to start: what happens,
-  device, browser and version, the key log lines, the likely cause, the thread's link and its log files and saves.
-  The part for Claude is a code block of plain text (the thread, the notes, the attached files' names), so Copy Text
-  or a selection takes it without Discord's markup. Each report gets a thread: later threads about the same problem (with what they add and their logs) and new logs
-  or pictures posted in any of them go there, and the report counts the threads. Only the thread's followers are
-  notified. A forum channel works as the staff channel too: each report, spike alert and daily note is a post.
+  device, browser and version, the key log lines, the likely cause, the thread's link and its logs, pictures and saves.
+  The report is a post (in a text channel: a message with a thread on it) that the bot rewrites at every change:
+  the problem; where it stands, 🔴 **Open**, ✅ **Fixed** (a release's fix is live and the bot told a thread; whether
+  a poster confirmed it), ✅ **Solved** (the poster says it works) or 🟠 **Reported again** (a new thread or log
+  after that), the post's name starting with the same mark; its forum and category (`bug-reports · audio`); every
+  thread about it, in one line; its files with links to download them; and one line with a Discord timestamp for
+  each change. The post's thread holds the rest: first the part for Claude, a code block of plain text (the threads,
+  the notes, the files' names) that Copy Text or a selection takes without Discord's markup, with the first thread's
+  files; the bot edits it as updates come, so one copy has them all. Then each update with its files: later threads
+  about the same problem (with what they add), new logs or pictures in any of them, a fix that went live, the poster
+  saying it works. Only the thread's followers are notified. A report from before this layout gets it at its next
+  change: its text and files move into its thread. Spike alerts and daily notes are posts of their own.
 
 - **when a fix goes live**, in a thread whose problem one of the release's commits fixes: that a fix may have solved
   it, what the fix changes (one plain sentence, no internals), to reload the page, and to post a new log if it still
   happens. Only when a full look at the thread is sure; at most once a thread, at most 3 threads a release (short,
   low-effort looks), threads of the last 14 days, also threads staff wrote in (one the bot never looked at is matched
-  by its title and first post). The report's thread notes it.
+  by its title and first post). A report about the thread turns ✅ Fixed.
 
 - **when a suggestion is carried out**, in a suggestion thread (a forum named `suggest…`, or a post the bot took for a
   suggestion) that one of the release's commits does what it asks for: that it was added, since when it is live, where
@@ -56,7 +63,7 @@ and it says something only when it is worth it:
   for something, **Dev aware** once the developer has the report, **Fix live** once it told the thread that a fix went
   live, **Complete** once it told a suggestion that it was added, and **Solved** when the poster says the problem is
   gone (a message of theirs that passes a word filter, then one short Haiku call over the end of the thread; also in
-  threads staff answered). It takes off only its own Needs info and Fix live: the poster's and staff's tags stay. It needs Manage Threads in the forums (Set up, step
+  threads staff answered; a report about the thread then says so, also in a dry run). It takes off only its own Needs info and Fix live: the poster's and staff's tags stay. It needs Manage Threads in the forums (Set up, step
   3); nothing in a dry run (the log says what it would set).
 
 Otherwise it says nothing. It reads every channel it can see, but posts only in forum threads, those replies in the

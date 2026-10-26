@@ -408,7 +408,7 @@ export class General {
     const text = res.content.filter(b => b.type === 'text').map(b => b.text).join('').trim();
     if (!text) return console.log(`[general] no digest: the model stopped with ${res.stop_reason} and no text`);
     const hours = Math.min(24, Math.round((now - this.saved.since) / 3600_000));
-    const cut = res.stop_reason === 'end_turn' ? '' : `\n-# Cut short: ${res.stop_reason}`;
+    const cut = res.stop_reason === 'end_turn' ? '' : `\nCut short: ${res.stop_reason}`;
     await this.toStaff(`General channels, ${day}`, `**General channels, last ${hours} hours** (${flagged.length} flagged messages)\n${text}`.slice(0, 1950) + cut);
     console.log(`[general] digest posted (${flagged.length} messages)`);
   }

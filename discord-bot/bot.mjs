@@ -2,8 +2,8 @@
 // gets one look (investigate.mjs) once its author has stopped adding to it.  It says something only when it has a
 // verified fix or needs information the post lacks; after it asked, the author's next post gets one more look.  It
 // stays out of threads the staff answered and stops after BOT_MAX_REPLIES replies in a thread.  A report the developer
-// should act on goes to the staff channel (BOT_STAFF_CHANNEL) with the thread's link, the bot's notes and its log files,
-// and gets a thread: later threads about the same problem and new logs in them go there.  When a release goes live,
+// should act on goes to the staff channel (BOT_STAFF_CHANNEL): a post that says where the problem stands, with a thread
+// for the part to copy to Claude, the files and every update (later threads about it, new logs).  When a release goes live,
 // threads whose problem one of its commits fixes get a look ('fix live'), and a careful "may be fixed, reload" when the
 // look is sure; suggestions one of its commits carries out, also old ones, get 'implemented': "added, reload", Complete.
 //   node --env-file=.env bot.mjs        (settings: README.md)
@@ -45,7 +45,8 @@ if (!CFG.token) { console.error('DISCORD_TOKEN is not set (README.md)'); process
 
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 const MAX_TEXT = 10 << 20, MAX_IMAGE = 10 << 20, MAX_IMAGES = 4;   // pictures are shrunk for the model (picture())
-const MAX_UPLOAD = 8 << 20, MAX_UPLOADS = 3;    // files copied into a staff report (Discord takes 10 MB a message)
+const MAX_UPLOAD = 8 << 20, MAX_UPLOADS = 10;   // files copied into a staff report, each update (Discord takes 10 MB a file)
+const MESSAGE_FILES = 10, MESSAGE_BYTES = 20 << 20;   // a message carries 10 files, 25 MB in all
 const SAVES_ZIP = /^nfsu2-saves-.*\.zip$/i;      // Saves, Download backup: for the developer, not for the model
 const LOG_FILE = /\.(log|txt)$/i;                // F9, Download log; a long paste comes as message.txt
 const hasLog = m => [...m.attachments.values()].some(a => LOG_FILE.test(a.name));
@@ -70,8 +71,8 @@ const LIVE_FILE = path.join(CFG.state, 'live.json');      // the live version th
 /** per thread: { title, forum, guild, created, active, status: new|seen|none|asked|answered|staff|failed, replies,
  *  summary, category, snippet (its first post, for threads the bot only indexed), closed (archived, locked or deleted:
  *  not one to point people to); for a problem reported to the staff:
- *  staffMsg, staffThread (the report and its thread), reports (how many threads, on the first one), reportOf (on the
- *  later ones: the first thread's id) } */
+ *  staffMsg, staffThread (the report and its thread), report (on the first one: what its post shows, REPORT below),
+ *  reportOf (on the later ones: the first thread's id) } */
 let threads = {};
 try { threads = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch { /* first start */ }
 function save() {
@@ -104,7 +105,7 @@ function isStaff(member, channel) {
 }
 
 const translator = new Translator({ client, anthropic, state: CFG.state });   // Apps, Translate on a message
-const tags = new Tags({ client, anthropic, isStaff, dryRun: CFG.dryRun });       // forum tags (tags.mjs)
+const tags = new Tags({ client, anthropic, isStaff, dryRun: CFG.dryRun, onSolved: solved });   // forum tags (tags.mjs)
 
 // the general channels (general.mjs): nudges to the forums, spikes and a daily digest for the staff
 const general = new General({
@@ -191,7 +192,7 @@ async function look(threadId, why, extra) {
   for (const d of [workDir, staffDir]) { fs.rmSync(d, { recursive: true, force: true }); fs.mkdirSync(d, { recursive: true }); }
   const { text, images } = await transcript(thread, msgs.filter(m => !m.system), workDir, staffDir, why, extra);
   say(`"${st.title}" (${why}): ${msgs.length} message(s), ${fs.readdirSync(workDir).length} file(s), ` +
-    `${fs.readdirSync(staffDir).length} save backup(s), ${images.length} picture(s)` +
+    `${fs.readdirSync(staffDir).filter(f => SAVES_ZIP.test(f.replace(/^\d+-/, ''))).length} save backup(s), ${images.length} picture(s)` +
     `${images.length ? ` (${images.reduce((s, p) => s + (p.tokens ?? 0), 0)} tokens)` : ''}`);
 
   day.n++;
@@ -247,11 +248,16 @@ async function look(threadId, why, extra) {
     if (posted) await thread.fetch(true).catch(() => {});      // the reply took it out of the archive
     const added = why === 'implemented';
     if (post) await tags.add(thread, added ? 'complete' : 'fixLive').catch(e => console.error(`[tags] ${threadId}: ${e.message}`));
-    if (post && CFG.staffChannel && st.staffMsg) {
+    if (post && CFG.staffChannel && st.staffMsg) {     // the report: fixed
       const staff = await client.channels.fetch(CFG.staffChannel).catch(() => null);
-      const th = staff && await reportThread(staff, threads[st.reportOf] ?? st);
-      await th?.send({ content: `**${added ? 'Added' : 'Fix live'}** (${extra.commit}): ${CFG.dryRun ? 'the bot would have told' : 'the bot told'} ` +
-        `${linkOf(thread.guildId, thread.id)} that ${added ? 'it was added' : 'it may be fixed'}.`, allowedMentions: { parse: [] } }).catch(() => {});
+      const told = `${CFG.dryRun ? 'would have told' : 'told'} ${linkOf(thread.guildId, thread.id)}`;
+      const that = `that ${added ? 'it was added' : 'it may be fixed'}`;
+      const label = added ? 'Added' : 'Fix live', commit = `\`${extra.commit}\` ${extra.subject ?? ''}`.trim();
+      const at = (repo.releases.find(r => r.rev === extra.rev)?.at ?? Date.now()) / 1000;
+      if (staff) await reportUpdate(staff, st.reportOf ?? threadId, {
+        line: `**${label}**: ${commit}; the bot ${told}`, content: `**${label}**: ${commit}\nThe bot ${told} ${that}.`,
+        part: `${label}: ${commit}. The bot ${told} ${that}.`, fix: { commit: extra.commit, at: Math.floor(at), added },
+      }).catch(e => console.error(`[staff] ${threadId}: ${e.message}`));
     }
     if (!posted && post && CFG.staffChannel) await tellStaff(thread, st, { ...v, escalate: false, duplicate_of: '' }, post, [workDir, staffDir], posted).catch(() => {});
     save();
@@ -277,7 +283,8 @@ async function look(threadId, why, extra) {
 }
 
 /** the thread as the model reads it: text attachments saved to workDir (whatever their name: a chrome://gpu report
- *  comes as .txt.phps, a long paste as message.txt), save backups to staffDir for the staff report, images inlined */
+ *  comes as .txt.phps, a long paste as message.txt), images inlined; save backups and the pictures as they were posted
+ *  to staffDir, for the staff report */
 async function transcript(thread, msgs, workDir, staffDir, why, extra) {
   const applied = (thread.appliedTags ?? []).map(id => thread.parent.availableTags?.find(t => t.id === id)?.name).filter(Boolean);
   const topics = Tags.of(thread.parent).topics.map(t => t.name);
@@ -297,11 +304,16 @@ async function transcript(thread, msgs, workDir, staffDir, why, extra) {
     for (const a of m.attachments.values()) {
       const kb = `${Math.round(a.size / 1024)} KB`;
       const type = (a.contentType ?? '').split(';')[0];
+      const name = `${++n}-${a.name.replace(/[^\w.-]+/g, '_')}`;
       if (IMAGE_TYPES.includes(type) && a.size <= MAX_IMAGE && images.length < MAX_IMAGES) {
         const data = await download(a.url), pic = data && await picture(data);
-        if (pic) { images.push(pic); lines.push(`  [picture ${images.length}: ${a.name}]`); continue; }
+        if (pic) {
+          images.push(pic);
+          if (data.length <= MAX_UPLOAD) fs.writeFileSync(path.join(staffDir, name), data);
+          lines.push(`  [picture ${images.length}: ${a.name}]`);
+          continue;
+        }
       }
-      const name = `${++n}-${a.name.replace(/[^\w.-]+/g, '_')}`;
       if (SAVES_ZIP.test(a.name) && a.size <= MAX_UPLOAD) {
         const data = await download(a.url);
         if (data) { fs.writeFileSync(path.join(staffDir, name), data); lines.push(`  [saves backup: ${a.name}, ${kb} (a zip, not readable here)]`); continue; }
@@ -322,10 +334,23 @@ async function transcript(thread, msgs, workDir, staffDir, why, extra) {
 }
 
 // ------------------------------------------------------------------------------------------- the staff channel --
-// A report is a message in the staff channel with a thread on it (in a forum channel: a post), and every thread about
-// that problem points to it: the first one has staffMsg/staffThread/reports, the later ones reportOf and the same ids.
-// Later threads about the problem, and new logs or pictures in any of them, go into the report's thread; the report
-// message counts the threads.  Only the thread's followers are notified.
+// A report is a post in the staff channel (in a text channel: a message with a thread on it).  The post is an overview,
+// rewritten at every change: the problem, where it stands (open, fixed, reported again), its forum and category, every
+// thread about it, its files with links to download them, and a line with a Discord timestamp for each change.  Its
+// thread holds the rest: first the part to copy to Claude, which takes in each update as it comes, with the first
+// thread's files; then each update with its own files (a later thread about the problem, new logs or pictures in any
+// of them, a fix that went live, the poster saying it works).  Only the thread's followers are notified.  The first
+// thread has staffMsg, staffThread and report; the later ones reportOf and the same ids.
+
+/** REPORT, on the first thread: { title, where ('bug-reports · audio'), guild, threads: [id], parts: [text] (the part
+ *  for Claude: the report, then one for each update), prompt (the message that shows them), files: [{ name, size,
+ *  msg, id, url }], log: [[seconds, line]], fix: { commit, at, added }, confirmed: { at, thread } (a poster says it
+ *  works), again: { at, thread } (a new thread or log after the fix or the poster's word, until the next of these) } */
+
+const linkOf = (guild, id) => `https://discord.com/channels/${guild}/${id}`;
+const stamp = s => `<t:${Math.floor(s)}:R>`;
+const seconds = () => Math.floor(Date.now() / 1000);
+const bytes = n => n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
 
 /** the report's first message (in a forum channel: its post's starter) */
 async function reportMessage(staff, root) {
@@ -345,21 +370,180 @@ async function reportThread(staff, root) {
   return th;
 }
 
-/** "Reports: N threads" on the report message */
-async function countReports(staff, root) {
-  const m = await reportMessage(staff, root);
-  if (!m) return;
-  const line = `-# Reports: ${root.reports} threads, the later ones in this report's thread.`;
-  const content = /^-# Reports: .*$/m.test(m.content) ? m.content.replace(/^-# Reports: .*$/m, line) : `${m.content}\n${line}`;
-  if (content.length <= 2000) await m.edit({ content, allowedMentions: { parse: [] } });
+/** where a report stands: open; fixed (a release's fix is live, and the bot told a thread) or solved (a poster says
+ *  it works); or reported again (a new thread or log after that).  mark: what the post's name starts with */
+function standing(r) {
+  const fix = r.fix && `\`${r.fix.commit}\` live ${stamp(r.fix.at)}`;
+  if (r.again) {
+    return { mark: '🟠 ', line: `🟠 **Reported again** ${stamp(r.again.at)} in ${linkOf(r.guild, r.again.thread)}, ` +
+      `after ${fix ? `the fix ${fix}` : 'a poster said it works'}` };
+  }
+  if (r.fix) {
+    const sure = r.confirmed?.at >= r.fix.at ? `a poster confirmed it ${stamp(r.confirmed.at)}` : 'no player confirmed it yet';
+    return { mark: '✅ ', line: `✅ **${r.fix.added ? 'Added' : 'Fixed'}**: ${fix}, ${sure}` };
+  }
+  if (r.confirmed) return { mark: '✅ ', line: `✅ **Solved**: the poster says it works in ${linkOf(r.guild, r.confirmed.thread)} ${stamp(r.confirmed.at)}` };
+  return { mark: '', line: '🔴 **Open**' };
 }
 
-const linkOf = (guild, id) => `https://discord.com/channels/${guild}/${id}`;
+/** the last of `items` that fit in `room` characters, joined by `sep`, after left(n) for the n left out */
+function newest(items, sep, room, left) {
+  for (let n = 0; ; n++) {
+    const text = (n ? [left(n), ...items.slice(n)] : items).join(sep);
+    if (text.length <= room || n >= items.length) return text;
+  }
+}
 
-/** files of this look for the staff: logs, other text and save backups, at most MAX_UPLOADS */
-const staffFiles = dirs => dirs.flatMap(d => fs.readdirSync(d).map(f => path.join(d, f)))
-  .filter(f => fs.statSync(f).size <= MAX_UPLOAD).slice(0, MAX_UPLOADS)
-  .map(f => ({ attachment: f, name: path.basename(f).replace(/^\d+-/, '') }));
+/** the report's post: the problem, where it stands, its forum and category, its threads, its files with links to
+ *  download them, and its changes, the newest when they are too many for a message */
+function overview(r, forum) {
+  const { mark, line } = standing(r);
+  // a post's name is its title (100 characters at most); a message in a text channel has none
+  const title = !forum ? [`## ${r.title}`] : (mark + r.title).length > 100 ? [`**${r.title}**`] : [];
+  const threadLinks = newest(r.threads.map(id => linkOf(r.guild, id)), ' · ', 600, n => `${n} more`);
+  const head = [...title, line, r.where, `**Threads:** ${threadLinks}`].join('\n');
+  const files = r.files.map(f => `- [${f.name.replace(/[[\]]/g, '_')}](<${f.url}>) ${bytes(f.size)}`);
+  const log = r.log.map(([at, text]) => `${stamp(at)} ${text}`);
+  const room = 2000 - head.length - 30;          // 30: the two headings
+  const shown = newest(files, '\n', Math.min(files.join('\n').length, room - Math.min(log.join('\n').length, 600)),
+    n => `- ${n} earlier in the thread`);
+  const [first, ...later] = log;                 // the first change (when it was reported) stays
+  const changes = [first, ...later.length ? [newest(later, '\n', room - shown.length - first.length - 1, n => `${n} more in the thread`)] : []];
+  return [head, ...(files.length ? ['**Files:**', shown] : []), '**Updates:**', ...changes].join('\n');
+}
+
+/** one part for Claude: its lines, and the names of the files that came with it */
+const part = (lines, files) => [...lines, files.length && `Attached: ${files.map(f => f.name).join(', ')}`].filter(Boolean).join('\n').trim();
+
+/** text in a code block, at most `max` characters: a selection or Copy Text takes it without Discord's markup */
+function fence(text, max) {
+  text = text.replace(/```/g, "'''");
+  const room = Math.max(0, max - 12);
+  return '```text\n' + (text.length > room ? `${text.slice(0, room - 2)} …` : text) + '\n```';
+}
+
+/** the report's part for Claude: the report and each update after it, in one code block; when they are too long for
+ *  a message, the longest are cut the most (each update's message has its whole text) */
+function promptText(r) {
+  const parts = r.parts.map(p => p.replace(/```/g, "'''")), cut = [];
+  let room = 2000 - 12 - 2 * (parts.length - 1);   // the code block, a blank line between the parts
+  [...parts.keys()].sort((a, b) => parts[a].length - parts[b].length).forEach((i, k, order) => {
+    const share = Math.floor(room / (order.length - k));
+    cut[i] = parts[i].length > share ? `${parts[i].slice(0, Math.max(0, share - 2))} …` : parts[i];
+    room -= cut[i].length;
+  });
+  return '```text\n' + cut.join('\n\n') + '\n```';
+}
+
+/** an update in the report's thread: its text with its files (the files past a message's share in the next
+ *  messages); their links go into the report.  -> the first message's id */
+async function postUpdate(target, r, content, files) {
+  const groups = [[]];
+  for (const f of files) {
+    const g = groups.at(-1);
+    if (g.length && (g.length === MESSAGE_FILES || g.reduce((s, x) => s + x.size, f.size) > MESSAGE_BYTES)) groups.push([f]);
+    else g.push(f);
+  }
+  let first = null;
+  for (const [i, g] of groups.entries()) {
+    const names = g.map(f => f.name).join(', ');
+    let failed = null;
+    let m = await target.send({ ...(i ? {} : { content }), files: g.map(f => ({ attachment: f.attachment, name: f.name })),
+      allowedMentions: { parse: [] } }).catch(e => { failed = e; return null; });
+    if (!m) {                                    // too big after all: the text, and which files are missing
+      console.error(`[staff] could not send ${names || 'an update'}: ${failed.message}`);
+      if (!g.length) throw failed;
+      if (!i) m = await target.send({ content, allowedMentions: { parse: [] } });
+      await target.send({ content: `Could not copy ${names} here: ${failed.message}`.slice(0, 2000), allowedMentions: { parse: [] } });
+    }
+    first ??= m?.id;
+    for (const a of m?.attachments.values() ?? []) r.files.push({ name: a.name, size: a.size, msg: m.id, id: a.id, url: a.url });
+  }
+  return first;
+}
+
+/** the files' download links as Discord gives them now: it signs a link for about a day */
+async function freshLinks(target, r) {
+  for (const id of new Set(r.files.map(f => f.msg))) {
+    const m = await target.messages.fetch(id).catch(() => null);
+    for (const a of m?.attachments.values() ?? []) { const f = r.files.find(f => f.id === a.id); if (f) f.url = a.url; }
+  }
+}
+
+/** the report's post, and its part for Claude when `prompt`, from the report; the post's name shows where it stands */
+async function render(staff, root, th, prompt = true) {
+  const r = root.report, forum = staff.type === ChannelType.GuildForum, target = th ?? (forum ? null : staff);
+  if (target) await freshLinks(target, r);
+  await (forum ? th?.messages : staff.messages)?.edit(forum ? root.staffThread : root.staffMsg,
+    { content: overview(r, forum), allowedMentions: { parse: [] } });
+  if (prompt && r.prompt && target) {
+    await target.messages.edit(r.prompt, { content: promptText(r), allowedMentions: { parse: [] } })
+      .catch(e => console.error(`[staff] the part for Claude: ${e.message}`));
+  }
+  // not waited for: Discord renames a thread twice in 10 minutes, and makes the third wait
+  const name = (standing(r).mark + r.title).slice(0, 100);
+  if (th && th.name !== name) th.setName(name).catch(e => console.error(`[staff] the report's name: ${e.message}`));
+}
+
+/** a report from before the overview: its text and files move into its thread as the part for Claude, and the post
+ *  becomes the overview */
+async function upgrade(staff, rootId, root) {
+  if (root.report) return root.report;
+  const m = await reportMessage(staff, root), th = await reportThread(staff, root);
+  const target = th ?? (staff.isTextBased() ? staff : null), text = m?.content ?? '';
+  const old = text.match(/```text\n([\s\S]*?)\n```/)?.[1] ?? text.replace(/^-# .*\n?/gm, '').trim();
+  const r = root.report = {
+    title: (root.summary || root.title).slice(0, 300), where: [root.forum, root.category].filter(Boolean).join(' · '),
+    guild: root.guild, threads: [rootId, ...Object.keys(threads).filter(id => threads[id].reportOf === rootId)],
+    parts: old ? [old] : [], files: [],
+    log: m ? [[Math.floor(m.createdTimestamp / 1000), `Reported from ${linkOf(root.guild, rootId)}`]] : [],
+  };
+  if (m && target) {
+    const files = [];
+    for (const a of m.attachments.values()) {
+      const data = await download(a.url);
+      if (data) files.push({ attachment: data, name: a.name, size: data.length });
+    }
+    r.prompt = await postUpdate(target, r, promptText(r), files);
+    if (files.length && files.length === m.attachments.size) await m.edit({ attachments: [] }).catch(() => {});
+  }
+  console.log(`[staff] the report on ${rootId} got its overview`);
+  return r;
+}
+
+const reportQueues = new Map();                  // report (its first thread's id) -> its last change
+/** fn after the report's changes before it: one change of a report at a time */
+function inOrder(rootId, fn) {
+  const p = (reportQueues.get(rootId) ?? Promise.resolve()).then(fn);
+  reportQueues.set(rootId, p.catch(() => {}));
+  return p;
+}
+
+/** a change to a report: its update (text and files) in the report's thread, its part for Claude, a line in the post.
+ *  u: { line, content, part, files, thread (one more thread about it), fix, confirmed and again (a thread's id) } */
+function reportUpdate(staff, rootId, u) {
+  return inOrder(rootId, async () => {
+    const root = threads[rootId];
+    if (!root?.staffMsg) return;
+    const r = await upgrade(staff, rootId, root), th = await reportThread(staff, root);
+    const at = seconds(), target = th ?? (staff.isTextBased() ? staff : null);
+    if (u.thread && !r.threads.includes(u.thread)) r.threads.push(u.thread);
+    if (u.fix || u.confirmed) delete r.again;
+    if (u.fix) r.fix = u.fix;
+    if (u.confirmed) r.confirmed = { at, thread: u.confirmed };
+    if (u.again && (r.fix || r.confirmed)) r.again = { at, thread: u.again };
+    if (u.content && target) await postUpdate(target, r, u.content, u.files ?? []);
+    if (u.part) r.parts.push(u.part);
+    r.log.push([at, u.line]);
+    await render(staff, root, th, !!u.part);
+    save();
+  });
+}
+
+/** files of this look for the staff: logs and other text, pictures and save backups, at most MAX_UPLOADS */
+const staffFiles = dirs => dirs.flatMap(d => fs.readdirSync(d).sort((a, b) => parseInt(a) - parseInt(b)).map(f => path.join(d, f)))
+  .map(f => ({ attachment: f, name: path.basename(f).replace(/^\d+-/, ''), size: fs.statSync(f).size }))
+  .filter(f => f.size <= MAX_UPLOAD).slice(0, MAX_UPLOADS);
 
 /** a look's verdict for the staff: a new report, an update in the report about the same problem, or nothing */
 async function tellStaff(thread, st, v, post, dirs, posted) {
@@ -372,93 +556,91 @@ async function tellStaff(thread, st, v, post, dirs, posted) {
   const staff = await client.channels.fetch(CFG.staffChannel);
   if (!staff?.isTextBased() && staff?.type !== ChannelType.GuildForum) throw new Error(`${CFG.staffChannel} is not a channel the bot can post in`);
   const did = !post ? 'did not reply' : v.action === 'ask' ? 'asked the poster for more' : 'answered the poster';
-  const dry = post && !posted ? `\n-# Dry run, not posted. The reply:\n${quote(post.slice(0, 600))}` : '';
+  const dry = post && !posted ? `Dry run, not posted. The reply:\n${quote(post.slice(0, 600))}` : '';
   const files = staffFiles(dirs);
   const where = `"${st.title}" in #${st.forum}${v.category ? ` (${v.category})` : ''}`;
 
-  if (reported && !st.staffMsg) {                 // the same problem again: an update in its report's thread
-    const th = await reportThread(staff, reported);
-    if (th) {
-      const head = `**Also reported:** ${link} · ${v.summary}`, tail = `-# The bot ${did}.${dry}`;
-      const block = forClaude([`Also reported: ${where}`, `Thread: ${link}`, v.notes.trim()], files, 2000 - head.length - tail.length - 2);
-      await th.send({ content: `${head}\n${block}\n${tail}`, files, allowedMentions: { parse: [] } });
-      Object.assign(st, { staffMsg: reported.staffMsg, staffThread: reported.staffThread, reportOf: rootId });
-      reported.reports = (reported.reports ?? 1) + 1;
-      await countReports(staff, reported);
-      console.log(`[staff] ${thread.id} added to the report on ${rootId} (${reported.reports} threads)`);
-      return;
-    }
-    const m = await reportMessage(staff, reported);   // no thread (no right to open one): a link on the report
-    const content = `${m?.content}\nAlso reported: ${link}`;
-    if (m && content.length <= 2000) {
-      await m.edit({ content, allowedMentions: { parse: [] } });
-      Object.assign(st, { staffMsg: reported.staffMsg, reportOf: rootId });
-      reported.reports = (reported.reports ?? 1) + 1;
-      return;
-    }
+  if (reported && !st.staffMsg) {                 // the same problem again: an update in its report
+    Object.assign(st, { staffMsg: reported.staffMsg, staffThread: reported.staffThread, reportOf: rootId });
+    const text = part([`Also reported: ${where}`, `Thread: ${link}`, v.notes.trim()], files), head = `**Also reported** in ${link}`;
+    await reportUpdate(staff, rootId, {
+      line: `Also reported in ${link}; the bot ${did}`, part: text, files, thread: thread.id, again: thread.id,
+      content: [head, fence(text, 2000 - head.length - dry.length - 2), dry].filter(Boolean).join('\n'),
+    });
+    console.log(`[staff] ${thread.id} added to the report on ${rootId}`);
+    return;
   }
   if (!v.escalate || st.staffMsg) {              // nothing new for the developer; in a dry run, the reply for review
-    if (dry) await staff.send({ content: `${link} · ${v.summary}${dry}`.slice(0, 2000), allowedMentions: { parse: [] } });
+    if (dry) await general.toStaff(`Dry run: ${st.title}`, `${link} · ${v.summary}\n${dry}`);
     return;
   }
   // a new report; an earlier thread about the problem that nobody reported joins it
-  const earlier = root && !root.staffMsg ? `\nEarlier: ${linkOf(thread.guildId, rootId)} · ${root.title}` : '';
-  const head = `**${v.summary}**\n${link} · ${st.forum} · ${v.category}${earlier}`;
-  const tail = `-# The bot ${did}.${dry}`;
-  // room for "Reports: N threads", which countReports adds later
-  const block = forClaude([`Forum report: ${where}`, `Thread: ${link}`,
-    earlier && `Earlier thread about it: "${root.title}": ${linkOf(thread.guildId, rootId)}`, v.notes.trim()],
-    files, 1900 - head.length - tail.length - 2);
-  const content = `${head}\n${block}\n${tail}`;
-  const name = (v.summary || st.title).slice(0, 100);
+  const earlier = root && !root.staffMsg ? rootId : null;
+  const r = {
+    title: (v.summary || st.title).slice(0, 300), where: [st.forum, v.category].filter(Boolean).join(' · '),
+    guild: thread.guildId, threads: [...(earlier ? [earlier] : []), thread.id], files: [],
+    parts: [part([`Forum report: ${where}`, `Thread: ${link}`,
+      earlier && `Earlier thread about it: "${root.title}": ${linkOf(thread.guildId, earlier)}`, v.notes.trim()], files)],
+    log: [[seconds(), `Reported from ${link}${earlier ? ` and ${linkOf(thread.guildId, earlier)}` : ''}; the bot ${did}`]],
+  };
+  const forum = staff.type === ChannelType.GuildForum, name = r.title.slice(0, 100);
+  const first = { content: overview(r, forum), allowedMentions: { parse: [] } };
   let m, th;
-  if (staff.type === ChannelType.GuildForum) {
-    th = await staff.threads.create({ name, message: { content, files, allowedMentions: { parse: [] } } });
+  if (forum) {
+    th = await staff.threads.create({ name, message: first });
     m = { id: th.id };
   } else {
-    m = await staff.send({ content, files, allowedMentions: { parse: [] } });
+    m = await staff.send(first);
     th = await m.startThread({ name, autoArchiveDuration: 10080 }).catch(e => { console.error(`[bot] report thread: ${e.message}`); return null; });
   }
-  Object.assign(st, { staffMsg: m.id, staffThread: th?.id, reports: 1 });
+  Object.assign(st, { staffMsg: m.id, staffThread: th?.id, report: r });
+  if (earlier) Object.assign(root, { staffMsg: m.id, staffThread: th?.id, reportOf: thread.id });
+  await inOrder(thread.id, async () => {          // the part for Claude with the files, then the post with their links
+    const target = th ?? staff;
+    r.prompt = await postUpdate(target, r, promptText(r), files);
+    if (dry) await target.send({ content: dry.slice(0, 2000), allowedMentions: { parse: [] } });
+    await render(staff, st, th, false);
+  });
   console.log(`[staff] ${thread.id} reported to the staff${th ? ', with a thread for updates' : ' (no thread: no right to open one?)'}`);
   if (earlier) {
-    Object.assign(root, { staffMsg: m.id, staffThread: th?.id, reportOf: thread.id });
-    st.reports = 2;
-    await countReports(staff, st);
-    const rt = await client.channels.fetch(rootId).catch(() => null);
-    if (rt) await tags.add(rt, 'aware').catch(e => console.error(`[tags] ${rootId}: ${e.message}`));
+    const rt = await client.channels.fetch(earlier).catch(() => null);
+    if (rt) await tags.add(rt, 'aware').catch(e => console.error(`[tags] ${earlier}: ${e.message}`));
   }
 }
 
-/** a new log or picture in a thread that has a report: into the report's thread, with the files */
+/** a new log or picture in a thread that has a report: an update in the report, with the files */
 async function relay(m, st) {
   const staff = await client.channels.fetch(CFG.staffChannel).catch(() => null);
-  const root = threads[st.reportOf] ?? st;
-  const th = staff && await reportThread(staff, root);
-  if (!th) return;
+  if (!staff) return;
   const files = [];
   for (const a of m.attachments.values()) {
     if (a.size > MAX_UPLOAD || files.length >= MAX_UPLOADS) continue;
     const data = await download(a.url);
-    if (data) files.push({ attachment: data, name: a.name });
+    if (data) files.push({ attachment: data, name: a.name, size: data.length });
   }
+  const all = [...m.attachments.values()], log = hasLog(m);
+  const kind = (log ? 'log' : all.every(a => /^image\//.test(a.contentType ?? '')) ? 'picture' : 'file') + (all.length > 1 ? 's' : '');
   const who = m.author.id === m.channel.ownerId ? 'the poster' : 'a member';
-  const link = linkOf(m.guildId, m.channelId), head = `**New in** ${link} (${who})`;
-  const block = forClaude([`New in "${m.channel.name}" from ${who}: ${link}`, m.content.trim().slice(0, 1200)], files, 2000 - head.length - 1);
-  await th.send({ content: `${head}\n${block}`, files, allowedMentions: { parse: [] } });
+  const link = linkOf(m.guildId, m.channelId), head = `**New ${kind}** from ${who} in ${link}`;
+  const text = part([`New in "${m.channel.name}" from ${who}: ${link}`, m.content.trim().slice(0, 1200)], files);
+  // a log after the fix: it may still happen
+  await reportUpdate(staff, st.reportOf ?? m.channelId, { line: `New ${kind} from ${who} in ${link}`, part: text, files,
+    again: log ? m.channelId : null, content: `${head}\n${fence(text, 2000 - head.length - 1)}` });
   console.log(`[staff] ${m.channelId}: ${files.length} file(s) from ${who} passed on to its report`);
 }
 
-const quote = s => s.split('\n').map(l => `> ${l}`).join('\n');
-
-/** the part of a staff message to copy to Claude: plain text in a code block, so a selection or Copy Text takes it
- *  without Discord's markup, with the names of the files attached to the message; at most `max` characters */
-function forClaude(lines, files, max) {
-  const att = files.length ? `\nAttached to this message: ${files.map(f => f.name).join(', ')}` : '';
-  const text = lines.filter(Boolean).join('\n').replace(/```/g, "'''");
-  const room = Math.max(0, max - att.length - 12);
-  return '```text\n' + (text.length > room ? `${text.slice(0, room - 2)} …` : text) + att + '\n```';
+/** the poster of a thread that has a report says it works now (tags.mjs): the report says so */
+function solved(thread) {
+  const st = threads[thread.id];
+  if (!st?.staffMsg || !CFG.staffChannel) return;
+  const rootId = st.reportOf ?? thread.id, link = linkOf(thread.guildId, thread.id);
+  const what = `**${threads[rootId]?.report?.fix ? 'Confirmed' : 'Solved'}**: the poster says it works now in ${link}`;
+  client.channels.fetch(CFG.staffChannel)
+    .then(staff => reportUpdate(staff, rootId, { line: what, content: what, part: `The poster says it works now: ${link}`, confirmed: thread.id }))
+    .catch(e => console.error(`[staff] ${thread.id}: ${e.message}`));
 }
+
+const quote = s => s.split('\n').map(l => `> ${l}`).join('\n');
 
 const WHY = {
   'new post': 'a new post',
@@ -530,7 +712,8 @@ async function checkRelease() {
     for (const m of ms.slice(0, max)) {
       const body = (await repo.git(['show', '--no-patch', '--format=%h %s%n%n%b', m.commit]).catch(() => '')).trim().slice(0, 1500);
       console.log(`[release] ${m.thread}: ${m.why}`);
-      enqueue(m.thread, why, { rev, commit: m.commit, text: `The commit that went live:\n${body || m.commit}\nWhy it may be ${what}: ${m.why}` });
+      enqueue(m.thread, why, { rev, commit: m.commit, subject: body.split('\n')[0].replace(/^\S+\s*/, ''),
+        text: `The commit that went live:\n${body || m.commit}\nWhy it may be ${what}: ${m.why}` });
     }
   }
 }
