@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { Archive } from './archive.mjs';
 import { matchFixes } from './fixes.mjs';
 import { General } from './general.mjs';
-import { investigate, newClient, vet } from './investigate.mjs';
+import { imageType, investigate, newClient, vet } from './investigate.mjs';
 import { Repo, defaultSource } from './repo.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -252,8 +252,8 @@ async function transcript(thread, msgs, workDir, staffDir, why, extra) {
       const kb = `${Math.round(a.size / 1024)} KB`;
       const type = (a.contentType ?? '').split(';')[0];
       if (IMAGE_TYPES.includes(type) && a.size <= MAX_IMAGE && images.length < MAX_IMAGES) {
-        const data = await download(a.url);
-        if (data) { images.push({ type, data: data.toString('base64') }); lines.push(`  [picture ${images.length}: ${a.name}]`); continue; }
+        const data = await download(a.url), real = data && imageType(data);
+        if (real) { images.push({ type: real, data: data.toString('base64') }); lines.push(`  [picture ${images.length}: ${a.name}]`); continue; }
       }
       const name = `${++n}-${a.name.replace(/[^\w.-]+/g, '_')}`;
       if (SAVES_ZIP.test(a.name) && a.size <= MAX_UPLOAD) {

@@ -175,3 +175,13 @@ export function vet(v, { minConfidence = 'medium' } = {}) {
 }
 
 export const newClient = () => new Anthropic();
+
+/** a picture's type from its first bytes, or null when it is none the API takes: the name or the type Discord gives
+ *  can be wrong (a PNG saved as .webp), and the API refuses the whole look then */
+export function imageType(b) {
+  if (b.length >= 8 && b.readUInt32BE(0) === 0x89504e47 && b.readUInt32BE(4) === 0x0d0a1a0a) return 'image/png';
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg';
+  if (b.length >= 6 && /^GIF8[79]a$/.test(b.toString('latin1', 0, 6))) return 'image/gif';
+  if (b.length >= 12 && b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP') return 'image/webp';
+  return null;
+}

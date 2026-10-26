@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { investigate, newClient, vet } from './investigate.mjs';
+import { imageType, investigate, newClient, vet } from './investigate.mjs';
 import { Repo, defaultSource } from './repo.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -54,8 +54,9 @@ for (const c of cases) {
     if (p.text) lines.push(p.text);
     for (const f of p.files) {
       if (f.startsWith('missing:')) { lines.push(`  [attachment not opened: ${f.slice(8)}]`); continue; }
-      const abs = path.join(base, f), type = TYPES[path.extname(f).toLowerCase()];
-      if (type && images.length < 4) { images.push({ type, data: fs.readFileSync(abs).toString('base64') }); lines.push(`  [picture ${images.length}: ${path.basename(f)}]`); continue; }
+      const abs = path.join(base, f), data = TYPES[path.extname(f).toLowerCase()] && images.length < 4 && fs.readFileSync(abs);
+      const type = data && imageType(data);
+      if (type) { images.push({ type, data: data.toString('base64') }); lines.push(`  [picture ${images.length}: ${path.basename(f)}]`); continue; }
       const name = `${++n}-${path.basename(f).replace(/[^\w.-]+/g, '_')}`;
       fs.copyFileSync(abs, path.join(workDir, name));
       lines.push(`  [attachment: attachments/${name}, ${Math.round(fs.statSync(abs).size / 1024)} KB]`);

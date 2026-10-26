@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Archive } from './archive.mjs';
-import { investigate, newClient, vet } from './investigate.mjs';
+import { imageType, investigate, newClient, vet } from './investigate.mjs';
 import { Repo, defaultSource } from './repo.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -33,8 +33,8 @@ const lines = [`Forum: #${forum}`, `Title: ${title}`, 'Tags: none', 'Why the bot
   `[${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC] player (the poster):`, text];
 const images = [];
 files.forEach((f, i) => {
-  const type = TYPES[path.extname(f).toLowerCase()];
-  if (type) { images.push({ type, data: fs.readFileSync(f).toString('base64') }); lines.push(`  [picture ${images.length}: ${path.basename(f)}]`); return; }
+  const data = TYPES[path.extname(f).toLowerCase()] && fs.readFileSync(f), type = data && imageType(data);
+  if (type) { images.push({ type, data: data.toString('base64') }); lines.push(`  [picture ${images.length}: ${path.basename(f)}]`); return; }
   const name = `${i + 1}-${path.basename(f).replace(/[^\w.-]+/g, '_')}`;
   fs.copyFileSync(f, path.join(workDir, name));
   lines.push(`  [attachment: attachments/${name}, ${Math.round(fs.statSync(f).size / 1024)} KB]`);
