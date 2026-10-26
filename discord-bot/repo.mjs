@@ -42,6 +42,7 @@ export class Repo {
     }
     if (!force && Date.now() - this.fetchedAt < FETCH_EVERY_MS) return;
     try {
+      await this.git(['remote', 'set-url', 'origin', this.source]);   // BOT_REPO may have changed since the clone
       await this.git(['fetch', '--quiet', 'origin', `+refs/heads/${this.branch}:refs/remotes/origin/${this.branch}`],
         { timeout: 120_000 });
       await this.git(['reset', '--quiet', '--hard', `origin/${this.branch}`]);
