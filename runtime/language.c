@@ -203,16 +203,20 @@ void language_texts_frame(CPU *c){
 
 /* A text of ours (UTF-8) in the game's letters: Latin-1, as its language files
  * write theirs; Polish's letters as its pack's fonts draw them (e-ogonek
- * 0xBF, l-stroke 0xEE, s-acute 0xE2 ...; hornmenu.c); a letter the fonts lack
- * as '?'.  Korean, Chinese, Japanese, Thai and Russian draw ASCII as it is
- * (car names), not Latin-1's accented letters. */
+ * 0xBF, l-stroke 0xEE, s-acute 0xE2 ...; hornmenu.c), Turkish's too (dotless
+ * i 0xED, s-cedilla 0xFF, g-breve 0xFD ...; its English.bin's); a letter the
+ * fonts lack as '?'.  Korean, Chinese, Japanese, Thai and Russian draw ASCII
+ * as it is (car names), not Latin-1's accented letters. */
 void language_game_letters(const char *utf8, char *out, size_t n){
     static const struct { uint16_t u; uint8_t b; } PL[] = {
         { 0x105, 0xe7 }, { 0x107, 0xe9 }, { 0x119, 0xbf }, { 0x142, 0xee }, { 0x144, 0xf1 }, { 0xf3, 0xf3 },
         { 0x15b, 0xe2 }, { 0x17a, 0xeb }, { 0x17c, 0xe1 }, { 0x104, 0xfd }, { 0x106, 0xc8 }, { 0x118, 0xc7 },
         { 0x141, 0xfa }, { 0x143, 0xd1 }, { 0xd3, 0xd3 }, { 0x15a, 0xda }, { 0x17b, 0xc9 },
+    }, TR[] = {
+        { 0x131, 0xed }, { 0x130, 0xcd }, { 0x15f, 0xff }, { 0x15e, 0xfe }, { 0x11f, 0xfd }, { 0x11e, 0xdd },
     };
-    int polish = !strcmp(g_lang->key, "polish"), latin = !g_lang->fonts && strcmp(g_lang->key, "russian");
+    int polish = !strcmp(g_lang->key, "polish"), turkish = !strcmp(g_lang->key, "turkish");
+    int latin = !g_lang->fonts && strcmp(g_lang->key, "russian");
     const uint8_t *s = (const uint8_t *)utf8;
     size_t o = 0;
     while (*s && o + 1 < n){
@@ -227,6 +231,7 @@ void language_game_letters(const char *utf8, char *out, size_t n){
         else if (u == 0x2019 || u == 0x2018) b = '\'';
         else if (u == 0x2013 || u == 0x2014) b = '-';
         else if (polish){ for (unsigned i = 0; i < sizeof PL / sizeof PL[0]; i++) if (PL[i].u == u) b = PL[i].b; }
+        else if (turkish && u >= 0x100){ for (unsigned i = 0; i < sizeof TR / sizeof TR[0]; i++) if (TR[i].u == u) b = TR[i].b; }
         else if (latin && u >= 0xa0 && u < 0x100) b = (uint8_t)u;
         out[o++] = (char)b;
     }

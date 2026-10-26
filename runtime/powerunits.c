@@ -95,7 +95,7 @@ static int bhp(void){ return g_hp >= 0 ? g_hp : MR8(A_KMH) != 1; }
 /* the name in the game's language, after its own Speedometer Units and
  * power ("Unit\xe9s compteur", "Puissance", ...; in Latin-1, as the language
  * files are; Polish with the letters its pack's fonts draw as Polish ones,
- * as hornmenu.c; Turkish's "G\xfc\xe7 Birimi" after its "H\xfdz Birimi");
+ * as hornmenu.c; Turkish's "G\xfc\xe7 Birimi" after its "H\xedz Birimi");
  * English for the others, whose fonts have their own
  * encodings but draw ASCII as it is */
 static const char *label(void){

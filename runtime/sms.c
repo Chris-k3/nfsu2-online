@@ -121,6 +121,13 @@ static const Text HELLO[] = {
       "znajdziesz cz\u0142onk\u00f3w swojej ekipy na przeja\u017cd\u017cce.^^Je\u015bli chcesz pom\u00f3c w kosztach hostingu i rozwoju, mo\u017cesz "
       "postawi\u0107 mi kaw\u0119 na ko-fi.com/nfsu2xyz. Nie jest to w og\u00f3le wymagane i nie daje \u017cadnych korzy\u015bci poza rol\u0105 na "
       "Discordzie, ale pomaga mi dalej ulepsza\u0107 gr\u0119 dla wszystkich." },
+    { "turkish", "Oyunu be\u011fendin mi?",
+      "Umar\u0131m sende sorunsuz \u00e7al\u0131\u015f\u0131yordur. Geri bildirimin ya da fikirlerin varsa Discord'umuza kat\u0131l, "
+      "ba\u011flant\u0131s\u0131 ba\u015flang\u0131\u00e7 sayfas\u0131nda. Oyunu be\u011fendiysen arkada\u015flar\u0131nla payla\u015f! F9 "
+      "men\u00fcs\u00fcnden bir ekip de kurabilirsin, b\u00f6ylece ekip arkada\u015flar\u0131n\u0131 serbest s\u00fcr\u00fc\u015fte daha kolay "
+      "bulursun.^^Sunucu ve geli\u015ftirme masraflar\u0131na yard\u0131m etmek istersen ko-fi.com/nfsu2xyz adresinden bana bir "
+      "kahve \u0131smarlayabilirsin. Hi\u00e7 zorunlu de\u011fil ve Discord'daki bir rol d\u0131\u015f\u0131nda hi\u00e7bir ayr\u0131cal\u0131k "
+      "getirmiyor, ama oyunu herkes i\u00e7in geli\u015ftirmeye devam etmeme yard\u0131mc\u0131 oluyor." },
 };
 #define MSG_N 1                     /* the messages, by id 1.. */
 static const struct { const char *name; const Text *t; unsigned n; } MSGS[MSG_N] = {

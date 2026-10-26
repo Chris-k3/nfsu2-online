@@ -70,7 +70,7 @@ extracted: its archive holds an Inno Setup installer, nfsu2tr11.exe, which
 `innoextract nfsu2tr11.exe` unpacks (into app/) without running it; or any
 folder below which it has LANGUAGES/English.bin.  Turkish takes English's
 place as Polish does: its text spells the Turkish letters with accented ones
-the game's fonts have (ş is ÿ, ı is í, ğ is ý, İ is Í, Ş is Þ, Ğ is Ý), and
+the game's fonts have (ş is ÿ, ı is í, ğ is ý, İ is Í, Ş is þ, Ğ is Ý), and
 its fonts' textures (LanguageTextures.bin, and one in GLOBALA.BUN) draw those
 as the Turkish ones; also its memory-card texts and credits.  The port shows
 the movies' subtitles itself (runtime/language.c), so the Extra Options mod
