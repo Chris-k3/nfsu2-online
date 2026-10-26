@@ -169,26 +169,43 @@ async function look(threadId, why, extra) {
 
   day.n++;
   const started = Date.now();
-  const res = await investigate({
-    client: anthropic, model: CFG.model, effort: CFG.effort, repo, archive, workDir,
-    thread: text, images, threads: recentThreads(threadId), threadIndex: () => threadIndex(threadId), step: say,
-  });
+  // staff are waiting for this one: "typing…" in the thread until the reply is there (Discord shows it ~10 s a call)
+  const typing = byStaff && setInterval(() => thread.sendTyping().catch(() => {}), 8000);
+  if (typing) thread.sendTyping().catch(() => {});
+  let res;
+  try {
+    res = await investigate({
+      client: anthropic, model: CFG.model, effort: CFG.effort, repo, archive, workDir,
+      thread: text, images, threads: recentThreads(threadId), threadIndex: () => threadIndex(threadId), step: say,
+    });
+  } catch (e) {
+    if (!byStaff) { clearInterval(typing); throw e; }
+    res = { verdict: null, turns: 0, cost: 0, log: [`failed: ${e.message}`] };
+    say(`failed: ${e.message}`);
+  }
   const v = res.verdict;
-  const { post, why: outcome } = fix && v?.action !== 'answer' ? { post: null, why: v?.action ?? 'no verdict' }
-    : vet(v, { minConfidence: fix ? 'high' : CFG.minConfidence });
+  let { post, why: outcome } = fix && v?.action !== 'answer' ? { post: null, why: v?.action ?? 'no verdict' }
+    : vet(v, { minConfidence: fix ? 'high' : byStaff ? 'low' : CFG.minConfidence });
+  if (byStaff && !post) {                        // staff asked: always a reply, at least what the look found
+    const text = v ? `${v.summary}` : 'I could not finish a look at this thread just now; the developer has the details.';
+    post = vet({ ...(v ?? {}), action: 'answer', confidence: 'high', reply: text }, {}).post;
+    outcome = `${outcome}, replying for staff`;
+  }
+  const posted = post && (!CFG.dryRun || byStaff);
   const secs = ((Date.now() - started) / 1000).toFixed(0);
-  say(`done: ${outcome}${post ? (CFG.dryRun ? ', dry run (to the staff channel)' : ', posted in the thread') : ', nothing posted'}; ` +
+  say(`done: ${outcome}${posted ? ', posted in the thread' : post ? ', dry run (to the staff channel)' : ', nothing posted'}; ` +
     `${res.turns} turns, ${secs} s${res.cost != null ? `, $${res.cost.toFixed(3)}` : ''}`);
   if (post) say(`reply: ${post.split('\n')[0].slice(0, 160)}`);
 
-  if (post && !CFG.dryRun) {
+  if (posted) {
     const lastOp = [...msgs].reverse().find(m => m.author.id === thread.ownerId);
     await thread.send({
       content: post,
       allowedMentions: { parse: [], repliedUser: false },
       ...(st.replies && lastOp ? { reply: { messageReference: lastOp.id, failIfNotExists: false } } : {}),
-    });
+    }).finally(() => clearInterval(typing));
   }
+  clearInterval(typing);
   if (fix) {                                     // a fix notice changes nothing else about the thread
     st.fixChecked = extra.rev;
     if (post) st.fixed = extra.rev;
@@ -198,7 +215,7 @@ async function look(threadId, why, extra) {
       await th?.send({ content: `**Fix live** (${extra.commit}): ${CFG.dryRun ? 'the bot would have told' : 'the bot told'} ` +
         `${linkOf(thread.guildId, thread.id)} that it may be fixed.`, allowedMentions: { parse: [] } }).catch(() => {});
     }
-    if (CFG.dryRun && post && CFG.staffChannel) await tellStaff(thread, st, { ...v, escalate: false, duplicate_of: '' }, post, [workDir, staffDir]).catch(() => {});
+    if (!posted && post && CFG.staffChannel) await tellStaff(thread, st, { ...v, escalate: false, duplicate_of: '' }, post, [workDir, staffDir], posted).catch(() => {});
     save();
     fs.appendFileSync(VERDICTS, JSON.stringify({ at: new Date().toISOString(), thread: threadId, title: st.title, why, extra, outcome,
       dryRun: CFG.dryRun, post, verdict: v, turns: res.turns, cost: res.cost, usage: res.usage, tools: res.log }) + '\n');
@@ -208,7 +225,7 @@ async function look(threadId, why, extra) {
   if (post) st.replies++;
   if (v) Object.assign(st, { summary: v.summary, category: v.category });
   st.status = !v ? 'failed' : post ? (v.action === 'ask' ? 'asked' : 'answered') : st.status === 'asked' ? 'asked-none' : 'none';
-  if (v && CFG.staffChannel) await tellStaff(thread, st, v, post, [workDir, staffDir]).catch(e => console.error(`[bot] staff channel: ${e.message}`));
+  if (v && CFG.staffChannel) await tellStaff(thread, st, v, post, [workDir, staffDir], posted).catch(e => console.error(`[bot] staff channel: ${e.message}`));
   save();
   fs.appendFileSync(VERDICTS, JSON.stringify({
     at: new Date().toISOString(), thread: threadId, title: st.title, why, outcome, dryRun: CFG.dryRun, post,
@@ -298,17 +315,17 @@ const staffFiles = dirs => dirs.flatMap(d => fs.readdirSync(d).map(f => path.joi
   .map(f => ({ attachment: f, name: path.basename(f).replace(/^\d+-/, '') }));
 
 /** a look's verdict for the staff: a new report, an update in the report about the same problem, or nothing */
-async function tellStaff(thread, st, v, post, dirs) {
+async function tellStaff(thread, st, v, post, dirs, posted) {
   const link = linkOf(thread.guildId, thread.id);
   const dup = v.duplicate_of && v.duplicate_of !== thread.id && threads[v.duplicate_of] ? v.duplicate_of : null;
   const rootId = dup ? (threads[dup].reportOf ?? dup) : null;
   const root = rootId ? threads[rootId] : null;
   const reported = root?.staffMsg ? root : null;     // the problem already has a report
-  if (!v.escalate && !reported && !(post && CFG.dryRun)) return;
+  if (!v.escalate && !reported && !(post && !posted)) return;
   const staff = await client.channels.fetch(CFG.staffChannel);
   if (!staff?.isTextBased() && staff?.type !== ChannelType.GuildForum) throw new Error(`${CFG.staffChannel} is not a channel the bot can post in`);
   const did = !post ? 'did not reply' : v.action === 'ask' ? 'asked the poster for more' : 'answered the poster';
-  const dry = CFG.dryRun && post ? `\n-# Dry run, not posted. The reply:\n${quote(post)}` : '';
+  const dry = post && !posted ? `\n-# Dry run, not posted. The reply:\n${quote(post)}` : '';
 
   if (reported && !st.staffMsg) {                 // the same problem again: an update in its report's thread
     const th = await reportThread(staff, reported);
@@ -383,7 +400,7 @@ const WHY = {
   'new post': 'a new post',
   'follow-up': 'the poster wrote again after the bot asked for information',
   'mentioned': 'the poster mentioned the bot or replied to it',
-  'asked by staff': 'staff mentioned the bot: they want its look, so answer or ask unless there is nothing useful to say',
+  'asked by staff': 'staff mentioned the bot and want its reply: answer or ask, never none; with no fix and nothing to ask, answer with a short account of what you found (what the log shows, whether it is known or fixed)',
   'fix live': 'a release just went live, and a commit in it may fix this thread\'s problem (see "When a fix goes live")',
 };
 
