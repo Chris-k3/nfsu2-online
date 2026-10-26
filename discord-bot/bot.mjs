@@ -105,14 +105,20 @@ function schedule(threadId, why) {
   const now = Date.now();
   const t = timers.get(threadId);
   if (t) clearTimeout(t.timer);
-  if (t?.why === 'asked by staff') why = t.why;   // a staff request outlasts the poster's next message
+  if (why === 'asked by staff') {                // staff asked: no wait, and ahead of the other looks
+    timers.delete(threadId);
+    console.log(`[bot] ${threadId} "${threads[threadId]?.title}": asked by staff, looking now`);
+    return enqueue(threadId, why, undefined, true);
+  }
   const first = t?.first ?? now;
   const delay = Math.max(0, Math.min(CFG.waitS * 1000, first + MAX_WAIT_MS - now));
   if (!t) console.log(`[bot] ${threadId} "${threads[threadId]?.title}": ${why}, a look in ${Math.round(delay / 1000)} s unless more comes`);
   timers.set(threadId, { first, why, timer: setTimeout(() => { timers.delete(threadId); enqueue(threadId, why); }, delay) });
 }
-function enqueue(threadId, why, extra) {
-  if (!queue.some(q => q.threadId === threadId)) queue.push({ threadId, why, extra });
+function enqueue(threadId, why, extra, first = false) {
+  const queued = queue.findIndex(q => q.threadId === threadId);
+  if (queued >= 0 && first) queue.splice(queued, 1);
+  if (queued < 0 || first) queue[first ? 'unshift' : 'push']({ threadId, why, extra });
   pump();
 }
 async function pump() {
