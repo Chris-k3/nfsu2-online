@@ -627,6 +627,7 @@
   "Gear up": "Sali di marcia",
   "Tilt has no motion sensor to read in this browser. The steering button (top right) switches to buttons.": "L'inclinazione non ha un sensore di movimento da leggere in questo browser. Il pulsante dello sterzo (in alto a destra) passa ai pulsanti.",
   "Straight ahead is where the phone is now.": "Ora la posizione dritta è quella attuale del telefono.",
+  "The phone took your fingers off the controls: on many phones, three fingers on the screen take a screenshot. Nitro gives gas too, so slide your thumb up to it from Gas, or turn the three-finger gesture off in the phone's settings.": "Il telefono ha tolto le tue dita dai comandi: su molti telefoni tre dita sullo schermo fanno uno screenshot. Anche N2O dà gas, quindi fai scivolare il pollice da Gas fino a N2O, oppure disattiva il gesto a tre dita nelle impostazioni del telefono.",
   "Tilt needs the motion sensor, which was not allowed.": "L'inclinazione ha bisogno del sensore di movimento, che non è stato consentito.",
   "Steering: tilt. Hold the phone like a wheel; the button beside this one sets straight ahead.": "Sterzo: inclinazione. Tieni il telefono come un volante; il pulsante accanto a questo imposta la posizione dritta.",
   "Steering: {how}": "Sterzo: {how}",

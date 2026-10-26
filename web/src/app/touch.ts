@@ -17,6 +17,11 @@
 //             Not in a cutscene (a race's start); faded in and out.  A switch in the Controls sheet's touch tab.
 //   menus     the arrow keys as a D-pad bottom left, OK (Enter) and Back (Esc) bottom right, in the bars beside the
 //             game's 4:3 menus; a tap on the game stays a click.  The game repeats a held arrow itself.
+//   cancels   the controls take every touch themselves (touch-action: none), so a cancelled one is the phone's: a
+//             gesture of its own took every finger (on many phones three fingers take a screenshot), and they do
+//             nothing more until lifted.  Driving, the first loss of three in this page says so (Nitro gives gas too:
+//             a thumb slid up to it from Gas needs no third finger).  A finger whose lift never came at all is let go
+//             when a new touch begins with no finger down.
 //   size      all of them (and the menu's button) bigger or smaller, from the Controls sheet's touch tab, kept in this
 //             browser: auto (autoTouchSize, for the screen) unless 80 to 150 % is picked; style.css --ts on the stage.
 //             The game's menus' small buttons likewise (menuSize: the help bar's and the scrollers' arrows, auto
@@ -170,6 +175,9 @@ interface Ctl {
 /** which controls show: the driving ones, the menu's, or none */
 type Mode = 'drive' | 'menu' | '';
 
+/** the phone's gesture took three fingers off the controls and the player was told (once in a page) */
+let toldCancel = false;
+
 const path = (d: string) => `<svg viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
 const ICONS = {
   left: '<path class="fill" d="M16 5L7 12l9 7z"/>',
@@ -216,6 +224,8 @@ export class TouchControls {
   private byFinger = new Map<number, Ctl>();
   /** the keys the controls hold, each with how many hold it */
   private keys = new Map<string, number>();
+  /** fingers on the controls cancelled together (the phone's gesture): how many the controls held, how many went */
+  private cancelled: { held: number; n: number } | null = null;
   private steering = steering();
   private session: GameSession | null = null;
   private raf = 0;
@@ -422,6 +432,8 @@ export class TouchControls {
   }
   private onDown = (e: PointerEvent) => {
     e.preventDefault();                       // the game's canvas keeps the focus, no mouse events follow
+    // the first finger of a new touch: no other is down, so one the controls still hold never lifted (the phone's)
+    if (e.pointerType === 'touch' && e.isPrimary) this.dropFingers();
     const el = (e.target as HTMLElement).closest<HTMLElement>('[data-ctl]');
     const c = el ? this.ctls.get(el.dataset.ctl!) : undefined;
     if (c) { this.byFinger.set(e.pointerId, c); this.press(c, e.pointerId); return; }
@@ -439,6 +451,7 @@ export class TouchControls {
     this.release(c, e.pointerId);
   };
   private onUp = (e: PointerEvent) => {
+    if (e.type === 'pointercancel') this.noteCancel(e.pointerId);
     if (e.pointerId === this.stickFinger) { this.stickUp(); this.sendPad(); return; }
     const c = this.byFinger.get(e.pointerId);
     if (!c) return;
@@ -446,6 +459,32 @@ export class TouchControls {
     this.release(c, e.pointerId);
     if (c.act && e.type === 'pointerup') c.act();       // the release is a user activation (tilt's permission)
   };
+  /** a finger on the controls cancelled: the phone's gesture (above) cancels every finger at once, so those of the
+   *  next moment are counted with it; logged, and driving, the first loss of three in this page explained */
+  private noteCancel(finger: number) {
+    if (!this.byFinger.has(finger) && finger !== this.stickFinger) return;
+    if (!this.cancelled) {
+      this.cancelled = { held: this.byFinger.size + (this.stickFinger !== -1 ? 1 : 0), n: 0 };
+      setTimeout(() => {
+        const { held, n } = this.cancelled!;
+        this.cancelled = null;
+        this.deps.log(`[app] touch controls: ${n} of ${held} finger(s) cancelled by the phone`);
+        if (n < 3 || this.mode !== 'drive' || toldCancel) return;
+        toldCancel = true;
+        this.deps.toast(t('The phone took your fingers off the controls: on many phones, three fingers on the screen take a screenshot. Nitro gives gas too, so slide your thumb up to it from Gas, or turn the three-finger gesture off in the phone\'s settings.'), 10000);
+      }, 50);
+    }
+    this.cancelled.n++;
+  }
+  /** every finger the controls hold let go: a new touch began with none down, so their lifts never came */
+  private dropFingers() {
+    const n = this.byFinger.size + (this.stickFinger !== -1 ? 1 : 0);
+    if (!n) return;
+    for (const [finger, c] of this.byFinger) this.release(c, finger);
+    this.byFinger.clear();
+    if (this.stickFinger !== -1) { this.stickUp(); this.sendPad(); }
+    this.deps.log(`[app] touch controls: ${n} finger(s) let go that never lifted (the phone took them)`);
+  }
 
   private press(c: Ctl, finger: number) {
     c.fingers.add(finger);

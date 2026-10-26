@@ -627,6 +627,7 @@
   "Gear up": "Subir marcha",
   "Tilt has no motion sensor to read in this browser. The steering button (top right) switches to buttons.": "Neste navegador não há sensor de movimento para a inclinação ler. O botão de direção (canto superior direito) muda para botões.",
   "Straight ahead is where the phone is now.": "Em frente agora é a posição atual do celular.",
+  "The phone took your fingers off the controls: on many phones, three fingers on the screen take a screenshot. Nitro gives gas too, so slide your thumb up to it from Gas, or turn the three-finger gesture off in the phone's settings.": "O celular tirou seus dedos dos controles: em muitos celulares, três dedos na tela tiram uma captura de tela. O Nitro também acelera, então deslize o polegar de Acelerar até ele, ou desative o gesto de três dedos nas configurações do celular.",
   "Tilt needs the motion sensor, which was not allowed.": "A inclinação precisa do sensor de movimento, que não foi permitido.",
   "Steering: tilt. Hold the phone like a wheel; the button beside this one sets straight ahead.": "Direção: inclinação. Segure o celular como um volante; o botão ao lado deste define a posição em frente.",
   "Steering: {how}": "Direção: {how}",

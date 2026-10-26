@@ -559,6 +559,7 @@
   "Gear up": "เกียร์ขึ้น",
   "Tilt has no motion sensor to read in this browser. The steering button (top right) switches to buttons.": "เบราว์เซอร์นี้อ่านเซ็นเซอร์ตรวจจับการเคลื่อนไหวไม่ได้ จึงใช้การเอียงเครื่องไม่ได้ ปุ่มบังคับเลี้ยว (มุมขวาบน) ใช้สลับไปเป็นปุ่มได้",
   "Straight ahead is where the phone is now.": "ตั้งตำแหน่งปัจจุบันของโทรศัพท์เป็นทิศตรงแล้ว",
+  "The phone took your fingers off the controls: on many phones, three fingers on the screen take a screenshot. Nitro gives gas too, so slide your thumb up to it from Gas, or turn the three-finger gesture off in the phone's settings.": "โทรศัพท์ยกเลิกการแตะของนิ้วคุณบนปุ่มควบคุม: ในโทรศัพท์หลายรุ่น การแตะหน้าจอด้วยสามนิ้วจะถ่ายภาพหน้าจอ ปุ่มไนตรัสก็เร่งด้วย จึงเลื่อนนิ้วโป้งจากปุ่มเร่งขึ้นไปที่ไนตรัส หรือปิดท่าทางสามนิ้วในการตั้งค่าของโทรศัพท์",
   "Tilt needs the motion sensor, which was not allowed.": "การเอียงเครื่องต้องใช้เซ็นเซอร์ตรวจจับการเคลื่อนไหว แต่ไม่ได้รับอนุญาต",
   "Steering: tilt. Hold the phone like a wheel; the button beside this one sets straight ahead.": "การบังคับเลี้ยว: เอียงเครื่อง ถือโทรศัพท์เหมือนพวงมาลัย ปุ่มข้าง ๆ ปุ่มนี้ใช้ตั้งทิศตรง",
   "Steering: {how}": "การบังคับเลี้ยว: {how}",

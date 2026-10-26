@@ -559,6 +559,7 @@
   "Gear up": "升檔",
   "Tilt has no motion sensor to read in this browser. The steering button (top right) switches to buttons.": "此瀏覽器讀不到動作感應器，無法使用傾斜。轉向按鈕（右上角）可切換為按鈕操作。",
   "Straight ahead is where the phone is now.": "已將手機目前的位置設為正前方。",
+  "The phone took your fingers off the controls: on many phones, three fingers on the screen take a screenshot. Nitro gives gas too, so slide your thumb up to it from Gas, or turn the three-finger gesture off in the phone's settings.": "手機把你的手指從操作按鈕上取消了：在許多手機上，三指觸碰螢幕會截圖。氮氣也會踩油門，所以請把拇指從油門往上滑到氮氣，或在手機設定中關閉三指手勢。",
   "Tilt needs the motion sensor, which was not allowed.": "傾斜需要動作感應器，但未獲允許。",
   "Steering: tilt. Hold the phone like a wheel; the button beside this one sets straight ahead.": "轉向方式：傾斜。像握方向盤一樣拿著手機；旁邊的按鈕可設定正前方。",
   "Steering: {how}": "轉向方式：{how}",

@@ -644,6 +644,7 @@
   "Gear up": "Передача вверх",
   "Tilt has no motion sensor to read in this browser. The steering button (top right) switches to buttons.": "Для наклона в этом браузере нет доступного датчика движения. Кнопка руления (вверху справа) переключит на кнопки.",
   "Straight ahead is where the phone is now.": "«Прямо» — теперь текущее положение телефона.",
+  "The phone took your fingers off the controls: on many phones, three fingers on the screen take a screenshot. Nitro gives gas too, so slide your thumb up to it from Gas, or turn the three-finger gesture off in the phone's settings.": "Телефон снял ваши пальцы с кнопок управления: на многих телефонах три пальца на экране делают скриншот. Нитро тоже даёт газ, поэтому сдвиньте большой палец с «Газ» вверх на «Нитро» или отключите жест тремя пальцами в настройках телефона.",
   "Tilt needs the motion sensor, which was not allowed.": "Для наклона нужен датчик движения, но доступ к нему не разрешён.",
   "Steering: tilt. Hold the phone like a wheel; the button beside this one sets straight ahead.": "Руление: наклон. Держите телефон как руль; кнопка рядом с этой задаёт положение «прямо».",
   "Steering: {how}": "Руление: {how}",

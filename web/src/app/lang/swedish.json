@@ -610,6 +610,7 @@
   "Gear up": "Växla upp",
   "Tilt has no motion sensor to read in this browser. The steering button (top right) switches to buttons.": "Lutning har ingen rörelsesensor att läsa i den här webbläsaren. Styrknappen (uppe till höger) byter till knappar.",
   "Straight ahead is where the phone is now.": "Rakt fram är där telefonen är nu.",
+  "The phone took your fingers off the controls: on many phones, three fingers on the screen take a screenshot. Nitro gives gas too, so slide your thumb up to it from Gas, or turn the three-finger gesture off in the phone's settings.": "Telefonen tog bort dina fingrar från knapparna: på många telefoner tar tre fingrar på skärmen en skärmbild. Lustgas gasar också, så dra tummen från Gas upp till Lustgas, eller stäng av trefingersgesten i telefonens inställningar.",
   "Tilt needs the motion sensor, which was not allowed.": "Lutning kräver rörelsesensorn, som inte tilläts.",
   "Steering: tilt. Hold the phone like a wheel; the button beside this one sets straight ahead.": "Styrning: lutning. Håll telefonen som en ratt; knappen bredvid den här ställer in rakt fram.",
   "Steering: {how}": "Styrning: {how}",

@@ -644,6 +644,7 @@
   "Gear up": "Wyższy bieg",
   "Tilt has no motion sensor to read in this browser. The steering button (top right) switches to buttons.": "Ta przeglądarka nie udostępnia czujnika ruchu, więc przechylanie nie działa. Przycisk sterowania (u góry po prawej) przełącza na przyciski.",
   "Straight ahead is where the phone is now.": "„Na wprost” to teraz obecne położenie telefonu.",
+  "The phone took your fingers off the controls: on many phones, three fingers on the screen take a screenshot. Nitro gives gas too, so slide your thumb up to it from Gas, or turn the three-finger gesture off in the phone's settings.": "Telefon zabrał twoje palce z przycisków: na wielu telefonach trzy palce na ekranie robią zrzut ekranu. Nitro też dodaje gazu, więc przesuń kciuk z przycisku Gaz w górę na Nitro albo wyłącz gest trzema palcami w ustawieniach telefonu.",
   "Tilt needs the motion sensor, which was not allowed.": "Przechylanie wymaga czujnika ruchu, a dostęp do niego nie został przyznany.",
   "Steering: tilt. Hold the phone like a wheel; the button beside this one sets straight ahead.": "Sterowanie: przechylanie. Trzymaj telefon jak kierownicę; przycisk obok tego ustawia „na wprost”.",
   "Steering: {how}": "Sterowanie: {how}",

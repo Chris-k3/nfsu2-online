@@ -559,6 +559,7 @@
   "Gear up": "기어 올림",
   "Tilt has no motion sensor to read in this browser. The steering button (top right) switches to buttons.": "이 브라우저에서는 기울이기에 필요한 모션 센서를 읽을 수 없어요. 오른쪽 위의 조향 버튼으로 버튼 조작으로 바꿀 수 있어요.",
   "Straight ahead is where the phone is now.": "지금 휴대폰 방향을 직진 방향으로 설정했어요.",
+  "The phone took your fingers off the controls: on many phones, three fingers on the screen take a screenshot. Nitro gives gas too, so slide your thumb up to it from Gas, or turn the three-finger gesture off in the phone's settings.": "휴대폰이 컨트롤에서 손가락 입력을 가져갔어요. 많은 휴대폰에서는 화면에 손가락 세 개를 대면 스크린샷이 찍혀요. 니트로도 가속하니, 엄지를 가속에서 니트로로 밀어 올리거나 휴대폰 설정에서 세 손가락 제스처를 꺼 주세요.",
   "Tilt needs the motion sensor, which was not allowed.": "기울이기에는 모션 센서가 필요한데, 허용되지 않았어요.",
   "Steering: tilt. Hold the phone like a wheel; the button beside this one sets straight ahead.": "조향: 기울이기. 휴대폰을 핸들처럼 잡으세요. 옆 버튼으로 직진 방향을 설정할 수 있어요.",
   "Steering: {how}": "조향: {how}",

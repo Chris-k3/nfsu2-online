@@ -610,6 +610,7 @@
   "Gear up": "Hochschalten",
   "Tilt has no motion sensor to read in this browser. The steering button (top right) switches to buttons.": "Neigen findet in diesem Browser keinen Bewegungssensor. Die Lenkungs-Schaltfläche (oben rechts) wechselt zu Tasten.",
   "Straight ahead is where the phone is now.": "Geradeaus ist jetzt die aktuelle Haltung des Handys.",
+  "The phone took your fingers off the controls: on many phones, three fingers on the screen take a screenshot. Nitro gives gas too, so slide your thumb up to it from Gas, or turn the three-finger gesture off in the phone's settings.": "Das Handy hat deine Finger von den Steuerelementen genommen: Auf vielen Handys machen drei Finger auf dem Bildschirm einen Screenshot. Nitro gibt auch Gas, also schieb den Daumen von Gas hoch zu Nitro, oder schalte die Drei-Finger-Geste in den Einstellungen des Handys aus.",
   "Tilt needs the motion sensor, which was not allowed.": "Neigen braucht den Bewegungssensor, der nicht erlaubt wurde.",
   "Steering: tilt. Hold the phone like a wheel; the button beside this one sets straight ahead.": "Lenkung: Neigen. Halte das Handy wie ein Lenkrad; die Schaltfläche daneben legt Geradeaus fest.",
   "Steering: {how}": "Lenkung: {how}",

@@ -559,6 +559,7 @@
   "Gear up": "シフトアップ",
   "Tilt has no motion sensor to read in this browser. The steering button (top right) switches to buttons.": "このブラウザでは、傾き操作に使うモーションセンサーを読み取れません。右上のステアリングボタンで、ボタン操作に切り替えられます。",
   "Straight ahead is where the phone is now.": "今のスマートフォンの向きを直進方向にしました。",
+  "The phone took your fingers off the controls: on many phones, three fingers on the screen take a screenshot. Nitro gives gas too, so slide your thumb up to it from Gas, or turn the three-finger gesture off in the phone's settings.": "スマートフォンが操作ボタンから指の入力を取り消しました。多くのスマートフォンでは、画面に3本の指を置くとスクリーンショットが撮られます。ニトロでもアクセルが入るので、親指をアクセルからニトロへ滑らせるか、スマートフォンの設定で3本指ジェスチャーをオフにしてください。",
   "Tilt needs the motion sensor, which was not allowed.": "傾き操作にはモーションセンサーが必要ですが、許可されませんでした。",
   "Steering: tilt. Hold the phone like a wheel; the button beside this one sets straight ahead.": "ステアリング: 傾き。スマートフォンをハンドルのように持ってください。隣のボタンで直進方向を設定できます。",
   "Steering: {how}": "ステアリング: {how}",

@@ -627,6 +627,7 @@
   "Gear up": "Rapport supérieur",
   "Tilt has no motion sensor to read in this browser. The steering button (top right) switches to buttons.": "L'inclinaison n'a aucun capteur de mouvement à lire dans ce navigateur. Le bouton de direction (en haut à droite) passe aux boutons.",
   "Straight ahead is where the phone is now.": "Le tout droit correspond maintenant à la position actuelle du téléphone.",
+  "The phone took your fingers off the controls: on many phones, three fingers on the screen take a screenshot. Nitro gives gas too, so slide your thumb up to it from Gas, or turn the three-finger gesture off in the phone's settings.": "Le téléphone a retiré vos doigts des commandes : sur beaucoup de téléphones, trois doigts sur l'écran font une capture d'écran. Nitro accélère aussi, alors faites glisser votre pouce de Gaz jusqu'à Nitro, ou désactivez le geste à trois doigts dans les réglages du téléphone.",
   "Tilt needs the motion sensor, which was not allowed.": "L'inclinaison a besoin du capteur de mouvement, qui n'a pas été autorisé.",
   "Steering: tilt. Hold the phone like a wheel; the button beside this one sets straight ahead.": "Direction : inclinaison. Tenez le téléphone comme un volant ; le bouton à côté de celui-ci règle le tout droit.",
   "Steering: {how}": "Direction : {how}",
