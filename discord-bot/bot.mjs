@@ -109,7 +109,7 @@ const tags = new Tags({ client, anthropic, isStaff, dryRun: CFG.dryRun });      
 // the general channels (general.mjs): nudges to the forums, spikes and a daily digest for the staff
 const general = new General({
   client, anthropic, model: CFG.model, isStaff, staffChannel: CFG.staffChannel, dryRun: CFG.dryRun, state: CFG.state,
-  releasedAt: () => repo.releases.at(-1)?.at ?? 0,
+  releasedAt: () => repo.releases.at(-1)?.at ?? 0, download,
   bugForum: guild => guild?.channels.cache.find(ch => isForum(ch) && /bug/i.test(ch.name)) ?? null,
   forumThreads: () => Object.entries(threads)
     .filter(([, t]) => !t.closed && !isSuggestion(t))

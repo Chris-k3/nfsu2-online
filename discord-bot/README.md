@@ -28,11 +28,16 @@ and it says something only when it is worth it:
   too: at each release the bot reads the suggestion forums' threads, archived ones included (the newest 500 of each),
   and keeps them a year. Suggestions tagged Complete or Denied, or locked, are left out.
 
-- **in the general channels** (text channels named `general…`), sparingly: someone who reports a problem there gets
-  one short templated reply in their language, pointing to the forum thread about it or to the bug-reports forum,
-  with how to get the log. Nothing for questions or chat, nothing when staff or another member already pointed them
-  to the forum; at most once a person a week and 6 an hour a channel. A local word filter picks the candidates (about
-  7% of the messages), and one Haiku call sorts each batch, so it costs a few cents a day. Spikes of complaints
+- **in the general channels** (text channels named `general…`), sparingly: someone who reports a problem of their own
+  there, and whom nobody helps within 4 minutes, gets one short reply in their language. When the problem is
+  unmistakably one the page names by a code (`PAGE-NOT-ISOLATED`, `GPU-ADAPTER-ANDROID`, ... in their words or their
+  screenshot; `FIXES` in `general.mjs`), the reply is its one-line fix from the guide; otherwise it points to the forum
+  thread about it or to the bug-reports forum, with what to post there (the log, a screenshot of the message, or how
+  the saves went). Nothing for questions, chat, opinions or answers to others, nothing when staff or another member
+  already pointed them to the forum or a member's answer fits (a reply to them starts the wait over); at most once a
+  person a week and 6 an hour a channel. A local word filter picks the candidates (about 10% of the messages), and
+  one Haiku call sorts them in the chat around them (what they reply to, who answered, their pictures): about 70 calls
+  and 3 cents a day. `general-eval.mjs` replays an export of the channels through it (below). Spikes of complaints
   (connection, crashes, controllers, sound, graphics: 8 people or more in 15 minutes, far above the 6 hours before)
   go to the staff channel at once, without a model, and a daily note at 06:00 UTC sums up what the general channels
   kept bringing up.
@@ -91,7 +96,8 @@ something to say, until the bot has replied `BOT_MAX_TALK` times (6) in the thre
 - `archive.mjs`: every message of every channel the bot sees, kept 7 days in `state/archive/`. At start the bot reads
   the forums' threads with posts in the last 48 hours, nothing older: it lists them (titles and first posts) in
   `state/threads.json`, and looks at the ones opened in that time that it never looked at, so a restart misses no post.
-- `general.mjs`: the general channels: the replies that point to the forums, the spike alerts and the daily note.
+- `general.mjs`: the general channels: the replies that point to the forums or give a page code's fix, the spike
+  alerts and the daily note.
 - `translate.mjs`: the Translate command. The bot registers it at start; the `bot` scope of the invite covers it.
 - `tags.mjs`: the forum tags. A look's verdict names the tags it picked from "Tags you may add" in the thread's text.
 - `eval.mjs`: the bot against past threads (below).
@@ -180,6 +186,16 @@ node --env-file=.env eval.mjs cases.json --only bug-reports/015,suggestions/008
 
 `cases.json` is made from a Discord export and stays out of this repository: it holds players' posts and logs. It
 stops at `--budget` dollars (default 5); a look costs a few cents.
+
+`general-eval.mjs` does the same for the general channels: an export of them (a JSON list of messages, `{ id, ch, t,
+a, c, re: { a, c }, att, bot }`) replayed in order on its own clock, with the real sorting, and a report next to it of
+every reply the bot would post and how it sorted every author. A day costs about 3 cents; the export has no pictures,
+so the sorting reads none.
+
+```sh
+node --env-file=.env general-eval.mjs nfsu2-general-last24h.json --staff name,name
+node --env-file=.env general-eval.mjs export.json --from 2026-10-26T12:00 --to 2026-10-26T18:00
+```
 
 ## Rolling it out
 
