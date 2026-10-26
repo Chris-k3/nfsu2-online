@@ -27,7 +27,8 @@ import { LogRing, downloadBlob, stamp } from './logs';
 import { LastGameKeeper, lastGameEnd, lastGameLine, lastGameToOffer, type LastGame } from './lastgame';
 import { browserBrief, deviceBrief } from './devicelog';
 import { canFullscreen, enterFullscreen, exitFullscreen, fromHomeScreen, homeScreenInstead, isFullscreen, keepScreenOn, measureRefresh, settledSize, trackCanvasSize } from './display';
-import { deviceDefaults, markTouch, noPinchZoom, padSeen, phoneScreen, touchFirst } from './device';
+import { deviceDefaults, isPhone, markTouch, noPinchZoom, padSeen, phoneScreen, touchFirst } from './device';
+import { phoneSeed, phoneUpgrade } from './phonegraphics';
 import { markPad, padPress, pageDialog } from './padnav';
 import { controlsSheet, type ControlsSheet } from './controls';
 import { TouchControls } from './touch';
@@ -489,7 +490,16 @@ async function startGame() {
     log.add(`[app] registry seeded from ${q.get('reg')} (page address)`);
   } else if (!await exists(SAVE, reg)) {
     if (r.env.NFSU2_SEED_REGISTRY === '0') log.add('[app] no registry yet, the game will run its first-run check');
+    else if (isPhone()) { await writeFile(SAVE, reg, phoneSeed(registryDefaults)); log.add(`[app] first launch, registry seeded with the built-in defaults and a phone's graphics (/save/${reg})`); }
     else { await writeFile(SAVE, reg, registryDefaults); log.add(`[app] first launch, registry seeded with the built-in defaults (/save/${reg})`); }
+  } else if (isPhone()) {
+    // a phone that started before the phone graphics (phonegraphics.ts): once
+    const up = phoneUpgrade(await readText(SAVE, reg) ?? '', registryDefaults);
+    if (up) {
+      await writeFile(SAVE, reg, up.text);
+      log.add(up.lowered ? '[app] phone graphics: the graphics options still had the built-in defaults, now a phone\'s'
+        : '[app] phone graphics: the graphics options were changed in this browser, they stay');
+    }
   }
   // the game's Save option at Autosave, once per profile (settings.ini autosave, profile.ts); an input script
   // plays the game as it was recorded (on the Mac, where nothing changes the profiles) unless the page address

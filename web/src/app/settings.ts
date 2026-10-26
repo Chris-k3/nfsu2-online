@@ -226,7 +226,9 @@ export const TEMPLATE = `# NFSU2 settings, read at every launch.
 #quit_grace = 10
 
 # Seed registry.txt with the game's highest graphics settings on first launch
-# (native-resolution row).  off = let the game run its own first-run hardware
+# (native-resolution row; a phone's without car and road reflections, motion
+# blur, depth of field, overbright and bleach bypass, which the game's Options,
+# Display turn back on).  off = let the game run its own first-run hardware
 # check instead.  Delete registry.txt (a fresh backup without it) to start
 # over.  [NFSU2_SEED_REGISTRY]
 #seed_registry = on

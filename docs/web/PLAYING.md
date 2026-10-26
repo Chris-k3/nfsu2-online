@@ -53,7 +53,10 @@ dragged sideways turn the car in the garage, and a finger dragged up or down on 
 graph moves its dot. The ☰ button opens the page menu. On a phone the game goes full screen
 when you press Play and renders at 75% resolution scale (Settings, Display changes both). After a few minutes of driving the page checks whether the phone keeps its frame rate with GPU
 time to spare; if so, it renders at 100% from the next game on that phone (and goes back to 75% if it later falls
-behind). This only applies while you leave the resolution scale at its default. Held sideways, the game fills the screen with the touch controls over it; held upright, it shows
+behind). This only applies while you leave the resolution scale at its default. A phone also starts with lighter
+graphics: car and road reflections, motion blur, depth of field, overbright and bleach bypass are off, which halves
+the GPU's work in a race (the game's Options, Display turns them back on). A phone that played before gets them once,
+unless a graphics option was changed there. Held sideways, the game fills the screen with the touch controls over it; held upright, it shows
 in a 4:5 picture at the top with the ☰ button and the touch controls below it. The screen stays on while the game
 runs. Chrome's menu, **Add to Home screen** (or **Install app**), puts the game on the home screen as an app that opens
 full screen; on a PC the same makes it an app with its own window.
