@@ -107,9 +107,9 @@ The start page shows these keys under **Controls**, and F9, Controls shows them 
 - **Drift mode (X):** in free roam, the car handles as in the game's drift races (its drift tuning and the drift
   assist), the camera is the drift races' (C still goes through all of them), and drifts score as there: the drift
   races' panel (Best, the multiplier with the points its next level needs, Total) shows under Bank, and DRIFT counts
-  a drift's points up while you drift, as in the races: lime when it banks, red when a wall loses it. Just for fun:
-  the points never go into the bank or the career. X again turns it off and gives your camera back. It is off in
-  races and outruns and comes back in free roam after them.
+  a drift's points up while you drift, as in the races: lime when it banks, red when a wall loses it. Free roam's
+  music plays on (the drift races have none). Just for fun: the points never go into the bank or the career. X again
+  turns it off and gives your camera back. It is off in races and outruns and comes back in free roam after them.
 - **Mouse:** works in the menus; in the garage, drag with the middle button (the wheel) held to turn the car, as in
   the PC game. On the ECU and Turbo tuning graphs the wheel moves the dot of the column under the pointer, as in the
   PC game, and so does a drag up or down on that column. **Touch:** a tap is a click there; drag two fingers to turn
