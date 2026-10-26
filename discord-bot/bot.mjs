@@ -32,7 +32,7 @@ const CFG = {
   state: path.resolve(HERE, env.BOT_STATE || 'state'),
   repo: env.BOT_REPO || defaultSource(HERE),
   branch: env.BOT_BRANCH || 'main',
-  liveUrl: env.BOT_LIVE_URL || 'https://nfsu2.xyz/game.json',
+  liveUrl: env.BOT_LIVE_URL || 'https://nfsu2.xyz/game.json', liveFile: env.BOT_LIVE_FILE || '/live/nfsu2.json',
 };
 if (!CFG.token) { console.error('DISCORD_TOKEN is not set (README.md)'); process.exit(2); }
 
@@ -60,7 +60,7 @@ function save() {
 }
 
 const archive = CFG.archive ? new Archive(path.join(CFG.state, 'archive')) : null;
-const repo = new Repo({ source: CFG.repo, branch: CFG.branch, dir: path.join(CFG.state, 'repo'), liveUrl: CFG.liveUrl });
+const repo = new Repo({ source: CFG.repo, branch: CFG.branch, dir: path.join(CFG.state, 'repo'), liveUrl: CFG.liveUrl, liveFile: CFG.liveFile });
 const anthropic = newClient();
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],

@@ -48,7 +48,6 @@ function opening({ now, recent, threads, thread, images }) {
   const ctx = [
     `Now: ${now}`,
     `Live version: ${recent.live}`,
-    `The live page (${recent.liveUrl}) ${recent.liveOk ? 'answered' : 'did not answer'} the bot just now.`,
     `Newest commit: ${recent.head}`,
     recent.notLive ? `Commits not live yet (newest first):\n${recent.notLive}` : 'Commits not live yet: none',
     `Commits of the last days up to the live version (newest first):\n${recent.recent || 'none'}`,

@@ -78,7 +78,8 @@ docker compose pull && docker compose up -d
 docker compose logs -f
 ```
 
-The bot clones the public repository into its `state` volume. If the pull is denied, the image is private on GitHub:
+The bot clones the public repository into its `state` volume, and reads the live version from the game server's module
+folder (`/srv/nfsu2/module`, read only): Cloudflare answers the server's own requests for game.json with a check page. If the pull is denied, the image is private on GitHub:
 make it public in the package's settings, or log in once with `docker login ghcr.io -u th0mk` and a token with
 `read:packages`.
 
@@ -135,7 +136,8 @@ Run it with `BOT_DRY_RUN=1` for a day. Every reply it would have posted goes to 
 | `BOT_ARCHIVE` | on | `0`: don't keep messages (the model then can't search other channels) |
 | `BOT_STATE` | `state` (`/state` in Docker) | where the clone, the archive, the thread list and the verdicts go |
 | `BOT_REPO`, `BOT_BRANCH` | this checkout, `main` | where the code comes from (in `compose.yml`: GitHub over SSH) |
-| `BOT_LIVE_URL` | `https://nfsu2.xyz/game.json` | the live version (`rev`) |
+| `BOT_LIVE_FILE` | `/live/nfsu2.json` | the live module's `nfsu2.json`, for its version (`rev`); `compose.yml` mounts `/srv/nfsu2/module` there |
+| `BOT_LIVE_URL` | `https://nfsu2.xyz/game.json` | the live version when there is no such file (Cloudflare may refuse it to a server) |
 
 Server-side fallback (`fallbacks: "default"`) is on: when Claude declines a request, the API runs it on another model
 instead of returning nothing.

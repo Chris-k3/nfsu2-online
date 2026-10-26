@@ -9,6 +9,7 @@ services:
       BOT_REPO: https://github.com/th0mk/nfsu2-web.git
     volumes:
       - state:/state
+      - /srv/nfsu2/module:/live:ro          # the live module's nfsu2.json: its version, which Cloudflare's page may refuse
     logging:
       driver: json-file
       options: { max-size: 10m, max-file: '3' }

@@ -20,7 +20,8 @@ const env = process.env;
 const state = path.resolve(HERE, env.BOT_STATE || 'state');
 const repo = new Repo({
   source: env.BOT_REPO || defaultSource(HERE),
-  branch: env.BOT_BRANCH || 'main', dir: path.join(state, 'repo'), liveUrl: env.BOT_LIVE_URL || 'https://nfsu2.xyz/game.json',
+  branch: env.BOT_BRANCH || 'main', dir: path.join(state, 'repo'),
+  liveUrl: env.BOT_LIVE_URL || 'https://nfsu2.xyz/game.json', liveFile: env.BOT_LIVE_FILE || '/live/nfsu2.json',
 });
 const archiveDir = path.join(state, 'archive');
 const archive = fs.existsSync(archiveDir) ? new Archive(archiveDir) : null;

@@ -73,7 +73,8 @@ Checked against the guide or the code, and confirmed by players in threads:
 - Saving on a phone: the game's own save, Garage, Save; it saves by itself after races and purchases from then on.
 - The site or the server cannot be reached while others play: their network blocks it (some providers block
   Cloudflare or the domain; firewalls and antivirus can too). Mobile data or another network shows it. The server is
-  behind Cloudflare: wherever Cloudflare works, the game does. The context says whether the live page answered the bot.
+  behind Cloudflare: wherever Cloudflare works, the game does. Other players posting in the last hour shows the
+  server is up.
 - Stuck behind a barrier or off the map: R respawns.
 - Firefox: when a problem shows only in Firefox (its log has Firefox errors, or Chrome works), Chrome is the browser
   most tested.
