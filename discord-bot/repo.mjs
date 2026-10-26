@@ -33,8 +33,14 @@ export class Repo {
     return stdout;
   }
 
-  /** clone on first use, then fetch + reset when stale (the model never sees a half-updated tree: one job at a time) */
-  async sync(force = false) {
+  /** clone on first use, then fetch + reset when stale (the model never sees a half-updated tree: one job at a time);
+   *  calls while one runs wait for it */
+  sync(force = false) {
+    this.syncing ??= this.syncNow(force).finally(() => { this.syncing = null; });
+    return this.syncing;
+  }
+
+  async syncNow(force) {
     if (!fs.existsSync(path.join(this.dir, '.git'))) {
       fs.mkdirSync(path.dirname(this.dir), { recursive: true });
       await run('git', ['clone', '--quiet', '--single-branch', '--branch', this.branch, this.source, this.dir],

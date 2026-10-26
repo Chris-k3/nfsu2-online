@@ -3,13 +3,16 @@
 // verified fix or needs information the post lacks; after it asked, the author's next post gets one more look.  It
 // stays out of threads the staff answered and stops after BOT_MAX_REPLIES replies in a thread.  A report the developer
 // should act on goes to the staff channel (BOT_STAFF_CHANNEL) with the thread's link, the bot's notes and its log files,
-// and gets a thread: later threads about the same problem and new logs in them go there.
+// and gets a thread: later threads about the same problem and new logs in them go there.  When a release goes live,
+// threads whose problem one of its commits fixes get a look ('fix live'), and a careful "may be fixed, reload" when the
+// look is sure.
 //   node --env-file=.env bot.mjs        (settings: README.md)
 import { ChannelType, Client, Events, GatewayIntentBits, Partials, PermissionFlagsBits } from 'discord.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Archive } from './archive.mjs';
+import { matchFixes } from './fixes.mjs';
 import { investigate, newClient, vet } from './investigate.mjs';
 import { Repo, defaultSource } from './repo.mjs';
 
@@ -42,10 +45,13 @@ const MAX_UPLOAD = 8 << 20, MAX_UPLOADS = 3;    // files copied into a staff rep
 const SAVES_ZIP = /^nfsu2-saves-.*\.zip$/i;      // Saves, Download backup: for the developer, not for the model
 const MAX_WAIT_MS = 10 * 60_000;                 // a thread that keeps growing is looked at after 10 minutes anyway
 const STARTUP_MS = 24 * 3600_000;                // at start, the forums' posts of the last 24 hours, nothing older
+const RELEASE_CHECK_MS = 5 * 60_000;             // how often the bot checks whether a new version went live
+const FIX_DAYS = 14, FIX_MAX = 10;               // a release is checked against threads of the last 14 days, 10 messages at most
 
 fs.mkdirSync(CFG.state, { recursive: true });
 const STATE_FILE = path.join(CFG.state, 'threads.json');
 const VERDICTS = path.join(CFG.state, 'verdicts.jsonl');
+const LIVE_FILE = path.join(CFG.state, 'live.json');      // the live version the bot saw last
 /** per thread: { title, forum, guild, created, active, status: new|seen|none|asked|answered|staff|failed, replies,
  *  summary, category, snippet (its first post, for threads the bot only indexed); for a problem reported to the staff:
  *  staffMsg, staffThread (the report and its thread), reports (how many threads, on the first one), reportOf (on the
@@ -92,8 +98,8 @@ function schedule(threadId, why) {
   if (!t) console.log(`[bot] ${threadId} "${threads[threadId]?.title}": ${why}, a look in ${Math.round(delay / 1000)} s unless more comes`);
   timers.set(threadId, { first, why, timer: setTimeout(() => { timers.delete(threadId); enqueue(threadId, why); }, delay) });
 }
-function enqueue(threadId, why) {
-  if (!queue.some(q => q.threadId === threadId)) queue.push({ threadId, why });
+function enqueue(threadId, why, extra) {
+  if (!queue.some(q => q.threadId === threadId)) queue.push({ threadId, why, extra });
   pump();
 }
 async function pump() {
@@ -101,7 +107,7 @@ async function pump() {
   busy = true;
   while (queue.length) {
     const job = queue.shift();
-    try { await look(job.threadId, job.why); } catch (e) { console.error(`[bot] ${job.threadId}: ${e.stack || e}`); }
+    try { await look(job.threadId, job.why, job.extra); } catch (e) { console.error(`[bot] ${job.threadId}: ${e.stack || e}`); }
   }
   busy = false;
 }
@@ -114,29 +120,31 @@ function underCap() {
 }
 
 // ---------------------------------------------------------------------------------------------------- a look --
-async function look(threadId, why) {
+async function look(threadId, why, extra) {
   const thread = await client.channels.fetch(threadId).catch(() => null);
   const st = threads[threadId];
   const say = s => console.log(`[look] ${threadId} ${s}`);
   if (!thread || !st || !watched(thread)) return say('skipped: the thread is gone or not in a watched forum');
-  if (thread.archived || thread.locked) return say('skipped: closed or locked');
+  const fix = why === 'fix live';
+  if (thread.locked || (thread.archived && !fix)) return say('skipped: closed or locked');
   st.guild ??= thread.guildId;
   const byStaff = why === 'asked by staff';
-  if (!byStaff && st.status === 'staff') return say('skipped: staff are in the thread');
-  if (!byStaff && st.replies >= CFG.maxReplies) return say(`skipped: ${st.replies} replies already`);
+  if (fix && st.fixed) return say('skipped: already told that a fix went live');
+  if (!byStaff && !fix && st.status === 'staff') return say('skipped: staff are in the thread');
+  if (!byStaff && !fix && st.replies >= CFG.maxReplies) return say(`skipped: ${st.replies} replies already`);
   if (!underCap()) return say(`skipped: ${CFG.maxPerDay} looks today already`);
 
   const msgs = [...(await thread.messages.fetch({ limit: 100 })).values()].reverse();
   const starter = await thread.fetchStarterMessage().catch(() => null);
   if (starter && !msgs.some(m => m.id === starter.id)) msgs.unshift(starter);
-  if (!byStaff && msgs.some(m => m.author.id !== client.user.id && isStaff(m.member, thread))) {
+  if (!byStaff && !fix && msgs.some(m => m.author.id !== client.user.id && isStaff(m.member, thread))) {
     st.status = 'staff'; save();
     return say('skipped: staff are in the thread');
   }
 
   const workDir = path.join(CFG.state, 'work', threadId), staffDir = `${workDir}-staff`;
   for (const d of [workDir, staffDir]) { fs.rmSync(d, { recursive: true, force: true }); fs.mkdirSync(d, { recursive: true }); }
-  const { text, images } = await transcript(thread, msgs.filter(m => !m.system), workDir, staffDir, why);
+  const { text, images } = await transcript(thread, msgs.filter(m => !m.system), workDir, staffDir, why, extra);
   say(`"${st.title}" (${why}): ${msgs.length} message(s), ${fs.readdirSync(workDir).length} file(s), ` +
     `${fs.readdirSync(staffDir).length} save backup(s), ${images.length} picture(s)`);
 
@@ -147,7 +155,8 @@ async function look(threadId, why) {
     thread: text, images, threads: recentThreads(threadId), threadIndex: () => threadIndex(threadId), step: say,
   });
   const v = res.verdict;
-  const { post, why: outcome } = vet(v, { minConfidence: CFG.minConfidence });
+  const { post, why: outcome } = fix && v?.action !== 'answer' ? { post: null, why: v?.action ?? 'no verdict' }
+    : vet(v, { minConfidence: fix ? 'high' : CFG.minConfidence });
   const secs = ((Date.now() - started) / 1000).toFixed(0);
   say(`done: ${outcome}${post ? (CFG.dryRun ? ', dry run (to the staff channel)' : ', posted in the thread') : ', nothing posted'}; ` +
     `${res.turns} turns, ${secs} s${res.cost != null ? `, $${res.cost.toFixed(3)}` : ''}`);
@@ -160,6 +169,22 @@ async function look(threadId, why) {
       allowedMentions: { parse: [], repliedUser: false },
       ...(st.replies && lastOp ? { reply: { messageReference: lastOp.id, failIfNotExists: false } } : {}),
     });
+  }
+  if (fix) {                                     // a fix notice changes nothing else about the thread
+    st.fixChecked = extra.rev;
+    if (post) st.fixed = extra.rev;
+    if (post && CFG.staffChannel && st.staffMsg) {
+      const staff = await client.channels.fetch(CFG.staffChannel).catch(() => null);
+      const th = staff && await reportThread(staff, threads[st.reportOf] ?? st);
+      await th?.send({ content: `**Fix live** (${extra.commit}): ${CFG.dryRun ? 'the bot would have told' : 'the bot told'} ` +
+        `${linkOf(thread.guildId, thread.id)} that it may be fixed.`, allowedMentions: { parse: [] } }).catch(() => {});
+    }
+    if (CFG.dryRun && post && CFG.staffChannel) await tellStaff(thread, st, { ...v, escalate: false, duplicate_of: '' }, post, [workDir, staffDir]).catch(() => {});
+    save();
+    fs.appendFileSync(VERDICTS, JSON.stringify({ at: new Date().toISOString(), thread: threadId, title: st.title, why, extra, outcome,
+      dryRun: CFG.dryRun, post, verdict: v, turns: res.turns, cost: res.cost, usage: res.usage, tools: res.log }) + '\n');
+    for (const d of [workDir, staffDir]) fs.rmSync(d, { recursive: true, force: true });
+    return;
   }
   if (post) st.replies++;
   if (v) Object.assign(st, { summary: v.summary, category: v.category });
@@ -175,10 +200,10 @@ async function look(threadId, why) {
 
 /** the thread as the model reads it: text attachments saved to workDir (whatever their name: a chrome://gpu report
  *  comes as .txt.phps, a long paste as message.txt), save backups to staffDir for the staff report, images inlined */
-async function transcript(thread, msgs, workDir, staffDir, why) {
+async function transcript(thread, msgs, workDir, staffDir, why, extra) {
   const tags = (thread.appliedTags ?? []).map(id => thread.parent.availableTags?.find(t => t.id === id)?.name).filter(Boolean);
   const lines = [`Forum: #${thread.parent.name}`, `Title: ${thread.name}`, `Tags: ${tags.join(', ') || 'none'}`,
-    `Why the bot looks now: ${WHY[why] ?? why}`, ''];
+    `Why the bot looks now: ${WHY[why] ?? why}`, ...(extra?.text ? [extra.text] : []), ''];
   const images = [];
   let n = 0;
   for (const m of msgs) {
@@ -340,7 +365,41 @@ const WHY = {
   'follow-up': 'the poster wrote again after the bot asked for information',
   'mentioned': 'the poster mentioned the bot or replied to it',
   'asked by staff': 'staff mentioned the bot: they want its look, so answer or ask unless there is nothing useful to say',
+  'fix live': 'a release just went live, and a commit in it may fix this thread\'s problem (see "When a fix goes live")',
 };
+
+// ---------------------------------------------------------------------------------------------- a release --
+/** a new live version: the threads its commits may fix get a 'fix live' look; at most FIX_MAX of them */
+async function checkRelease() {
+  const rev = await repo.liveRev();
+  if (!rev) return;
+  let last = null;
+  try { last = JSON.parse(fs.readFileSync(LIVE_FILE, 'utf8')).rev; } catch { /* first start */ }
+  if (last === rev) return;
+  // the new version is kept once this release is dealt with, so a check that fails is tried again next time
+  const seen = () => fs.writeFileSync(LIVE_FILE, JSON.stringify({ rev, at: new Date().toISOString() }));
+  if (!last) { seen(); return console.log(`[release] live is ${rev}`); }
+  await repo.sync(true);
+  if (!(await repo.has(last)) || !(await repo.has(rev))) { seen(); return console.log(`[release] live ${last} -> ${rev}: not both in the code copy, skipped`); }
+  const commits = (await repo.git(['log', '--no-merges', '-n', '60', '--format=commit %h %s%n%b', `${last}..${rev}`])).trim();
+  if (!commits) { seen(); return console.log(`[release] live ${last} -> ${rev}: no new commits (a rollback?)`); }
+  const since = new Date(Date.now() - FIX_DAYS * 86400_000).toISOString();
+  const candidates = Object.entries(threads)
+    .filter(([, t]) => t.created >= since && !t.fixed && t.fixChecked !== rev && !['suggestion', 'question'].includes(t.category))
+    .sort(byActivity).slice(0, 200)
+    .map(([id, t]) => ({ id, line: `${id} | #${t.forum} | ${t.created.slice(0, 10)} | ${t.category ?? '?'} | ${t.title} | ${t.summary || t.snippet || ''}` }));
+  const n = commits.split('\ncommit ').length;
+  console.log(`[release] live ${last} -> ${rev}: ${n} commit(s), checking ${candidates.length} thread(s)`);
+  const { matches, error } = await matchFixes({ client: anthropic, model: CFG.model, effort: CFG.effort, commits: commits.slice(0, 60_000), candidates });
+  if (error) return console.log(`[release] matching failed, again at the next check: ${error}`);
+  seen();
+  console.log(`[release] ${matches.length} thread(s) may be fixed${matches.length ? `: ${matches.map(m => `${m.thread} (${m.commit})`).join(', ')}` : ''}`);
+  for (const m of matches.slice(0, FIX_MAX)) {
+    const body = (await repo.git(['show', '--no-patch', '--format=%h %s%n%n%b', m.commit]).catch(() => '')).trim().slice(0, 1500);
+    console.log(`[release] ${m.thread}: ${m.why}`);
+    enqueue(m.thread, 'fix live', { rev, commit: m.commit, text: `The commit that went live:\n${body || m.commit}\nWhy it may be this thread's problem: ${m.why}` });
+  }
+}
 
 async function download(url) {
   try {
@@ -400,7 +459,9 @@ client.on(Events.ClientReady, c => {
     `${CFG.forums.length ? `forums ${CFG.forums.join(', ')}` : 'every forum'}, ` +
     `${CFG.staffChannel ? `staff channel ${CFG.staffChannel}` : 'no staff channel'}, model ${CFG.model} (${CFG.effort})`);
   repo.sync(true).catch(e => console.error(`[repo] ${e.message}`));
-  indexForums().catch(e => console.error(`[bot] forum index: ${e.message}`));
+  const release = () => checkRelease().catch(e => console.error(`[release] ${e.message}`));
+  indexForums().catch(e => console.error(`[bot] forum index: ${e.message}`)).finally(release);
+  setInterval(release, RELEASE_CHECK_MS);
   // posts that came in shortly before a restart still get their look
   for (const [id, t] of Object.entries(threads)) if (t.status === 'new' && Date.now() - Date.parse(t.created) < STARTUP_MS) schedule(id, 'new post');
 });

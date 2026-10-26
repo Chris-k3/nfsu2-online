@@ -13,6 +13,10 @@ and it says something only when it is worth it:
   or pictures posted in any of them go there, and the report counts the threads. Only the thread's followers are
   notified. A forum channel works as the staff channel too: each report is a post.
 
+- **when a fix goes live**, in a thread whose problem one of the release's commits fixes: that a fix may have solved
+  it, to reload the page, and to post a new log if it still happens. Only when a full look at the thread is sure; at
+  most once a thread, at most 10 threads a release, threads of the last 14 days. The report's thread notes it.
+
 Otherwise it says nothing. It reads every channel it can see, but posts only in forum threads and the staff channel. It
 stays out of a thread once staff wrote in it (the server owner, `BOT_STAFF`, anyone who can manage threads), and replies
 at most twice in a thread: after it asked for something, the poster's next post gets one more look. Staff can mention
