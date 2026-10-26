@@ -77,7 +77,7 @@ node --env-file=.env try.mjs --title "Game crashes" "it crashes in free roam on 
 | `BOT_DRY_RUN` | off | `1`: look and log, post nothing |
 | `BOT_FORUMS` | every forum | forum channel ids to answer in |
 | `BOT_STAFF` | | user or role ids of staff, besides the owner and anyone who can manage threads |
-| `BOT_MODEL` | `claude-opus-5-5` | |
+| `BOT_MODEL` | `claude-sonnet-5-5` | |
 | `BOT_EFFORT` | `high` | `low` … `max`: how much the model thinks and reads before it answers |
 | `BOT_MIN_CONFIDENCE` | `medium` | answers below this confidence are not posted (questions are) |
 | `BOT_WAIT_S` | `120` | quiet time after the poster's last message before the look (at most 10 minutes after the first) |

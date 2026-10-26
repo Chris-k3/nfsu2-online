@@ -19,7 +19,7 @@ const CFG = {
   token: env.DISCORD_TOKEN,
   forums: list(env.BOT_FORUMS),                  // forum channel ids; empty: every forum
   staff: list(env.BOT_STAFF),                    // user or role ids, besides the owner and whoever can manage threads
-  model: env.BOT_MODEL || 'claude-opus-5-5',
+  model: env.BOT_MODEL || 'claude-sonnet-5-5',
   effort: env.BOT_EFFORT || 'high',
   dryRun: env.BOT_DRY_RUN === '1',
   waitS: Number(env.BOT_WAIT_S || 120),
