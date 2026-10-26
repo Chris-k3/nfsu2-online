@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { TOOL_DEFS, Tools } from './tools.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const MAX_TURNS = 30;
+const MAX_TURNS = 16;                            // a look that needs more is cut short: the long ones cost the most
 
 export const VERDICT = {
   type: 'object', additionalProperties: false,
@@ -39,7 +39,8 @@ async function systemBlocks(repo) {
   const [rules, notes, playing] = [await own('system.md'), await own('knowledge.md'), await repo.file('docs/web/PLAYING.md')];
   return [
     { type: 'text', text: `${rules}\n\n${notes}` },
-    { type: 'text', text: `# The player's guide (docs/web/PLAYING.md)\n\n${playing}`, cache_control: { type: 'ephemeral' } },
+    // kept an hour: looks are often more than 5 minutes apart, and this part (~20k tokens) is the same for all of them
+    { type: 'text', text: `# The player's guide (docs/web/PLAYING.md)\n\n${playing}`, cache_control: { type: 'ephemeral', ttl: '1h' } },
   ];
 }
 
@@ -93,7 +94,7 @@ function gist(out) {
  * threadIndex: () => every known thread, for search_threads; step: (text) => void, told each step as it happens
  * -> { verdict, usage, cost, turns, log }
  */
-export async function investigate({ client, model, effort, repo, archive, workDir, thread, images = [], threads = '', threadIndex, step = () => {} }) {
+export async function investigate({ client, model, effort, maxTurns = MAX_TURNS, repo, archive, workDir, thread, images = [], threads = '', threadIndex, step = () => {} }) {
   await repo.sync();
   const tools = new Tools({ repo, workDir, archive, threadIndex });
   const system = await systemBlocks(repo);
@@ -104,8 +105,8 @@ export async function investigate({ client, model, effort, repo, archive, workDi
   const log = [];
   let verdict = null;
 
-  for (let turn = 1; turn <= MAX_TURNS && !verdict; turn++) {
-    const last = turn === MAX_TURNS;
+  for (let turn = 1; turn <= maxTurns && !verdict; turn++) {
+    const last = turn === maxTurns;
     const res = await client.beta.messages.create({
       model, max_tokens: 16000, system, messages,
       tools: TOOL_DEFS,
@@ -134,7 +135,7 @@ export async function investigate({ client, model, effort, repo, archive, workDi
         return { type: 'tool_result', tool_use_id: c.id, content: text, ...(out?.error ? { is_error: true } : {}) };
       }));
       const content = [...results];
-      if (turn + 1 === MAX_TURNS) content.push({ type: 'text', text: 'That was the last tool call: give your verdict now.' });
+      if (turn + 1 === maxTurns) content.push({ type: 'text', text: 'That was the last tool call: give your verdict now.' });
       messages.push({ role: 'user', content });
       continue;
     }

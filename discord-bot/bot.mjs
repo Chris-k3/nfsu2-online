@@ -47,7 +47,8 @@ const SAVES_ZIP = /^nfsu2-saves-.*\.zip$/i;      // Saves, Download backup: for 
 const MAX_WAIT_MS = 10 * 60_000;                 // a thread that keeps growing is looked at after 10 minutes anyway
 const STARTUP_MS = 48 * 3600_000;                // at start, the forums' posts of the last 48 hours, nothing older
 const RELEASE_CHECK_MS = 5 * 60_000;             // how often the bot checks whether a new version went live
-const FIX_DAYS = 14, FIX_MAX = 10;               // a release is checked against threads of the last 14 days, 10 messages at most
+const FIX_DAYS = 14, FIX_MAX = 3;                // a release is checked against threads of the last 14 days, 3 looks at most
+const FIX_EFFORT = 'low', FIX_TURNS = 8;          // a fix check reads one commit against one thread: a short look
 const BUMP_QUIET_MS = 12 * 3600_000;             // the poster writing after this long a silence is a bump: they wait
 
 fs.mkdirSync(CFG.state, { recursive: true });
@@ -180,7 +181,7 @@ async function look(threadId, why, extra) {
   let res;
   try {
     res = await investigate({
-      client: anthropic, model: CFG.model, effort: CFG.effort, repo, archive, workDir,
+      client: anthropic, model: CFG.model, effort: fix ? FIX_EFFORT : CFG.effort, maxTurns: fix ? FIX_TURNS : undefined, repo, archive, workDir,
       thread: text, images, threads: recentThreads(threadId), threadIndex: () => threadIndex(threadId), step: say,
     });
   } catch (e) {

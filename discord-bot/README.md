@@ -17,7 +17,7 @@ and it says something only when it is worth it:
 
 - **when a fix goes live**, in a thread whose problem one of the release's commits fixes: that a fix may have solved
   it, to reload the page, and to post a new log if it still happens. Only when a full look at the thread is sure; at
-  most once a thread, at most 10 threads a release, threads of the last 14 days. The report's thread notes it.
+  most once a thread, at most 3 threads a release (short, low-effort looks), threads of the last 14 days. The report's thread notes it.
 
 - **in the general channels** (text channels named `general…`), sparingly: someone who reports a problem there gets
   one short templated reply in their language, pointing to the forum thread about it or to the bug-reports forum,

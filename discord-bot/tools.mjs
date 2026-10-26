@@ -9,7 +9,7 @@ import { LOG_DATE, LOG_FORMAT } from './repo.mjs';
 
 const run = promisify(execFile);
 const ATT = 'attachments';
-const MAX_OUT = 40_000;          // characters of one tool result
+const MAX_OUT = 15_000;          // characters of one tool result: it stays in the look and is read again every turn
 const REV = /^(LIVE|HEAD|[0-9a-f]{4,40})$/;
 
 const str = d => ({ type: 'string', description: d });
@@ -31,7 +31,7 @@ export const TOOL_DEFS = [
     '("attachments/<name>"). Returns numbered lines and the file\'s line count.', {
     path: str('the file'),
     start_line: int('first line to read, from 1'),
-    max_lines: int('how many lines, at most 400 (0 = 200)'),
+    max_lines: int('how many lines, at most 250 (0 = 120)'),
   }),
   tool('list', 'List a folder of the code ("" = the root) or "attachments/": names, with "/" after folders.', {
     path: str('the folder'),
@@ -62,7 +62,7 @@ export const TOOL_DEFS = [
 ];
 
 function cut(s, n = MAX_OUT) {
-  return s.length <= n ? s : s.slice(0, n) + `\n[... cut: ${s.length - n} more characters]`;
+  return s.length <= n ? s : s.slice(0, n) + `\n[... cut: ${s.length - n} more characters: read a smaller range, or search]`;
 }
 
 export class Tools {
@@ -153,7 +153,7 @@ export class Tools {
   read({ path: p, start_line, max_lines }) {
     const { abs, att, rel } = this.where(p);
     const all = fs.readFileSync(abs, 'utf8').split('\n');
-    const n = Math.min(max_lines > 0 ? max_lines : 200, 400);
+    const n = Math.min(max_lines > 0 ? max_lines : 120, 250);
     const from = Math.max(1, start_line || 1);
     const slice = all.slice(from - 1, from - 1 + n)
       .map((l, i) => `${String(from + i).padStart(6)}  ${l.length > 500 ? l.slice(0, 500) + ' [...]' : l}`);
@@ -197,7 +197,7 @@ export class Tools {
       if (since && since !== 'not live yet') state += `, ${since}`;
     }
     let out = `${msg.join('\n')}\n\n[${state}]\n${stat.trim()}`;
-    if (patch) out += '\n\n' + cut(await this.repo.git(['show', '--format=', '--patch', r]), 30_000);
+    if (patch) out += '\n\n' + cut(await this.repo.git(['show', '--format=', '--patch', r]), 12_000);
     return cut(out);
   }
 
