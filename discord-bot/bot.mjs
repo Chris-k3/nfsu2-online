@@ -1,16 +1,17 @@
 // The forum bot: reads every channel it can see (archive.mjs), and answers only in forum threads, where a new post
 // gets one look (investigate.mjs) once its author has stopped adding to it.  It says something only when it has a
 // verified fix or needs information the post lacks; after it asked, the author's next post gets one more look.  It
-// stays out of threads the staff answered and stops after BOT_MAX_REPLIES replies in a thread.
+// stays out of threads the staff answered and stops after BOT_MAX_REPLIES replies in a thread.  A report the developer
+// should act on goes to the staff channel (BOT_STAFF_CHANNEL) with the thread's link, the bot's notes and its log files;
+// a later report of the same problem is added to that message, not posted again.
 //   node --env-file=.env bot.mjs        (settings: README.md)
 import { ChannelType, Client, Events, GatewayIntentBits, Partials, PermissionFlagsBits } from 'discord.js';
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { Archive } from './archive.mjs';
 import { investigate, newClient, vet } from './investigate.mjs';
-import { Repo } from './repo.mjs';
+import { Repo, defaultSource } from './repo.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const env = process.env;
@@ -19,6 +20,7 @@ const CFG = {
   token: env.DISCORD_TOKEN,
   forums: list(env.BOT_FORUMS),                  // forum channel ids; empty: every forum
   staff: list(env.BOT_STAFF),                    // user or role ids, besides the owner and whoever can manage threads
+  staffChannel: env.BOT_STAFF_CHANNEL || '',     // where reports for the developer go; empty: nowhere (verdicts.jsonl only)
   model: env.BOT_MODEL || 'claude-sonnet-5-5',
   effort: env.BOT_EFFORT || 'high',
   dryRun: env.BOT_DRY_RUN === '1',
@@ -28,7 +30,7 @@ const CFG = {
   minConfidence: env.BOT_MIN_CONFIDENCE || 'medium',
   archive: env.BOT_ARCHIVE !== '0',
   state: path.resolve(HERE, env.BOT_STATE || 'state'),
-  repo: env.BOT_REPO || execFileSync('git', ['-C', HERE, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim(),
+  repo: env.BOT_REPO || defaultSource(HERE),
   branch: env.BOT_BRANCH || 'main',
   liveUrl: env.BOT_LIVE_URL || 'https://nfsu2.xyz/game.json',
 };
@@ -37,12 +39,14 @@ if (!CFG.token) { console.error('DISCORD_TOKEN is not set (README.md)'); process
 const TEXT_EXT = /\.(log|txt|json|ini|csv|md|cfg)$/i;
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 const MAX_TEXT = 10 << 20, MAX_IMAGE = 3_500_000, MAX_IMAGES = 4;
+const MAX_UPLOAD = 8 << 20, MAX_UPLOADS = 3;    // log files copied into a staff report (Discord takes 10 MB a message)
 const MAX_WAIT_MS = 10 * 60_000;                 // a thread that keeps growing is looked at after 10 minutes anyway
 
 fs.mkdirSync(CFG.state, { recursive: true });
 const STATE_FILE = path.join(CFG.state, 'threads.json');
 const VERDICTS = path.join(CFG.state, 'verdicts.jsonl');
-/** per thread: { title, forum, created, status: new|none|asked|answered|staff|failed, replies, summary, category } */
+/** per thread: { title, forum, created, status: new|none|asked|answered|staff|failed, replies, summary, category,
+ *  staffMsg: the staff channel message about it (its own, or the earlier report it was added to) } */
 let threads = {};
 try { threads = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch { /* first start */ }
 function save() {
@@ -147,6 +151,7 @@ async function look(threadId, why) {
   if (post) st.replies++;
   if (v) Object.assign(st, { summary: v.summary, category: v.category });
   st.status = !v ? 'failed' : post ? (v.action === 'ask' ? 'asked' : 'answered') : st.status === 'asked' ? 'asked-none' : 'none';
+  if (v && CFG.staffChannel) await tellStaff(thread, st, v, post, workDir).catch(e => console.error(`[bot] staff channel: ${e.message}`));
   save();
   fs.appendFileSync(VERDICTS, JSON.stringify({
     at: new Date().toISOString(), thread: threadId, title: st.title, why, outcome, dryRun: CFG.dryRun, post,
@@ -190,6 +195,41 @@ async function transcript(thread, msgs, workDir, why) {
   return { text: lines.join('\n'), images };
 }
 
+// ------------------------------------------------------------------------------------------- the staff channel --
+/** a report for the developer: a new message, or a line added to the message about the same problem */
+async function tellStaff(thread, st, v, post, workDir) {
+  const link = `https://discord.com/channels/${thread.guildId}/${thread.id}`;
+  const earlier = v.duplicate_of && v.duplicate_of !== thread.id ? threads[v.duplicate_of]?.staffMsg : null;
+  if (!v.escalate && !earlier && !(post && CFG.dryRun)) return;
+  const staff = await client.channels.fetch(CFG.staffChannel);
+  if (!staff?.isTextBased()) throw new Error(`${CFG.staffChannel} is not a text channel the bot can see`);
+  const did = !post ? 'did not reply' : v.action === 'ask' ? 'asked the poster for more' : 'answered the poster';
+  const dry = CFG.dryRun && post ? `\n-# Dry run, not posted. The reply:\n${quote(post)}` : '';
+
+  if (earlier && !st.staffMsg) {                 // the same problem again: one more link on that message, no new ping
+    const m = await staff.messages.fetch(earlier).catch(() => null);
+    if (m) {
+      const also = m.content.match(/^Also reported: .*$/m);
+      const content = also ? m.content.replace(also[0], `${also[0]}, ${link}`) : `${m.content}\nAlso reported: ${link}`;
+      if (content.length <= 2000) { await m.edit({ content, allowedMentions: { parse: [] } }); st.staffMsg = earlier; }
+    }
+  }
+  if (!v.escalate || st.staffMsg) {              // nothing new for the developer; in a dry run, the reply for review
+    if (dry) await staff.send({ content: `${link} · ${v.summary}${dry}`.slice(0, 2000), allowedMentions: { parse: [] } });
+    return;
+  }
+  const files = fs.readdirSync(workDir).map(f => path.join(workDir, f))
+    .filter(f => fs.statSync(f).size <= MAX_UPLOAD).slice(0, MAX_UPLOADS)
+    .map(f => ({ attachment: f, name: path.basename(f).replace(/^\d+-/, '') }));
+  const head = `**${v.summary}**\n${link} · ${st.forum} · ${v.category}`;
+  const tail = `-# The bot ${did}.${dry}`;
+  const body = v.notes.trim().slice(0, Math.max(0, 2000 - head.length - tail.length - 2));
+  const m = await staff.send({ content: `${head}\n${body}\n${tail}`.slice(0, 2000), files, allowedMentions: { parse: [] } });
+  st.staffMsg = m.id;
+}
+
+const quote = s => s.split('\n').map(l => `> ${l}`).join('\n');
+
 const WHY = {
   'new post': 'a new post',
   'follow-up': 'the poster wrote again after the bot asked for information',
@@ -209,14 +249,16 @@ function recentThreads(except, guildId) {
     .filter(([id, t]) => id !== except && t.summary)
     .sort((a, b) => b[1].created.localeCompare(a[1].created))
     .slice(0, 40)
-    .map(([id, t]) => `- ${id} https://discord.com/channels/${guildId}/${id} [${t.category}, ${t.status}] ${t.title}: ${t.summary}`)
+    .map(([id, t]) => `- ${id} https://discord.com/channels/${guildId}/${id} [${t.category}, ${t.status}` +
+      `${t.staffMsg ? ', developer told' : ''}] ${t.title}: ${t.summary}`)
     .join('\n');
 }
 
 // ------------------------------------------------------------------------------------------------- events --
 client.on(Events.ClientReady, c => {
-  console.log(`[bot] ${c.user.tag} on ${c.guilds.cache.size} server(s); ${CFG.dryRun ? 'dry run (posts nothing), ' : ''}` +
-    `${CFG.forums.length ? `forums ${CFG.forums.join(', ')}` : 'every forum'}, model ${CFG.model} (${CFG.effort})`);
+  console.log(`[bot] ${c.user.tag} on ${c.guilds.cache.size} server(s); ${CFG.dryRun ? 'dry run (replies go to the staff channel only), ' : ''}` +
+    `${CFG.forums.length ? `forums ${CFG.forums.join(', ')}` : 'every forum'}, ` +
+    `${CFG.staffChannel ? `staff channel ${CFG.staffChannel}` : 'no staff channel'}, model ${CFG.model} (${CFG.effort})`);
   repo.sync(true).catch(e => console.error(`[repo] ${e.message}`));
   // posts that came in shortly before a restart still get their look
   for (const [id, t] of Object.entries(threads)) if (t.status === 'new' && Date.now() - Date.parse(t.created) < 86400_000) schedule(id, 'new post');
@@ -261,4 +303,4 @@ client.on(Events.MessageCreate, guard('message', m => {
 client.on(Events.Error, e => console.error(`[bot] discord: ${e.message}`));
 process.on('unhandledRejection', e => console.error(`[bot] ${e?.stack || e}`));
 
-client.login(CFG.token);
+client.login(CFG.token).catch(e => { console.error(`[bot] login: ${e.message}`); process.exit(1); });

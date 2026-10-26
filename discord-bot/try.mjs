@@ -3,11 +3,10 @@
 // Text attachments are read as the bot reads a thread's; images (.png .jpg .gif .webp) go in as pictures.
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { Archive } from './archive.mjs';
 import { investigate, newClient, vet } from './investigate.mjs';
-import { Repo } from './repo.mjs';
+import { Repo, defaultSource } from './repo.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -20,7 +19,7 @@ if (!text) { console.error('usage: try.mjs [--title T] [--forum F] "post text" [
 const env = process.env;
 const state = path.resolve(HERE, env.BOT_STATE || 'state');
 const repo = new Repo({
-  source: env.BOT_REPO || execFileSync('git', ['-C', HERE, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim(),
+  source: env.BOT_REPO || defaultSource(HERE),
   branch: env.BOT_BRANCH || 'main', dir: path.join(state, 'repo'), liveUrl: env.BOT_LIVE_URL || 'https://nfsu2.xyz/game.json',
 });
 const archiveDir = path.join(state, 'archive');

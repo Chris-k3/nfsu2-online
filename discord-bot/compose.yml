@@ -1,0 +1,17 @@
+# The forum bot on a server with Docker (README.md, "In Docker"): this file, .env and deploy_key in one folder, then
+#   docker compose up -d
+services:
+  bot:
+    image: ghcr.io/th0mk/nfsu2-web-bot:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      BOT_REPO: git@github.com:th0mk/nfsu2-web.git
+    volumes:
+      - state:/state
+      - ./deploy_key:/keys/deploy_key:ro
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: '3' }
+volumes:
+  state:

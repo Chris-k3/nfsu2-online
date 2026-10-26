@@ -1,7 +1,7 @@
 // The bot's own copy of the code: a clone of BOT_REPO (default: the checkout this folder is in) at BOT_BRANCH, fetched
 // again before an investigation when it is more than 5 minutes old.  The model reads only this copy, never a working
 // tree that someone is editing.  The live server's version comes from its game.json (`rev`, the module's commit).
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -9,6 +9,15 @@ import { promisify } from 'node:util';
 const run = promisify(execFile);
 const FETCH_EVERY_MS = 5 * 60_000;
 const LIVE_EVERY_MS = 60_000;
+
+/** where the code comes from without BOT_REPO: the checkout the bot's folder is in */
+export function defaultSource(here) {
+  try {
+    return execFileSync('git', ['-C', here, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch {
+    throw new Error('set BOT_REPO: this folder is not in a git checkout (README.md)');
+  }
+}
 
 export class Repo {
   constructor({ source, branch, dir, liveUrl }) {

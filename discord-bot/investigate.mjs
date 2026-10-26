@@ -1,6 +1,7 @@
 // One investigation: the thread goes to Claude with the bot's instructions (system.md), the maintainer's notes
-// (knowledge.md) and the player's guide (docs/web/PLAYING.md of the bot's copy of the code), and Claude reads what it
-// needs through the tools (tools.mjs) until it gives its verdict as JSON (VERDICT).
+// (knowledge.md) and the player's guide (docs/web/PLAYING.md), and Claude reads what it needs through the tools
+// (tools.mjs) until it gives its verdict as JSON (VERDICT).  All three come from the bot's copy of the code, so a pushed
+// change to them applies within minutes, without a new image; the bot's own system.md and knowledge.md until then.
 import Anthropic from '@anthropic-ai/sdk';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -12,7 +13,7 @@ const MAX_TURNS = 30;
 
 export const VERDICT = {
   type: 'object', additionalProperties: false,
-  required: ['action', 'category', 'language', 'reply', 'disclaimer', 'summary', 'notes', 'duplicate_of', 'confidence'],
+  required: ['action', 'category', 'language', 'reply', 'disclaimer', 'summary', 'notes', 'escalate', 'duplicate_of', 'confidence'],
   properties: {
     action: { type: 'string', enum: ['none', 'ask', 'answer'] },
     category: { type: 'string', enum: ['crash', 'graphics', 'performance', 'controls', 'online', 'saves', 'audio', 'phone', 'suggestion', 'question', 'other'] },
@@ -20,7 +21,8 @@ export const VERDICT = {
     reply: { type: 'string', description: 'the message to post; "" for none' },
     disclaimer: { type: 'string' },
     summary: { type: 'string' },
-    notes: { type: 'string' },
+    notes: { type: 'string', description: 'for the developer; posted in the staff channel when escalate is true' },
+    escalate: { type: 'boolean', description: 'the developer should look at this' },
     duplicate_of: { type: 'string' },
     confidence: { type: 'string', enum: ['low', 'medium', 'high'] },
   },
@@ -32,9 +34,9 @@ const PRICES = {
   'claude-sonnet-5-5': [2, 10, 2.5, 0.2],
 };
 
-function systemBlocks(playing) {
-  const rules = fs.readFileSync(path.join(HERE, 'system.md'), 'utf8');
-  const notes = fs.readFileSync(path.join(HERE, 'knowledge.md'), 'utf8');
+async function systemBlocks(repo) {
+  const own = async f => (await repo.file(`discord-bot/${f}`)) || fs.readFileSync(path.join(HERE, f), 'utf8');
+  const [rules, notes, playing] = [await own('system.md'), await own('knowledge.md'), await repo.file('docs/web/PLAYING.md')];
   return [
     { type: 'text', text: `${rules}\n\n${notes}` },
     { type: 'text', text: `# The player's guide (docs/web/PLAYING.md)\n\n${playing}`, cache_control: { type: 'ephemeral' } },
@@ -70,7 +72,7 @@ function opening({ now, recent, threads, thread, images }) {
 export async function investigate({ client, model, effort, repo, archive, workDir, thread, images = [], threads = '' }) {
   await repo.sync();
   const tools = new Tools({ repo, workDir, archive });
-  const system = systemBlocks(await repo.file('docs/web/PLAYING.md'));
+  const system = await systemBlocks(repo);
   const recent = await repo.recent();
   const messages = [{ role: 'user', content: opening({ now: new Date().toISOString().slice(0, 16) + 'Z', recent, threads, thread, images }) }];
   const usage = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
