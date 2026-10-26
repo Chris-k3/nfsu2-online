@@ -54,7 +54,8 @@ const STATE_FILE = path.join(CFG.state, 'threads.json');
 const VERDICTS = path.join(CFG.state, 'verdicts.jsonl');
 const LIVE_FILE = path.join(CFG.state, 'live.json');      // the live version the bot saw last
 /** per thread: { title, forum, guild, created, active, status: new|seen|none|asked|answered|staff|failed, replies,
- *  summary, category, snippet (its first post, for threads the bot only indexed); for a problem reported to the staff:
+ *  summary, category, snippet (its first post, for threads the bot only indexed), closed (archived, locked or deleted:
+ *  not one to point people to); for a problem reported to the staff:
  *  staffMsg, staffThread (the report and its thread), reports (how many threads, on the first one), reportOf (on the
  *  later ones: the first thread's id) } */
 let threads = {};
@@ -86,13 +87,13 @@ function isStaff(member, channel) {
 }
 
 // the general channels (general.mjs): nudges to the forums, spikes and a daily digest for the staff
-let releasedAt = 0;
+const released = { rev: '', at: 0 };             // the last release the bot saw go live, and when
 const general = new General({
   client, anthropic, model: CFG.model, isStaff, staffChannel: CFG.staffChannel, dryRun: CFG.dryRun, state: CFG.state,
-  releasedAt: () => releasedAt,
+  releasedAt: () => released.at,
   bugForum: guild => guild?.channels.cache.find(ch => isForum(ch) && /bug/i.test(ch.name)) ?? null,
   forumThreads: () => Object.entries(threads)
-    .filter(([, t]) => !t.archived && t.category !== 'suggestion' && !/suggest/i.test(t.forum ?? ''))
+    .filter(([, t]) => !t.closed && t.category !== 'suggestion' && !/suggest/i.test(t.forum ?? ''))
     .sort(byActivity).slice(0, 40)
     .map(([id, t]) => ({ id, line: `${id} | ${t.title} | ${(t.summary || t.snippet || '').slice(0, 120)}` })),
 });
@@ -415,6 +416,7 @@ async function checkRelease() {
   // the new version is kept once this release is dealt with, so a check that fails is tried again next time
   const seen = () => fs.writeFileSync(LIVE_FILE, JSON.stringify({ rev, at: new Date().toISOString() }));
   if (!last) { seen(); return console.log(`[release] live is ${rev}`); }
+  if (released.rev !== rev) Object.assign(released, { rev, at: Date.now() });
   await repo.sync(true);
   if (!(await repo.has(last)) || !(await repo.has(rev))) { seen(); return console.log(`[release] live ${last} -> ${rev}: not both in the code copy, skipped`); }
   const commits = (await repo.git(['log', '--no-merges', '-n', '60', '--format=commit %h %s%n%b', `${last}..${rev}`])).trim();
@@ -429,7 +431,6 @@ async function checkRelease() {
   const { matches, error } = await matchFixes({ client: anthropic, model: CFG.model, effort: CFG.effort, commits: commits.slice(0, 60_000), candidates });
   if (error) return console.log(`[release] matching failed, again at the next check: ${error}`);
   seen();
-  releasedAt = Date.now();
   console.log(`[release] ${matches.length} thread(s) may be fixed${matches.length ? `: ${matches.map(m => `${m.thread} (${m.commit})`).join(', ')}` : ''}`);
   for (const m of matches.slice(0, FIX_MAX)) {
     const body = (await repo.git(['show', '--no-patch', '--format=%h %s%n%n%b', m.commit]).catch(() => '')).trim().slice(0, 1500);
@@ -470,6 +471,8 @@ async function indexForums() {
   const found = [];
   for (const guild of client.guilds.cache.values()) {
     const active = await guild.channels.fetchActiveThreads().catch(() => null);
+    // a known thread that is not active was archived (or deleted) while the bot was away
+    if (active) for (const [id, st] of Object.entries(threads)) if (st.guild === guild.id) st.closed = !!(active.threads.get(id)?.locked ?? true);
     for (const t of active?.threads.values() ?? []) {
       if (!watched(t) || Math.max(t.createdTimestamp, t.lastMessageId ? snowflakeTime(t.lastMessageId) : 0) < since) continue;
       const fresh = !threads[t.id] && t.createdTimestamp >= since;
@@ -515,9 +518,18 @@ client.on(Events.ThreadCreate, guard('new thread', (thread, created) => {
   schedule(thread.id, 'new post');
 }));
 
+client.on(Events.ThreadUpdate, guard('thread update', (old, thread) => {
+  const st = threads[thread.id];
+  const closed = !!(thread.archived || thread.locked);
+  if (st && !!st.closed !== closed) { st.closed = closed; save(); }
+}));
+client.on(Events.ThreadDelete, guard('thread deleted', thread => {
+  if (threads[thread.id] && !threads[thread.id].closed) { threads[thread.id].closed = true; save(); }
+}));
+
 client.on(Events.MessageCreate, guard('message', m => {
   if (m.system) return;                          // "changed the post title", pins, joins
-  general.onMessage(m);
+  try { general.onMessage(m); } catch (e) { console.error(`[general] message: ${e.stack || e}`); }
   if (archive && m.guild) {
     archive.add({
       id: m.id, at: m.createdAt.toISOString(),

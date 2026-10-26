@@ -3,18 +3,23 @@
 //   - Nudges: a local filter picks messages that sound like a problem (any language); after 3 quiet minutes, one cheap
 //     call (Haiku) sorts the batch: a problem report, a how-to question, or chat. A problem report gets one templated
 //     reply, in its language: the forum thread about it, or the bug-reports forum, and the log.  At most once a person
-//     a week and 6 an hour a channel; never when staff answered them; not in a dry run (logged, counted in the digest).
-//   - Spikes: no model.  Problem words are counted per kind (connection, crash, controller, sound, graphics) in
-//     15-minute buckets; a bucket far above the last 6 hours goes to the staff channel with examples.
+//     a week and 6 an hour a channel; never when staff answered them or someone pointed them to a forum or a thread;
+//     not in a dry run (logged, counted in the digest).
+//   - Spikes: no model.  The people who used a kind's problem words (connection, crash, controller, sound, graphics)
+//     in the last 15 minutes, against the 15-minute stretches of the 6 hours before: far above them goes to the staff
+//     channel with examples.
 //   - Digest: once a day, the day's flagged messages in one call: what keeps coming up, for the staff channel.
+// What a restart must not lose (who was pointed, the spike history, the day's flagged messages) is in general.json.
+import { ChannelType } from 'discord.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
 const TRIAGE_MODEL = 'claude-haiku-5-5';        // sorting short messages: the cheapest model is enough
+const SORT_BATCH = 40;                           // authors a sorting call: a burst of reports does not run out of tokens
 const WAIT_MS = 3 * 60_000;                      // a message waits this long: others may answer, the author may add more
 const USER_COOLDOWN_MS = 7 * 86400_000;          // one nudge a person a week
 const CHANNEL_MAX_PER_HOUR = 6;
-const BUCKET_MS = 15 * 60_000, BASELINE_BUCKETS = 24;
+const WINDOW_MS = 15 * 60_000, BASELINE_WINDOWS = 24, SPIKE_MIN = 8;   // a spike: 8 people or more in 15 minutes
 const DIGEST_HOUR_UTC = 6;
 
 // a problem in any of the server's languages; how-to questions pass too and the model sorts them out
@@ -26,6 +31,9 @@ export const KINDS = {
   graphics: /GPU-|PAGE-|webgpu|graphics|isolated|SharedArrayBuffer|error code|\berro\b|\berror|ошибк|\bhata|błąd|\bfps\b|\blag/i,
 };
 export const PROBLEM = /bug|broken|doesn'?t work|does not work|not work|isn'?t working|can'?t (play|start|load|open|enter|join)|won'?t (start|open)|problem|issue|glitch|não funciona|nao funciona|não abre|no funciona|no anda|не работает|не запускается|не могу|çalışmıyor|açılmıyor|olmuyor|nie działa|ne marche|funktioniert nicht|non funziona/i;
+
+// someone pointing to a forum or a thread: a channel mention, a link, or the forum by name
+const POINTER = /<#\d+>|discord\.com\/channels\/|#bug|\bbug.?reports?\b|\bf[oó]rum|\bforo\b|форум/i;
 
 const SORT = {
   type: 'object', additionalProperties: false, required: ['items'],
@@ -85,22 +93,42 @@ export class General {
     Object.assign(this, o);
     this.file = path.join(o.state, 'general.json');
     this.pending = new Map();                   // author id -> { msgs: [Message], last }
-    this.buckets = new Map();                   // `${channel}|${kind}` -> Map(bucket start -> [message link])
-    this.flagged = [];                          // the day's flagged messages, for the digest
-    this.alerted = new Map();                   // `${channel}|${kind}` -> ms
     this.sent = [];                             // { at, ch } of nudges, for the hourly cap
-    this.saved = { nudged: {}, digest: '', stats: { nudges: 0, dry: 0, sorted: 0 } };
+    this.saved = {
+      nudged: {},                               // author id -> ms they were last pointed to the forums, by anyone
+      hits: {},                                 // `${channel}|${kind}` -> [[ms, author id, message link]], for spikes
+      alerted: {},                              // `${channel}|${kind}` -> ms of the last spike alert
+      flagged: [],                              // the day's flagged messages, for the digest
+      since: Date.now(),                        // since when the bot has been collecting them
+      digest: '', stats: { nudges: 0, dry: 0, sorted: 0 },
+    };
     try { Object.assign(this.saved, JSON.parse(fs.readFileSync(this.file, 'utf8'))); } catch { /* first start */ }
   }
 
   save() {
-    const cut = Date.now() - USER_COOLDOWN_MS;
-    for (const [id, t] of Object.entries(this.saved.nudged)) if (t < cut) delete this.saved.nudged[id];
-    fs.writeFileSync(this.file, JSON.stringify(this.saved));
+    const now = Date.now(), { saved } = this;
+    for (const [id, t] of Object.entries(saved.nudged)) if (now - t > USER_COOLDOWN_MS) delete saved.nudged[id];
+    for (const [key, hits] of Object.entries(saved.hits)) {
+      saved.hits[key] = hits.filter(([at]) => now - at < (BASELINE_WINDOWS + 1) * WINDOW_MS);
+      if (!saved.hits[key].length) delete saved.hits[key];
+    }
+    for (const [key, t] of Object.entries(saved.alerted)) if (now - t > 3600_000) delete saved.alerted[key];
+    saved.flagged = saved.flagged.filter(f => now - f.at < 86400_000);
+    fs.writeFileSync(this.file + '.tmp', JSON.stringify(saved));
+    fs.renameSync(this.file + '.tmp', this.file);
   }
 
-  /** a text channel (type 0) named general*: not a thread, not a voice channel's chat */
-  static isGeneral(ch) { return ch?.type === 0 && /^general/i.test(ch.name ?? ''); }
+  /** a text channel named general*: not a thread, not a voice channel's chat */
+  static isGeneral(ch) { return ch?.type === ChannelType.GuildText && /^general/i.test(ch.name ?? ''); }
+
+  /** a message for the staff channel; a forum staff channel gets it as a post named `name` */
+  async toStaff(name, content) {
+    const staff = this.staffChannel && await this.client.channels.fetch(this.staffChannel).catch(() => null);
+    if (!staff) return;
+    const message = { content: content.slice(0, 2000), allowedMentions: { parse: [] } };
+    if (staff.type === ChannelType.GuildForum) await staff.threads.create({ name: name.slice(0, 100), message });
+    else await staff.send(message);
+  }
 
   onMessage(m) {
     if (!General.isGeneral(m.channel) || m.author.bot) return;
@@ -110,21 +138,16 @@ export class General {
     const kinds = Object.entries(KINDS).filter(([, re]) => re.test(text)).map(([k]) => k);
     const hasLog = files.some(f => /\.(log|txt)$/i.test(f));
     const flagged = kinds.length || PROBLEM.test(text) || hasLog;
-    // someone answering: staff take it from here, and so does a member who points to a forum or a thread
-    const to = [m.mentions?.repliedUser?.id, ...(m.mentions?.users?.keys() ?? [])].filter(Boolean);
-    if (this.isStaff(m.member, m.channel)) { for (const id of to) this.pending.delete(id); return; }
-    if (/<#\d+>|discord\.com\/channels\//.test(text)) for (const id of to) this.pending.delete(id);
-    if (!flagged) return;
-    const now = Date.now(), bucket = now - now % BUCKET_MS;
-    for (const k of kinds) {
-      const key = `${m.channelId}|${k}`;
-      if (!this.buckets.has(key)) this.buckets.set(key, new Map());
-      const b = this.buckets.get(key);
-      if (!b.has(bucket)) b.set(bucket, []);
-      b.get(bucket).push(link);
-    }
-    this.flagged.push({ at: now, channel: m.channel.name, kinds, text: text.replace(/\s+/g, ' ').slice(0, 240), files, link });
-    if (text.length < 12 && !hasLog) return;
+    // someone answering: staff take it from here, and so does a member who points to a forum or a thread.  That
+    // counts as this week's pointer, for them and for an author who links a thread or a forum themselves
+    const now = Date.now();
+    const staff = this.isStaff(m.member, m.channel), pointer = POINTER.test(text);
+    const to = [m.mentions?.repliedUser?.id, ...(m.mentions?.users?.keys() ?? []), ...(pointer ? [m.author.id] : [])].filter(Boolean);
+    if (staff || pointer) for (const id of to) { this.pending.delete(id); this.saved.nudged[id] = now; }
+    if (staff || !flagged) return;
+    for (const k of kinds) (this.saved.hits[`${m.channelId}|${k}`] ??= []).push([now, m.author.id, link]);
+    this.saved.flagged.push({ at: now, channel: m.channel.name, kinds, text: text.replace(/\s+/g, ' ').slice(0, 240), files, link });
+    if (pointer || (text.length < 12 && !hasLog)) return;
     const p = this.pending.get(m.author.id) ?? { msgs: [], last: 0 };
     p.msgs.push(m); p.last = now;
     this.pending.set(m.author.id, p);
@@ -133,13 +156,26 @@ export class General {
   /** every minute: spikes, the daily digest, and the nudges whose wait is over */
   async tick() {
     const now = Date.now();
-    this.flagged = this.flagged.filter(f => now - f.at < 86400_000);
     await this.spikes(now).catch(e => console.error(`[general] spikes: ${e.message}`));
     await this.digest(now).catch(e => console.error(`[general] digest: ${e.message}`));
     const due = [...this.pending].filter(([, p]) => now - p.last >= WAIT_MS);
     for (const [id] of due) this.pending.delete(id);
     const ready = due.filter(([id]) => now - (this.saved.nudged[id] ?? 0) > USER_COOLDOWN_MS);
-    if (ready.length) await this.nudge(ready).catch(e => console.error(`[general] nudge: ${e.message}`));
+    // a channel that had its nudges this hour sends its people to no model: they would get no reply
+    let left = 0;
+    for (let i = 0; i < ready.length; i += SORT_BATCH) {
+      const batch = ready.slice(i, i + SORT_BATCH).filter(([, p]) => !this.full(p.msgs.at(-1).channelId));
+      left += Math.min(SORT_BATCH, ready.length - i) - batch.length;
+      if (batch.length) await this.nudge(batch).catch(e => console.error(`[general] nudge: ${e.message}`));
+    }
+    if (left) console.log(`[general] ${left} not sorted: ${CHANNEL_MAX_PER_HOUR} nudges this hour already in their channel`);
+    this.save();
+  }
+
+  /** the channel had its CHANNEL_MAX_PER_HOUR nudges in the last hour */
+  full(channelId) {
+    this.sent = this.sent.filter(x => Date.now() - x.at < 3600_000);
+    return this.sent.filter(x => x.ch === channelId).length >= CHANNEL_MAX_PER_HOUR;
   }
 
   async nudge(batch) {
@@ -154,18 +190,19 @@ export class General {
         items.map(i => `[${i.id}] ${i.text}${i.files.length ? ` [files: ${i.files.join(', ')}]` : ''}`).join('\n') + '\n</messages>' }],
       output_config: { effort: 'low', format: { type: 'json_schema', schema: SORT } },
     });
-    if (res.stop_reason !== 'end_turn') return console.log(`[general] sorting stopped: ${res.stop_reason}`);
+    if (res.stop_reason !== 'end_turn') return console.log(`[general] sorting ${items.length} stopped: ${res.stop_reason}`);
     let sorted = [];
-    try { sorted = JSON.parse(res.content.filter(b => b.type === 'text').map(b => b.text).join('')).items; } catch { return; }
+    try { sorted = JSON.parse(res.content.filter(b => b.type === 'text').map(b => b.text).join('')).items; } catch {
+      return console.log(`[general] sorting ${items.length}: no JSON`);
+    }
     this.saved.stats.sorted += items.length;
     const known = new Set(threads.map(t => t.id));
     for (const s of sorted) {
       const p = batch.find(([id]) => id === s.id)?.[1];
-      if (!p || s.kind !== 'problem') continue;
-      const m = p.msgs.at(-1);
       const now = Date.now();
-      this.sent = this.sent.filter(x => now - x.at < 3600_000);
-      if (this.sent.filter(x => x.ch === m.channelId).length >= CHANNEL_MAX_PER_HOUR) { console.log(`[general] #${m.channel.name}: ${CHANNEL_MAX_PER_HOUR} nudges this hour already`); continue; }
+      if (!p || s.kind !== 'problem' || now - (this.saved.nudged[s.id] ?? 0) <= USER_COOLDOWN_MS) continue;  // also an id listed twice
+      const m = p.msgs.at(-1);
+      if (this.full(m.channelId)) continue;
       const thread = known.has(s.thread) ? s.thread : '';
       const t = T[s.lang] ?? T.en;
       const forum = this.bugForum(m.guild);
@@ -179,35 +216,36 @@ export class General {
         this.saved.stats.dry++;
         console.log(`[general] dry run: would point ${m.id} in #${m.channel.name} (${s.lang}) to ${thread || 'the bug forum'}: ${m.content.slice(0, 80)}`);
       } else {
-        await m.reply({ content, allowedMentions: { parse: [], repliedUser: false } }).catch(e => console.error(`[general] reply: ${e.message}`));
+        const ok = await m.reply({ content, allowedMentions: { parse: [], repliedUser: false } })
+          .then(() => true, e => { console.error(`[general] reply to ${m.id} in #${m.channel.name}: ${e.message}`); return false; });
+        if (!ok) continue;
         this.saved.stats.nudges++;
         console.log(`[general] pointed ${m.id} in #${m.channel.name} (${s.lang}) to ${thread || 'the bug forum'}`);
       }
     }
-    this.save();
   }
 
-  /** a 15-minute bucket far above the last 6 hours: to the staff channel, once an hour per channel and kind */
+  /** the people of the last 15 minutes far above the usual of the 6 hours before: to the staff channel, once an hour
+   *  per channel and kind.  People, not messages: one person repeating a word is no spike */
   async spikes(now) {
     if (!this.staffChannel) return;
-    const current = now - now % BUCKET_MS - BUCKET_MS;   // the last complete bucket
-    for (const [key, b] of this.buckets) {
-      for (const t of b.keys()) if (t < current - BASELINE_BUCKETS * BUCKET_MS) b.delete(t);
-      const n = b.get(current)?.length ?? 0;
-      if (n < 8 || now - (this.alerted.get(key) ?? 0) < 3600_000) continue;
+    for (const [key, hits] of Object.entries(this.saved.hits)) {
+      const people = (from, to) => new Set(hits.filter(([at]) => at > from && at <= to).map(h => h[1])).size;
+      const n = people(now - WINDOW_MS, now);
+      if (n < SPIKE_MIN || now - (this.saved.alerted[key] ?? 0) < 3600_000) continue;
       const before = [];
-      for (let i = 1; i <= BASELINE_BUCKETS; i++) before.push(b.get(current - i * BUCKET_MS)?.length ?? 0);
+      for (let i = 1; i <= BASELINE_WINDOWS; i++) before.push(people(now - (i + 1) * WINDOW_MS, now - i * WINDOW_MS));
       const usual = before.sort((x, y) => x - y)[before.length >> 1];
       if (n < 3 * usual + 3) continue;
-      this.alerted.set(key, now);
+      this.saved.alerted[key] = now;
       const [channelId, kind] = key.split('|');
-      const staff = await this.client.channels.fetch(this.staffChannel).catch(() => null);
       const ch = await this.client.channels.fetch(channelId).catch(() => null);
       const rel = this.releasedAt();
       const note = rel && now - rel < 2 * 3600_000 ? ` A release went live ${Math.round((now - rel) / 60_000)} minutes ago.` : '';
-      await staff?.send({ content: `**More ${kind} complaints than usual in #${ch?.name ?? channelId}**: ${n} messages in 15 minutes ` +
-        `(usually ${usual}).${note}\n${b.get(current).slice(-3).join('\n')}`, allowedMentions: { parse: [] } });
-      console.log(`[general] spike: ${kind} in #${ch?.name}: ${n} (usually ${usual})`);
+      const examples = [...new Map(hits.filter(([at]) => at > now - WINDOW_MS).map(([, author, link]) => [author, link])).values()].slice(-3);
+      await this.toStaff(`More ${kind} complaints in #${ch?.name ?? channelId}`,
+        `**More ${kind} complaints than usual in #${ch?.name ?? channelId}**: ${n} people in 15 minutes (usually ${usual}).${note}\n${examples.join('\n')}`);
+      console.log(`[general] spike: ${kind} in #${ch?.name}: ${n} people (usually ${usual})`);
     }
   }
 
@@ -215,24 +253,25 @@ export class General {
   async digest(now) {
     const day = new Date(now).toISOString().slice(0, 10);
     if (!this.staffChannel || new Date(now).getUTCHours() !== DIGEST_HOUR_UTC || this.saved.digest === day) return;
-    this.saved.digest = day; this.save();
-    if (this.flagged.length < 5) return;
+    // the day is marked done first, so a digest that fails is not tried again every minute; the counts start over
+    const st = this.saved.stats, flagged = this.saved.flagged;
+    Object.assign(this.saved, { digest: day, stats: { nudges: 0, dry: 0, sorted: 0 } });
+    this.save();
+    if (flagged.length < 5) return console.log(`[general] no digest: ${flagged.length} flagged messages`);
     const counts = {};
-    for (const f of this.flagged) for (const k of f.kinds) counts[k] = (counts[k] ?? 0) + 1;
-    const st = this.saved.stats;
+    for (const f of flagged) for (const k of f.kinds) counts[k] = (counts[k] ?? 0) + 1;
     const input = `Counts: ${JSON.stringify(counts)}; nudges sent ${st.nudges}${this.dryRun ? `, in the dry run would have sent ${st.dry}` : ''}.\n\n` +
       `<threads>\n${this.forumThreads().map(t => t.line).join('\n') || 'none'}\n</threads>\n\n<messages>\n` +
-      this.flagged.slice(-400).map(f => `#${f.channel} ${f.link} ${f.text}${f.files.length ? ` [files: ${f.files.join(', ')}]` : ''}`).join('\n') + '\n</messages>';
+      flagged.slice(-400).map(f => `#${f.channel} ${f.link} ${f.text}${f.files.length ? ` [files: ${f.files.join(', ')}]` : ''}`).join('\n') + '\n</messages>';
     const res = await this.anthropic.messages.create({
       model: this.model, max_tokens: 4000, system: DIGEST_SYSTEM,
       messages: [{ role: 'user', content: input }], output_config: { effort: 'low' },
     });
     const text = res.content.filter(b => b.type === 'text').map(b => b.text).join('').trim();
-    if (!text) return;
-    const staff = await this.client.channels.fetch(this.staffChannel).catch(() => null);
-    await staff?.send({ content: `**General channels, last 24 hours** (${this.flagged.length} flagged messages)\n${text}`.slice(0, 2000), allowedMentions: { parse: [] } });
-    Object.assign(st, { nudges: 0, dry: 0, sorted: 0 });
-    this.save();
-    console.log(`[general] digest posted (${this.flagged.length} messages)`);
+    if (!text) return console.log(`[general] no digest: the model stopped with ${res.stop_reason} and no text`);
+    const hours = Math.min(24, Math.round((now - this.saved.since) / 3600_000));
+    const cut = res.stop_reason === 'end_turn' ? '' : `\n-# Cut short: ${res.stop_reason}`;
+    await this.toStaff(`General channels, ${day}`, `**General channels, last ${hours} hours** (${flagged.length} flagged messages)\n${text}`.slice(0, 1950) + cut);
+    console.log(`[general] digest posted (${flagged.length} messages)`);
   }
 }

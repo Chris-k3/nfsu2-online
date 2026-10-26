@@ -11,7 +11,7 @@ and it says something only when it is worth it:
   device, browser and version, the key log lines, the likely cause, the thread's link and its log files and saves.
   Each report gets a thread: later threads about the same problem (with what they add and their logs) and new logs
   or pictures posted in any of them go there, and the report counts the threads. Only the thread's followers are
-  notified. A forum channel works as the staff channel too: each report is a post.
+  notified. A forum channel works as the staff channel too: each report, spike alert and daily note is a post.
 
 - **when a fix goes live**, in a thread whose problem one of the release's commits fixes: that a fix may have solved
   it, to reload the page, and to post a new log if it still happens. Only when a full look at the thread is sure; at
@@ -22,8 +22,9 @@ and it says something only when it is worth it:
   with how to get the log. Nothing for questions or chat, nothing when staff or another member already pointed them
   to the forum; at most once a person a week and 6 an hour a channel. A local word filter picks the candidates (about
   7% of the messages), and one Haiku call sorts each batch, so it costs a few cents a day. Spikes of complaints
-  (connection, crashes, controllers, sound, graphics) go to the staff channel at once, without a model, and a daily
-  note at 06:00 UTC sums up what the general channels kept bringing up.
+  (connection, crashes, controllers, sound, graphics: 8 people or more in 15 minutes, far above the 6 hours before)
+  go to the staff channel at once, without a model, and a daily note at 06:00 UTC sums up what the general channels
+  kept bringing up.
 
 Otherwise it says nothing. It reads every channel it can see, but posts only in forum threads, those replies in the
 general channels, and the staff channel. It
