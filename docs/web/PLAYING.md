@@ -404,7 +404,8 @@ Good to know:
     cars as the game itself does (its performance rating: the engine, gears, weight and drag with every part in) and
     changes each car's engine power so the cars come close: they head for a rating between their middle and the
     best (two cars: two thirds of the way up from the slower one), and each goes nine tenths of its way there, so
-    the better car keeps a small edge (of two cars, one rated a third higher, about 3 % is left). The power changes
+    the better car keeps a small edge (of two cars, one rated a third higher, about 3 % is left). In a drag race,
+    where even that edge decided most races, each goes all of its way there. The power changes
     by at most half again as much or a quarter less (the nitrous with it). No car keeps a stock car's top-speed
     governor (as with an ECU part), so the extra power counts at speed too. Grip, brakes, gears, weight and your
     tuning stay as they are, so your car still drives as itself and your upgrades still count, by less; a car far
