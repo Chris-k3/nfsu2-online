@@ -126,9 +126,12 @@ performance and tuning, AI and traffic, the career's progression, races and rewa
 
 ## Limits players hit (true as of these notes; check the guide and the code)
 
-- No WebGPU, no game: Firefox for Android (play in Chrome), Samsung TV browsers, Samsung Xclipse graphics (some Galaxy
-  phones), Windows PCs without Direct3D 12 (Intel HD 4000 and older). Chrome on Linux needs the Vulkan driver.
-  Players report that the Xbox's browser does not run it either.
+- No WebGPU, no game: Firefox for Android (play in Chrome), Samsung TV browsers, Windows PCs without Direct3D 12
+  (Intel HD 4000 and older). Chrome on Linux needs the Vulkan driver. Players report that the Xbox's browser does not
+  run it either.
+- Samsung Xclipse graphics (some Galaxy phones; `GPU-ADAPTER-ANDROID`, chrome://gpu says "Limited support / testing
+  currently available on Android"): Chrome blocklists them, and chrome://flags/#enable-unsafe-webgpu, then restarting
+  Chrome, lifts that. Not tried with the game yet: suggest it, say so, and ask how it went (back to Default if not).
 - iPhone: a web page cannot go full screen. Adding the page to the Home Screen (Share menu) opens it without the
   browser's bars. That copy has its own saves: cloud saves bring them over. Only controllers iOS knows (Xbox,
   PlayStation, Switch, MFi) reach the page.
