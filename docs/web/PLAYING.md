@@ -53,7 +53,10 @@ dragged sideways turn the car in the garage, and a finger dragged up or down on 
 graph moves its dot. The ☰ button opens the page menu. On a phone the game goes full screen
 when you press Play and renders at 75% resolution scale (Settings, Display changes both). After a few minutes of driving the page checks whether the phone keeps its frame rate with GPU
 time to spare; if so, it renders at 100% from the next game on that phone (and goes back to 75% if it later falls
-behind). This only applies while you leave the resolution scale at its default. Held sideways, the game fills the screen with the touch controls over it; held upright, it shows
+behind). This only applies while you leave the resolution scale at its default. A phone also starts with lighter
+graphics: car and road reflections, motion blur, depth of field, overbright and bleach bypass are off, which halves
+the GPU's work in a race (the game's Options, Display turns them back on). A phone that played before gets them once,
+unless a graphics option was changed there. Held sideways, the game fills the screen with the touch controls over it; held upright, it shows
 in a 4:5 picture at the top with the ☰ button and the touch controls below it. The screen stays on while the game
 runs. Chrome's menu, **Add to Home screen** (or **Install app**), puts the game on the home screen as an app that opens
 full screen; on a PC the same makes it an app with its own window.
@@ -93,7 +96,7 @@ rev in the countdown) and step aside for menus, the pause menu and free roam's c
 | M, Tab | Map, messages |
 | Esc or P | Pause; Esc also goes back in menus |
 | Enter | Choose (menus); in free roam, start an event at its marker or take an outrun |
-| F12 | Screenshot (PNG), kept with your saves and shown in Saves on the start page |
+| F12 | Photo mode while you drive (see below), and in it the photo; elsewhere a screenshot. Both are PNGs kept with your saves and shown in Saves on the start page |
 | **F8** | Frame-rate counter: off, on, detailed |
 | **F9** | The page menu: when the game last saved, full screen, counter, ghost mode and crews (in free roam), controls, log, **Quit game**; on a controller Home, or both sticks pressed in; on a touch screen the ☰ button |
 | **Hold Esc** | Leave full screen (a short press still goes to the game) |
@@ -104,9 +107,20 @@ The start page shows these keys under **Controls**, and F9, Controls shows them 
 - **Drift mode (X):** in free roam, the car handles as in the game's drift races (its drift tuning and the drift
   assist), the camera is the drift races' (C still goes through all of them), and drifts score as there: the drift
   races' panel (Best, the multiplier with the points its next level needs, Total) shows under Bank, and DRIFT counts
-  a drift's points up while you drift, as in the races: lime when it banks, red when a wall loses it. Just for fun:
-  the points never go into the bank or the career. X again turns it off and gives your camera back. It is off in
-  races and outruns and comes back in free roam after them.
+  a drift's points up while you drift, as in the races: lime when it banks, red when a wall loses it. Free roam's
+  music plays on (the drift races have none). Just for fun: the points never go into the bank or the career. X again
+  turns it off and gives your camera back. It is off in races and outruns and comes back in free roam after them.
+- **Photo mode (F12, or Photo Mode in the pause menu):** while you drive (a race, free roam, an outrun) the world
+  stands still, the HUD goes and the camera comes loose from the car. Orbit (the first) turns around a point at your
+  car, which you can move up to 10 m from it; Free flies up to 20 m from the car. Drag with the mouse (or the arrow
+  keys) to turn, W A S D to move, Q and E for down and up, the wheel to come closer or go farther, Z and X to zoom,
+  C and V to tilt, Shift to go faster, Tab for orbit or free, R to start over, H to hide the panel. F12, Enter or
+  Space takes the photo, Esc leaves. On a controller: the right stick turns, the left stick moves, LB and RB are down
+  and up, the triggers closer and farther, the D-pad zooms and tilts, Y is orbit or free, X starts over, A takes the
+  photo, B leaves, View hides the panel. On a touch screen: drag to turn, two fingers to move, pinch for closer or
+  farther, the panel's buttons for the rest. The sound effects pause, the music plays on. In free roam with other
+  players your world stands still for you only: they see you as paused and drive through you. Not in races over the
+  network (Online, LAN, free roam's races with other players). Nothing keeps the camera out of walls.
 - **Mouse:** works in the menus; in the garage, drag with the middle button (the wheel) held to turn the car, as in
   the PC game. On the ECU and Turbo tuning graphs the wheel moves the dot of the column under the pointer, as in the
   PC game, and so does a drag up or down on that column. **Touch:** a tap is a click there; drag two fingers to turn
@@ -160,9 +174,9 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
 | Controller | rumble; more: controller on or off, menu buttons, dead zones |
 
 - **Language:** English, French, German, Italian, Spanish, Dutch, Swedish, Danish, Korean, Chinese, Japanese, Russian,
-  Thai, Portuguese (Brazil) or Polish, for the menus and all the game's text. Where the server has the [language packs](VPS.md#languages), French, German, Italian, Spanish, Japanese and Russian also play with their dubbed voices and movies,
-  Chinese, Japanese and Thai with their full text, and Portuguese and Polish with their text at all (without the
-  packs they play in English, with English voices). Your browser fetches only your language's files: the dubbed
+  Thai, Portuguese (Brazil), Polish or Turkish, for the menus and all the game's text. Where the server has the [language packs](VPS.md#languages), French, German, Italian, Spanish, Japanese and Russian also play with their dubbed voices and movies,
+  Chinese, Japanese and Thai with their full text, and Portuguese, Polish and Turkish with their text at all (without
+  the packs they play in English, with English voices). Your browser fetches only your language's files: the dubbed
   voices are about 50 MB (Russian 94 MB), and the dubbed movies are smaller than the English ones they replace.
   The start page follows the same choice (the list at its top sets it too): its text, settings and messages in
   that language, English until you pick another. Its problems and errors carry a short code (`GPU-ADAPTER-WIN`),
@@ -389,13 +403,16 @@ Good to know:
     none while a story task runs, and none where the game has something of its own to enter at the same place (a race
     open in your career there, a cover shoot): Enter is the game's there, and an open race's card asks Solo or
     Multiplayer as above.
-  - **Multiplayer opens a lobby** at the start: the panel shows it, its race, track and laps and its six places (drag
+  - **Multiplayer opens a lobby** at the start: the panel shows it, its race, career stage, track and laps and its six places (drag
     4, 3 on the three-lane track) with the players in them, the host first and yours marked. The players near see
     "Thom's circuit (1/6)" over the start (from about 250 m); everyone in free roam sees its race's icon on the world
     map (M), and the nearest four lobbies their words beside it ("Circuit 1/6"). They join at the start: within 15 m
     of it the panel shows the lobby and Enter joins (at an open race: its card's Accept, then **Join**). Up to 6
     players; at a full one the panel says so, and Enter starts another. Drive more than 40 m from the start to leave
-    a lobby; the host leaving calls it off, and a lobby nobody joins closes after 5 minutes. A lobby is within your Room, as everything in free roam. At a race's
+    a lobby; the host leaving calls it off, and a lobby nobody joins closes after 5 minutes. A host who seems away
+    (none of the game's keys or controller buttons and no driving for 2 minutes while others wait) gets a 30-second
+    countdown on every panel of the lobby, then it closes; one of those keys keeps it. A lobby is within your Room, as
+    everything in free roam. At a race's
     start Enter is for the race: no outrun is offered there.
   - **The host presses Enter** to start once another player is in. After a 5-second countdown every game in the lobby
     goes to the race by itself, behind a screen with the lobby on it and where the trip is ("Loading the race"): out
@@ -408,7 +425,8 @@ Good to know:
     cars as the game itself does (its performance rating: the engine, gears, weight and drag with every part in) and
     changes each car's engine power so the cars come close: they head for a rating between their middle and the
     best (two cars: two thirds of the way up from the slower one), and each goes nine tenths of its way there, so
-    the better car keeps a small edge (of two cars, one rated a third higher, about 3 % is left). The power changes
+    the better car keeps a small edge (of two cars, one rated a third higher, about 3 % is left). In a drag race,
+    where even that edge decided most races, each goes all of its way there. The power changes
     by at most half again as much or a quarter less (the nitrous with it). No car keeps a stock car's top-speed
     governor (as with an ECU part), so the extra power counts at speed too. Grip, brakes, gears, weight and your
     tuning stay as they are, so your car still drives as itself and your upgrades still count, by less; a car far
@@ -473,7 +491,8 @@ Good to know:
 - **A name that reads as a slur** is not taken: Settings does not save it as **Your name**, the Online mode
   refuses it, and in free roam the other players see `Player` over your car. Digits or signs for letters (`1` for
   `i`), gaps and repeated letters read as the word they spell; a number (a year, two digits at the end) is a number
-  (`Hakan1995` and `Dani99` are names).
+  (`Hakan1995` and `Dani99` are names). The same goes for Nazi names (and `1488` in a name), hate aimed at a group,
+  terror and sexual violence. Swear words are fine.
 - **Your name is yours while you are online**, and while you race. Someone else can use it when you are not; the
   rankings and your EA Messenger lists follow the name, so whoever plays under it while you are away sees your
   friends, the players you block, your friend requests and the messages waiting for you, and can change them. If
@@ -534,7 +553,7 @@ Good to know:
 | `GPU-ADAPTER-LINUX`: Chrome on Linux, while `chrome://gpu` says WebGPU is hardware accelerated | Most likely the Vulkan driver is missing: Chrome runs WebGPU on Vulkan there (the rest of Chrome on OpenGL). `ls /usr/share/vulkan/icd.d/` lists the installed ones (`intel_icd` for Intel, `radeon_icd` for AMD). Install it with `sudo apt install mesa-vulkan-drivers` on Debian and Ubuntu, `sudo dnf install mesa-vulkan-drivers` on Fedora, `vulkan-intel` or `vulkan-radeon` on Arch, then quit Chrome completely and start it again. Chrome has WebGPU on by itself on Linux for Intel graphics (Gen12 and newer) and NVIDIA (Wayland); for other graphics turn on `chrome://flags/#enable-unsafe-webgpu`. If the driver is there, the Dawn Info section further down `chrome://gpu` lists each adapter WebGPU sees and why one is blocked. |
 | `GPU-ADAPTER-WIN`: Chrome on Windows | Chrome runs WebGPU on Direct3D 12 there, and older graphics have no Direct3D 12 driver (Intel HD 4000 and older, for one): the game cannot run on that computer. The Dawn Info section further down `chrome://gpu` lists each adapter WebGPU sees and why it is blocked; when it lists only "D3D11 backend" adapters, "Blocklisted - D3D11 backend not fully implemented", the graphics have no Direct3D 12. On newer graphics, update the graphics driver from Intel, AMD or NVIDIA, then quit Chrome completely and start it again. |
 | `GPU-ADAPTER-WIN-ARM`: Chrome on Windows on ARM (Snapdragon) | Chrome keeps WebGPU behind a flag there: turn on `chrome://flags/#enable-unsafe-webgpu`, then restart Chrome. |
-| `GPU-ADAPTER-ANDROID` | Chrome on Android has WebGPU from Android 12 on Qualcomm (Adreno), ARM (Mali) and Intel graphics, and from Android 16 on Imagination (PowerVR); not yet on Samsung's Xclipse. Update Android and Chrome; on other phones the game cannot run yet. |
+| `GPU-ADAPTER-ANDROID` | Chrome on Android has WebGPU from Android 12 on Qualcomm (Adreno), ARM (Mali) and Intel graphics, and from Android 16 on Imagination (PowerVR). Update Android and Chrome. If that does not help, turn on `chrome://flags/#enable-unsafe-webgpu` (on the phone, type it into Chrome's address bar, or open `chrome://flags` and search for "Unsafe WebGPU"), then restart Chrome: that lifts Chrome's WebGPU blocklist. Samsung's Xclipse (some Galaxy phones) is on it, and the game runs with the flag (a player's Xclipse 540 with Android 16). If the game still does not run with it, it cannot run on that phone yet. |
 | `GPU-ADAPTER`, `GPU-ADAPTER-FIREFOX` | The browser would not use the graphics. Restart it; update the graphics driver (on a Mac: macOS) and the browser. `chrome://gpu` in Chrome, about:support (Graphics) in Firefox says why. In Firefox on Windows, graphics without Direct3D 12 cannot run it either. |
 | `GPU-NO-BC`: a note about packed textures | Nothing to do: the game plays. This GPU (in many phones, Pixels among them) cannot read the game's compressed textures, so the page unpacks them as the game loads: about 200 MB more memory, and loading screens may pause for a moment. Graphics that can read ASTC instead (iPhones, iPads, most other phones) get no note: most textures are converted to that, about 50 MB more. |
 | `GPU-INTEGRATED-FIREFOX`: "Graphics: Intel (integrated)" (or AMD) in Firefox on Windows | Firefox runs the game on the graphics it draws its own windows with, whatever the game asks for. If the computer also has a graphics card, as many laptops do, give Firefox the card: Windows Settings, System, Display, Graphics, Firefox, High performance; then quit Firefox completely and start it again. On a computer with integrated graphics only, nothing changes. Chrome does the same (its `chrome://gpu` names the graphics it uses): the same Windows setting for Chrome, or `chrome://flags/#force-high-performance-gpu`. |
@@ -546,6 +565,6 @@ Good to know:
 | No sound | Click the game or press a key. Check the sound setting and the output latency (try "Robust"). |
 | Stuck on a loading screen | F9, Quit game; then "Close the game now"; then "Stop the game". When the log ends in `[data]` lines, the game was waiting for its data from the server: it goes on when the data comes. |
 | Other players' cars stutter, freeze and jump in an Online or LAN race | All updates go through the player who created the game, so let whoever has the steadiest connection (a cable rather than Wi-Fi or mobile) and the fastest computer create it, and keep the game's tab in front. After the race, F9, Download log: its `[racenet]` lines say how each car's updates came (long waits, how many came at once after them) and each player's frame rate. |
-| Anything odd | F9, Download log (or "Download log" on the start page after the game ended) and keep the file. It has the game's own log. When the browser stopped the page itself (on an iPhone the game is suddenly gone and the page loads again), the start page says so and Download log starts with that last game's log. After you reload or close the page during a game, Download log has that game's log as well. Before you post it anywhere: it names your browser, its version and your system, your graphics chip, your time zone, and the names and virtual addresses of the players you met (not the server's address: only whether it was this machine, on the LAN or remote). |
+| Anything odd | F9, Download log (or "Download log" on the start page after the game ended) and keep the file. It has the game's own log. When the browser stopped the page itself (on an iPhone the game is suddenly gone and the page loads again), the start page says so and Download log starts with that last game's log. After you reload or close the page during a game, Download log has that game's log as well. It names your browser, its version and your system, your graphics chip, and your time zone's offset from UTC. Names (yours, your profiles', crews' and room's, and those of the players you met) and addresses become stand-ins such as `you`, `player-3k9x` and `vlan-7q2m`, the same in every log from that browser, so you can post it as it is. |
 | `Port 8080 is in use` when starting | The server already runs; open its address. Or start on another port: `web/start.sh --http-port 9080`. |
 | Full screen | The game plays in the browser window. F9, Full screen goes full screen, and holding Esc leaves it (in Firefox, a press). "Full screen on Play" in Settings starts every game full screen. |

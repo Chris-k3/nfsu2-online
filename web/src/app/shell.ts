@@ -27,13 +27,15 @@ import { LogRing, downloadBlob, stamp } from './logs';
 import { LastGameKeeper, lastGameEnd, lastGameLine, lastGameToOffer, type LastGame } from './lastgame';
 import { browserBrief, deviceBrief } from './devicelog';
 import { canFullscreen, enterFullscreen, exitFullscreen, fromHomeScreen, homeScreenInstead, isFullscreen, keepScreenOn, measureRefresh, settledSize, trackCanvasSize } from './display';
-import { deviceDefaults, markTouch, noPinchZoom, padSeen, phoneScreen, touchFirst } from './device';
+import { deviceDefaults, isPhone, markTouch, noPinchZoom, padSeen, phoneScreen, touchFirst } from './device';
+import { phoneSeed, phoneUpgrade } from './phonegraphics';
 import { markPad, padPress, pageDialog } from './padnav';
 import { controlsSheet, type ControlsSheet } from './controls';
 import { TouchControls } from './touch';
 import { TextField } from './textentry';
 import { PauseHint } from './pausehint';
 import { DriftPanel } from './drift';
+import { PhotoMode } from './photo';
 import type { PadPage } from '../input/gamepad';
 import type { NetQueue, NetRemoved } from '../net';
 import { checkSetting, HOST_FIXED, pageOnly, resolveEnv, settingsUpgrade, TEMPLATE, type Resolved } from './settings';
@@ -42,6 +44,7 @@ import { turnOnAutosave } from './profile';
 import { crewControl, putKey, SettingsPanel, showCrewCounts } from './settings-ui';
 import { askCrews, queueText, roomHash, serverAnswers, watchPlayers, type PlayerCounts } from './players';
 import { crewList, crewsOf, crewsValue, rgbsValue, rgbWords, type Crew } from './crews';
+import { privacy, SCRUB_NOTE } from './privacy';
 import { SavesPanel } from './saves-ui';
 import { saveScreenshot } from './shots';
 import { forgetLink, VaultPanel } from './vault-ui';
@@ -53,6 +56,7 @@ import { LobbyPanel } from './lobby';
 import { ICON as CHAT_ICON, QuickChat } from './quickchat';
 import { GameSession } from './game';
 import { AwayCheck, AWAY_LIMITS, type AwayLimits } from './away';
+import { PlayTime, SMS_AFTER_MS } from './playtime';
 import { pageId } from './page-id';
 import { RenderCheck, RENDER_CHECK_TIMES, type RenderCheckTimes } from './rendercheck';
 import { moviesKept, Predownload } from './predownload';
@@ -64,7 +68,7 @@ type Phase = 'boot' | 'ready' | 'error' | 'waiting' | 'starting' | 'playing' | '
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 
 // the page address's test aids, once boot knows whether the server is a development server
-const TEST_PARAMS = ['env', 'save', 'fresh', 'reg', 'script', 'artifacts', 'dumpscale', 'away', 'rendercheck'];
+const TEST_PARAMS = ['env', 'save', 'fresh', 'reg', 'script', 'artifacts', 'dumpscale', 'away', 'rendercheck', 'playtime'];
 const addr = new URLSearchParams(location.search);
 let q = new URLSearchParams();
 let SAVE = 'save';
@@ -93,6 +97,7 @@ async function devServer(): Promise<boolean> {
 }
 
 const log = new LogRing(8 << 20);
+log.onLine = s => { privacy.learn(s); };    // the names a downloaded log must not carry (privacy.ts)
 let phase: Phase = 'boot';
 let loaded: Loaded | null = null;
 let displayHz = 60;
@@ -107,6 +112,7 @@ let crewDraft = '';                      // the crew name being typed in the men
 let popCounts = new Map<number, number>();   // how many are in free roam in each of those crews, by hash (askPopCounts)
 let popAsk = 0;                          // the popup's questions so far: only the newest one's answer shows
 let away: AwayCheck | null = null;
+let playTime: PlayTime | null = null;
 let renderCheck: RenderCheck | null = null;
 let lastExit: { code: number; seconds: number } | null = null;
 let keeper: LastGameKeeper;              // the running game's log, copied where a page Safari stops cannot lose it
@@ -319,6 +325,50 @@ async function askRoam(): Promise<boolean> {
 }
 
 /**
+ * The fifth Play in this browser (four games played here, vault-ui.ts played) of a player with a profile here and no
+ * cloud saves asks to turn them on: the saves live only in this browser, and browsers clear a site's data now and then.
+ * Asked once (Not now and Esc are no); not at the Play that asked about free roam (the next one asks), on a test page,
+ * offline, or where the server keeps no cloud saves.  Turned on, the keyphrase is shown to keep (copy, download)
+ * before the game starts; it failed, the reason.
+ */
+async function askCloud() {
+  if (testPage() || offline || !vault.offerable() || !await newestProfile()) return;
+  vault.offered();
+  const p = (text: string) => Object.assign(document.createElement('p'), { textContent: text });
+  const body = document.createElement('div');
+  body.append(p(t('Your career is saved only in this browser. Browsers sometimes clear a website\'s data, for example when the device runs low on space or when browsing data is cleared, and your saves go with it.')),
+    p(t('Cloud saves keep a copy on this server under a keyphrase that only you have. With it you get your saves back, here or in another browser.')),
+    p(t('You can change this any time under Cloud saves on the start page.')));
+  const answer = confirmBox(t('Turn on cloud saves?'), body, t('Turn on'), false, '', t('Not now'));
+  $<HTMLButtonElement>('#confirm-ok').focus();
+  const on = await answer;
+  log.add(`[app] cloud saves: ${on ? 'turned on' : 'not now'} (asked at Play)`);
+  if (!on) return;
+  const got = await vault.enable();
+  if ('why' in got) {
+    await confirmBox(t('Cloud saves are not on'), got.why ? t('They could not be turned on: {error}. Try again under Cloud saves on the start page.', { error: got.why })
+      : t('They could not be turned on. Try again under Cloud saves on the start page.'), t('Continue'), false, '', '');
+    return;
+  }
+  const box = Object.assign(document.createElement('p'), { className: 'keyphrase', textContent: got.phrase });
+  const copy = Object.assign(document.createElement('button'), { type: 'button', className: 'text-btn', textContent: t('Copy') });
+  copy.onclick = async () => {
+    try { await navigator.clipboard.writeText(got.phrase); copy.textContent = t('Copied.'); }
+    catch { getSelection()?.selectAllChildren(box); }
+  };
+  const file = Object.assign(document.createElement('button'), { type: 'button', className: 'text-btn', textContent: t('Download keyphrase') });
+  file.onclick = () => vault.download();
+  const row = document.createElement('div'); row.className = 'row keyphrase-do';
+  row.append(copy, file);
+  const kept = document.createElement('div');
+  kept.append(p(t('Keyphrase made. Keep it safe: it is the only way back to these saves.')), box, row,
+    p(t('To load your saves, enter it under Cloud saves on the start page.')));
+  const shown = confirmBox(t('Your keyphrase'), kept, t('Continue'), false, '', '');
+  $<HTMLButtonElement>('#confirm-ok').focus();
+  await shown;
+}
+
+/**
  * A full server (the newest /players, asked again at Play): a game that takes a place at once (free roam on) waits in
  * line for it.  The player picks: wait in line (the game starts, alone until it is their turn; the default, also for
  * Esc), or play offline (this game only, without free roam or Online; settings.ini stays as it is).  True: offline.
@@ -372,7 +422,9 @@ async function startGame() {
     return;
   }
   // (the free-roam question says when the server is full: answered, it is not asked again what to do about that)
-  const alone = !await askRoam() && await askFull(counts);
+  const roamAsked = await askRoam();
+  if (!roamAsked) await askCloud();
+  const alone = !roamAsked && await askFull(counts);
   const pre = resolved();
   // inside the click: things that need a user gesture.  The context runs at the
   // mixer's own rate (44.1 kHz), so the worklet does not resample.
@@ -414,6 +466,11 @@ async function startGame() {
     NFSU2_WIDTH: String(size.w & ~1), NFSU2_HEIGHT: String(size.h & ~1), NFSU2_DISPLAY_HZ: String(displayHz),
   };
   const r = resolved(host);
+  // the names this game goes by, for the log as it leaves the browser (privacy.ts)
+  privacy.name(r.env.NFSU2_ROAM_NAME, 'you');
+  for (const c of crewList(r.env.NFSU2_ROAM_CREW ?? '')) privacy.name(c, 'crew');
+  privacy.name(r.env.NFSU2_ROAM_ROOM, 'room');
+  for (const p of await listProfiles(SAVE).catch(() => [])) privacy.name(p.name, 'profile');
   // offline mode: the server does not answer.  The movies stream from it, so unless every one of them is in this
   // browser they are off for this game (a movie the game could not read would stop it).
   setReach(await serverAnswers(2000));
@@ -442,7 +499,16 @@ async function startGame() {
     log.add(`[app] registry seeded from ${q.get('reg')} (page address)`);
   } else if (!await exists(SAVE, reg)) {
     if (r.env.NFSU2_SEED_REGISTRY === '0') log.add('[app] no registry yet, the game will run its first-run check');
+    else if (isPhone()) { await writeFile(SAVE, reg, phoneSeed(registryDefaults)); log.add(`[app] first launch, registry seeded with the built-in defaults and a phone's graphics (/save/${reg})`); }
     else { await writeFile(SAVE, reg, registryDefaults); log.add(`[app] first launch, registry seeded with the built-in defaults (/save/${reg})`); }
+  } else if (isPhone()) {
+    // a phone that started before the phone graphics (phonegraphics.ts): once
+    const up = phoneUpgrade(await readText(SAVE, reg) ?? '', registryDefaults);
+    if (up) {
+      await writeFile(SAVE, reg, up.text);
+      log.add(up.lowered ? '[app] phone graphics: the graphics options still had the built-in defaults, now a phone\'s'
+        : '[app] phone graphics: the graphics options were changed in this browser, they stay');
+    }
   }
   // the game's Save option at Autosave, once per profile (settings.ini autosave, profile.ts); an input script
   // plays the game as it was recorded (on the Mac, where nothing changes the profiles) unless the page address
@@ -487,7 +553,7 @@ async function startGame() {
       netBack, netQueue, onSaved,
       netId: net ? pageId() : undefined, netRemoved,
       artifacts: q.get('artifacts') ?? undefined, dumpScale: q.get('dumpscale') ? +q.get('dumpscale')! : undefined,
-      toggleFullscreen, padPage: PAD_PAGE, log: logLine, onFatal: stopFatal,
+      toggleFullscreen, padPage: PAD_PAGE, log: logLine, onFatal: stopFatal, onOtherBuild: otherBuild,
     });
   } catch (e) {
     log.add(`[app] the game could not start: ${e}`);
@@ -499,16 +565,19 @@ async function startGame() {
     return;
   }
   setPhase('playing', T('Playing'), () => '');
+  vault.played();                     // counted for the cloud saves question (askCloud)
   keeper.start(loaded!.info.rev, gameHeld);
   $('#lastgame').hidden = true;           // about the game before this one
   document.body.dataset.phase = 'playing';
   away = new AwayCheck(session, awayLimits(), awayLine, logLine);
+  playTime = new PlayTime(session, playTimeLimit(), logLine);
   // a phone's render scale (device.ts): whether it has room for all its pixels, for its next game
   if (r.source.NFSU2_RENDER === 'device') renderCheck = new RenderCheck(session, r.env.NFSU2_RENDER, renderCheckTimes(), logLine);
   touch.start(session);
   textField.start(session);
   pauseHint.start(session);
   driftPanel.start(session);
+  photo.start(session);
   quickChat.start(session, net && r.env.NFSU2_ROAM === '1' && r.env.NFSU2_ROAM_SAY !== '0');
   fps.memory = session.proc.memory;
   const st = session;
@@ -571,6 +640,26 @@ function stopFatal(what: string, code?: string) {
   log.add(`[app] ${what}: stopping the game`);
   s.terminate();
 }
+/** The renderer is of another build than the game module (game.ts onOtherBuild): this page came from offline mode's
+ *  copies (sw.ts) and the module from the server, or from a server swapping its module.  The game is stopped and the
+ *  page loaded again from the server: once a tab and module, while the server answers; else as any renderer that
+ *  did not start. */
+const OTHER_KEY = 'nfsu2-other-build';
+let reloadAtExit = false;
+function otherBuild(why: string) {
+  const s = session, rev = loaded!.info.rev;
+  if (!s || s.ended) return;
+  let again = true;
+  try { again = sessionStorage.getItem(OTHER_KEY) === rev; if (!again) sessionStorage.setItem(OTHER_KEY, rev); } catch { /* no storage: no reload that could repeat */ }
+  if (again || offline) {
+    log.add(`[app] this page is of another build than game ${rev} (${why}), ${offline ? 'and the server does not answer' : 'after a reload for that too'}`);
+    stopFatal(N('the graphics could not start'), 'GPU-RENDERER');
+    return;
+  }
+  log.add(`[app] this page is of another build than game ${rev} (${why}): stopping the game, then the page again from the server`);
+  reloadAtExit = true;
+  s.terminate();
+}
 
 /** what to do on an iPhone, whose browsers have no full screen for a page */
 const HOME_SCREEN = N('On an iPhone a web page cannot go full screen: add this page to the Home Screen (in the Share menu) and play from its icon.');
@@ -623,6 +712,7 @@ const PAD_PAGE: PadPage = {
   dialog: () => !!pageDialog(),
   press: padPress,
   stick: (x, y) => quickChat.stick(x, y),
+  capture: (s, pressed) => photo.pad(s, pressed),
 };
 
 let awake: (() => void) | null = null;   // the running game's Wake Lock (display.ts keepScreenOn)
@@ -630,15 +720,18 @@ let touch: TouchControls;                // the controls on the game while a fin
 let textField: TextField;               // the field for a phone's keyboard while the game asks for text (textentry.ts)
 let pauseHint: PauseHint;               // the line to the page's menu under the game's pause menu (pausehint.ts)
 let driftPanel: DriftPanel;             // free roam's drift mode: its score under the game's Bank panel, a note at F2 (drift.ts)
+let photo: PhotoMode;                   // photo mode: F12 in the world, its panel and its keys (photo.ts)
 
 function endStage() {
   touch.stop();
   textField.stop();
   pauseHint.stop();
   driftPanel.stop();
+  photo.stop();
   quickChat.stop();
   awake?.(); awake = null;
   away?.stop(); away = null;
+  playTime?.stop(); playTime = null;
   hideRemoved();
   renderCheck?.stop(); renderCheck = null;
   Object.assign(DEVICE, deviceDefaults());      // its verdict, for the next game without a reload
@@ -669,6 +762,7 @@ function onExit(s: GameSession, code: number) {
   endStage();
   players?.now();
   download.resume();
+  if (reloadAtExit) { reloadAtExit = false; setPhase('boot', T('Loading'), T('Loading the game.')); void reloadFromServer(); return; }
   $('#log-btn').hidden = false;
   // a crash, or a game stopped for want of a subsystem: where to send the log (not a normal close or a Stop)
   $('#report').hidden = !fatal && (code === 0 || code === -1);
@@ -747,6 +841,7 @@ function openHelp() {
  *  on the server they came too often */
 const FRIEND_NOTICES = false;
 function notice(text: string, who?: string) {
+  privacy.name(who, 'player');
   log.add(`[notice] ${text}`);
   if (who && !FRIEND_NOTICES) return;
   const box = $('#notices'), line = document.createElement('div');
@@ -845,6 +940,12 @@ function awayLimits(): AwayLimits {
   const ms = (s: number, d: number) => Number.isFinite(s) && s > 0 ? s * 1000 : d;
   return { inputMs: ms(inputS, AWAY_LIMITS.inputMs), hiddenMs: ms(hiddenS, AWAY_LIMITS.hiddenMs), warnMs: ms(warnS, AWAY_LIMITS.warnMs) };
 }
+/** the play before our message on the game's phone (playtime.ts); a test page's address may give it in seconds
+ *  (playtime=seconds) */
+function playTimeLimit(): number {
+  const s = Number(q.get('playtime'));
+  return Number.isFinite(s) && s > 0 ? s * 1000 : SMS_AFTER_MS;
+}
 /** the render check's times; a test page's address may give them in seconds of driving (rendercheck=warmup,verdict) */
 function renderCheckTimes(): RenderCheckTimes {
   const [warmS, decideS] = (q.get('rendercheck') ?? '').split(',').map(Number);
@@ -859,7 +960,8 @@ function toast(msg: string, ms: number) {
   (toast as any).timer = setTimeout(() => { t.hidden = true; }, ms);
 }
 
-/** F12: the next frame the renderer draws, as a PNG beside the saves (Saves on the start page shows it) */
+/** F12 (photo.ts: photo mode's picture, or where it cannot open): the next frame the renderer draws, as a PNG beside the
+ *  saves (Saves on the start page shows it) */
 async function screenshot() {
   const r = session?.renderer;
   if (!r?.dump) { toast(t('No screenshot: the picture is not there yet.'), 2500); return; }
@@ -1078,14 +1180,14 @@ function quitLabel(): string {
 function confirmBox(title: string, body: Node | string, ok: string, danger = false, about = '', cancel = t('Cancel')): Promise<boolean> {
   return choiceBox(title, body, ok, cancel, danger, about).then(v => v === 'ok');
 }
-/** the same, with which way it closed: 'ok', 'cancel' (the cancel button), '' (Esc) */
+/** the same, with which way it closed: 'ok', 'cancel' (the cancel button, none when cancel is ''), '' (Esc) */
 function choiceBox(title: string, body: Node | string, ok: string, cancel: string, danger = false, about = ''): Promise<string> {
   const d = $<HTMLDialogElement>('#confirm');
   d.dataset.about = about;            // 'quit': closed when the game ends (endStage)
   $('#confirm-title').textContent = title;
   const b = $('#confirm-body'); b.replaceChildren(typeof body === 'string' ? Object.assign(document.createElement('p'), { textContent: body }) : body);
   const okb = $<HTMLButtonElement>('#confirm-ok'); okb.textContent = ok; okb.className = danger ? 'btn danger' : 'btn selected';
-  $('#confirm-cancel').textContent = cancel;
+  const cb = $('#confirm-cancel'); cb.textContent = cancel; cb.hidden = !cancel;     // '': the one button
   d.returnValue = '';
   d.showModal();
   return new Promise(res => d.addEventListener('close', () => res(d.returnValue), { once: true }));
@@ -1096,8 +1198,10 @@ function choiceBox(title: string, body: Node | string, ok: string, cancel: strin
 async function downloadLog() {
   if (session?.logReport()) await log.waitFor('[watchdog] log download ready', 2000);
   // the last game's copy first, when that game did not get to its end (lastgame.ts)
-  const prev = lastGame ? `=== the last game's log, as the page kept it while it ran ===\n${lastGame.log}=== this page's log ===\n` : '';
-  downloadBlob(prev + log.text(), `nfsu2-${stamp()}.log`, 'text/plain');
+  // as it may leave the browser (privacy.ts): no names, no addresses; a copy from a page before that scrubbed nothing
+  const kept = lastGame ? (lastGame.scrubbed ? lastGame.log : privacy.scrub(lastGame.log)) : '';
+  const prev = lastGame ? `=== the last game's log, as the page kept it while it ran ===\n${kept}=== this page's log ===\n` : '';
+  downloadBlob(`${SCRUB_NOTE}\n${prev}${privacy.scrub(log.text())}`, `nfsu2-${stamp()}.log`, 'text/plain');
 }
 /** what the running game holds now, for each copy of its log (lastgame.ts): what fills a phone's memory as it plays */
 function gameHeld(): string {
@@ -1241,6 +1345,13 @@ async function reload() {
   await swOnline();
   location.reload();
 }
+/** A reload offline mode's copies do not answer (otherBuild): the service worker goes first.  The page registers it
+ *  again once the module has loaded, and its install takes new copies from the server. */
+async function reloadFromServer() {
+  await saves.settled();
+  try { await (await navigator.serviceWorker?.getRegistration())?.unregister(); } catch { /* none, or not here */ }
+  location.reload();
+}
 /** Offline mode's copies answer first for a while after the server did not (sw.ts); it answers now, so the start
  *  after this reload is the server's.  An older service worker does not answer: 0.5 s at most. */
 function swOnline(): Promise<void> {
@@ -1267,7 +1378,7 @@ function showOverrides(given: string[], dev: boolean) {
   const env = Object.entries(ENVIRONMENT).map(([k, v]) => `${k}=${v}`);
   live(o, () => t('Test settings from this page\'s address (development server): save folder "{folder}"', { folder: SAVE }) +
     (env.length ? t('; {vars} (wins over Settings)', { vars: env.join(', ') }) : '') +
-    ['fresh', 'reg', 'script', 'artifacts', 'dumpscale', 'away'].filter(k => q.has(k)).map(k => `; ${k}`).join('') + '.');
+    ['fresh', 'reg', 'script', 'artifacts', 'dumpscale', 'away', 'playtime'].filter(k => q.has(k)).map(k => `; ${k}`).join('') + '.');
 }
 
 export async function boot() {
@@ -1277,7 +1388,7 @@ export async function boot() {
   const given = takeParams(dev);
   instance = claimInstance(`nfsu2-saves:${SAVE}`);
   // the last game of this save folder that did not get to its end (Safari stopped the page, say): its log is offered
-  keeper = new LastGameKeeper(SAVE, log, logLine);
+  keeper = new LastGameKeeper(SAVE, log, logLine, text => privacy.scrub(text));
   lastGame = lastGameToOffer(SAVE);
   if (lastGame) {
     log.keep(lastGameLine(lastGame));
@@ -1351,13 +1462,14 @@ export async function boot() {
 
   // F8 / F9 belong to the page while the game runs (the game binds neither,
   // Chrome reserves neither); caught first, so the game never sees them.  F12
-  // too: the page's screenshot, not the game's (whose copy of the frame comes
-  // out black in this port) nor the browser's developer tools.
+  // too: photo mode in the world, its picture while it is on, else the page's
+  // screenshot (not the game's, whose copy of the frame comes out black in
+  // this port, nor the browser's developer tools).
   window.addEventListener('keydown', e => {
     if (session && (e.code === 'F8' || e.code === 'F9' || e.code === 'F12')) {
       e.preventDefault(); e.stopImmediatePropagation();
       if (e.repeat) return;
-      if (e.code === 'F8') toast(fpsLabel(fps.cycle()), 1500); else if (e.code === 'F9') openMenu(); else void screenshot();
+      if (e.code === 'F8') toast(fpsLabel(fps.cycle()), 1500); else if (e.code === 'F9') openMenu(); else photo.f12();
       return;
     }
     // Enter plays only when nothing else has the focus (or Play itself does): a
@@ -1402,6 +1514,7 @@ export async function boot() {
     fullscreen: () => canFullscreen() || !fromHomeScreen(),
   });
   driftPanel = new DriftPanel($('#stage'), { toast, wide: () => hudWide, log: logLine });
+  photo = new PhotoMode($('#stage'), { shoot: screenshot, screenshot: () => void screenshot(), log: logLine });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { void checkNewer(); vault.shown(); } });
   setInterval(() => { if (document.visibilityState === 'visible') void checkNewer(); }, NEWER_EVERY_MS);
 

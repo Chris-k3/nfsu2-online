@@ -487,8 +487,11 @@ void sub_0060faa0(CPU *c){
  * the view matrix copied from it (0x4012b0), the product and the culling
  * planes made of that agree, and whatever reads the camera itself keeps the
  * game's.  The game's view space has y down (the projection's P11 is
- * negative), so this turns the picture anticlockwise for a + roll. */
+ * negative), so this turns the picture anticlockwise for a + roll.  Photo
+ * mode's tilt turns it the same way, and its field of view (camera +0xC4, a
+ * binary angle) stands in for the camera's for the call (photo.c). */
 float input_view_roll(void);
+int photo_view(uint16_t *fov, float *roll);
 static void view_roll(uint32_t m, float a){
     float c = cosf(a), s = sinf(a);
     for (uint32_t r = m; r < m + 0x40u; r += 0x10u){
@@ -502,15 +505,22 @@ void sub_005c7ec0_orig(CPU *c);
 void sub_005c7ec0(CPU *c){
     uint32_t plat = c->ecx, view = MR32(c->esp + 4u);
 #ifdef __wasm__
-    uint32_t cam = 0; uint8_t keep[0x40];
+    uint32_t cam = 0, fcam = 0; uint8_t keep[0x40]; uint16_t fov = 0, fkeep = 0;
     if (view && mem_is_committed(view + 0x43u) && (MR32(view + 4u) == 1u || MR32(view + 4u) == 4u)){
-        float a = input_view_roll();
+        float a = input_view_roll(), pr = 0.f;
+        if (photo_view(&fov, &pr)){
+            a += pr;
+            fcam = MR32(view + 0x40u);
+            if (fcam && mem_is_committed(fcam + 0xc5u)){ fkeep = MR16(fcam + 0xc4u); MR16(fcam + 0xc4u) = fov; }
+            else fcam = 0;
+        }
         cam = a != 0.f ? MR32(view + 0x40u) : 0u;
         if (cam && mem_is_committed(cam + 0x3fu)){ memcpy(keep, g_mem + cam, sizeof keep); view_roll(cam, a); }
         else cam = 0;
     }
     sub_005c7ec0_orig(c);
     if (cam) memcpy(g_mem + cam, keep, sizeof keep);
+    if (fcam) MR16(fcam + 0xc4u) = fkeep;
 #else
     sub_005c7ec0_orig(c);
 #endif

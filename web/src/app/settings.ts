@@ -192,10 +192,10 @@ export const TEMPLATE = `# NFSU2 settings, read at every launch.
 
 # The game's language: english, french, german, italian, spanish, dutch,
 # swedish, danish, korean, chinese, japanese, russian, thai, portuguese
-# (Brazil's) or polish.  French, German, Italian, Spanish, Japanese and
-# Russian come with their dubbed voices and movies where the server has the
-# language packs; Russian, Portuguese and Polish take their text from them
-# too.  [NFSU2_LANGUAGE]
+# (Brazil's), polish or turkish.  French, German, Italian, Spanish, Japanese
+# and Russian come with their dubbed voices and movies where the server has
+# the language packs; Russian, Portuguese, Polish and Turkish take their text
+# from them too.  [NFSU2_LANGUAGE]
 #language = english
 
 # The movies' subtitles: the PSA, the tutorials and the story, in every
@@ -226,7 +226,9 @@ export const TEMPLATE = `# NFSU2 settings, read at every launch.
 #quit_grace = 10
 
 # Seed registry.txt with the game's highest graphics settings on first launch
-# (native-resolution row).  off = let the game run its own first-run hardware
+# (native-resolution row; a phone's without car and road reflections, motion
+# blur, depth of field, overbright and bleach bypass, which the game's Options,
+# Display turn back on).  off = let the game run its own first-run hardware
 # check instead.  Delete registry.txt (a fresh backup without it) to start
 # over.  [NFSU2_SEED_REGISTRY]
 #seed_registry = on
@@ -292,9 +294,9 @@ export const TEMPLATE = `# NFSU2 settings, read at every launch.
 # work.  Cutscenes stay at 30 fps in every mode.  [NFSU2_FPS]
 #fps = auto
 # Fixes for subsystems that count frames: default (all above 60 fps, none
-# at 60, ticks,particles,rain at 30), all, none, or a list of
-# ticks,timer,particles,trail,audio,rtf,rain (a leading '-' removes one,
-# e.g. default,-audio).  [NFSU2_HFR_FIX]
+# at 60, ticks,particles,rain,spinners at 30), all, none, or a list of
+# ticks,timer,particles,trail,audio,rtf,rain,spinners (a leading '-' removes
+# one, e.g. default,-audio).  [NFSU2_HFR_FIX]
 #hfr_fixes = default
 # Length factor of the NOS / streak trail.  [NFSU2_NOS_TRAIL_LEN]
 #nos_trail_length = 1.0
@@ -387,7 +389,8 @@ export const TEMPLATE = `# NFSU2 settings, read at every launch.
 #roam_discovery = on
 # Largest group: you and the players you exchange cars with at once (2 to
 # 33; the server picks the nearest), and other players' cars shown at once
-# (0 to 32, the nearest).  [NFSU2_ROAM_MAX_PLAYERS, NFSU2_ROAM_MAX_CARS]
+# (16, 20, 24, 28 or 32, the nearest; phones start at 16, tablets at 24).
+# [NFSU2_ROAM_MAX_PLAYERS, NFSU2_ROAM_MAX_CARS]
 #roam_max_players = 33
 #roam_max_cars = 32
 # on = the other players' cars are solid: drawn where they are now, and one
@@ -495,7 +498,7 @@ function listOk(v: string, words: readonly string[], minus: boolean): boolean {
   const toks = v.split(/[, \t]+/).filter(Boolean);
   return toks.length > 0 && toks.every(t => words.includes(lower(minus && t[0] === '-' ? t.slice(1) : t)));
 }
-const FIX_WORDS = ['default', 'all', 'none', 'ticks', 'timer', 'particles', 'trail', 'audio', 'rtf', 'rain'];
+const FIX_WORDS = ['default', 'all', 'none', 'ticks', 'timer', 'particles', 'trail', 'audio', 'rtf', 'rain', 'spinners'];
 const PART_WORDS = ['all', 'world', 'signs', 'cars', 'garage', 'sky', 'effects', 'frontend', 'hud', 'other'];
 /** sscanf %u: strtoull's value (saturated), stored into a 32-bit unsigned */
 const scanU32 = (d: string) => { let x = BigInt(d); const max = (1n << 64n) - 1n; if (x > max) x = max; return Number(x & 0xFFFFFFFFn); };
@@ -533,7 +536,7 @@ const KIND_TEXT: Partial<Record<Kind, string>> = {
   path: N('a folder (printable, under 1024 bytes)'),
   text: N('text of 1 to 63 bytes without control characters'),
   wxh: N('<width>x<height> (320 to 16384 each)'),
-  fixes: N('default, all, none or a list of ticks, timer, particles, trail, audio, rtf, rain (-name removes one)'),
+  fixes: N('default, all, none or a list of ticks, timer, particles, trail, audio, rtf, rain, spinners (-name removes one)'),
   ifname: N('a network interface name (letters and digits, e.g. en0)'),
   ipv4: N('an IPv4 address a.b.c.d'),
   mac: N('xx:xx:xx:xx:xx:xx (hex, not all zero)'),

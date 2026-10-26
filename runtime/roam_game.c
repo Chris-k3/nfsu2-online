@@ -117,6 +117,7 @@
 #define G_PARTOWNERS    0x008a1cb8u   /* CarPart byte +7 -> owner (car type) hash table */
 #define G_CARPARTDB     0x008a2b68u
 #define G_CARLOADER     0x008a3288u   /* entries on +0x58, handle at entry +0x123C */
+#define G_RIDEPOOL      0x008a1d00u   /* bSlotPool* of its entries: +0x18 in use, +0x2C entries (0x43CD10: all taken) */
 #define G_CARPOOL_KB    0x007fa9d4u   /* free-roam "Cars" pool size (KB), read at the track load */
 #define CARPOOL_KB_GAME 11000         /* its size in the game */
 #define CARPOOL_KB      48000         /* free roam's (NFSU2_ROAM_CARPOOL_KB) */
@@ -1318,8 +1319,58 @@ static void restore(CPU *c, int k){
  * on with it.  So it runs only with the loader idle, as the game's own purge
  * does (0x63AE70 services the loader until +0x14 is 0); busy: the next frame. */
 #define POOL_NEED (3600u * 1024u)
+/* Room among the loader's ride entries (RIDE_ENTRIES) too.  An unloaded
+ * ride keeps its entry until a purge, and the game purges only in Load
+ * (0x63AE70), once every entry is taken -- after servicing the loader until
+ * it is idle, and each step's callback goes straight on to the next load,
+ * so the frame waited for the load under way and all those queued behind
+ * it.  With friends coming and going all the time (the hub relinks as the
+ * player drives), about 128 rides in, every load was a 30-530 ms frame (a
+ * crowded 2026-10-26 session: none before the 128th load since the crib,
+ * 95 of the 410 after).  So the unused entries go here, with the loader
+ * idle, before they run out: one a frame (rides_tidy), two before a load.
+ * A purge takes ~0.5 ms (a ride's models out): never a batch (20 at once
+ * were a 6-16 ms frame).  RIDES_FREE stay free for a crowd arriving at once
+ * (a jump: 32 loads queued while the old rides are still held; with only
+ * 16 free the rest waited for the loader one by one, all 32 cars shown
+ * after 4.1 s instead of 3.0), and two at the least: this load's and one
+ * for a load of the game's own (traffic).  Busy and short of those: the
+ * next frame. */
+#define RIDES_FREE      40
+#define RIDES_STEP      2
+static struct { int n; int64_t us; } g_rides_out;
+static void rides_out(CPU *c, uint32_t p, int most){
+    uint32_t n = MR32(p + 0x2cu);
+    if (MR32(p + 0x18u) + RIDES_FREE <= n || rd32(G_CARLOADER + LOADER_BUSY)) return;
+    int k = 0;
+    int64_t t0 = roam_plat_now_us();
+    while (MR32(p + 0x18u) + RIDES_FREE > n && k < most && (gcall1(c, FN_LOADER_PURGE, G_CARLOADER, 0) & 0xffu)) k++;
+    g_rides_out.n += k; g_rides_out.us += roam_plat_now_us() - t0;
+    if (g_rides_out.n >= 50){
+        rlog("[roam] f=%ld car loader: %d unused rides out (%.1f ms in all), %u of %u entries in use\n", rh_frame(), g_rides_out.n,
+             g_rides_out.us / 1000.0, MR32(p + 0x18u), n);
+        g_rides_out.n = 0; g_rides_out.us = 0;
+    }
+}
+static void rides_tidy(CPU *c){
+    uint32_t p = rd32(G_RIDEPOOL);
+    if (ok(p, 0x30)) rides_out(c, p, 1);
+}
+static int ride_room(CPU *c){
+    uint32_t p = rd32(G_RIDEPOOL);
+    if (!ok(p, 0x30)) return 1;
+    uint32_t n = MR32(p + 0x2cu);
+    rides_out(c, p, RIDES_STEP);
+    if (MR32(p + 0x18u) + 2 <= n) return 1;
+    static long said;
+    if (!said || rh_frame() - said > 1200){ said = rh_frame();
+        rlog("[roam] f=%ld car loader: %u of %u entries taken, the loader %s: loads wait\n", rh_frame(), MR32(p + 0x18u), n,
+             rd32(G_CARLOADER + LOADER_BUSY) ? "busy" : "holding no unused ride"); }
+    return 0;
+}
 static struct { uint32_t id; long next; } g_memnote[RC_TABLE];
 static int pool_room(CPU *c, const Slot *s, const char *car /* 0: a car of our own */){
+    if (!ride_room(c)) return 0;
     if (pool_free() >= POOL_NEED) return 1;
     if (rd32(G_CARLOADER + LOADER_BUSY)) return 0;
     int n = 0;
@@ -3432,6 +3483,11 @@ static void spots_read(CPU *c, int64_t host){
 #define MP_LATE_US      30000000      /* ...but taken this long after it was sent, still in (a connection seconds behind) */
 #define MP_AWAY_US      3000000       /* a player of ours gone from free roam or the start this long is out (a hitch is not) */
 #define MP_ALONE_US     (300ll * 1000000)   /* a lobby nobody joins closes after this (NFSU2_ROAM_LOBBY_ALONE_S: tests) */
+/* a lobby with others in it whose host made no input this long closes (NFSU2_ROAM_LOBBY_IDLE_S: tests): a host gone
+ * from the keys kept a full lobby, and the spot, for good (a player's report, 2026-10-26); its last MP_IDLE_WARN_US
+ * (at most half of it) every panel of the lobby counts down */
+#define MP_IDLE_US      (120ll * 1000000)
+#define MP_IDLE_WARN_US 30000000
 #define MP_STALE_US     3000000       /* in free roam this long with the trip not over: it is over (mprace_end_in_roam) */
 #define MP_NOTE_US      5000000
 /* a career with no car of its own yet (a new one's prologue, mprace_car_ok) neither joins nor opens a lobby: the
@@ -3440,7 +3496,8 @@ static void spots_read(CPU *c, int64_t host){
 #define MP_SEEN         16
 enum { MP_IDLE, MP_HOST, MP_ASKED, MP_IN, MP_COUNT, MP_TRIP };
 static const char *const mp_st[] = { "idle", "hosting", "asked to join", "in a lobby", "counting down", "on the trip" };
-typedef struct { uint32_t id, host, race; float x, y; uint8_t n, max, state; uint32_t ids[RC_LOBBY_MAX]; int64_t heard; } MpLobby;
+/* away_s: its host seems away (rc_lobby): the lobby closes in this many s (0: not) */
+typedef struct { uint32_t id, host, race; float x, y; uint8_t n, max, state, away_s; uint32_t ids[RC_LOBBY_MAX]; int64_t heard; } MpLobby;
 static struct {
     int      st;
     MpLobby  l;                                  /* ours (hosting) or the one we are in */
@@ -3453,6 +3510,10 @@ static struct {
     int64_t  alone_at;                           /* hosting: since when nobody else is in it (0: someone is) */
     int64_t  roam_at;                            /* on the trip: since when in free roam with it not over (0: not) */
     int64_t  alone_us;                           /* MP_ALONE_US, or the test's */
+    int64_t  input_at;                           /* hosting: our last input (mp_idle; alone: now) */
+    uint32_t acts;                               /* ...the game's actions held last frame */
+    int64_t  said_at;                            /* our last quick chat pick (say_frame) */
+    int64_t  idle_us;                            /* MP_IDLE_US, or the test's */
     uint32_t asked_host, asked_id; int64_t asked_at;   /* the lobby we last sent a JOIN to (its host, its id), and when */
     char     names[RC_LOBBY_MAX][RC_NAME_MAX + 1];   /* on the trip: the lobby's players' names (their links end in the menus) */
     char     lan[RC_LOBBY_MAX][13];              /* ...and their LAN names (lan_names), the race's results' */
@@ -3498,7 +3559,8 @@ static void mp_note(int64_t host, const char *t){
 }
 static void mp_to(int st, int64_t host){
     if (st != g_mp.st) rlog("[roam] f=%ld race lobby %08x: %s -> %s\n", rh_frame(), g_mp.l.id, mp_st[g_mp.st], mp_st[st]);
-    if (st != g_mp.st) g_mp.alone_at = g_mp.roam_at = 0;
+    if (st != g_mp.st){ g_mp.alone_at = g_mp.roam_at = 0; g_mp.input_at = host; }
+    if (st != g_mp.st && g_mp.st == MP_HOST) g_mp.l.away_s = 0;      /* (the countdown's adverts: not away) */
     g_mp.st = st; g_mp.since = host;
     if (st == MP_IDLE) memset(&g_mp.l, 0, sizeof g_mp.l);
 }
@@ -3524,7 +3586,7 @@ static const char *mp_name(uint32_t id){
 static void mp_send_of(const MpLobby *l, uint8_t op, uint8_t arg, uint32_t to){
     rc_lobby m; memset(&m, 0, sizeof m);
     m.op = op; m.arg = arg; m.to = to; m.lobby = l->id; m.race = MR32(l->race + 8u);
-    m.max = l->max; m.state = l->state; m.n = l->n;
+    m.max = l->max; m.state = l->state; m.n = l->n; m.away_s = op == RC_LOBBY_ADVERT ? l->away_s : 0;
     m.x = (int16_t)(l->x < -32767.f ? -32767.f : l->x > 32767.f ? 32767.f : l->x);
     m.y = (int16_t)(l->y < -32767.f ? -32767.f : l->y > 32767.f ? 32767.f : l->y);
     if (op == RC_LOBBY_START){ int64_t t = (g_mp.start_at - roam_plat_now_us()) / 1000; m.t_ms = (uint16_t)(t < 0 ? 0 : t > 60000 ? 60000 : t); }
@@ -3657,8 +3719,11 @@ static void mp_recv(int64_t host, uint32_t from, const rc_lobby *m){
         }
         if (!l) l = mp_seen(from, 1);
         l->id = m->lobby; l->host = from; l->race = r; l->x = m->x; l->y = m->y; l->n = m->n; l->max = m->max; l->state = m->state;
+        l->away_s = m->op != RC_LOBBY_ADVERT ? 0 : m->away_s > MP_IDLE_WARN_US / 1000000 ? MP_IDLE_WARN_US / 1000000 : m->away_s;
         memcpy(l->ids, m->ids, sizeof l->ids); l->heard = host;
         if ((g_mp.st == MP_ASKED || g_mp.st == MP_IN || g_mp.st == MP_COUNT) && g_mp.l.host == from && g_mp.l.id == m->lobby){
+            if (l->away_s && !g_mp.l.away_s) rlog("[roam] f=%ld race lobby %08x: %s seems away, it closes in %d s\n", rh_frame(), l->id, mp_name(from), l->away_s);
+            if (!l->away_s && g_mp.l.away_s) rlog("[roam] f=%ld race lobby %08x: %s is back\n", rh_frame(), l->id, mp_name(from));
             g_mp.l = *l;
             int in = mp_in(l, self);
             if (g_mp.st == MP_ASKED && in){ g_mp.joined++; mp_to(MP_IN, host); }
@@ -3703,7 +3768,8 @@ static void mp_recv(int64_t host, uint32_t from, const rc_lobby *m){
     case RC_LOBBY_CLOSE:
         mp_forget(from);
         if ((g_mp.st == MP_ASKED || g_mp.st == MP_IN || g_mp.st == MP_COUNT) && from == g_mp.l.host && m->lobby == g_mp.l.id){
-            char t[TAG_DUEL_MAX]; snprintf(t, sizeof t, "%s called off the race", mp_name(from));
+            char t[TAG_DUEL_MAX];
+            snprintf(t, sizeof t, g_mp.l.away_s ? "%s seemed away: the race is called off" : "%s called off the race", mp_name(from));
             mp_note(host, t); mp_to(MP_IDLE, host);
         }
         return;
@@ -3793,6 +3859,26 @@ static void mp_away(int64_t host){
         g_mp.tx_at = 0;
     }
 }
+/* hosting: 1 when we made no input for g_mp.idle_us with others in the lobby (the clock waits while we are alone:
+ * MP_ALONE_US is that lobby's end).  Input: the game's actions changing (keys, a pad's buttons and stick), the car
+ * moving (while the world runs: paused its velocity is the last one), a quick chat pick.  Its last MP_IDLE_WARN_US
+ * goes out in the adverts (away_s), for every panel of the lobby */
+static int mp_idle(int64_t host, int world_runs){
+    uint32_t acts = rd32(G_ACTIONS);
+    float v = rc_sqrtf(g_lv[0] * g_lv[0] + g_lv[1] * g_lv[1] + g_lv[2] * g_lv[2]);
+    int input = acts != g_mp.acts || (world_runs && v >= IDLE_MPS) || g_mp.said_at > g_mp.input_at;
+    g_mp.acts = acts;
+    if (g_mp.l.away_s && input) rlog("[roam] f=%ld race lobby %08x: input from us again: it stays\n", rh_frame(), g_mp.l.id);
+    if (input || g_mp.l.n < 2) g_mp.input_at = host;
+    int64_t idle = host - g_mp.input_at, warn = g_mp.idle_us / 2 < MP_IDLE_WARN_US ? g_mp.idle_us / 2 : MP_IDLE_WARN_US;
+    if (idle >= g_mp.idle_us) return 1;
+    int s = idle < g_mp.idle_us - warn ? 0 : (int)((g_mp.idle_us - idle + 999999) / 1000000);
+    if (s && !g_mp.l.away_s) rlog("[roam] f=%ld race lobby %08x: no input from us for %.0f s: it closes in %d s\n", rh_frame(), g_mp.l.id,
+                                  (double)idle / 1e6, s);
+    if (s != g_mp.l.away_s) g_mp.tx_at = 0;                          /* the panels at once (and each second) */
+    g_mp.l.away_s = (uint8_t)s;
+    return 0;
+}
 static void mp_ui_frame(CPU *c, int64_t host, int in_roam, int press, const MpSpot *sp);
 /* per frame */
 static void mp_frame(CPU *c, int64_t host, int in_roam, int world_runs, const uint32_t *from, const rc_lobby *in, int nin){
@@ -3865,6 +3951,7 @@ static void mp_frame(CPU *c, int64_t host, int in_roam, int world_runs, const ui
             }
         } else g_mp.alone_at = 0;
         mp_away(host);
+        if (mp_idle(host, world_runs)){ mp_close(host, RC_LL_GONE, "You seemed away: the lobby is closed"); break; }
         if (press && g_mp.l.n >= 2){
             g_mp.l.state = RC_LS_STARTING; g_mp.start_at = host + MP_COUNT_US;
             mp_to(MP_COUNT, host);
@@ -3905,6 +3992,7 @@ static int mp_line(int64_t host, char *tx, int n){
     switch (g_mp.st){
     case MP_HOST:
         if (g_mp.l.n < 2) snprintf(tx, (size_t)n, "Multiplayer %s: waiting for players (drive away to call it off)", race_kind(g_mp.l.race));
+        else if (g_mp.l.away_s) snprintf(tx, (size_t)n, "You seem away: the lobby closes in %d s unless you press a key", g_mp.l.away_s);
         else snprintf(tx, (size_t)n, "Multiplayer %s: %d of %d players. Press Enter to start", race_kind(g_mp.l.race), g_mp.l.n, g_mp.l.max);
         return 1;
     case MP_ASKED:
@@ -3912,7 +4000,8 @@ static int mp_line(int64_t host, char *tx, int n){
         return 1;
     case MP_IN:
         snprintf(nm, sizeof nm, "%s", mp_name(g_mp.l.host));
-        snprintf(tx, (size_t)n, "%s's %s: %d of %d players. Waiting for %s to start", nm, race_kind(g_mp.l.race), g_mp.l.n, g_mp.l.max, nm);
+        if (g_mp.l.away_s) snprintf(tx, (size_t)n, "%s seems away: the lobby closes in %d s", nm, g_mp.l.away_s);
+        else snprintf(tx, (size_t)n, "%s's %s: %d of %d players. Waiting for %s to start", nm, race_kind(g_mp.l.race), g_mp.l.n, g_mp.l.max, nm);
         return 1;
     case MP_COUNT: {
         int64_t s = (g_mp.start_at - host + 999999) / 1000000;
@@ -3958,9 +4047,10 @@ static int mp_busy(void){
  * sent when it changes ("{}": none):
  *   v      "spot" a multiplayer-only spot: Enter opens a lobby (why: the reason it is not open);
  *          "join" a lobby here to join; "full" the lobby here is full, Enter opens another;
- *          "lobby" ours, or the one we are in (st: host, asked, in, count; t: the countdown's seconds);
+ *          "lobby" ours, or the one we are in (st: host, asked, in, count; t: the countdown's seconds; away: its host
+ *          seems away, the seconds until it closes);
  *          "trip" the way to the race and back (step: where it is); "note" a message (text)
- *   kind, track, laps   the race; names: the lobby's players, the host first; me: our place (-1: none); max */
+ *   kind, track, laps, stage   the race; names: the lobby's players, the host first; me: our place (-1: none); max */
 /* a track's name in the game's language, as UTF-8 (discord.c's track_name): TRACK_NAME_<n>, or
  * REVERSE_TRACK_NAME_<n>, in the game's text table ({hash, text} sorted by hash), for a track of its list */
 #define G_TRACKS        0x00883da0u   /* TrackInfo[], 0x128 bytes: +0x8a the int16 number */
@@ -4016,13 +4106,15 @@ static void js_val(MpJs *j, const char *v){
 static void js_str(MpJs *j, const char *k, const char *v){ js_key(j, k); js_val(j, v); }
 static void js_int(MpJs *j, const char *k, int v){ char t[16]; snprintf(t, sizeof t, "%d", v); js_key(j, k); js_raw(j, t); }
 /* the race: its kind, track and laps (a LAN race takes at least 2, Street X 4, as mprace.c sets them; a downhill
- * drift, 1 lap in the career, is one run and shows none, as a sprint) */
+ * drift, 1 lap in the career, is one run and shows none, as a sprint), its career stage (a lobby races its host's
+ * stage's race at the spot, or the last won there: spot_of) */
 static void js_race(MpJs *j, uint32_t r){
     static uint32_t cr; static char tn[64];
     if (!r) return;
     if (r != cr){ cr = r; track_name(MR16(r + 0x18u), MR8(r + 0x1au) & 1, tn, sizeof tn); }
     js_str(j, "kind", race_kind(r));
     if (tn[0]) js_str(j, "track", tn);
+    if (MR8(r + 0x37u) >= 1u && MR8(r + 0x37u) <= 9u) js_int(j, "stage", MR8(r + 0x37u));
     uint8_t ty = MR8(r + 0xfu); int laps = MR8(r + 0x1bu), lo = ty == 2 ? 4 : 2;
     if (MR8(r + 0x34u) != 2u && (ty == 0 || ty == 2 || ty == 5) && laps > 1) js_int(j, "laps", laps < lo ? lo : laps > 10 ? 10 : laps);
 }
@@ -4075,6 +4167,7 @@ static void mp_panel(int64_t host, int in_roam){
             int64_t s = (g_mp.alone_at + g_mp.alone_us - host + 999999) / 1000000;
             if (s <= 60) js_int(&j, "closes", (int)(s < 0 ? 0 : s));
         }
+        if ((g_mp.st == MP_HOST || g_mp.st == MP_IN) && g_mp.l.away_s) js_int(&j, "away", g_mp.l.away_s);
     } else if (hud){
         const MpSpot *sp = mp_spot_here();
         MpLobby *l = mp_joinable();
@@ -4110,9 +4203,8 @@ static void mp_panel(int64_t host, int in_roam){
  * Multiplayer (Join) or Cancel.  Both are the game's generic in-game dialog
  * (DialogInterface 0x558750: two buttons, a printf text) over the screen
  * they come from; the buttons' labels are strings of our own, added to the
- * game's language table (a sorted {hash, text} array, [0x8383D8] x
- * [0x8383D0], which the game only points into its language chunk: 0x5125B0
- * loads it, 0x4FFAE0 clears it), so the dialog looks them up as its own.
+ * game's language table (language.c language_add_text), so the dialog looks
+ * them up as its own.
  * The answer: a press writes the button's message to the dialog's +0x50
  * (0x54C1BC); on its next update the dialog goes and sends it to the
  * screen it was over (0x5511E0 -> 0x51CDF0): to the card, whose handler is
@@ -4122,8 +4214,6 @@ static void mp_panel(int64_t host, int in_roam){
 void dispatch_patch(uint32_t a, void (*f)(CPU *));
 int career_fe_active(const char *name);       /* career.c */
 static int career_card_up(void){ return career_fe_active("UI_EngageRaceDialog.fng"); }
-#define G_LANG          0x008383d8u   /* the language table: {hash, char*} sorted by hash, [0x8383D0] entries */
-#define G_LANG_N        0x008383d0u
 #define FN_DIALOG2      0x00558750u   /* cdecl (from package, dialog package, label1, label2, msg1, msg2, back msg, first, fmt, ...) */
 #define G_DLG_ID        0x00838974u   /* the dialog up now (0 none) */
 #define G_FEMGR_LIST    0x008637b4u   /* the FE manager's screens: n = [it]; until n == it: screen [n - 4 + 0x14], n = [n] */
@@ -4141,7 +4231,6 @@ static int career_card_up(void){ return career_fe_active("UI_EngageRaceDialog.fn
 static const char *const mp_lang_name[MP_LANG_N] = { "MPRACE_SOLO", "MPRACE_MULTI", "MPRACE_JOIN", "MPRACE_CANCEL" };
 static const char *const mp_lang_text[MP_LANG_N] = { "Solo", "Multiplayer", "Join", "Cancel" };
 static uint32_t mp_lang_hash[MP_LANG_N];
-static uint32_t g_lang_mine;                  /* our copy of the table, while the game's pointer is it */
 enum { MPD_NONE, MPD_CARD };
 static struct {
     int      dlg;                             /* MPD_*: the question we asked, up now */
@@ -4154,30 +4243,14 @@ static struct {
 #define MSG_MP_SOLO     0x4d505301u   /* our answers (not the game's messages: its screens ignore them) */
 #define MSG_MP_MULTI    0x4d505302u
 #define MSG_MP_BACK     0x4d505303u
-/* our labels in the game's language table, again whenever it loads another */
+/* our labels in the game's language table (language.c: again whenever it loads another) */
+uint32_t language_add_text(const char *name, const char *text);
+uint32_t language_text(uint32_t hash);
+void language_texts_frame(CPU *c);
 static void mp_lang(CPU *c){
-    uint32_t t = rd32(G_LANG), n = rd32(G_LANG_N);
-    if (!t || !n || t == g_lang_mine || n > 100000u || !ok(t, n * 8u)) return;
-    for (int i = 0; i < MP_LANG_N; i++) mp_lang_hash[i] = bhash(mp_lang_name[i]);
-    uint32_t strs = 0; for (int i = 0; i < MP_LANG_N; i++) strs += (uint32_t)strlen(mp_lang_text[i]) + 1u;
-    uint32_t sz = (n + MP_LANG_N) * 8u + strs, mem = rh_call(c, FN_MALLOC, 0, 0, 1, &sz);
-    if (!mem){ rlog("[roam] guest malloc failed: no race lobby labels\n"); return; }
-    /* our strings after the entries; then a merge, both sorted (unsigned, as 0x4FF9D0 compares) */
-    uint32_t sp = mem + (n + MP_LANG_N) * 8u, sa[MP_LANG_N];
-    for (int i = 0; i < MP_LANG_N; i++){ sa[i] = sp; gstr(sp, mp_lang_text[i], 64); sp += (uint32_t)strlen(mp_lang_text[i]) + 1u; }
-    int ord[MP_LANG_N]; for (int i = 0; i < MP_LANG_N; i++) ord[i] = i;
-    for (int i = 1; i < MP_LANG_N; i++) for (int j = i; j > 0 && mp_lang_hash[ord[j - 1]] > mp_lang_hash[ord[j]]; j--){ int x = ord[j]; ord[j] = ord[j - 1]; ord[j - 1] = x; }
-    uint32_t o = 0, k = 0;
-    for (uint32_t i = 0; i <= n; i++){
-        uint32_t h = i < n ? MR32(t + 8u * i) : 0xffffffffu;
-        while (k < MP_LANG_N && mp_lang_hash[ord[k]] <= h){
-            if (mp_lang_hash[ord[k]] == h && i < n){ k++; continue; }              /* the game has the label already */
-            MR32(mem + 8u * o) = mp_lang_hash[ord[k]]; MR32(mem + 8u * o + 4u) = sa[ord[k]]; o++; k++;
-        }
-        if (i < n){ MR32(mem + 8u * o) = h; MR32(mem + 8u * o + 4u) = MR32(t + 8u * i + 4u); o++; }
-    }
-    MR32(G_LANG) = mem; MR32(G_LANG_N) = o; g_lang_mine = mem;
-    rlog("[roam] race lobby labels added to the game's %u strings\n", n);
+    if (mp_lang_hash[0]) return;
+    for (int i = 0; i < MP_LANG_N; i++) mp_lang_hash[i] = language_add_text(mp_lang_name[i], mp_lang_text[i]);
+    language_texts_frame(c);                  /* in the table at once: a question may come this frame */
 }
 /* a two-button question over package `from` (a name in guest memory).  The
  * dialog's text is a format the game's vsprintf (0x43FBC0) fills in, and ours
@@ -4587,6 +4660,9 @@ static void say_frame(int64_t host, int in_roam, uint8_t st){
     if (!g_s.conf.say) return;
     int pick = roam_plat_say_pick();
     if (g_say.test_pick >= 0){ pick = g_say.test_pick; g_say.test_pick = -1; }
+#if MPRACES
+    if (pick >= 0) g_mp.said_at = host;                 /* a host who talks is there (mp_idle) */
+#endif
     if (pick >= 0) say_send(pick, host, in_roam && st == RC_ST_ROAM && !g_racing);
     uint32_t from; uint8_t ph, sq;
     while (rc_take_say(&g_s, &from, &ph, &sq)) say_recv(from, ph, sq, host, in_roam && !g_racing);
@@ -4672,6 +4748,7 @@ static void init_once(CPU *c){
     O.max_cars = env_int("NFSU2_ROAM_MAX_CARS", MAX_CARS, 0, MAX_CARS);
 #if MPRACES
     g_mp.alone_us = (int64_t)env_int("NFSU2_ROAM_LOBBY_ALONE_S", (int)(MP_ALONE_US / 1000000), 5, 3600) * 1000000;
+    g_mp.idle_us = (int64_t)env_int("NFSU2_ROAM_LOBBY_IDLE_S", (int)(MP_IDLE_US / 1000000), 10, 3600) * 1000000;
 #endif
     /* at most 30: each snapshot goes to up to 32 friends, and 60 tripled what each of them got from that player
      * (the server's port the limit, nfsu2.xyz 2026-10-22) for little they see: they draw a car 100 ms in the past,
@@ -5203,6 +5280,7 @@ void roam_game_frame(CPU *c){
         spots_read(c, host);
 #endif
         g_heavy = 0;
+        rides_tidy(c);
         assign(c, host);
         for (int k = 0; k < NSLOT; k++){
             Slot *s = &g_sl[k];
@@ -5546,9 +5624,9 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
     if (!strcasecmp(sub, "lobby")){
         /* the race lobby we host or are in, and the others heard of */
         char nm[40]; race_name(g_mp.l.race, nm, sizeof nm);
-        rlog("[roam] f=%ld mp lobby: %s, lobby %08x of %s, %s, %d of %d players, state %u; trip phase %d; %d other lobbies heard of; "
+        rlog("[roam] f=%ld mp lobby: %s, lobby %08x of %s, %s, %d of %d players, state %u, away %u; trip phase %d; %d other lobbies heard of; "
              "opened %u, joined %u, trips %u\n", f, mp_st[g_mp.st], g_mp.l.id, g_mp.l.host ? mp_name(g_mp.l.host) : "-", nm[0] ? nm : "-",
-             g_mp.l.n, g_mp.l.max, g_mp.l.state, mprace_phase(), g_mp.nseen, g_mp.opened, g_mp.joined, g_mp.trips);
+             g_mp.l.n, g_mp.l.max, g_mp.l.state, g_mp.l.away_s, mprace_phase(), g_mp.nseen, g_mp.opened, g_mp.joined, g_mp.trips);
         for (int i = 0; i < g_mp.nseen; i++){
             const MpLobby *l = &g_mp.seen[i];
             race_name(l->race, nm, sizeof nm);
@@ -5579,7 +5657,7 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
     if (!strcasecmp(sub, "ui")){
         /* the pop-ups: the dialog up, the FE manager's screens and their classes */
         rlog("[roam] f=%ld mp ui: dialog %08x, ours %d (race %08x, answer %08x), asked %u, solo %u, multiplayer %u; labels %s\n", f, rd32(G_DLG_ID),
-             g_mpd.dlg, g_mpd.race, g_mpd.msg, g_mpd.asked, g_mpd.solo, g_mpd.multi, g_lang_mine ? "in" : "not in");
+             g_mpd.dlg, g_mpd.race, g_mpd.msg, g_mpd.asked, g_mpd.solo, g_mpd.multi, mp_lang_hash[0] && language_text(mp_lang_hash[0]) ? "in" : "not in");
         uint32_t n = rd32(G_FEMGR_LIST);
         for (int k = 0; n && n != G_FEMGR_LIST && k < 32; k++, n = rd32(n)){
             uint32_t sc = rd32(n - 4u + 0x14u);
@@ -5607,6 +5685,18 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
         if (have >= (want ? want : 1)){ rlog("[roam] f=%ld mp waitlobby %d satisfied after %ld frames (%s)\n", f, want, f - *wait_start, mp_st[g_mp.st]);
                                         *wait_start = -1; return 1; }
         if (tmo && f - *wait_start >= tmo){ rlog("[roam] f=%ld mp waitlobby %d TIMEOUT (%s, %d)\n", f, want, mp_st[g_mp.st], have); *wait_start = -1; return 1; }
+        return 0;
+    }
+    if (!strcasecmp(sub, "waitaway") || !strcasecmp(sub, "waitidle")){
+        /* "mp waitaway [tmo]": the lobby we host or are in counts down for its host's being away (mp_idle);
+         * "mp waitidle [tmo]": we are in no lobby */
+        int away = !strcasecmp(sub, "waitaway"); long tmo = a1[0] ? atol(a1) : 0;
+        if (*wait_start < 0) *wait_start = f;
+        if (away ? (g_mp.st == MP_HOST || g_mp.st == MP_IN) && g_mp.l.away_s : g_mp.st == MP_IDLE){
+            rlog("[roam] f=%ld mp %s satisfied after %ld frames (%s, away %u): %s\n", f, sub, f - *wait_start, mp_st[g_mp.st], g_mp.l.away_s, g_mp.note);
+            *wait_start = -1; return 1;
+        }
+        if (tmo && f - *wait_start >= tmo){ rlog("[roam] f=%ld mp %s TIMEOUT (%s)\n", f, sub, mp_st[g_mp.st]); *wait_start = -1; return 1; }
         return 0;
     }
 #endif

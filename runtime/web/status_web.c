@@ -143,15 +143,20 @@ static void roam_state(void){
     double v[2] = { (double)roam_game_cars(), n++ % 30 ? last[1] : (double)roam_game_friends() };
     if (v[0] != last[0] || v[1] != last[1]){ last[0] = v[0]; last[1] = v[1]; host_status_set_n(slot, v, 2); }
 }
+/* "sms": the text message of ours (sms.c) the game has in its inbox this
+ * game, 0 none, so the page asks for it no more (web/src/app/playtime.ts) */
+int sms_delivered(void);
 void status_web_frame(void){
-    static int slot = -2, last = -1, rslot = -2, rlast = -1, pslot = -2, plast = -1;
-    if (slot == -2){ slot = host_status_slot("drive"); rslot = host_status_slot("rate"); pslot = host_status_slot("pause"); }
+    static int slot = -2, last = -1, rslot = -2, rlast = -1, pslot = -2, plast = -1, sslot = -2, slast = -1;
+    if (slot == -2){ slot = host_status_slot("drive"); rslot = host_status_slot("rate"); pslot = host_status_slot("pause"); sslot = host_status_slot("sms"); }
     int v = drive_state();
     if (v != last && slot >= 0){ last = v; host_status_set(slot, v); }
     int r = hfr_rate_now();
     if (r != rlast && rslot >= 0){ rlast = r; host_status_set(rslot, r); }
     int p = pause_state();
     if (p != plast && pslot >= 0){ plast = p; host_status_set(pslot, p); }
+    int m = sms_delivered();
+    if (m != slast && sslot >= 0){ slast = m; host_status_set(sslot, m); }
     roam_state();
 }
 
