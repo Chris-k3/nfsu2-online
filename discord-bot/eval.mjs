@@ -20,7 +20,7 @@ const file = args[0];
 if (!file) { console.error('usage: eval.mjs <cases.json> [--limit N] [--only id,id] [--staff] [--forum F] [--budget USD]'); process.exit(2); }
 
 const env = process.env;
-const model = env.BOT_MODEL || 'claude-sonnet-5-5', effort = env.BOT_EFFORT || 'high';
+const model = env.BOT_MODEL || 'claude-sonnet-5-5', effort = env.BOT_EFFORT || 'medium';
 const state = path.resolve(HERE, env.BOT_STATE || 'state');
 fs.mkdirSync(state, { recursive: true });
 const repo = new Repo({

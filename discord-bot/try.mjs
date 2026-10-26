@@ -42,7 +42,7 @@ files.forEach((f, i) => {
 
 try {
   const res = await investigate({
-    client: newClient(), model: env.BOT_MODEL || 'claude-sonnet-5-5', effort: env.BOT_EFFORT || 'high',
+    client: newClient(), model: env.BOT_MODEL || 'claude-sonnet-5-5', effort: env.BOT_EFFORT || 'medium',
     repo, archive, workDir, thread: lines.join('\n'), images, step: s => console.log(`  ${s}`),
   });
   console.log(JSON.stringify(res.verdict, null, 2));

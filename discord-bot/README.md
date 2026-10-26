@@ -10,7 +10,8 @@ and it says something only when it is worth it:
   inline code, and every reply ends with a line saying it is an automated AI reply that may be wrong;
 - **in the staff channel**, a report the developer should act on, with everything needed to start: what happens,
   device, browser and version, the key log lines, the likely cause, the thread's link and its log files and saves.
-  Each report gets a thread: later threads about the same problem (with what they add and their logs) and new logs
+  The part for Claude is a code block of plain text (the thread, the notes, the attached files' names), so Copy Text
+  or a selection takes it without Discord's markup. Each report gets a thread: later threads about the same problem (with what they add and their logs) and new logs
   or pictures posted in any of them go there, and the report counts the threads. Only the thread's followers are
   notified. A forum channel works as the staff channel too: each report, spike alert and daily note is a post.
 
@@ -151,7 +152,7 @@ Run it with `BOT_DRY_RUN=1` for a day. Every reply it would have posted goes to 
 | `BOT_FORUMS` | every forum | forum channel ids to answer in |
 | `BOT_STAFF` | | user or role ids of staff, besides the owner and anyone who can manage threads |
 | `BOT_MODEL` | `claude-sonnet-5-5` | |
-| `BOT_EFFORT` | `high` | `low` … `max`: how much the model thinks and reads before it answers |
+| `BOT_EFFORT` | `medium` | `low` … `max`: how much the model thinks and reads before it answers |
 | `BOT_MIN_CONFIDENCE` | `medium` | answers below this confidence are not posted (questions are) |
 | `BOT_WAIT_S` | `120` | quiet time after the poster's last message before the look (at most 10 minutes after the first) |
 | `BOT_MAX_REPLIES` | `2` | replies per thread |

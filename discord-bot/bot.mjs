@@ -26,7 +26,7 @@ const CFG = {
   staff: list(env.BOT_STAFF),                    // user or role ids, besides the owner and whoever can manage threads
   staffChannel: env.BOT_STAFF_CHANNEL || '',     // where reports for the developer go; empty: nowhere (verdicts.jsonl only)
   model: env.BOT_MODEL || 'claude-sonnet-5-5',
-  effort: env.BOT_EFFORT || 'high',
+  effort: env.BOT_EFFORT || 'medium',
   dryRun: env.BOT_DRY_RUN === '1',
   waitS: Number(env.BOT_WAIT_S || 120),
   maxReplies: Number(env.BOT_MAX_REPLIES || 2),
@@ -333,13 +333,16 @@ async function tellStaff(thread, st, v, post, dirs, posted) {
   const staff = await client.channels.fetch(CFG.staffChannel);
   if (!staff?.isTextBased() && staff?.type !== ChannelType.GuildForum) throw new Error(`${CFG.staffChannel} is not a channel the bot can post in`);
   const did = !post ? 'did not reply' : v.action === 'ask' ? 'asked the poster for more' : 'answered the poster';
-  const dry = post && !posted ? `\n-# Dry run, not posted. The reply:\n${quote(post)}` : '';
+  const dry = post && !posted ? `\n-# Dry run, not posted. The reply:\n${quote(post.slice(0, 600))}` : '';
+  const files = staffFiles(dirs);
+  const where = `"${st.title}" in #${st.forum}${v.category ? ` (${v.category})` : ''}`;
 
   if (reported && !st.staffMsg) {                 // the same problem again: an update in its report's thread
     const th = await reportThread(staff, reported);
     if (th) {
-      await th.send({ content: `**Also reported:** ${link} · ${v.summary}\n${v.notes.trim()}\n-# The bot ${did}.${dry}`.slice(0, 2000),
-        files: staffFiles(dirs), allowedMentions: { parse: [] } });
+      const head = `**Also reported:** ${link} · ${v.summary}`, tail = `-# The bot ${did}.${dry}`;
+      const block = forClaude([`Also reported: ${where}`, `Thread: ${link}`, v.notes.trim()], files, 2000 - head.length - tail.length - 2);
+      await th.send({ content: `${head}\n${block}\n${tail}`, files, allowedMentions: { parse: [] } });
       Object.assign(st, { staffMsg: reported.staffMsg, staffThread: reported.staffThread, reportOf: rootId });
       reported.reports = (reported.reports ?? 1) + 1;
       await countReports(staff, reported);
@@ -363,15 +366,18 @@ async function tellStaff(thread, st, v, post, dirs, posted) {
   const earlier = root && !root.staffMsg ? `\nEarlier: ${linkOf(thread.guildId, rootId)} · ${root.title}` : '';
   const head = `**${v.summary}**\n${link} · ${st.forum} · ${v.category}${earlier}`;
   const tail = `-# The bot ${did}.${dry}`;
-  const body = v.notes.trim().slice(0, Math.max(0, 1900 - head.length - tail.length));
-  const content = `${head}\n${body}\n${tail}`.slice(0, 1900);
+  // room for "Reports: N threads", which countReports adds later
+  const block = forClaude([`Forum report: ${where}`, `Thread: ${link}`,
+    earlier && `Earlier thread about it: "${root.title}": ${linkOf(thread.guildId, rootId)}`, v.notes.trim()],
+    files, 1900 - head.length - tail.length - 2);
+  const content = `${head}\n${block}\n${tail}`;
   const name = (v.summary || st.title).slice(0, 100);
   let m, th;
   if (staff.type === ChannelType.GuildForum) {
-    th = await staff.threads.create({ name, message: { content, files: staffFiles(dirs), allowedMentions: { parse: [] } } });
+    th = await staff.threads.create({ name, message: { content, files, allowedMentions: { parse: [] } } });
     m = { id: th.id };
   } else {
-    m = await staff.send({ content, files: staffFiles(dirs), allowedMentions: { parse: [] } });
+    m = await staff.send({ content, files, allowedMentions: { parse: [] } });
     th = await m.startThread({ name, autoArchiveDuration: 10080 }).catch(e => { console.error(`[bot] report thread: ${e.message}`); return null; });
   }
   Object.assign(st, { staffMsg: m.id, staffThread: th?.id, reports: 1 });
@@ -396,13 +402,22 @@ async function relay(m, st) {
     if (data) files.push({ attachment: data, name: a.name });
   }
   const who = m.author.id === m.channel.ownerId ? 'the poster' : 'a member';
-  const text = m.content.replace(/\s+/g, ' ').slice(0, 400);
-  await th.send({ content: `**New in** ${linkOf(m.guildId, m.channelId)} (${who})${text ? `: ${text}` : ''}`.slice(0, 2000),
-    files, allowedMentions: { parse: [] } });
+  const link = linkOf(m.guildId, m.channelId), head = `**New in** ${link} (${who})`;
+  const block = forClaude([`New in "${m.channel.name}" from ${who}: ${link}`, m.content.trim().slice(0, 1200)], files, 2000 - head.length - 1);
+  await th.send({ content: `${head}\n${block}`, files, allowedMentions: { parse: [] } });
   console.log(`[staff] ${m.channelId}: ${files.length} file(s) from ${who} passed on to its report`);
 }
 
 const quote = s => s.split('\n').map(l => `> ${l}`).join('\n');
+
+/** the part of a staff message to copy to Claude: plain text in a code block, so a selection or Copy Text takes it
+ *  without Discord's markup, with the names of the files attached to the message; at most `max` characters */
+function forClaude(lines, files, max) {
+  const att = files.length ? `\nAttached to this message: ${files.map(f => f.name).join(', ')}` : '';
+  const text = lines.filter(Boolean).join('\n').replace(/```/g, "'''");
+  const room = Math.max(0, max - att.length - 12);
+  return '```text\n' + (text.length > room ? `${text.slice(0, room - 2)} …` : text) + att + '\n```';
+}
 
 const WHY = {
   'new post': 'a new post',
