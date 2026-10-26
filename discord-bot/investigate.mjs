@@ -64,17 +64,40 @@ function opening({ now, recent, threads, thread, images }) {
   ];
 }
 
+/** a tool call in a few words, for the log: search /iphone|ios/ in attachments/, read docs/web/PLAYING.md:520 */
+function brief(name, i) {
+  switch (name) {
+    case 'search': return `search /${i.pattern}/${i.ignore_case ? 'i' : ''} in ${i.path || 'the code'}`;
+    case 'read': return `read ${i.path}:${i.start_line || 1}`;
+    case 'list': return `list ${i.path || '/'}`;
+    case 'git_log': return `git log ${i.range || 'HEAD'}${i.grep ? ` grep /${i.grep}/` : ''}${i.path ? ` -- ${i.path}` : ''}`;
+    case 'git_show': return `git show ${i.rev}${i.patch ? ' with diff' : ''}`;
+    case 'search_threads': return `threads /${i.pattern}/`;
+    case 'discord_search': return `messages /${i.pattern}/ ${i.days} d`;
+    default: return name;
+  }
+}
+/** a tool's result in a few words: how many lines or matches, or the error */
+function gist(out) {
+  if (out?.error) return `error: ${out.error}`;
+  const text = String(out);
+  if (/^(no matches|no commits|no threads|no messages|\(empty\))$/.test(text)) return text;
+  const n = text.split('\n').length;
+  return `${n} line${n === 1 ? '' : 's'}`;
+}
+
 /**
  * client: Anthropic; repo: Repo; archive: Archive|null; workDir: the thread's attachments;
  * thread: its text as built by the bot; images: [{type, data}]; threads: the recent-threads list as text;
- * threadIndex: () => every known thread, for search_threads
+ * threadIndex: () => every known thread, for search_threads; step: (text) => void, told each step as it happens
  * -> { verdict, usage, cost, turns, log }
  */
-export async function investigate({ client, model, effort, repo, archive, workDir, thread, images = [], threads = '', threadIndex }) {
+export async function investigate({ client, model, effort, repo, archive, workDir, thread, images = [], threads = '', threadIndex, step = () => {} }) {
   await repo.sync();
   const tools = new Tools({ repo, workDir, archive, threadIndex });
   const system = await systemBlocks(repo);
   const recent = await repo.recent();
+  step(`code at ${recent.head.split(' ')[0]}, live ${recent.live.split(' ')[0]}${recent.notLive ? `, ${recent.notLive.split('\n').length} commit(s) not live yet` : ''}; asking ${model}`);
   const messages = [{ role: 'user', content: opening({ now: new Date().toISOString().slice(0, 16) + 'Z', recent, threads, thread, images }) }];
   const usage = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
   const log = [];
@@ -96,8 +119,8 @@ export async function investigate({ client, model, effort, repo, archive, workDi
     usage.input += u.input_tokens; usage.output += u.output_tokens;
     usage.cacheWrite += u.cache_creation_input_tokens ?? 0; usage.cacheRead += u.cache_read_input_tokens ?? 0;
 
-    if (res.stop_reason === 'refusal') { log.push(`refused (${res.stop_details?.category ?? 'no category'})`); break; }
-    if (res.stop_reason === 'max_tokens') { log.push('ran out of output tokens'); break; }
+    if (res.stop_reason === 'refusal') { log.push(`refused (${res.stop_details?.category ?? 'no category'})`); step(log.at(-1)); break; }
+    if (res.stop_reason === 'max_tokens') { log.push('ran out of output tokens'); step(log.at(-1)); break; }
     messages.push({ role: 'assistant', content: res.content });
 
     const calls = res.content.filter(b => b.type === 'tool_use');
@@ -106,6 +129,7 @@ export async function investigate({ client, model, effort, repo, archive, workDi
         const out = await tools.run(c.name, c.input);
         const text = typeof out === 'string' ? out : JSON.stringify(out);
         log.push(`${c.name} ${JSON.stringify(c.input)} -> ${text.length} chars${out?.error ? ` (error: ${out.error})` : ''}`);
+        step(`${brief(c.name, c.input)} -> ${gist(out)}`);
         return { type: 'tool_result', tool_use_id: c.id, content: text, ...(out?.error ? { is_error: true } : {}) };
       }));
       const content = [...results];
@@ -115,7 +139,9 @@ export async function investigate({ client, model, effort, repo, archive, workDi
     }
 
     const text = res.content.filter(b => b.type === 'text').map(b => b.text).join('');
-    try { verdict = JSON.parse(text); } catch { log.push(`no JSON verdict: ${text.slice(0, 200)}`); break; }
+    try { verdict = JSON.parse(text); } catch { log.push(`no JSON verdict: ${text.slice(0, 200)}`); step(log.at(-1)); break; }
+    step(`verdict after ${turn} turn${turn === 1 ? '' : 's'}: ${verdict.action}${verdict.escalate ? ' + tell the staff' : ''}` +
+      `${verdict.duplicate_of ? `, same as ${verdict.duplicate_of}` : ''} (${verdict.confidence}): ${verdict.summary}`);
   }
 
   const p = PRICES[model];

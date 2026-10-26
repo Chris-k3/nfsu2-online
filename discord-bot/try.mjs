@@ -43,9 +43,8 @@ files.forEach((f, i) => {
 try {
   const res = await investigate({
     client: newClient(), model: env.BOT_MODEL || 'claude-sonnet-5-5', effort: env.BOT_EFFORT || 'high',
-    repo, archive, workDir, thread: lines.join('\n'), images,
+    repo, archive, workDir, thread: lines.join('\n'), images, step: s => console.log(`  ${s}`),
   });
-  for (const l of res.log) console.log(`  ${l}`);
   console.log(JSON.stringify(res.verdict, null, 2));
   const { post, why } = vet(res.verdict, { minConfidence: env.BOT_MIN_CONFIDENCE || 'medium' });
   console.log(`\n${post ? `--- would post (${why}) ---\n${post}\n---` : `--- would post nothing (${why}) ---`}`);

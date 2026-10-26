@@ -34,11 +34,13 @@ the bot in a thread to have it look anyway.
   and the guide are read from that clone, so a pushed change to them applies within minutes, without a new image or a
   restart. The live version comes from `https://nfsu2.xyz/game.json`.
 - `archive.mjs`: every message of every channel the bot sees, kept 7 days in `state/archive/`. At start the bot reads
-  the forums' threads with posts in the last 6 hours, nothing older: it lists them (titles and first posts) in
+  the forums' threads with posts in the last 24 hours, nothing older: it lists them (titles and first posts) in
   `state/threads.json`, and looks at the ones opened in that time that it never looked at, so a restart misses no post.
 - `eval.mjs`: the bot against past threads (below).
 
-Each look adds one line to `state/verdicts.jsonl`: the verdict with the developer notes, what was posted (or why not),
+`docker compose logs -f` shows each step as it happens: when a post is seen and when its look is due, what the look
+reads (each search and file, and how much it found), the verdict, what was posted, and what went to the staff. Each
+look also adds one line to `state/verdicts.jsonl`: the verdict with the developer notes, what was posted (or why not),
 the tools used, the tokens and the cost.
 
 ## Set up

@@ -41,7 +41,7 @@ const MAX_TEXT = 10 << 20, MAX_IMAGE = 3_500_000, MAX_IMAGES = 4;
 const MAX_UPLOAD = 8 << 20, MAX_UPLOADS = 3;    // files copied into a staff report (Discord takes 10 MB a message)
 const SAVES_ZIP = /^nfsu2-saves-.*\.zip$/i;      // Saves, Download backup: for the developer, not for the model
 const MAX_WAIT_MS = 10 * 60_000;                 // a thread that keeps growing is looked at after 10 minutes anyway
-const STARTUP_MS = 6 * 3600_000;                 // at start, the forums' posts of the last 6 hours, nothing older
+const STARTUP_MS = 24 * 3600_000;                // at start, the forums' posts of the last 24 hours, nothing older
 
 fs.mkdirSync(CFG.state, { recursive: true });
 const STATE_FILE = path.join(CFG.state, 'threads.json');
@@ -89,6 +89,7 @@ function schedule(threadId, why) {
   if (t?.why === 'asked by staff') why = t.why;   // a staff request outlasts the poster's next message
   const first = t?.first ?? now;
   const delay = Math.max(0, Math.min(CFG.waitS * 1000, first + MAX_WAIT_MS - now));
+  if (!t) console.log(`[bot] ${threadId} "${threads[threadId]?.title}": ${why}, a look in ${Math.round(delay / 1000)} s unless more comes`);
   timers.set(threadId, { first, why, timer: setTimeout(() => { timers.delete(threadId); enqueue(threadId, why); }, delay) });
 }
 function enqueue(threadId, why) {
@@ -116,32 +117,41 @@ function underCap() {
 async function look(threadId, why) {
   const thread = await client.channels.fetch(threadId).catch(() => null);
   const st = threads[threadId];
-  if (!thread || !st || !watched(thread) || thread.archived || thread.locked) return;
+  const say = s => console.log(`[look] ${threadId} ${s}`);
+  if (!thread || !st || !watched(thread)) return say('skipped: the thread is gone or not in a watched forum');
+  if (thread.archived || thread.locked) return say('skipped: closed or locked');
   st.guild ??= thread.guildId;
   const byStaff = why === 'asked by staff';
-  if (!byStaff && (st.status === 'staff' || st.replies >= CFG.maxReplies)) return;
-  if (!underCap()) { console.log(`[bot] ${threadId}: skipped, ${CFG.maxPerDay} looks today already`); return; }
+  if (!byStaff && st.status === 'staff') return say('skipped: staff are in the thread');
+  if (!byStaff && st.replies >= CFG.maxReplies) return say(`skipped: ${st.replies} replies already`);
+  if (!underCap()) return say(`skipped: ${CFG.maxPerDay} looks today already`);
 
   const msgs = [...(await thread.messages.fetch({ limit: 100 })).values()].reverse();
   const starter = await thread.fetchStarterMessage().catch(() => null);
   if (starter && !msgs.some(m => m.id === starter.id)) msgs.unshift(starter);
-  if (!byStaff && msgs.some(m => m.author.id !== client.user.id && isStaff(m.member, thread))) { st.status = 'staff'; save(); return; }
+  if (!byStaff && msgs.some(m => m.author.id !== client.user.id && isStaff(m.member, thread))) {
+    st.status = 'staff'; save();
+    return say('skipped: staff are in the thread');
+  }
 
   const workDir = path.join(CFG.state, 'work', threadId), staffDir = `${workDir}-staff`;
   for (const d of [workDir, staffDir]) { fs.rmSync(d, { recursive: true, force: true }); fs.mkdirSync(d, { recursive: true }); }
   const { text, images } = await transcript(thread, msgs.filter(m => !m.system), workDir, staffDir, why);
+  say(`"${st.title}" (${why}): ${msgs.length} message(s), ${fs.readdirSync(workDir).length} file(s), ` +
+    `${fs.readdirSync(staffDir).length} save backup(s), ${images.length} picture(s)`);
 
   day.n++;
   const started = Date.now();
   const res = await investigate({
     client: anthropic, model: CFG.model, effort: CFG.effort, repo, archive, workDir,
-    thread: text, images, threads: recentThreads(threadId), threadIndex: () => threadIndex(threadId),
+    thread: text, images, threads: recentThreads(threadId), threadIndex: () => threadIndex(threadId), step: say,
   });
   const v = res.verdict;
   const { post, why: outcome } = vet(v, { minConfidence: CFG.minConfidence });
   const secs = ((Date.now() - started) / 1000).toFixed(0);
-  console.log(`[bot] ${threadId} "${st.title}" (${why}): ${outcome}${post ? (CFG.dryRun ? ', dry run' : ', posted') : ''}; ` +
-    `${res.turns} turns, ${secs} s${res.cost != null ? `, $${res.cost.toFixed(3)}` : ''}${v ? `; ${v.summary}` : ''}`);
+  say(`done: ${outcome}${post ? (CFG.dryRun ? ', dry run (to the staff channel)' : ', posted in the thread') : ', nothing posted'}; ` +
+    `${res.turns} turns, ${secs} s${res.cost != null ? `, $${res.cost.toFixed(3)}` : ''}`);
+  if (post) say(`reply: ${post.split('\n')[0].slice(0, 160)}`);
 
   if (post && !CFG.dryRun) {
     const lastOp = [...msgs].reverse().find(m => m.author.id === thread.ownerId);
@@ -264,6 +274,7 @@ async function tellStaff(thread, st, v, post, dirs) {
       Object.assign(st, { staffMsg: reported.staffMsg, staffThread: reported.staffThread, reportOf: rootId });
       reported.reports = (reported.reports ?? 1) + 1;
       await countReports(staff, reported);
+      console.log(`[staff] ${thread.id} added to the report on ${rootId} (${reported.reports} threads)`);
       return;
     }
     const m = await reportMessage(staff, reported);   // no thread (no right to open one): a link on the report
@@ -295,6 +306,7 @@ async function tellStaff(thread, st, v, post, dirs) {
     th = await m.startThread({ name, autoArchiveDuration: 10080 }).catch(e => { console.error(`[bot] report thread: ${e.message}`); return null; });
   }
   Object.assign(st, { staffMsg: m.id, staffThread: th?.id, reports: 1 });
+  console.log(`[staff] ${thread.id} reported to the staff${th ? ', with a thread for updates' : ' (no thread: no right to open one?)'}`);
   if (earlier) {
     Object.assign(root, { staffMsg: m.id, staffThread: th?.id, reportOf: thread.id });
     st.reports = 2;
@@ -318,6 +330,7 @@ async function relay(m, st) {
   const text = m.content.replace(/\s+/g, ' ').slice(0, 400);
   await th.send({ content: `**New in** ${linkOf(m.guildId, m.channelId)} (${who})${text ? `: ${text}` : ''}`.slice(0, 2000),
     files, allowedMentions: { parse: [] } });
+  console.log(`[staff] ${m.channelId}: ${files.length} file(s) from ${who} passed on to its report`);
 }
 
 const quote = s => s.split('\n').map(l => `> ${l}`).join('\n');
@@ -425,6 +438,7 @@ client.on(Events.MessageCreate, guard('message', m => {
   const replied = m.mentions.has(client.user, { ignoreEveryone: true, ignoreRoles: true });
   if (isStaff(m.member, thread)) {
     if (named) { schedule(thread.id, 'asked by staff'); return; }
+    if (st.status !== 'staff') console.log(`[bot] ${thread.id} "${st.title}": staff wrote, the bot stays out`);
     st.status = 'staff'; save();
     const t = timers.get(thread.id); if (t) { clearTimeout(t.timer); timers.delete(thread.id); }
     return;
