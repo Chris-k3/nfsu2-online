@@ -3,7 +3,9 @@
 //             this browser:
 //               buttons  ◀ ▶ press the arrow keys, so the game's own keyboard steering applies (the default)
 //               stick    a thumb stick where the left thumb lands: the controller's left stick
-//               tilt     the phone is the wheel, from its motion sensor: the controller's left stick
+//               tilt     the phone is the wheel, from its motion sensor: the controller's left stick.  Straight ahead
+//                        is how the phone is held when driving first starts with tilt, kept through menus and races
+//                        until the Straight ahead button sets it anew
 //   pedals    Gas and Brake press the up and down arrows; Nitro and the handbrake are the controller's LB and RB
 //             (Alt, the nitrous key, would turn the other keys into Alt+key).  Nitro holds Gas too, so the thumb on
 //             Gas can go up to it, and a thumb slides between Gas, Brake and Nitro without letting go.  With tilt,
@@ -245,7 +247,8 @@ export class TouchControls {
   private knobEl: HTMLElement;
   private stickFinger = -1;
   private stickX0 = 0;
-  // tilt: the roll that counts as straight ahead (null: the next reading), whether the sensor answered
+  // tilt: the roll that counts as straight ahead (null: the next reading; kept when the driving controls go and come
+  // back, cleared when tilt is picked or the game ends), whether the sensor answered
   private center: number | null = null;
   private lastRoll: number | null = null;
   private tiltHeard = false;
@@ -364,6 +367,7 @@ export class TouchControls {
     cancelAnimationFrame(this.raf);
     this.setMode('');
     this.levelK = this.tilt = 0;
+    this.center = this.lastRoll = null;
     if (this.sentRoll) { this.sentRoll = 0; this.session?.input?.viewRoll?.(0); }
     this.session = null;
     this.drive = this.frames = 0;
@@ -572,7 +576,7 @@ export class TouchControls {
   private tiltOn() {
     removeEventListener('deviceorientation', this.onOrient);
     addEventListener('deviceorientation', this.onOrient);
-    this.center = null; this.tiltHeard = false;
+    this.tiltHeard = false;
     clearTimeout(this.tiltCheck);
     this.tiltCheck = setTimeout(() => {
       if (!this.tiltHeard && this.mode === 'drive' && this.steering === 'tilt')
@@ -602,6 +606,7 @@ export class TouchControls {
     for (const c of this.ctls.values()) if (c.group) { c.fingers.clear(); this.up(c, true); }
     this.stickUp(); this.tiltOff();
     this.steering = to; this.lx = 0;
+    if (to === 'tilt') this.center = null;
     this.root.dataset.steering = to;
     this.ctls.get('mode')!.el.innerHTML = path(ICONS[to]);
     if (this.mode === 'drive') { if (to === 'tilt') this.tiltOn(); this.sendPad(); }
