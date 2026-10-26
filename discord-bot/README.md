@@ -25,12 +25,15 @@ the bot in a thread to have it look anyway.
   tools, then returns a verdict as JSON: none, ask or answer, and whether to tell the developer. `vet()` drops weak
   answers and replies that paste code.
 - `tools.mjs`: what Claude can do. It can search and read the code, read the thread's attachments, look at the git
-  history (`LIVE` is the live server's commit) and search the archive of recent messages. Everything is read only:
-  no shell, no network, no writing, and nothing outside the bot's own copy of the code and the attachments.
+  history (`LIVE` is the live server's commit), search the forums' threads (to point a duplicate to the earlier one)
+  and the archive of recent messages. Everything is read only: no shell, no network, no writing, and nothing outside
+  the bot's own copy of the code and the attachments.
 - `repo.mjs`: the bot's own clone of the code in `state/repo`, fetched at most every 5 minutes. The rules, the notes
   and the guide are read from that clone, so a pushed change to them applies within minutes, without a new image or a
   restart. The live version comes from `https://nfsu2.xyz/game.json`.
-- `archive.mjs`: every message of every channel the bot sees, kept 7 days in `state/archive/`.
+- `archive.mjs`: every message of every channel the bot sees, kept 7 days in `state/archive/`. At start the bot also
+  lists the forums' existing threads (titles and first posts) in `state/threads.json`, without looking at them.
+- `eval.mjs`: the bot against past threads (below).
 
 Each look adds one line to `state/verdicts.jsonl`: the verdict with the developer notes, what was posted (or why not),
 the tools used, the tokens and the cost.
@@ -68,15 +71,13 @@ the tools used, the tokens and the cost.
 server, in a folder of its own (`/srv/nfsu2-bot`, say), put `compose.yml` from here and the `.env` above, then:
 
 ```sh
-ssh-keygen -t ed25519 -N '' -C nfsu2-bot -f deploy_key   # before the first start: compose would make a folder of it
-chown 1000:1000 deploy_key                               # the bot runs as uid 1000
-cat deploy_key.pub     # GitHub, th0mk/nfsu2-web, Settings, Deploy keys, Add deploy key: read only
 docker compose pull && docker compose up -d
 docker compose logs -f
 ```
 
-The bot clones the repository with that key into its `state` volume. The image is private like the repository: if
-the pull is denied, log in once with `docker login ghcr.io -u th0mk` and a token with `read:packages`.
+The bot clones the public repository into its `state` volume. If the pull is denied, the image is private on GitHub:
+make it public in the package's settings, or log in once with `docker login ghcr.io -u th0mk` and a token with
+`read:packages`.
 
 - New code: `docker compose pull && docker compose up -d`. A change to `system.md`, `knowledge.md` or the guide needs
   nothing: the bot reads them from its clone.
@@ -95,6 +96,19 @@ node --env-file=.env try.mjs --title "Game crashes" "it crashes in free roam on 
 
 It clones the checkout this folder is in (its `main` branch, so committed changes only), unless `BOT_REPO` says
 otherwise.
+
+## Trying it on past threads
+
+`eval.mjs` runs past threads through the bot, each as a new post, and writes a report next to the cases with the bot's
+reply, its staff note, and what staff or members actually answered:
+
+```sh
+node --env-file=.env eval.mjs cases.json --staff --limit 20     # 20 threads that staff answered
+node --env-file=.env eval.mjs cases.json --only bug-reports/015,suggestions/008
+```
+
+`cases.json` is made from a Discord export and stays out of this repository: it holds players' posts and logs. It
+stops at `--budget` dollars (default 5); a look costs a few cents.
 
 ## Rolling it out
 

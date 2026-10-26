@@ -48,6 +48,7 @@ function opening({ now, recent, threads, thread, images }) {
   const ctx = [
     `Now: ${now}`,
     `Live version: ${recent.live}`,
+    `The live page (${recent.liveUrl}) ${recent.liveOk ? 'answered' : 'did not answer'} the bot just now.`,
     `Newest commit: ${recent.head}`,
     recent.notLive ? `Commits not live yet (newest first):\n${recent.notLive}` : 'Commits not live yet: none',
     `Commits of the last days up to the live version (newest first):\n${recent.recent || 'none'}`,
@@ -66,12 +67,13 @@ function opening({ now, recent, threads, thread, images }) {
 
 /**
  * client: Anthropic; repo: Repo; archive: Archive|null; workDir: the thread's attachments;
- * thread: its text as built by the bot; images: [{type, data}]; threads: the recent-threads list as text
+ * thread: its text as built by the bot; images: [{type, data}]; threads: the recent-threads list as text;
+ * threadIndex: () => every known thread, for search_threads
  * -> { verdict, usage, cost, turns, log }
  */
-export async function investigate({ client, model, effort, repo, archive, workDir, thread, images = [], threads = '' }) {
+export async function investigate({ client, model, effort, repo, archive, workDir, thread, images = [], threads = '', threadIndex }) {
   await repo.sync();
-  const tools = new Tools({ repo, workDir, archive });
+  const tools = new Tools({ repo, workDir, archive, threadIndex });
   const system = await systemBlocks(repo);
   const recent = await repo.recent();
   const messages = [{ role: 'user', content: opening({ now: new Date().toISOString().slice(0, 16) + 'Z', recent, threads, thread, images }) }];

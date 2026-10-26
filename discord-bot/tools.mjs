@@ -47,6 +47,11 @@ export const TOOL_DEFS = [
     rev: str('the commit: a hex hash, LIVE or HEAD'),
     patch: bool('include the diff'),
   }),
+  tool('search_threads', 'Search the forum threads the bot knows (bug reports, suggestions, also from before it ' +
+    'started) by regular expression over their titles, first posts and the bot\'s summaries, case-insensitive. Shows id, ' +
+    'link, forum, last activity, what the bot did, title and summary, the most recently active first.', {
+    pattern: str('the regular expression (JavaScript syntax)'),
+  }),
   tool('discord_search', 'Search the messages of every channel of the Discord server (not only forums) from the last ' +
     'days, by regular expression, case-insensitive. Shows when, where, who and the text.', {
     pattern: str('the regular expression (JavaScript syntax)'),
@@ -59,9 +64,9 @@ function cut(s, n = MAX_OUT) {
 }
 
 export class Tools {
-  /** repo: Repo; workDir: this thread's attachments; archive: Archive or null */
-  constructor({ repo, workDir, archive }) {
-    Object.assign(this, { repo, workDir, archive });
+  /** repo: Repo; workDir: this thread's attachments; archive: Archive or null; threadIndex: () => [{ line, text }] */
+  constructor({ repo, workDir, archive, threadIndex }) {
+    Object.assign(this, { repo, workDir, archive, threadIndex });
   }
 
   /** a path the model gave, as { abs, att } inside the code copy or the attachments, or throws */
@@ -101,6 +106,7 @@ export class Tools {
         case 'list': return this.list(input);
         case 'git_log': return await this.gitLog(input);
         case 'git_show': return await this.gitShow(input);
+        case 'search_threads': return this.searchThreads(input);
         case 'discord_search': return this.discordSearch(input);
         default: return { error: `no tool ${name}` };
       }
@@ -188,6 +194,15 @@ export class Tools {
     let out = `${head.trim()}\n\n[${state}]\n${stat.trim()}`;
     if (patch) out += '\n\n' + cut(await this.repo.git(['show', '--format=', '--patch', r]), 30_000);
     return cut(out);
+  }
+
+  searchThreads({ pattern }) {
+    if (!this.threadIndex) return 'no thread list here';
+    if (!pattern || pattern.length > 300) throw new Error('give a pattern of 1 to 300 characters');
+    let re; try { re = new RegExp(pattern, 'i'); } catch (e) { throw new Error(`bad pattern: ${e.message}`); }
+    const hits = this.threadIndex().filter(t => re.test(t.text));
+    if (!hits.length) return 'no threads';
+    return cut(hits.slice(0, 30).map(t => t.line).join('\n') + (hits.length > 30 ? `\n[${hits.length - 30} more: narrow the pattern]` : ''));
   }
 
   discordSearch({ pattern, days }) {

@@ -36,17 +36,18 @@ const CFG = {
 };
 if (!CFG.token) { console.error('DISCORD_TOKEN is not set (README.md)'); process.exit(2); }
 
-const TEXT_EXT = /\.(log|txt|json|ini|csv|md|cfg)$/i;
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 const MAX_TEXT = 10 << 20, MAX_IMAGE = 3_500_000, MAX_IMAGES = 4;
-const MAX_UPLOAD = 8 << 20, MAX_UPLOADS = 3;    // log files copied into a staff report (Discord takes 10 MB a message)
+const MAX_UPLOAD = 8 << 20, MAX_UPLOADS = 3;    // files copied into a staff report (Discord takes 10 MB a message)
+const SAVES_ZIP = /^nfsu2-saves-.*\.zip$/i;      // Saves, Download backup: for the developer, not for the model
 const MAX_WAIT_MS = 10 * 60_000;                 // a thread that keeps growing is looked at after 10 minutes anyway
 
 fs.mkdirSync(CFG.state, { recursive: true });
 const STATE_FILE = path.join(CFG.state, 'threads.json');
 const VERDICTS = path.join(CFG.state, 'verdicts.jsonl');
-/** per thread: { title, forum, created, status: new|none|asked|answered|staff|failed, replies, summary, category,
- *  staffMsg: the staff channel message about it (its own, or the earlier report it was added to) } */
+/** per thread: { title, forum, guild, created, active, status: new|seen|none|asked|answered|staff|failed, replies,
+ *  summary, category, snippet (its first post, for threads the bot only indexed), staffMsg: the staff channel message
+ *  about it (its own, or the earlier report it was added to) } */
 let threads = {};
 try { threads = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch { /* first start */ }
 function save() {
@@ -114,6 +115,7 @@ async function look(threadId, why) {
   const thread = await client.channels.fetch(threadId).catch(() => null);
   const st = threads[threadId];
   if (!thread || !st || !watched(thread) || thread.archived || thread.locked) return;
+  st.guild ??= thread.guildId;
   const byStaff = why === 'asked by staff';
   if (!byStaff && (st.status === 'staff' || st.replies >= CFG.maxReplies)) return;
   if (!underCap()) { console.log(`[bot] ${threadId}: skipped, ${CFG.maxPerDay} looks today already`); return; }
@@ -123,16 +125,15 @@ async function look(threadId, why) {
   if (starter && !msgs.some(m => m.id === starter.id)) msgs.unshift(starter);
   if (!byStaff && msgs.some(m => m.author.id !== client.user.id && isStaff(m.member, thread))) { st.status = 'staff'; save(); return; }
 
-  const workDir = path.join(CFG.state, 'work', threadId);
-  fs.rmSync(workDir, { recursive: true, force: true });
-  fs.mkdirSync(workDir, { recursive: true });
-  const { text, images } = await transcript(thread, msgs, workDir, why);
+  const workDir = path.join(CFG.state, 'work', threadId), staffDir = `${workDir}-staff`;
+  for (const d of [workDir, staffDir]) { fs.rmSync(d, { recursive: true, force: true }); fs.mkdirSync(d, { recursive: true }); }
+  const { text, images } = await transcript(thread, msgs.filter(m => !m.system), workDir, staffDir, why);
 
   day.n++;
   const started = Date.now();
   const res = await investigate({
     client: anthropic, model: CFG.model, effort: CFG.effort, repo, archive, workDir,
-    thread: text, images, threads: recentThreads(threadId, thread.guildId),
+    thread: text, images, threads: recentThreads(threadId), threadIndex: () => threadIndex(threadId),
   });
   const v = res.verdict;
   const { post, why: outcome } = vet(v, { minConfidence: CFG.minConfidence });
@@ -151,17 +152,18 @@ async function look(threadId, why) {
   if (post) st.replies++;
   if (v) Object.assign(st, { summary: v.summary, category: v.category });
   st.status = !v ? 'failed' : post ? (v.action === 'ask' ? 'asked' : 'answered') : st.status === 'asked' ? 'asked-none' : 'none';
-  if (v && CFG.staffChannel) await tellStaff(thread, st, v, post, workDir).catch(e => console.error(`[bot] staff channel: ${e.message}`));
+  if (v && CFG.staffChannel) await tellStaff(thread, st, v, post, [workDir, staffDir]).catch(e => console.error(`[bot] staff channel: ${e.message}`));
   save();
   fs.appendFileSync(VERDICTS, JSON.stringify({
     at: new Date().toISOString(), thread: threadId, title: st.title, why, outcome, dryRun: CFG.dryRun, post,
     verdict: v, turns: res.turns, cost: res.cost, usage: res.usage, tools: res.log,
   }) + '\n');
-  fs.rmSync(workDir, { recursive: true, force: true });
+  for (const d of [workDir, staffDir]) fs.rmSync(d, { recursive: true, force: true });
 }
 
-/** the thread as the model reads it, with its attachments saved to workDir and its images inlined */
-async function transcript(thread, msgs, workDir, why) {
+/** the thread as the model reads it: text attachments saved to workDir (whatever their name: a chrome://gpu report
+ *  comes as .txt.phps, a long paste as message.txt), save backups to staffDir for the staff report, images inlined */
+async function transcript(thread, msgs, workDir, staffDir, why) {
   const tags = (thread.appliedTags ?? []).map(id => thread.parent.availableTags?.find(t => t.id === id)?.name).filter(Boolean);
   const lines = [`Forum: #${thread.parent.name}`, `Title: ${thread.name}`, `Tags: ${tags.join(', ') || 'none'}`,
     `Why the bot looks now: ${WHY[why] ?? why}`, ''];
@@ -179,10 +181,14 @@ async function transcript(thread, msgs, workDir, why) {
         const data = await download(a.url);
         if (data) { images.push({ type, data: data.toString('base64') }); lines.push(`  [picture ${images.length}: ${a.name}]`); continue; }
       }
-      if ((type.startsWith('text/') || TEXT_EXT.test(a.name)) && a.size <= MAX_TEXT) {
+      const name = `${++n}-${a.name.replace(/[^\w.-]+/g, '_')}`;
+      if (SAVES_ZIP.test(a.name) && a.size <= MAX_UPLOAD) {
         const data = await download(a.url);
-        if (data) {
-          const name = `${++n}-${a.name.replace(/[^\w.-]+/g, '_')}`;
+        if (data) { fs.writeFileSync(path.join(staffDir, name), data); lines.push(`  [saves backup: ${a.name}, ${kb} (a zip, not readable here)]`); continue; }
+      }
+      if (!/^(image|video|audio)\//.test(type) && !/\.(zip|7z|rar|mp4|mov|webm)$/i.test(a.name) && a.size <= MAX_TEXT) {
+        const data = await download(a.url);
+        if (data && !data.subarray(0, 8192).includes(0)) {
           fs.writeFileSync(path.join(workDir, name), data);
           lines.push(`  [attachment: attachments/${name}, ${kb}]`);
           continue;
@@ -197,7 +203,7 @@ async function transcript(thread, msgs, workDir, why) {
 
 // ------------------------------------------------------------------------------------------- the staff channel --
 /** a report for the developer: a new message, or a line added to the message about the same problem */
-async function tellStaff(thread, st, v, post, workDir) {
+async function tellStaff(thread, st, v, post, dirs) {
   const link = `https://discord.com/channels/${thread.guildId}/${thread.id}`;
   const earlier = v.duplicate_of && v.duplicate_of !== thread.id ? threads[v.duplicate_of]?.staffMsg : null;
   if (!v.escalate && !earlier && !(post && CFG.dryRun)) return;
@@ -218,7 +224,7 @@ async function tellStaff(thread, st, v, post, workDir) {
     if (dry) await staff.send({ content: `${link} · ${v.summary}${dry}`.slice(0, 2000), allowedMentions: { parse: [] } });
     return;
   }
-  const files = fs.readdirSync(workDir).map(f => path.join(workDir, f))
+  const files = dirs.flatMap(d => fs.readdirSync(d).map(f => path.join(d, f)))
     .filter(f => fs.statSync(f).size <= MAX_UPLOAD).slice(0, MAX_UPLOADS)
     .map(f => ({ attachment: f, name: path.basename(f).replace(/^\d+-/, '') }));
   const head = `**${v.summary}**\n${link} · ${st.forum} · ${v.category}`;
@@ -244,14 +250,53 @@ async function download(url) {
   } catch { return null; }
 }
 
-function recentThreads(except, guildId) {
-  return Object.entries(threads)
-    .filter(([id, t]) => id !== except && t.summary)
-    .sort((a, b) => b[1].created.localeCompare(a[1].created))
-    .slice(0, 40)
-    .map(([id, t]) => `- ${id} https://discord.com/channels/${guildId}/${id} [${t.category}, ${t.status}` +
-      `${t.staffMsg ? ', developer told' : ''}] ${t.title}: ${t.summary}`)
-    .join('\n');
+/** one known thread as the model sees it */
+function threadLine([id, t]) {
+  const what = t.summary || (t.snippet ? `first post: ${t.snippet}` : '');
+  return `- ${id} https://discord.com/channels/${t.guild}/${id} #${t.forum}, ${(t.active ?? t.created).slice(0, 10)} ` +
+    `[${[t.category, t.status, t.staffMsg && 'developer told'].filter(Boolean).join(', ')}] ${t.title}${what ? `: ${what}` : ''}`;
+}
+const byActivity = (a, b) => (b[1].active ?? b[1].created).localeCompare(a[1].active ?? a[1].created);
+/** the threads active last, for the context */
+function recentThreads(except) {
+  return Object.entries(threads).filter(([id]) => id !== except).sort(byActivity).slice(0, 30).map(threadLine).join('\n');
+}
+/** every known thread, for the search_threads tool: [{ line, text }] */
+function threadIndex(except) {
+  return Object.entries(threads).filter(([id]) => id !== except).sort(byActivity)
+    .map(e => ({ line: threadLine(e), text: `${e[1].title}\n${e[1].summary ?? ''}\n${e[1].snippet ?? ''}` }));
+}
+
+/** the forums' threads from before the bot started (titles, tags, first posts), so it can point to them; no looks */
+async function indexForums() {
+  const found = [];
+  for (const guild of client.guilds.cache.values()) {
+    const forums = guild.channels.cache.filter(ch => isForum(ch) && (!CFG.forums.length || CFG.forums.includes(ch.id)));
+    const active = await guild.channels.fetchActiveThreads().catch(() => null);
+    for (const forum of forums.values()) {
+      const list = [...(active?.threads.filter(t => t.parentId === forum.id).values() ?? [])];
+      let before;
+      for (let page = 0; page < 10; page++) {           // up to 1000 archived posts, newest first
+        const r = await forum.threads.fetchArchived({ type: 'public', limit: 100, before }).catch(() => null);
+        if (!r?.threads.size) break;
+        list.push(...r.threads.values());
+        if (!r.hasMore) break;
+        before = [...r.threads.values()].at(-1).archiveTimestamp;
+      }
+      for (const t of list) {
+        const st = threads[t.id] ??= { title: t.name, forum: forum.name, guild: guild.id, created: t.createdAt.toISOString(), status: 'seen', replies: 0 };
+        Object.assign(st, { title: t.name, guild: guild.id, archived: t.archived });
+        if (!st.snippet && !st.summary) found.push(t);
+      }
+    }
+  }
+  save();
+  console.log(`[bot] forums indexed: ${Object.keys(threads).length} threads, reading ${found.length} first posts`);
+  for (const t of found) {                         // one at a time: discord.js waits out the rate limits
+    const m = await t.fetchStarterMessage().catch(() => null);
+    if (m) threads[t.id].snippet = m.content.replace(/\s+/g, ' ').slice(0, 200);
+  }
+  save();
 }
 
 // ------------------------------------------------------------------------------------------------- events --
@@ -260,6 +305,7 @@ client.on(Events.ClientReady, c => {
     `${CFG.forums.length ? `forums ${CFG.forums.join(', ')}` : 'every forum'}, ` +
     `${CFG.staffChannel ? `staff channel ${CFG.staffChannel}` : 'no staff channel'}, model ${CFG.model} (${CFG.effort})`);
   repo.sync(true).catch(e => console.error(`[repo] ${e.message}`));
+  indexForums().catch(e => console.error(`[bot] forum index: ${e.message}`));
   // posts that came in shortly before a restart still get their look
   for (const [id, t] of Object.entries(threads)) if (t.status === 'new' && Date.now() - Date.parse(t.created) < 86400_000) schedule(id, 'new post');
 });
@@ -269,12 +315,14 @@ const guard = (name, fn) => (...a) => { try { fn(...a); } catch (e) { console.er
 
 client.on(Events.ThreadCreate, guard('new thread', (thread, created) => {
   if (!created || !watched(thread) || threads[thread.id]) return;
-  threads[thread.id] = { title: thread.name, forum: thread.parent.name, created: new Date().toISOString(), status: 'new', replies: 0 };
+  const now = new Date().toISOString();
+  threads[thread.id] = { title: thread.name, forum: thread.parent.name, guild: thread.guildId, created: now, active: now, status: 'new', replies: 0 };
   save();
   schedule(thread.id, 'new post');
 }));
 
 client.on(Events.MessageCreate, guard('message', m => {
+  if (m.system) return;                          // "changed the post title", pins, joins
   if (archive && m.guild) {
     archive.add({
       id: m.id, at: m.createdAt.toISOString(),
@@ -286,6 +334,7 @@ client.on(Events.MessageCreate, guard('message', m => {
   if (m.author.bot || !watched(thread)) return;
   const st = threads[thread.id];
   if (!st) return;
+  st.active = m.createdAt.toISOString();
   // a mention by name; for the poster a reply to the bot's message counts too
   const named = m.mentions.has(client.user, { ignoreEveryone: true, ignoreRoles: true, ignoreRepliedUser: true });
   const replied = m.mentions.has(client.user, { ignoreEveryone: true, ignoreRoles: true });

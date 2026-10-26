@@ -58,10 +58,10 @@ export class Repo {
     try {
       const r = await fetch(this.liveUrl, { signal: AbortSignal.timeout(10_000), headers: { 'cache-control': 'no-cache' } });
       const j = await r.json();
-      this.live = { rev: /^[0-9a-f]{4,40}$/.test(j.rev ?? '') ? j.rev : null, at: Date.now() };
+      this.live = { rev: /^[0-9a-f]{4,40}$/.test(j.rev ?? '') ? j.rev : null, at: Date.now(), ok: r.ok };
     } catch (e) {
       console.error(`[repo] live version: ${e.message}`);
-      this.live.at = Date.now();
+      Object.assign(this.live, { at: Date.now(), ok: false });
     }
     return this.live.rev;
   }
@@ -80,7 +80,8 @@ export class Repo {
     const head = (await this.git(['log', '-1', ...fmt])).trim();
     const live = await this.liveRev();
     const known = live && await this.has(live);
-    const out = { head, live: live ? `${live} (not in this copy of the code)` : 'unknown (the live page did not answer)' };
+    const out = { head, live: live ? `${live} (not in this copy of the code)` : 'unknown (the live page did not answer)',
+      liveUrl: this.liveUrl, liveOk: !!this.live.ok };
     if (known) {
       out.live = (await this.git(['log', '-1', ...fmt, live])).trim();
       out.notLive = (await this.git(['log', ...fmt, '-n', '40', `${live}..HEAD`])).trim();

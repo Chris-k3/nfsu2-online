@@ -1,5 +1,6 @@
-# The forum bot (README.md, "In Docker").  The image holds only the bot: it clones the code at run time (BOT_REPO) over
-# SSH with a read-only deploy key mounted at /keys/deploy_key, and keeps its clone, archive and log in /state.
+# The forum bot (README.md, "In Docker").  The image holds only the bot: it clones the code at run time (BOT_REPO, the
+# public repository over HTTPS; a private one over SSH with a read-only deploy key mounted at /keys/deploy_key), and
+# keeps its clone, archive and log in /state.
 FROM node:22-alpine
 RUN apk add --no-cache git openssh-client
 WORKDIR /app
