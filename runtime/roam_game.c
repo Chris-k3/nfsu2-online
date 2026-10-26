@@ -2027,6 +2027,24 @@ static uint32_t fe_clone(CPU *c, uint32_t pkg, uint32_t o, const char *name){
     MR32(l - 4u) += 1;
     return cl;
 }
+/* an image's or a string's colour: its drawing data's first four ints
+ * (blue, green, red, alpha, as FN_FE_COLOR takes them) */
+static int fe_colour_get(uint32_t o, int32_t col[4]){
+    uint32_t d = ok(o, 0x34) ? rd32(o + 0x2cu) : 0;
+    if (!ok(d, 16) || rd32(o + 0x30u) < 16u) return 0;
+    for (uint32_t i = 0; i < 4; i++) col[i] = (int32_t)MR32(d + 4u * i);
+    return 1;
+}
+static void fe_colour_set(CPU *c, uint32_t o, int32_t b, int32_t g, int32_t r, int32_t a){
+    uint32_t col = g_gmem + TAG_SCR + 0x20u;
+    MR32(col) = (uint32_t)b; MR32(col + 4u) = (uint32_t)g; MR32(col + 8u) = (uint32_t)r; MR32(col + 12u) = (uint32_t)a;
+    uint32_t ac[2] = { col, 0 }; rh_call(c, FN_FE_COLOR, o, 0, 2, ac);
+}
+/* o's colour as rgb (b, g, r) has it, its alpha kept; nothing when it has it already */
+static void fe_colour_to(CPU *c, uint32_t o, const int32_t rgb[3]){
+    int32_t col[4];
+    if (fe_colour_get(o, col) && (col[0] != rgb[0] || col[1] != rgb[1] || col[2] != rgb[2])) fe_colour_set(c, o, rgb[0], rgb[1], rgb[2], col[3]);
+}
 /* the label's FE object, looked up (or made) once per HUD */
 static uint32_t tag_obj(CPU *c, int k, uint32_t pkg){
     if (g_tag.looked[k]) return g_tag.obj[k];
@@ -2228,7 +2246,19 @@ static void tags_update(CPU *c){
 #define MM_AIRACER      3u
 #define MM_POOL         256u          /* the minimap's visual and icon pools with free roam on (g_pools) */
 static struct { uint32_t hud, copy[NSLOT], hash[NSLOT]; int ncopy; int said, stop;
+                int32_t col[NSLOT][3];                                  /* each copy's own colour (b, g, r) */
                 uint32_t orig; int vis; } g_mm;                         /* AIRACERINDICATOR_0; its copies are 0 unknown, 1 hidden, 2 shown */
+/* the arrows crew_arrows has in a crew's colour, and the colour each had before */
+#define MMC_MAX         (NSLOT + 8)
+static struct { uint32_t hud; int n; uint32_t obj[MMC_MAX]; int32_t orig[MMC_MAX][3]; } g_mmc;
+/* an arrow's own colour (b, g, r): the one it had before a crew's, else the one it has */
+static int mm_own_colour(uint32_t o, int32_t rgb[3]){
+    int32_t col[4];
+    if (!fe_colour_get(o, col)) return 0;
+    for (int i = 0; i < 3; i++) rgb[i] = col[i];
+    for (int j = 0; g_mmc.hud == g_mm.hud && j < g_mmc.n; j++) if (g_mmc.obj[j] == o) for (int i = 0; i < 3; i++) rgb[i] = g_mmc.orig[j][i];
+    return 1;
+}
 /* a visual (a free one, or one for a copy of AIRACERINDICATOR_0) in the free list */
 static int mm_visual_held(uint32_t icons, uint32_t fo){
     for (uint32_t n = rd32(G_MM_VISUALS), m = 0; n && n != G_MM_VISUALS && m < 256; n = rd32(n), m++) if (rd32(rd32(n + 8u)) == fo) return 1;
@@ -2264,9 +2294,16 @@ static int mm_visual(CPU *c, uint32_t icons){
         char nm[24]; snprintf(nm, sizeof nm, "ROAM_AIRACER_%d", g_mm.ncopy);
         fo = ok(o0, 0x5c) ? fe_clone(c, pkg, o0, nm) : 0;
         if (!fo) return 0;
-        g_mm.hash[g_mm.ncopy] = MR32(fo + 0x10u); g_mm.copy[g_mm.ncopy++] = fo;
+        i = g_mm.ncopy;
+        if (!mm_own_colour(o0, g_mm.col[i])) mm_own_colour(fo, g_mm.col[i]);
+        g_mm.hash[i] = MR32(fo + 0x10u); g_mm.copy[g_mm.ncopy++] = fo;
         g_mm.orig = o0; g_mm.vis = 0;                                     /* shown or hidden as the original, next frame */
     }
+    /* a copy in its own colour: fe_clone gave it the original's, a crew's
+     * while the original is on a crew-mate's arrow (and every car the copy
+     * went to was marked as a crew-mate's); and crew_arrows forgets a copy
+     * no visual holds, in a crew's colour or not */
+    fe_colour_to(c, fo, g_mm.col[i]);
     uint32_t pool = rd32(G_MM_VISPOOL), v = pool ? rh_call(c, FN_POOL_ALLOC, 0, 0, 1, &pool) : 0, n = v ? rh_call(c, FN_NODE_ALLOC, 0, 0, 0, 0) : 0;
     if (!ok(v, 8) || !ok(n, 12)) return 0;
     MR32(v) = fo; MR32(v + 4u) = MM_AIRACER;
@@ -2327,27 +2364,22 @@ static void arrows_update(CPU *c, uint32_t w){
     }
 }
 
+/* the crew (1..) of the friend's car shown with this racer number, 0: none */
+static int racer_crew(uint32_t w, int16_t rn){
+    for (int k = 0; k < NSLOT; k++){
+        const Slot *sl = &g_sl[k];
+        if (sl->st == SL_ACTIVE && sl->crew && !sl->hidden && sl->world == w && ok(sl->car, 0x9e0) && (int16_t)MR16(sl->car + 0xau) == rn) return sl->crew;
+    }
+    return 0;
+}
 /* A crew's arrows in the crew's colour: the arrow's object (its visual's)
  * gets the colour each frame its icon belongs to a crew's car, and its own
  * colour back once it no longer does (the visuals go from car to car, and
- * to the AI racers).  An object's colour is its drawing data's first four
- * ints (blue, green, red, alpha, as FN_FE_COLOR takes them); the alpha is
- * left as it is.  Only objects the HUD still holds are touched: a visual on
- * an icon or in the free list (G_MM_VISUALS); the others went with an old
- * HUD and are forgotten */
-#define MMC_MAX         (NSLOT + 8)
-static struct { uint32_t hud; int n; uint32_t obj[MMC_MAX]; int32_t orig[MMC_MAX][3]; } g_mmc;
-static int fe_colour_get(uint32_t o, int32_t col[4]){
-    uint32_t d = ok(o, 0x34) ? rd32(o + 0x2cu) : 0;
-    if (!ok(d, 16) || rd32(o + 0x30u) < 16u) return 0;
-    for (uint32_t i = 0; i < 4; i++) col[i] = (int32_t)MR32(d + 4u * i);
-    return 1;
-}
-static void fe_colour_set(CPU *c, uint32_t o, int32_t b, int32_t g, int32_t r, int32_t a){
-    uint32_t col = g_gmem + TAG_SCR + 0x20u;
-    MR32(col) = (uint32_t)b; MR32(col + 4u) = (uint32_t)g; MR32(col + 8u) = (uint32_t)r; MR32(col + 12u) = (uint32_t)a;
-    uint32_t ac[2] = { col, 0 }; rh_call(c, FN_FE_COLOR, o, 0, 2, ac);
-}
+ * to the AI racers); the alpha is left as it is.  Only objects the HUD
+ * still holds are touched: a visual on an icon or in the free list
+ * (G_MM_VISUALS); the others went with an old HUD and are forgotten (a
+ * copy of ours that no visual holds for a while too: mm_visual gives it
+ * its own colour back when it takes it again) */
 static void crew_arrows(CPU *c, uint32_t w){
     uint32_t pl = rd32(G_PLAYER1), hud = pl && ok(pl, PL_HUD + 4u) ? rd32(pl + PL_HUD) : 0, icons = rd32(G_MM_ICONS);
     if (hud != g_mmc.hud){ memset(&g_mmc, 0, sizeof g_mmc); g_mmc.hud = hud; }
@@ -2356,12 +2388,7 @@ static void crew_arrows(CPU *c, uint32_t w){
     for (uint32_t n = rd32(icons), m = 0; n && n != icons && m < 256 && ok(n, 0x20); n = rd32(n), m++){
         uint32_t v = rd32(n + 0x1cu), o = ok(v, 8) && MR32(v + 4u) == MM_AIRACER ? MR32(v) : 0;
         if (!ok(o, 0x34)) continue;
-        int16_t rn = (int16_t)MR32(n + 8u);
-        int crew = 0, j = -1;
-        for (int k = 0; k < NSLOT && !crew; k++){
-            const Slot *sl = &g_sl[k];
-            if (sl->st == SL_ACTIVE && !sl->hidden && sl->world == w && ok(sl->car, 0x9e0) && (int16_t)MR16(sl->car + 0xau) == rn) crew = sl->crew;
-        }
+        int crew = racer_crew(w, (int16_t)MR32(n + 8u)), j = -1;
         for (int i = 0; i < g_mmc.n; i++) if (g_mmc.obj[i] == o) j = i;
         if (j >= 0) live[j] = 1;
         if (!crew) continue;
@@ -2439,7 +2466,8 @@ static void crew_arrows(CPU *c, uint32_t w){
 #define WM_ASKS         3
 #define FE_LIST_MAX     1024          /* the FE renderer's list of a package's objects to draw */
 #define WM_SPARE        16            /* objects left to the package itself */
-static struct { int done, said, copies, asks, others; uint32_t map, gen, fake; int64_t asked; } g_wm;
+static struct { int done, said, copies, asks, others; uint32_t map, gen, fake; int64_t asked;
+                int col_ok; int32_t col[3]; } g_wm;                   /* AIRACERINDICATOR_0's colour as the map opened (b, g, r) */
 static struct { int16_t x, y; uint8_t heading; } g_wm_e[RC_MAP_MAX];
 /* the open map's screen, 0 while it is not made (or not this screen) */
 static uint32_t wm_screen(uint32_t pk){
@@ -2503,6 +2531,10 @@ static int wm_dress(CPU *c, uint32_t map, uint32_t pkg, int max){
             if (!g_wm.said++) rlog("[roam] f=%ld world map: no copy of AIRACERINDICATOR_0: some players not marked\n", rh_frame());
             break;
         }
+        /* in the marker's own colour: the hub's players are marked after
+         * crew_map_open, and AIRACERINDICATOR_0 can be a crew-mate's marker
+         * by then, in the crew's colour (every one of them was) */
+        if (g_wm.col_ok) fe_colour_to(c, cl, g_wm.col);
         MR32(e + 0xcu) = cl; copies++; g_wm.copies++;
     }
     return copies;
@@ -2586,6 +2618,9 @@ static void map_update(CPU *c, uint32_t w, int64_t host){
     if (g_wm.done && map != g_wm.map) g_wm.done = 0;                    /* another map (opened again) */
     if (!g_wm.done){
         g_wm.done = 1; g_wm.map = map; g_wm.copies = 0; g_wm.asks = 0; g_wm.others = 0;
+        int32_t col[4] = {0}; uint32_t o0 = wm_find(c, pkg, "AIRACERINDICATOR_0");      /* (before a crew's colour) */
+        g_wm.col_ok = o0 && fe_colour_get(o0, col);
+        for (int i = 0; i < 3; i++) g_wm.col[i] = col[i];
         int n = 0;
 #if MPRACES
         mp_map_icons(c, map, pkg, (uint32_t)wm_room(pk), 0);                   /* (before the cars take the room) */
@@ -5429,6 +5464,14 @@ void roam_game_report(void){
 #define G_HOTPOS_ANGLE  0x008900d0u
 #define G_HOTPOS_JUMP   0x008900cdu
 #define G_HOTPOS_VALID  0x008900ceu
+/* the crew (1..) whose colour an FE object has, 0: none (mp status, mp map) */
+static int colour_crew(uint32_t o){
+    int32_t col[4];
+    if (!fe_colour_get(o, col)) return 0;
+    uint32_t rgb = (uint32_t)(col[2] & 0xff) << 16 | (uint32_t)(col[1] & 0xff) << 8 | (uint32_t)(col[0] & 0xff);
+    for (int i = 0; i < O.ncrew; i++) if (O.crew_rgb[i] == rgb) return i + 1;
+    return 0;
+}
 int roam_game_cmd(CPU *c, const char *args, long *wait_start){
     (void)c;
     char sub[32] = {0}, a1[200] = {0}, a2[64] = {0}; int used = 0;
@@ -5454,9 +5497,14 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
                     p->mo.n, rc_peer_crew(&g_s, i) + 1, p->n_crews, p->reads_crews, p->n_hub_crews);
         }
         roam_plat_unlock();
-        uint32_t icons = rd32(G_MM_ICONS); int arrows = 0, freev = 0; uint8_t has[256] = {0};
+        uint32_t icons = rd32(G_MM_ICONS); int arrows = 0, freev = 0, tinted = 0, wrong = 0; uint8_t has[256] = {0};
         for (uint32_t n = ok(icons, 0x1c) ? rd32(icons) : 0, m = 0; n && n != icons && m < 256; n = rd32(n), m++)
-            if (ok(rd32(n + 0x1cu), 8) && MR32(rd32(n + 0x1cu) + 4u) == MM_AIRACER){ arrows++; has[(uint8_t)MR32(n + 8u)] = 1; }
+            if (ok(rd32(n + 0x1cu), 8) && MR32(rd32(n + 0x1cu) + 4u) == MM_AIRACER){
+                arrows++; has[(uint8_t)MR32(n + 8u)] = 1;
+                /* (arrows in a crew's colour, and of those the ones whose car is not a crew-mate's) */
+                int ct = colour_crew(MR32(rd32(n + 0x1cu)));
+                tinted += ct != 0; wrong += ct && !racer_crew(world(), (int16_t)MR32(n + 8u));
+            }
         for (uint32_t n = rd32(G_MM_VISUALS), m = 0; n && n != G_MM_VISUALS && m < 256; n = rd32(n), m++)
             if (ok(rd32(n + 8u), 8) && MR32(rd32(n + 8u) + 4u) == MM_AIRACER) freev++;
         /* friends' cars shown, and of those with an arrow; hidden ones still in the world (an arrow at the parking spot) */
@@ -5470,7 +5518,8 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
         int cdrawn = 0;                             /* copies the renderer has drawn (their render object made) */
         for (int i = 0; i < g_mm.ncopy; i++) cdrawn += ok(g_mm.copy[i], 0x5c) && MR32(g_mm.copy[i] + 0x58u);
         rlog("[roam]   minimap: %d cars' arrows, %d free, %d copies of AIRACERINDICATOR_0 (%d drawn); %d of %d friends' cars shown have one, "
-                        "%d hidden one(s) in the world; %d in a crew's colour\n", arrows, freev, g_mm.ncopy, cdrawn, with, shown, stray, g_mmc.n);
+                        "%d hidden one(s) in the world; %d in a crew's colour (%d of them not a crew-mate's car)\n", arrows, freev, g_mm.ncopy, cdrawn,
+                        with, shown, stray, tinted, wrong);
         for (int k = 0; k < TAG_N; k++)
             if (g_tag.shown[k] && g_tag.obj[k])
                 rlog("[roam]   name %d: \"%s\" colour %06x at %.1f %.1f\n", k, g_tag.text[k], g_tag.rgb[k],
@@ -5594,18 +5643,22 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
         if (g_gmem){ gstr(sa, WM_PACKAGE, 24); pk = gcall1(c, FN_FE_PACKAGE, 0, sa); }
         uint32_t scr = ok(pk, 0x54) ? wm_screen(pk) : 0, map = scr ? rd32(scr + WM_MAP) : 0;
         if (!ok(map, 0x2c)){ rlog("[roam] f=%ld mp map: the world map is not open\n", f); return 1; }
-        int n = 0, cars = 0, drawn = 0;
+        int n = 0, cars = 0, drawn = 0, tinted = 0;
         for (uint32_t e = rd32(map + 4u); e && e != map + 4u && n < 4096 && ok(e, WM_MARK_SZ); e = rd32(e), n++){
             if (MR32(e + 8u) != WM_CAR) continue;
             cars++;
             uint32_t o = MR32(e + 0xcu);
+            int32_t col[4] = {0};
             drawn += ok(o, 0x5c) && MR32(o + 0x58u);
+            tinted += colour_crew(o) != 0;
+            fe_colour_get(o, col);
             if (cars <= 64)
-                rlog("[roam]   car marker at %.1f %.1f, object 0x%08x%s%s\n", (double)MRF32(e + 0x10u), (double)MRF32(e + 0x14u), o,
+                rlog("[roam]   car marker at %.1f %.1f, object 0x%08x colour %02x%02x%02x%s%s\n", (double)MRF32(e + 0x10u), (double)MRF32(e + 0x14u), o,
+                        col[2] & 0xff, col[1] & 0xff, col[0] & 0xff,
                         ok(o, 0x5c) && (MR32(o + 0x1cu) & 1u) ? ", hidden" : "", ok(o, 0x5c) && MR32(o + 0x58u) ? ", drawn" : "");
         }
-        rlog("[roam] f=%ld mp map: %d markers, %d of them cars', %d of those drawn; %d other players' (from the hub)\n", f, n, cars, drawn,
-                g_wm.others);
+        rlog("[roam] f=%ld mp map: %d markers, %d of them cars', %d of those drawn, %d in a crew's colour; %d other players' (from the hub)\n", f,
+                n, cars, drawn, tinted, g_wm.others);
         /* the level sorter's most nodes in one package so far (0x50B430): RH_FE_NODES when objects went undrawn */
         rlog("[roam] f=%ld mp map: the package has %d objects, room for %d more; FEng drew %u objects of one package at most (%d nodes)\n",
                 f, fe_objects(pk + 0x4cu, 0), wm_room(pk), rd32(0x00838490u), RH_FE_NODES);
