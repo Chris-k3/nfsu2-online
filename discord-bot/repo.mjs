@@ -69,6 +69,9 @@ export class Repo {
     if (this.liveFile && fs.existsSync(this.liveFile)) {
       try { found = rev(JSON.parse(fs.readFileSync(this.liveFile, 'utf8'))); via = 'file'; }
       catch (e) { console.error(`[repo] live version from ${this.liveFile}: ${e.message}`); }
+    } else if (this.liveFile && !this.saidNoFile) {
+      this.saidNoFile = true;
+      console.error(`[repo] no ${this.liveFile}: mount the live module's folder there (compose.yml: /srv/nfsu2/module:/live:ro); trying the page`);
     }
     if (!found && this.liveUrl) {
       try {
