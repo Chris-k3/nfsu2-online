@@ -50,6 +50,7 @@ import { LobbyPanel } from './lobby';
 import { ICON as CHAT_ICON, QuickChat } from './quickchat';
 import { GameSession } from './game';
 import { AwayCheck, AWAY_LIMITS, type AwayLimits } from './away';
+import { PlayTime, SMS_AFTER_MS } from './playtime';
 import { pageId } from './page-id';
 import { RenderCheck, RENDER_CHECK_TIMES, type RenderCheckTimes } from './rendercheck';
 import { moviesKept, Predownload } from './predownload';
@@ -61,7 +62,7 @@ type Phase = 'boot' | 'ready' | 'error' | 'waiting' | 'starting' | 'playing' | '
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 
 // the page address's test aids, once boot knows whether the server is a development server
-const TEST_PARAMS = ['env', 'save', 'fresh', 'reg', 'script', 'artifacts', 'dumpscale', 'away', 'rendercheck'];
+const TEST_PARAMS = ['env', 'save', 'fresh', 'reg', 'script', 'artifacts', 'dumpscale', 'away', 'rendercheck', 'playtime'];
 const addr = new URLSearchParams(location.search);
 let q = new URLSearchParams();
 let SAVE = 'save';
@@ -104,6 +105,7 @@ let crewDraft = '';                      // the crew name being typed in the men
 let popCounts = new Map<number, number>();   // how many are in free roam in each of those crews, by hash (askPopCounts)
 let popAsk = 0;                          // the popup's questions so far: only the newest one's answer shows
 let away: AwayCheck | null = null;
+let playTime: PlayTime | null = null;
 let renderCheck: RenderCheck | null = null;
 let lastExit: { code: number; seconds: number } | null = null;
 let keeper: LastGameKeeper;              // the running game's log, copied where a page Safari stops cannot lose it
@@ -542,6 +544,7 @@ async function startGame() {
   $('#lastgame').hidden = true;           // about the game before this one
   document.body.dataset.phase = 'playing';
   away = new AwayCheck(session, awayLimits(), awayLine, logLine);
+  playTime = new PlayTime(session, playTimeLimit(), logLine);
   // a phone's render scale (device.ts): whether it has room for all its pixels, for its next game
   if (r.source.NFSU2_RENDER === 'device') renderCheck = new RenderCheck(session, r.env.NFSU2_RENDER, renderCheckTimes(), logLine);
   touch.start(session);
@@ -689,6 +692,7 @@ function endStage() {
   quickChat.stop();
   awake?.(); awake = null;
   away?.stop(); away = null;
+  playTime?.stop(); playTime = null;
   hideRemoved();
   renderCheck?.stop(); renderCheck = null;
   Object.assign(DEVICE, deviceDefaults());      // its verdict, for the next game without a reload
@@ -893,6 +897,12 @@ function awayLimits(): AwayLimits {
   const [inputS, hiddenS, warnS] = (q.get('away') ?? '').split(',').map(Number);
   const ms = (s: number, d: number) => Number.isFinite(s) && s > 0 ? s * 1000 : d;
   return { inputMs: ms(inputS, AWAY_LIMITS.inputMs), hiddenMs: ms(hiddenS, AWAY_LIMITS.hiddenMs), warnMs: ms(warnS, AWAY_LIMITS.warnMs) };
+}
+/** the play before our message on the game's phone (playtime.ts); a test page's address may give it in seconds
+ *  (playtime=seconds) */
+function playTimeLimit(): number {
+  const s = Number(q.get('playtime'));
+  return Number.isFinite(s) && s > 0 ? s * 1000 : SMS_AFTER_MS;
 }
 /** the render check's times; a test page's address may give them in seconds of driving (rendercheck=warmup,verdict) */
 function renderCheckTimes(): RenderCheckTimes {
@@ -1273,7 +1283,7 @@ function showOverrides(given: string[], dev: boolean) {
   const env = Object.entries(ENVIRONMENT).map(([k, v]) => `${k}=${v}`);
   live(o, () => t('Test settings from this page\'s address (development server): save folder "{folder}"', { folder: SAVE }) +
     (env.length ? t('; {vars} (wins over Settings)', { vars: env.join(', ') }) : '') +
-    ['fresh', 'reg', 'script', 'artifacts', 'dumpscale', 'away'].filter(k => q.has(k)).map(k => `; ${k}`).join('') + '.');
+    ['fresh', 'reg', 'script', 'artifacts', 'dumpscale', 'away', 'playtime'].filter(k => q.has(k)).map(k => `; ${k}`).join('') + '.');
 }
 
 export async function boot() {

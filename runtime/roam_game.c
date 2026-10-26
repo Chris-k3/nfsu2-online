@@ -4110,9 +4110,8 @@ static void mp_panel(int64_t host, int in_roam){
  * Multiplayer (Join) or Cancel.  Both are the game's generic in-game dialog
  * (DialogInterface 0x558750: two buttons, a printf text) over the screen
  * they come from; the buttons' labels are strings of our own, added to the
- * game's language table (a sorted {hash, text} array, [0x8383D8] x
- * [0x8383D0], which the game only points into its language chunk: 0x5125B0
- * loads it, 0x4FFAE0 clears it), so the dialog looks them up as its own.
+ * game's language table (language.c language_add_text), so the dialog looks
+ * them up as its own.
  * The answer: a press writes the button's message to the dialog's +0x50
  * (0x54C1BC); on its next update the dialog goes and sends it to the
  * screen it was over (0x5511E0 -> 0x51CDF0): to the card, whose handler is
@@ -4122,8 +4121,6 @@ static void mp_panel(int64_t host, int in_roam){
 void dispatch_patch(uint32_t a, void (*f)(CPU *));
 int career_fe_active(const char *name);       /* career.c */
 static int career_card_up(void){ return career_fe_active("UI_EngageRaceDialog.fng"); }
-#define G_LANG          0x008383d8u   /* the language table: {hash, char*} sorted by hash, [0x8383D0] entries */
-#define G_LANG_N        0x008383d0u
 #define FN_DIALOG2      0x00558750u   /* cdecl (from package, dialog package, label1, label2, msg1, msg2, back msg, first, fmt, ...) */
 #define G_DLG_ID        0x00838974u   /* the dialog up now (0 none) */
 #define G_FEMGR_LIST    0x008637b4u   /* the FE manager's screens: n = [it]; until n == it: screen [n - 4 + 0x14], n = [n] */
@@ -4141,7 +4138,6 @@ static int career_card_up(void){ return career_fe_active("UI_EngageRaceDialog.fn
 static const char *const mp_lang_name[MP_LANG_N] = { "MPRACE_SOLO", "MPRACE_MULTI", "MPRACE_JOIN", "MPRACE_CANCEL" };
 static const char *const mp_lang_text[MP_LANG_N] = { "Solo", "Multiplayer", "Join", "Cancel" };
 static uint32_t mp_lang_hash[MP_LANG_N];
-static uint32_t g_lang_mine;                  /* our copy of the table, while the game's pointer is it */
 enum { MPD_NONE, MPD_CARD };
 static struct {
     int      dlg;                             /* MPD_*: the question we asked, up now */
@@ -4154,30 +4150,14 @@ static struct {
 #define MSG_MP_SOLO     0x4d505301u   /* our answers (not the game's messages: its screens ignore them) */
 #define MSG_MP_MULTI    0x4d505302u
 #define MSG_MP_BACK     0x4d505303u
-/* our labels in the game's language table, again whenever it loads another */
+/* our labels in the game's language table (language.c: again whenever it loads another) */
+uint32_t language_add_text(const char *name, const char *text);
+uint32_t language_text(uint32_t hash);
+void language_texts_frame(CPU *c);
 static void mp_lang(CPU *c){
-    uint32_t t = rd32(G_LANG), n = rd32(G_LANG_N);
-    if (!t || !n || t == g_lang_mine || n > 100000u || !ok(t, n * 8u)) return;
-    for (int i = 0; i < MP_LANG_N; i++) mp_lang_hash[i] = bhash(mp_lang_name[i]);
-    uint32_t strs = 0; for (int i = 0; i < MP_LANG_N; i++) strs += (uint32_t)strlen(mp_lang_text[i]) + 1u;
-    uint32_t sz = (n + MP_LANG_N) * 8u + strs, mem = rh_call(c, FN_MALLOC, 0, 0, 1, &sz);
-    if (!mem){ rlog("[roam] guest malloc failed: no race lobby labels\n"); return; }
-    /* our strings after the entries; then a merge, both sorted (unsigned, as 0x4FF9D0 compares) */
-    uint32_t sp = mem + (n + MP_LANG_N) * 8u, sa[MP_LANG_N];
-    for (int i = 0; i < MP_LANG_N; i++){ sa[i] = sp; gstr(sp, mp_lang_text[i], 64); sp += (uint32_t)strlen(mp_lang_text[i]) + 1u; }
-    int ord[MP_LANG_N]; for (int i = 0; i < MP_LANG_N; i++) ord[i] = i;
-    for (int i = 1; i < MP_LANG_N; i++) for (int j = i; j > 0 && mp_lang_hash[ord[j - 1]] > mp_lang_hash[ord[j]]; j--){ int x = ord[j]; ord[j] = ord[j - 1]; ord[j - 1] = x; }
-    uint32_t o = 0, k = 0;
-    for (uint32_t i = 0; i <= n; i++){
-        uint32_t h = i < n ? MR32(t + 8u * i) : 0xffffffffu;
-        while (k < MP_LANG_N && mp_lang_hash[ord[k]] <= h){
-            if (mp_lang_hash[ord[k]] == h && i < n){ k++; continue; }              /* the game has the label already */
-            MR32(mem + 8u * o) = mp_lang_hash[ord[k]]; MR32(mem + 8u * o + 4u) = sa[ord[k]]; o++; k++;
-        }
-        if (i < n){ MR32(mem + 8u * o) = h; MR32(mem + 8u * o + 4u) = MR32(t + 8u * i + 4u); o++; }
-    }
-    MR32(G_LANG) = mem; MR32(G_LANG_N) = o; g_lang_mine = mem;
-    rlog("[roam] race lobby labels added to the game's %u strings\n", n);
+    if (mp_lang_hash[0]) return;
+    for (int i = 0; i < MP_LANG_N; i++) mp_lang_hash[i] = language_add_text(mp_lang_name[i], mp_lang_text[i]);
+    language_texts_frame(c);                  /* in the table at once: a question may come this frame */
 }
 /* a two-button question over package `from` (a name in guest memory).  The
  * dialog's text is a format the game's vsprintf (0x43FBC0) fills in, and ours
@@ -5579,7 +5559,7 @@ int roam_game_cmd(CPU *c, const char *args, long *wait_start){
     if (!strcasecmp(sub, "ui")){
         /* the pop-ups: the dialog up, the FE manager's screens and their classes */
         rlog("[roam] f=%ld mp ui: dialog %08x, ours %d (race %08x, answer %08x), asked %u, solo %u, multiplayer %u; labels %s\n", f, rd32(G_DLG_ID),
-             g_mpd.dlg, g_mpd.race, g_mpd.msg, g_mpd.asked, g_mpd.solo, g_mpd.multi, g_lang_mine ? "in" : "not in");
+             g_mpd.dlg, g_mpd.race, g_mpd.msg, g_mpd.asked, g_mpd.solo, g_mpd.multi, mp_lang_hash[0] && language_text(mp_lang_hash[0]) ? "in" : "not in");
         uint32_t n = rd32(G_FEMGR_LIST);
         for (int k = 0; n && n != G_FEMGR_LIST && k < 32; k++, n = rd32(n)){
             uint32_t sc = rd32(n - 4u + 0x14u);

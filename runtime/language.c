@@ -109,6 +109,7 @@ static uint32_t game_text(uint32_t hash){
     }
     return 0;
 }
+uint32_t language_text(uint32_t hash){ return game_text(hash); }
 /* Whether a profile name (16 bytes at most) is the game's "No Profile": what
  * 0x512360 puts in the profile's name (0x83a9e0) while none is loaded, in the
  * game's language ("Aucun profil", "Kein Profil", ...). */
@@ -117,6 +118,117 @@ int language_no_profile(const char *name){
     uint32_t s = game_text(0xcf4f80c2u);
     if (!s) s = game_text(0xc01a6f63u);
     return s && mem_is_committed(s) && mem_is_committed(s + 15u) && !strncasecmp(name, (const char *)(g_mem + s), 16);
+}
+
+/* ---- texts of our own --------------------------------------------------------
+ * Texts the game shows but has none of (the free-roam race questions' buttons,
+ * roam_game.c; our SMS, sms.c) go into its language table under names of ours,
+ * so that it looks them up as its own.  The table is a sorted {hash, char*}
+ * array that the game only points into its language chunk (0x5125B0 loads it,
+ * 0x4FFAE0 clears it).  Each frame (the main-loop hook) a table that is not
+ * ours, or one older than a text added since, is replaced by a copy with every
+ * text of ours merged in by hash (unsigned, as 0x4FF9D0 compares; a hash the
+ * game has keeps the game's), their strings after the entries.  The game's own
+ * array stays as it was, for the next copy. */
+void dispatch_indirect(CPU *c, uint32_t addr);
+#define G_LANG      0x008383d8u
+#define G_LANG_N    0x008383d0u
+#define FN_NEW      0x00575620u    /* cdecl (size): operator new */
+#define OWN_MAX     8
+static struct { uint32_t hash; char text[1024]; } g_own[OWN_MAX];
+static int g_nown, g_own_merged;            /* texts named; how many of them the copy has */
+static uint32_t g_own_copy, g_own_from, g_own_from_n;   /* the copy, while the game points at it; the game's array */
+
+uint32_t language_add_text(const char *name, const char *text){
+    uint32_t h = 0xffffffffu;                   /* bStringHash (0x43DB50) */
+    for (const char *s = name; *s; s++) h = h * 33u + (uint8_t)*s;
+    int i = 0;
+    while (i < g_nown && g_own[i].hash != h) i++;
+    if (i == OWN_MAX){ fprintf(stderr, "language: no room for the text %s\n", name); return h; }
+    if (i == g_nown) g_nown++;
+    g_own[i].hash = h;
+    snprintf(g_own[i].text, sizeof g_own[i].text, "%s", text);
+    g_own_merged = -1;                          /* a new copy, also for a text changed */
+    return h;
+}
+
+/* operator new in guest memory, from the main-loop hook */
+static uint32_t guest_new(CPU *c, uint32_t size){
+    CPU save = *c;
+    c->esp = (c->esp - 256u) & ~15u;
+    PUSH32(size);
+    PUSH32(0x00581475u);                        /* the hook's return address: the callee's ret pops it */
+    dispatch_indirect(c, FN_NEW);
+    uint32_t r = c->eax;
+    *c = save;
+    return r;
+}
+
+void language_texts_frame(CPU *c){
+    uint32_t t = MR32(G_LANG), n = MR32(G_LANG_N);
+    if (!g_nown || !t || !n || n > 0x100000u) return;
+    if (t == g_own_copy){
+        if (g_own_merged == g_nown) return;
+        t = g_own_from; n = g_own_from_n;
+    }
+    if (!mem_is_committed(t) || !mem_is_committed(t + 8u*n - 1u)) return;
+    int ord[OWN_MAX];
+    uint32_t strs = 0;
+    for (int i = 0; i < g_nown; i++){ ord[i] = i; strs += (uint32_t)strlen(g_own[i].text) + 1u; }
+    for (int i = 1; i < g_nown; i++)
+        for (int j = i; j > 0 && g_own[ord[j - 1]].hash > g_own[ord[j]].hash; j--){ int x = ord[j]; ord[j] = ord[j - 1]; ord[j - 1] = x; }
+    uint32_t mem = guest_new(c, (n + (uint32_t)g_nown) * 8u + strs);
+    if (!mem){ fprintf(stderr, "language: guest memory for our texts failed\n"); g_own_copy = t; g_own_merged = g_nown; return; }
+    uint32_t sp = mem + (n + (uint32_t)g_nown) * 8u, sa[OWN_MAX];
+    for (int i = 0; i < g_nown; i++){
+        size_t l = strlen(g_own[i].text) + 1u;
+        memcpy(g_mem + sp, g_own[i].text, l); sa[i] = sp; sp += (uint32_t)l;
+    }
+    uint32_t o = 0; int k = 0, kept = 0;
+    for (uint32_t i = 0; i <= n; i++){
+        uint32_t h = i < n ? MR32(t + 8u*i) : 0xffffffffu;
+        while (k < g_nown && g_own[ord[k]].hash <= h){
+            if (g_own[ord[k]].hash == h && i < n){ k++; kept++; continue; }   /* the game has the name already */
+            MR32(mem + 8u*o) = g_own[ord[k]].hash; MR32(mem + 8u*o + 4u) = sa[ord[k]]; o++; k++;
+        }
+        if (i < n){ MR32(mem + 8u*o) = h; MR32(mem + 8u*o + 4u) = MR32(t + 8u*i + 4u); o++; }
+    }
+    MR32(G_LANG) = mem; MR32(G_LANG_N) = o;
+    g_own_copy = mem; g_own_from = t; g_own_from_n = n; g_own_merged = g_nown;
+    fprintf(stderr, "language: %d text%s of our own added to the game's %u%s\n", g_nown - kept, g_nown - kept == 1 ? "" : "s", n,
+            kept ? " (some names the game has already: the game's stay)" : "");
+}
+
+/* A text of ours (UTF-8) in the game's letters: Latin-1, as its language files
+ * write theirs; Polish's letters as its pack's fonts draw them (e-ogonek
+ * 0xBF, l-stroke 0xEE, s-acute 0xE2 ...; hornmenu.c); a letter the fonts lack
+ * as '?'.  Korean, Chinese, Japanese, Thai and Russian draw ASCII as it is
+ * (car names), not Latin-1's accented letters. */
+void language_game_letters(const char *utf8, char *out, size_t n){
+    static const struct { uint16_t u; uint8_t b; } PL[] = {
+        { 0x105, 0xe7 }, { 0x107, 0xe9 }, { 0x119, 0xbf }, { 0x142, 0xee }, { 0x144, 0xf1 }, { 0xf3, 0xf3 },
+        { 0x15b, 0xe2 }, { 0x17a, 0xeb }, { 0x17c, 0xe1 }, { 0x104, 0xfd }, { 0x106, 0xc8 }, { 0x118, 0xc7 },
+        { 0x141, 0xfa }, { 0x143, 0xd1 }, { 0xd3, 0xd3 }, { 0x15a, 0xda }, { 0x17b, 0xc9 },
+    };
+    int polish = !strcmp(g_lang->key, "polish"), latin = !g_lang->fonts && strcmp(g_lang->key, "russian");
+    const uint8_t *s = (const uint8_t *)utf8;
+    size_t o = 0;
+    while (*s && o + 1 < n){
+        uint32_t u = *s++;
+        if (u >= 0xc0){
+            int more = u >= 0xf0 ? 3 : u >= 0xe0 ? 2 : 1;
+            u &= 0x3fu >> more;
+            while (more-- && (*s & 0xc0) == 0x80) u = u << 6 | (*s++ & 0x3fu);
+        }
+        uint8_t b = '?';
+        if (u < 0x80) b = (uint8_t)u;
+        else if (u == 0x2019 || u == 0x2018) b = '\'';
+        else if (u == 0x2013 || u == 0x2014) b = '-';
+        else if (polish){ for (unsigned i = 0; i < sizeof PL / sizeof PL[0]; i++) if (PL[i].u == u) b = PL[i].b; }
+        else if (latin && u >= 0xa0 && u < 0x100) b = (uint8_t)u;
+        out[o++] = (char)b;
+    }
+    out[o] = 0;
 }
 
 /* The subtitles' check, 0x50d350 (the front end's movies and InGamePlayMovie's

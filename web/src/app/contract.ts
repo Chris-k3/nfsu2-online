@@ -107,6 +107,8 @@ export interface InputSubsystem extends Subsystem {
   /** Download log: the game's line on its last frame (and stall report), then "[watchdog] log download ready".
    *  false: it cannot reach the game */
   logReport?(): boolean;
+  /** a text message of ours for the game's phone (runtime/sms.c), by its number; false: it cannot reach the game */
+  sms?(id: number): boolean;
   /** performance.now() of the player's last key, mouse or controller input; null: the page cannot tell
    *  (the game's own driver plays an input script) */
   lastInput?(): number | null;
