@@ -864,5 +864,16 @@
   "{n} points": {
     "one": "{n} punt",
     "other": "{n} punten"
-  }
+  },
+  "Your career is saved only in this browser. Browsers sometimes clear a website's data, for example when the device runs low on space or when browsing data is cleared, and your saves go with it.": "Je carrière is alleen in deze browser opgeslagen. Browsers wissen soms de gegevens van een website, bijvoorbeeld als het apparaat bijna vol is of als de browsegegevens worden gewist, en dan zijn je opgeslagen spellen ook weg.",
+  "Cloud saves keep a copy on this server under a keyphrase that only you have. With it you get your saves back, here or in another browser.": "Opgeslagen spellen in de cloud bewaren een kopie op deze server, onder een sleutelzin die alleen jij hebt. Daarmee krijg je je opgeslagen spellen terug, hier of in een andere browser.",
+  "You can change this any time under Cloud saves on the start page.": "Je kunt dit altijd wijzigen onder Opgeslagen spellen in de cloud op de startpagina.",
+  "Turn on cloud saves?": "Opslaan in de cloud aanzetten?",
+  "Cloud saves are not on": "Opslaan in de cloud staat niet aan",
+  "They could not be turned on: {error}. Try again under Cloud saves on the start page.": "Het kon niet worden aangezet: {error}. Probeer het opnieuw onder Opgeslagen spellen in de cloud op de startpagina.",
+  "They could not be turned on. Try again under Cloud saves on the start page.": "Het kon niet worden aangezet. Probeer het opnieuw onder Opgeslagen spellen in de cloud op de startpagina.",
+  "Continue": "Doorgaan",
+  "Copy": "Kopiëren",
+  "To load your saves, enter it under Cloud saves on the start page.": "Voer deze sleutelzin in onder Opgeslagen spellen in de cloud op de startpagina om je opgeslagen spellen te laden.",
+  "Your keyphrase": "Je sleutelzin"
 }

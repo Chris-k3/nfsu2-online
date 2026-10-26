@@ -311,6 +311,50 @@ async function askRoam(): Promise<boolean> {
 }
 
 /**
+ * The fifth Play in this browser (four games played here, vault-ui.ts played) of a player with a profile here and no
+ * cloud saves asks to turn them on: the saves live only in this browser, and browsers clear a site's data now and then.
+ * Asked once (Not now and Esc are no); not at the Play that asked about free roam (the next one asks), on a test page,
+ * offline, or where the server keeps no cloud saves.  Turned on, the keyphrase is shown to keep (copy, download)
+ * before the game starts; it failed, the reason.
+ */
+async function askCloud() {
+  if (testPage() || offline || !vault.offerable() || !await newestProfile()) return;
+  vault.offered();
+  const p = (text: string) => Object.assign(document.createElement('p'), { textContent: text });
+  const body = document.createElement('div');
+  body.append(p(t('Your career is saved only in this browser. Browsers sometimes clear a website\'s data, for example when the device runs low on space or when browsing data is cleared, and your saves go with it.')),
+    p(t('Cloud saves keep a copy on this server under a keyphrase that only you have. With it you get your saves back, here or in another browser.')),
+    p(t('You can change this any time under Cloud saves on the start page.')));
+  const answer = confirmBox(t('Turn on cloud saves?'), body, t('Turn on'), false, '', t('Not now'));
+  $<HTMLButtonElement>('#confirm-ok').focus();
+  const on = await answer;
+  log.add(`[app] cloud saves: ${on ? 'turned on' : 'not now'} (asked at Play)`);
+  if (!on) return;
+  const got = await vault.enable();
+  if ('why' in got) {
+    await confirmBox(t('Cloud saves are not on'), got.why ? t('They could not be turned on: {error}. Try again under Cloud saves on the start page.', { error: got.why })
+      : t('They could not be turned on. Try again under Cloud saves on the start page.'), t('Continue'), false, '', '');
+    return;
+  }
+  const box = Object.assign(document.createElement('p'), { className: 'keyphrase', textContent: got.phrase });
+  const copy = Object.assign(document.createElement('button'), { type: 'button', className: 'text-btn', textContent: t('Copy') });
+  copy.onclick = async () => {
+    try { await navigator.clipboard.writeText(got.phrase); copy.textContent = t('Copied.'); }
+    catch { getSelection()?.selectAllChildren(box); }
+  };
+  const file = Object.assign(document.createElement('button'), { type: 'button', className: 'text-btn', textContent: t('Download keyphrase') });
+  file.onclick = () => vault.download();
+  const row = document.createElement('div'); row.className = 'row keyphrase-do';
+  row.append(copy, file);
+  const kept = document.createElement('div');
+  kept.append(p(t('Keyphrase made. Keep it safe: it is the only way back to these saves.')), box, row,
+    p(t('To load your saves, enter it under Cloud saves on the start page.')));
+  const shown = confirmBox(t('Your keyphrase'), kept, t('Continue'), false, '', '');
+  $<HTMLButtonElement>('#confirm-ok').focus();
+  await shown;
+}
+
+/**
  * A full server (the newest /players, asked again at Play): a game that takes a place at once (free roam on) waits in
  * line for it.  The player picks: wait in line (the game starts, alone until it is their turn; the default, also for
  * Esc), or play offline (this game only, without free roam or Online; settings.ini stays as it is).  True: offline.
@@ -364,7 +408,9 @@ async function startGame() {
     return;
   }
   // (the free-roam question says when the server is full: answered, it is not asked again what to do about that)
-  const alone = !await askRoam() && await askFull(counts);
+  const roamAsked = await askRoam();
+  if (!roamAsked) await askCloud();
+  const alone = !roamAsked && await askFull(counts);
   const pre = resolved();
   // inside the click: things that need a user gesture.  The context runs at the
   // mixer's own rate (44.1 kHz), so the worklet does not resample.
@@ -491,6 +537,7 @@ async function startGame() {
     return;
   }
   setPhase('playing', T('Playing'), () => '');
+  vault.played();                     // counted for the cloud saves question (askCloud)
   keeper.start(loaded!.info.rev, gameHeld);
   $('#lastgame').hidden = true;           // about the game before this one
   document.body.dataset.phase = 'playing';
@@ -1030,14 +1077,14 @@ function quitLabel(): string {
 function confirmBox(title: string, body: Node | string, ok: string, danger = false, about = '', cancel = t('Cancel')): Promise<boolean> {
   return choiceBox(title, body, ok, cancel, danger, about).then(v => v === 'ok');
 }
-/** the same, with which way it closed: 'ok', 'cancel' (the cancel button), '' (Esc) */
+/** the same, with which way it closed: 'ok', 'cancel' (the cancel button, none when cancel is ''), '' (Esc) */
 function choiceBox(title: string, body: Node | string, ok: string, cancel: string, danger = false, about = ''): Promise<string> {
   const d = $<HTMLDialogElement>('#confirm');
   d.dataset.about = about;            // 'quit': closed when the game ends (endStage)
   $('#confirm-title').textContent = title;
   const b = $('#confirm-body'); b.replaceChildren(typeof body === 'string' ? Object.assign(document.createElement('p'), { textContent: body }) : body);
   const okb = $<HTMLButtonElement>('#confirm-ok'); okb.textContent = ok; okb.className = danger ? 'btn danger' : 'btn selected';
-  $('#confirm-cancel').textContent = cancel;
+  const cb = $('#confirm-cancel'); cb.textContent = cancel; cb.hidden = !cancel;     // '': the one button
   d.returnValue = '';
   d.showModal();
   return new Promise(res => d.addEventListener('close', () => res(d.returnValue), { once: true }));

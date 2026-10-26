@@ -908,5 +908,16 @@
     "few": "{n} punkty",
     "many": "{n} punktów",
     "other": "{n} punktu"
-  }
+  },
+  "Your career is saved only in this browser. Browsers sometimes clear a website's data, for example when the device runs low on space or when browsing data is cleared, and your saves go with it.": "Twoja kariera jest zapisana tylko w tej przeglądarce. Przeglądarki czasem usuwają dane strony, na przykład gdy na urządzeniu kończy się miejsce albo gdy dane przeglądania zostaną wyczyszczone, a wtedy znikają też twoje zapisy.",
+  "Cloud saves keep a copy on this server under a keyphrase that only you have. With it you get your saves back, here or in another browser.": "Zapisy w chmurze przechowują kopię na tym serwerze pod frazą dostępu, którą masz tylko ty. Dzięki niej odzyskasz swoje zapisy, tutaj lub w innej przeglądarce.",
+  "You can change this any time under Cloud saves on the start page.": "Możesz to zmienić w każdej chwili w sekcji „Zapisy w chmurze” na stronie startowej.",
+  "Turn on cloud saves?": "Włączyć zapisy w chmurze?",
+  "Cloud saves are not on": "Zapisy w chmurze nie są włączone",
+  "They could not be turned on: {error}. Try again under Cloud saves on the start page.": "Nie udało się ich włączyć: {error}. Spróbuj ponownie w sekcji „Zapisy w chmurze” na stronie startowej.",
+  "They could not be turned on. Try again under Cloud saves on the start page.": "Nie udało się ich włączyć. Spróbuj ponownie w sekcji „Zapisy w chmurze” na stronie startowej.",
+  "Continue": "Dalej",
+  "Copy": "Kopiuj",
+  "To load your saves, enter it under Cloud saves on the start page.": "Aby wczytać zapisy, wpisz tę frazę dostępu w sekcji „Zapisy w chmurze” na stronie startowej.",
+  "Your keyphrase": "Twoja fraza dostępu"
 }

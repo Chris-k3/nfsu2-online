@@ -886,5 +886,16 @@
     "one": "{n} ponto",
     "many": "{n} de pontos",
     "other": "{n} pontos"
-  }
+  },
+  "Your career is saved only in this browser. Browsers sometimes clear a website's data, for example when the device runs low on space or when browsing data is cleared, and your saves go with it.": "Sua carreira está salva só neste navegador. Às vezes os navegadores apagam os dados de um site, por exemplo quando o aparelho fica sem espaço ou quando os dados de navegação são apagados, e seus jogos salvos vão junto.",
+  "Cloud saves keep a copy on this server under a keyphrase that only you have. With it you get your saves back, here or in another browser.": "Os jogos salvos na nuvem guardam uma cópia neste servidor, com uma frase-chave que só você tem. Com ela você recupera seus jogos salvos, aqui ou em outro navegador.",
+  "You can change this any time under Cloud saves on the start page.": "Você pode mudar isso quando quiser em Jogos salvos na nuvem, na página inicial.",
+  "Turn on cloud saves?": "Ativar os jogos salvos na nuvem?",
+  "Cloud saves are not on": "Os jogos salvos na nuvem não estão ativados",
+  "They could not be turned on: {error}. Try again under Cloud saves on the start page.": "Não foi possível ativá-los: {error}. Tente de novo em Jogos salvos na nuvem, na página inicial.",
+  "They could not be turned on. Try again under Cloud saves on the start page.": "Não foi possível ativá-los. Tente de novo em Jogos salvos na nuvem, na página inicial.",
+  "Continue": "Continuar",
+  "Copy": "Copiar",
+  "To load your saves, enter it under Cloud saves on the start page.": "Para carregar seus jogos salvos, digite esta frase-chave em Jogos salvos na nuvem, na página inicial.",
+  "Your keyphrase": "Sua frase-chave"
 }

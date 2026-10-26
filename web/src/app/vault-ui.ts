@@ -31,10 +31,14 @@ export interface VaultPanelDeps {
 
 /** where a save folder's link is kept (localStorage) */
 const linkKey = (saveDir: string) => `nfsu2-keyphrase:${saveDir}`;
+/** where its games are counted until Play offers cloud saves, 'asked' after (localStorage) */
+const offerKey = (saveDir: string) => `nfsu2-cloud-offer:${saveDir}`;
+/** the games played in a save folder before its next Play offers cloud saves */
+const OFFER_AFTER = 4;
 
 /** A save folder emptied (a test page's &fresh): its link goes too, or the page would sync an empty folder. */
 export function forgetLink(saveDir: string) {
-  try { localStorage.removeItem(linkKey(saveDir)); } catch { /* storage off */ }
+  try { localStorage.removeItem(linkKey(saveDir)); localStorage.removeItem(offerKey(saveDir)); } catch { /* storage off */ }
 }
 
 const today = (d: Date) => d.toDateString() === new Date().toDateString();
@@ -84,7 +88,7 @@ export class VaultPanel {
       if (!this.sync?.link) return;
       try { await navigator.clipboard.writeText(this.input.value); this.msg(() => t('Copied.')); } catch { /* the selection is there to copy */ }
     });
-    on('#vault-file', () => { if (this.sync?.link) downloadBlob(`${this.sync.link.phrase}\n`, 'nfsu2-keyphrase.txt', 'text/plain'); });
+    on('#vault-file', () => this.download());
     on('#vault-sync', () => this.syncNow());
     on('#vault-earlier', () => this.goBack());
     on('#vault-stop', () => this.stop());
@@ -208,17 +212,45 @@ export class VaultPanel {
   /** A game started or ended, or this tab's ownership changed: the buttons again. */
   refresh() { this.show(); }
 
+  // ---- offered at Play (shell.ts askCloud) ----
+
+  /** A game started here: counted until Play offers cloud saves; with a keyphrase here, they are never offered. */
+  played() {
+    try {
+      const k = offerKey(this.d.saveDir), v = localStorage.getItem(k);
+      if (v !== 'asked') localStorage.setItem(k, this.sync?.link ? 'asked' : String((Number(v) || 0) + 1));
+    } catch { /* storage off: no link is kept here either */ }
+  }
+  /** Play may offer cloud saves: this server keeps them, this tab owns the saves and has no keyphrase, OFFER_AFTER
+   *  games were played here, and they were not offered before. */
+  offerable(): boolean {
+    const s = this.sync;
+    if (!s || s.link || s.state.s === 'working' || !this.d.owner()) return false;
+    try { const v = localStorage.getItem(offerKey(this.d.saveDir)); return v !== 'asked' && (Number(v) || 0) >= OFFER_AFTER; } catch { return false; }
+  }
+  /** Play offered them: not again in this browser. */
+  offered() { try { localStorage.setItem(offerKey(this.d.saveDir), 'asked'); } catch { /* storage off */ } }
+  /** Cloud saves turned on from Play's question: the keyphrase made, or why not (the section says it too). */
+  async enable(): Promise<{ phrase: string } | { why: string }> {
+    const l = await this.make() ? this.sync?.link : null, st = this.sync?.state;
+    return l ? { phrase: l.phrase } : { why: st?.s === 'error' ? tvars(st.why.t, st.why.v) : '' };
+  }
+  /** the linked keyphrase as a file */
+  download() { if (this.sync?.link) downloadBlob(`${this.sync.link.phrase}\n`, 'nfsu2-keyphrase.txt', 'text/plain'); }
+
   // ---- the buttons ----
 
-  private async make() {
-    if (!this.sync || !this.d.owner()) return;
+  /** true: made */
+  private async make(): Promise<boolean> {
+    if (!this.sync || !this.d.owner()) return false;
     try {
       await this.sync.create();
       this.hidden = false;
       this.show();
       this.msg(() => t('Keyphrase made. Keep it safe: it is the only way back to these saves.'));
       this.d.log('[app] keyphrase: made one, the saves went to the server');
-    } catch { /* the state says why */ }
+      return true;
+    } catch { return false; /* the state says why */ }
   }
 
   private async use(text: string) {

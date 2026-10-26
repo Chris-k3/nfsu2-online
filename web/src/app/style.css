@@ -402,6 +402,15 @@ summary:hover { color: var(--text); }
 #vault-conflict { margin-top: 12px; }
 #vault-on { margin-top: 4px; gap: 4px 16px; }
 #vault-on .text-btn { padding: 0; height: 24px; }
+/* the keyphrase just made at Play (shell.ts askCloud): shown whole, in a value box like the section's, wrapped at its
+ * dashes; Copy and Download keyphrase as text under it */
+.keyphrase {
+  padding: 6px 10px; border: 2px solid var(--edge); border-radius: 8px; background: var(--field);
+  color: var(--lime); font: 14px/24px var(--mono); user-select: all;
+}
+.dlg p.keyphrase { margin-bottom: 4px; }
+.keyphrase-do { gap: 4px 16px; margin-bottom: 12px; }
+.keyphrase-do .text-btn { padding: 0; height: 24px; }
 #cache-info { font-variant-numeric: tabular-nums; }
 #data-bar { margin: 0 0 16px; }
 .msg { font-size: 14px; line-height: 20px; margin-top: 12px; }

@@ -864,5 +864,16 @@
   "{n} points": {
     "one": "{n} point",
     "other": "{n} point"
-  }
+  },
+  "Your career is saved only in this browser. Browsers sometimes clear a website's data, for example when the device runs low on space or when browsing data is cleared, and your saves go with it.": "Din karriere er kun gemt i denne browser. Browsere sletter nogle gange et websteds data, for eksempel når enheden er ved at løbe tør for plads, eller når browserdata ryddes, og så forsvinder dine gemte spil også.",
+  "Cloud saves keep a copy on this server under a keyphrase that only you have. With it you get your saves back, here or in another browser.": "Med gemte spil i skyen ligger der en kopi på denne server under en nøglefrase, som kun du har. Med den får du dine gemte spil tilbage, her eller i en anden browser.",
+  "You can change this any time under Cloud saves on the start page.": "Du kan til enhver tid ændre det under Gemte spil i skyen på startsiden.",
+  "Turn on cloud saves?": "Slå gemning i skyen til?",
+  "Cloud saves are not on": "Gemning i skyen er ikke slået til",
+  "They could not be turned on: {error}. Try again under Cloud saves on the start page.": "Den kunne ikke slås til: {error}. Prøv igen under Gemte spil i skyen på startsiden.",
+  "They could not be turned on. Try again under Cloud saves on the start page.": "Den kunne ikke slås til. Prøv igen under Gemte spil i skyen på startsiden.",
+  "Continue": "Fortsæt",
+  "Copy": "Kopiér",
+  "To load your saves, enter it under Cloud saves on the start page.": "Indtast nøglefrasen under Gemte spil i skyen på startsiden for at indlæse dine gemte spil.",
+  "Your keyphrase": "Din nøglefrase"
 }

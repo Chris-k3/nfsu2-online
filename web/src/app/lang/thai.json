@@ -798,5 +798,16 @@
   "Your last game stopped with an error.": "เกมล่าสุดของคุณหยุดลงเพราะเกิดข้อผิดพลาด",
   "Results": "ผลการแข่งขัน",
   "DNF": "ไม่จบการแข่งขัน",
-  "{n} points": "{n} คะแนน"
+  "{n} points": "{n} คะแนน",
+  "Your career is saved only in this browser. Browsers sometimes clear a website's data, for example when the device runs low on space or when browsing data is cleared, and your saves go with it.": "โหมดอาชีพของคุณบันทึกไว้ในเบราว์เซอร์นี้เท่านั้น บางครั้งเบราว์เซอร์จะล้างข้อมูลของเว็บไซต์ เช่น เมื่อพื้นที่ในอุปกรณ์ใกล้เต็ม หรือเมื่อมีการล้างข้อมูลการท่องเว็บ แล้วเซฟของคุณก็จะหายไปด้วย",
+  "Cloud saves keep a copy on this server under a keyphrase that only you have. With it you get your saves back, here or in another browser.": "เซฟบนคลาวด์จะเก็บสำเนาไว้บนเซิร์ฟเวอร์นี้ด้วยวลีรหัสที่มีแค่คุณเท่านั้น เมื่อมีวลีรหัสนี้ คุณจะได้เซฟคืน ไม่ว่าจะที่นี่หรือในเบราว์เซอร์อื่น",
+  "You can change this any time under Cloud saves on the start page.": "คุณเปลี่ยนตัวเลือกนี้ได้ทุกเมื่อในส่วน “เซฟบนคลาวด์” ของหน้าเริ่มต้น",
+  "Turn on cloud saves?": "เปิดเซฟบนคลาวด์ไหม?",
+  "Cloud saves are not on": "ยังไม่ได้เปิดเซฟบนคลาวด์",
+  "They could not be turned on: {error}. Try again under Cloud saves on the start page.": "เปิดไม่สำเร็จ: {error} ลองอีกครั้งในส่วน “เซฟบนคลาวด์” ของหน้าเริ่มต้น",
+  "They could not be turned on. Try again under Cloud saves on the start page.": "เปิดไม่สำเร็จ ลองอีกครั้งในส่วน “เซฟบนคลาวด์” ของหน้าเริ่มต้น",
+  "Continue": "ดำเนินการต่อ",
+  "Copy": "คัดลอก",
+  "To load your saves, enter it under Cloud saves on the start page.": "หากต้องการโหลดเซฟ ให้ใส่วลีรหัสนี้ในส่วน “เซฟบนคลาวด์” ของหน้าเริ่มต้น",
+  "Your keyphrase": "วลีรหัสของคุณ"
 }

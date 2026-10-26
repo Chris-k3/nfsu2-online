@@ -798,5 +798,16 @@
   "Your last game stopped with an error.": "上一局遊戲因錯誤而停止。",
   "Results": "結果",
   "DNF": "未完賽",
-  "{n} points": "{n} 分"
+  "{n} points": "{n} 分",
+  "Your career is saved only in this browser. Browsers sometimes clear a website's data, for example when the device runs low on space or when browsing data is cleared, and your saves go with it.": "你的生涯模式只存在這個瀏覽器裡。瀏覽器有時會清除網站的資料，例如裝置空間不足或瀏覽資料被清除時，你的存檔也會跟著消失。",
+  "Cloud saves keep a copy on this server under a keyphrase that only you have. With it you get your saves back, here or in another browser.": "雲端存檔會以只有你知道的通關密語，在這個伺服器上保留一份副本。有了它，你就能在這裡或其他瀏覽器取回存檔。",
+  "You can change this any time under Cloud saves on the start page.": "你隨時可以在開始頁面的「雲端存檔」中變更此設定。",
+  "Turn on cloud saves?": "要開啟雲端存檔嗎？",
+  "Cloud saves are not on": "雲端存檔未開啟",
+  "They could not be turned on: {error}. Try again under Cloud saves on the start page.": "無法開啟：{error}。請在開始頁面的「雲端存檔」中再試一次。",
+  "They could not be turned on. Try again under Cloud saves on the start page.": "無法開啟。請在開始頁面的「雲端存檔」中再試一次。",
+  "Continue": "繼續",
+  "Copy": "複製",
+  "To load your saves, enter it under Cloud saves on the start page.": "要載入存檔，請在開始頁面的「雲端存檔」中輸入這組通關密語。",
+  "Your keyphrase": "你的通關密語"
 }

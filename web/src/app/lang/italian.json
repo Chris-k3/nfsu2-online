@@ -886,5 +886,16 @@
     "one": "{n} punto",
     "many": "{n} punti",
     "other": "{n} punti"
-  }
+  },
+  "Your career is saved only in this browser. Browsers sometimes clear a website's data, for example when the device runs low on space or when browsing data is cleared, and your saves go with it.": "La tua carriera è salvata solo in questo browser. A volte i browser cancellano i dati di un sito, per esempio quando il dispositivo sta finendo lo spazio o quando vengono cancellati i dati di navigazione, e i tuoi salvataggi spariscono con loro.",
+  "Cloud saves keep a copy on this server under a keyphrase that only you have. With it you get your saves back, here or in another browser.": "I salvataggi cloud conservano una copia su questo server, con una frase chiave che hai solo tu. Con questa recuperi i tuoi salvataggi, qui o in un altro browser.",
+  "You can change this any time under Cloud saves on the start page.": "Puoi cambiarlo in qualsiasi momento in \"Salvataggi cloud\" nella pagina iniziale.",
+  "Turn on cloud saves?": "Attivare i salvataggi cloud?",
+  "Cloud saves are not on": "I salvataggi cloud non sono attivi",
+  "They could not be turned on: {error}. Try again under Cloud saves on the start page.": "Non è stato possibile attivarli: {error}. Riprova in \"Salvataggi cloud\" nella pagina iniziale.",
+  "They could not be turned on. Try again under Cloud saves on the start page.": "Non è stato possibile attivarli. Riprova in \"Salvataggi cloud\" nella pagina iniziale.",
+  "Continue": "Continua",
+  "Copy": "Copia",
+  "To load your saves, enter it under Cloud saves on the start page.": "Per caricare i tuoi salvataggi, inserisci questa frase chiave in \"Salvataggi cloud\" nella pagina iniziale.",
+  "Your keyphrase": "La tua frase chiave"
 }

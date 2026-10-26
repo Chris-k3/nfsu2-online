@@ -886,5 +886,16 @@
     "one": "{n} punto",
     "many": "{n} de puntos",
     "other": "{n} puntos"
-  }
+  },
+  "Your career is saved only in this browser. Browsers sometimes clear a website's data, for example when the device runs low on space or when browsing data is cleared, and your saves go with it.": "Tu carrera solo está guardada en este navegador. A veces los navegadores borran los datos de un sitio web, por ejemplo cuando el dispositivo se queda sin espacio o cuando se borran los datos de navegación, y tus partidas guardadas se van con ellos.",
+  "Cloud saves keep a copy on this server under a keyphrase that only you have. With it you get your saves back, here or in another browser.": "Las partidas en la nube guardan una copia en este servidor con una frase clave que solo tienes tú. Con ella recuperas tus partidas guardadas, aquí o en otro navegador.",
+  "You can change this any time under Cloud saves on the start page.": "Puedes cambiarlo cuando quieras en Partidas en la nube, en la página de inicio.",
+  "Turn on cloud saves?": "¿Activar las partidas en la nube?",
+  "Cloud saves are not on": "Las partidas en la nube no están activadas",
+  "They could not be turned on: {error}. Try again under Cloud saves on the start page.": "No se pudieron activar: {error}. Vuelve a intentarlo en Partidas en la nube, en la página de inicio.",
+  "They could not be turned on. Try again under Cloud saves on the start page.": "No se pudieron activar. Vuelve a intentarlo en Partidas en la nube, en la página de inicio.",
+  "Continue": "Continuar",
+  "Copy": "Copiar",
+  "To load your saves, enter it under Cloud saves on the start page.": "Para cargar tus partidas guardadas, escribe esta frase clave en Partidas en la nube, en la página de inicio.",
+  "Your keyphrase": "Tu frase clave"
 }

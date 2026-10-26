@@ -864,5 +864,16 @@
   "{n} points": {
     "one": "{n} poäng",
     "other": "{n} poäng"
-  }
+  },
+  "Your career is saved only in this browser. Browsers sometimes clear a website's data, for example when the device runs low on space or when browsing data is cleared, and your saves go with it.": "Din karriär sparas bara i den här webbläsaren. Webbläsare rensar ibland en webbplats data, till exempel när enheten börjar få ont om utrymme eller när webbinformationen rensas, och då försvinner dina sparfiler också.",
+  "Cloud saves keep a copy on this server under a keyphrase that only you have. With it you get your saves back, here or in another browser.": "Med sparfiler i molnet finns en kopia på den här servern under en nyckelfras som bara du har. Med den får du tillbaka dina sparfiler, här eller i en annan webbläsare.",
+  "You can change this any time under Cloud saves on the start page.": "Du kan ändra detta när som helst under Sparfiler i molnet på startsidan.",
+  "Turn on cloud saves?": "Slå på sparning i molnet?",
+  "Cloud saves are not on": "Sparning i molnet är inte påslagen",
+  "They could not be turned on: {error}. Try again under Cloud saves on the start page.": "Den gick inte att slå på: {error}. Försök igen under Sparfiler i molnet på startsidan.",
+  "They could not be turned on. Try again under Cloud saves on the start page.": "Den gick inte att slå på. Försök igen under Sparfiler i molnet på startsidan.",
+  "Continue": "Fortsätt",
+  "Copy": "Kopiera",
+  "To load your saves, enter it under Cloud saves on the start page.": "Ange nyckelfrasen under Sparfiler i molnet på startsidan för att ladda dina sparfiler.",
+  "Your keyphrase": "Din nyckelfras"
 }
