@@ -68,7 +68,8 @@ function save() {
 }
 
 const archive = CFG.archive ? new Archive(path.join(CFG.state, 'archive')) : null;
-const repo = new Repo({ source: CFG.repo, branch: CFG.branch, dir: path.join(CFG.state, 'repo'), liveUrl: CFG.liveUrl, liveFile: CFG.liveFile });
+const repo = new Repo({ source: CFG.repo, branch: CFG.branch, dir: path.join(CFG.state, 'repo'), liveUrl: CFG.liveUrl, liveFile: CFG.liveFile,
+  releasesFile: path.join(CFG.state, 'releases.json') });
 const anthropic = newClient();
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
@@ -87,10 +88,9 @@ function isStaff(member, channel) {
 }
 
 // the general channels (general.mjs): nudges to the forums, spikes and a daily digest for the staff
-const released = { rev: '', at: 0 };             // the last release the bot saw go live, and when
 const general = new General({
   client, anthropic, model: CFG.model, isStaff, staffChannel: CFG.staffChannel, dryRun: CFG.dryRun, state: CFG.state,
-  releasedAt: () => released.at,
+  releasedAt: () => repo.releases.at(-1)?.at ?? 0,
   bugForum: guild => guild?.channels.cache.find(ch => isForum(ch) && /bug/i.test(ch.name)) ?? null,
   forumThreads: () => Object.entries(threads)
     .filter(([, t]) => !t.closed && t.category !== 'suggestion' && !/suggest/i.test(t.forum ?? ''))
@@ -416,7 +416,6 @@ async function checkRelease() {
   // the new version is kept once this release is dealt with, so a check that fails is tried again next time
   const seen = () => fs.writeFileSync(LIVE_FILE, JSON.stringify({ rev, at: new Date().toISOString() }));
   if (!last) { seen(); return console.log(`[release] live is ${rev}`); }
-  if (released.rev !== rev) Object.assign(released, { rev, at: Date.now() });
   await repo.sync(true);
   if (!(await repo.has(last)) || !(await repo.has(rev))) { seen(); return console.log(`[release] live ${last} -> ${rev}: not both in the code copy, skipped`); }
   const commits = (await repo.git(['log', '--no-merges', '-n', '60', '--format=commit %h %s%n%b', `${last}..${rev}`])).trim();

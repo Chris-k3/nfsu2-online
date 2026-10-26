@@ -49,8 +49,9 @@ function opening({ now, recent, threads, thread, images }) {
     `Now: ${now}`,
     `Live version: ${recent.live}`,
     `Newest commit: ${recent.head}`,
+    `Releases the bot saw (newest first):\n${recent.releases || 'none yet'}`,
     recent.notLive ? `Commits not live yet (newest first):\n${recent.notLive}` : 'Commits not live yet: none',
-    `Commits of the last days up to the live version (newest first):\n${recent.recent || 'none'}`,
+    `Commits of the last days up to the live version (newest first; when made, and when they went live):\n${recent.recent || 'none'}`,
     `Recent forum threads (id, category, what the bot did, title: summary):\n${threads || 'none yet'}`,
   ].join('\n\n');
   return [

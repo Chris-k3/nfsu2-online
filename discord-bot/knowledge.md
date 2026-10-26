@@ -11,7 +11,7 @@ known or decided. The code is public: https://github.com/th0mk/nfsu2-web.
   the browser, or also on the server with cloud saves (a keyphrase only the player has).
 - The page updates itself: before a game it loads the new version by itself; during a game it shows "A new version of
   the game is on the server", and Reload or Play loads it. A tab left open runs the old version until then. When a fix
-  is live, "reload the page (Ctrl+F5 on a PC)" is the whole answer: that is how the developer answers it.
+  is live, the answer is when it was fixed, since when it is live, and "reload the page (Ctrl+F5 on a PC)".
 - Multiplayer: free roam with everyone on the server (Online, Free roam with others), the game's Online mode (a name,
   no EA account) and races from free roam or the Online menus, up to 6 players. Crews, rooms, ghost mode (F9, solid
   cars), quick chat (1-4, then 1-4), horn (N).
@@ -45,7 +45,7 @@ The log is the most useful thing in a bug report. Say exactly how:
   attached to the thread. The developer asks for that to reproduce it.
 - The page shows a problem: the code it shows (`GPU-ADAPTER-WIN`, `PAGE-NOT-ISOLATED`, ...) or a screenshot of it. Most
   codes are in the guide's section 8 with what to do.
-- The browser cannot use the graphics and the guide does not settle why: Chrome's report from chrome://gpu (the
+- The browser cannot use the graphics and the guide does not settle why: Chrome's report from `chrome://gpu` (the
   button at the top saves it as a file), attached.
 - Graphics or speed: browser and version, device or graphics chip, the F8 frame-rate counter's numbers, where it
   happens (free roam with many cars, races, menus). The log has all but the last.
@@ -62,13 +62,13 @@ The log is the most useful thing in a bug report. Say exactly how:
 Checked against the guide or the code, and confirmed by players in threads:
 
 - "It worked yesterday, today it won't start" or a crash on an older version (the log's `game <rev>` is not the live
-  one): reload the page, Ctrl+F5 on a PC.
+  one): reload the page, Ctrl+F5 on a PC; when a fix for it is live, say when it was fixed and since when it is live.
 - `GPU-ACCEL-OFF`, or Chrome drawing with "Microsoft Basic Render Driver" or SwiftShader: turn on "Use graphics
-  acceleration when available" in chrome://settings/system and restart Chrome. Moderators answer this often; it works.
+  acceleration when available" in `chrome://settings/system` and restart Chrome. Moderators answer this often; it works.
 - `PAGE-NOT-ISOLATED` ("not cross-origin isolated") on nfsu2.xyz itself: something in the browser changes the page,
   most often an extension. A guest or incognito window works for the players who tried it; then turn the
   extensions off one by one.
-- Saves gone after closing the browser: the browser deletes site data when it closes (Chrome: chrome://settings/content/siteData,
+- Saves gone after closing the browser: the browser deletes site data when it closes (Chrome: `chrome://settings/content/siteData`,
   allow nfsu2.xyz to save data). Lost saves do not come back; Saves, Download backup, and cloud saves keep a copy.
 - Loading a backup or a PC profile: Saves, Restore a backup (the guide's section 5).
 - Saving on a phone: the game's own save, Garage, Save; it saves by itself after races and purchases from then on.
@@ -140,7 +140,7 @@ performance and tuning, AI and traffic, the career's progression, races and rewa
 ## Don't
 
 - Don't tell players to edit settings.ini variables (`NFSU2_...`) or use `?env=` links: those work only on a
-  development server. Don't send them to chrome://flags unless the guide says so for their case.
+  development server. Don't send them to `chrome://flags` unless the guide says so for their case.
 - Don't suggest mods, trainers, cheats, save downloads, other builds or other sites.
 - Don't answer questions about moderation, bans, kicks, names, donations, Discord channels, server load or the
   server's setup: staff answer those (none).

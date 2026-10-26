@@ -5,6 +5,7 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { LOG_DATE, LOG_FORMAT } from './repo.mjs';
 
 const run = promisify(execFile);
 const ATT = 'attachments';
@@ -35,15 +36,16 @@ export const TOOL_DEFS = [
   tool('list', 'List a folder of the code ("" = the root) or "attachments/": names, with "/" after folders.', {
     path: str('the folder'),
   }),
-  tool('git_log', 'The commit history, newest first: short hash, date, title. LIVE is the live server\'s commit, HEAD the ' +
-    'newest. "abc123..LIVE" lists what came after abc123 up to the live version (empty: abc123 is live or newer).', {
+  tool('git_log', 'The commit history, newest first: short hash, time (UTC, and as a Discord timestamp), title, and when it ' +
+    'went live. LIVE is the live server\'s commit, HEAD the newest. "abc123..LIVE" lists what came after abc123 up to the ' +
+    'live version (empty: abc123 is live or newer).', {
     range: str('a commit, or A..B ("" = HEAD); commits are hex hashes, LIVE or HEAD'),
     grep: str('only commits whose message matches this regular expression, case-insensitive ("" = all)'),
     path: str('only commits that touch this file or folder ("" = all)'),
     max: int('how many commits, at most 100 (0 = 30)'),
   }),
   tool('git_show', 'One commit: its full message and the files it changed, and with patch its diff (long diffs are ' +
-    'cut). Also tells whether it is in the live version.', {
+    'cut). Also tells whether it is in the live version, and since when.', {
     rev: str('the commit: a hex hash, LIVE or HEAD'),
     patch: bool('include the diff'),
   }),
@@ -173,25 +175,28 @@ export class Tools {
     const ends = (range || 'HEAD').split('..');
     if (ends.length > 2) throw new Error('range: a commit or A..B');
     const spec = (await Promise.all(ends.map(e => this.rev(e || 'HEAD')))).join('..');
-    const args = ['log', '--no-merges', '--date=format:%Y-%m-%d %H:%M', '--format=%h %cd %s', '-n', String(Math.min(max > 0 ? max : 30, 100))];
+    const args = ['log', '--no-merges', LOG_DATE, `--format=${LOG_FORMAT}`, '-n', String(Math.min(max > 0 ? max : 30, 100))];
     if (grep) args.push('-i', '-E', `--grep=${grep}`);
     args.push(spec, '--');
     if (p) args.push(this.where(p, true).rel || '.');
-    const out = (await this.repo.git(args)).trim();
+    const out = await this.repo.withLive(await this.repo.git(args));
     return out || 'no commits';
   }
 
   async gitShow({ rev, patch }) {
     const r = await this.rev(rev);
-    const head = await this.repo.git(['show', '--no-patch', '--date=format:%Y-%m-%d %H:%M', '--format=%h %cd%n%B', r]);
+    const head = await this.repo.git(['show', '--no-patch', LOG_DATE, '--format=%H%n%h %cd <t:%ct>%n%B', r]);
+    const [full, ...msg] = head.trim().split('\n');
     const stat = await this.repo.git(['show', '--format=', '--stat=120', r]);
     const live = await this.repo.liveRev();
     let state = 'unknown whether it is live';
     if (live && await this.repo.has(live)) {
       try { await this.repo.git(['merge-base', '--is-ancestor', r, live]); state = 'in the live version'; }
       catch { state = 'not in the live version yet'; }
+      const since = (await this.repo.liveSince([full])).get(full);
+      if (since && since !== 'not live yet') state += `, ${since}`;
     }
-    let out = `${head.trim()}\n\n[${state}]\n${stat.trim()}`;
+    let out = `${msg.join('\n')}\n\n[${state}]\n${stat.trim()}`;
     if (patch) out += '\n\n' + cut(await this.repo.git(['show', '--format=', '--patch', r]), 30_000);
     return cut(out);
   }

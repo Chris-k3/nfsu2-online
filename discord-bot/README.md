@@ -4,9 +4,10 @@ A Discord bot for the server's forums. It looks at each new post once its author
 and it says something only when it is worth it:
 
 - **in the thread**, a fix it verified in the player's guide, the code or the git history (an error code, a missed
-  setting, a browser's limit, a bug fixed in the live version); or a request for what the report lacks (the log, the
-  browser and device, the controller's model), with how to get it. In the poster's language, and every reply ends
-  with a line saying it is an automated AI reply that may be wrong;
+  setting, a browser's limit, a bug fixed in the live version, with when it was fixed and since when it is live); or
+  a request for what the report lacks (the log, the browser and device, the controller's model), with how to get it.
+  In the poster's language, dates as Discord timestamps (each reader sees their own time zone), web addresses in
+  inline code, and every reply ends with a line saying it is an automated AI reply that may be wrong;
 - **in the staff channel**, a report the developer should act on, with everything needed to start: what happens,
   device, browser and version, the key log lines, the likely cause, the thread's link and its log files and saves.
   Each report gets a thread: later threads about the same problem (with what they add and their logs) and new logs
@@ -46,7 +47,9 @@ the bot in a thread to have it look anyway.
   the bot's own copy of the code and the attachments.
 - `repo.mjs`: the bot's own clone of the code in `state/repo`, fetched at most every 5 minutes. The rules, the notes
   and the guide are read from that clone, so a pushed change to them applies within minutes, without a new image or a
-  restart. The live version comes from `https://nfsu2.xyz/game.json`.
+  restart. The live version comes from the module file, else `https://nfsu2.xyz/game.json`. Each new live version
+  goes into `state/releases.json` with its time (the module file's, which `release.sh` writes as the release goes
+  out), and every commit the model reads shows when it went live.
 - `archive.mjs`: every message of every channel the bot sees, kept 7 days in `state/archive/`. At start the bot reads
   the forums' threads with posts in the last 48 hours, nothing older: it lists them (titles and first posts) in
   `state/threads.json`, and looks at the ones opened in that time that it never looked at, so a restart misses no post.
