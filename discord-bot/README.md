@@ -18,7 +18,8 @@ and it says something only when it is worth it:
 - **when a fix goes live**, in a thread whose problem one of the release's commits fixes: that a fix may have solved
   it, what the fix changes (one plain sentence, no internals), to reload the page, and to post a new log if it still
   happens. Only when a full look at the thread is sure; at most once a thread, at most 3 threads a release (short,
-  low-effort looks), threads of the last 14 days. The report's thread notes it.
+  low-effort looks), threads of the last 14 days, also threads staff wrote in (one the bot never looked at is matched
+  by its title and first post). The report's thread notes it.
 
 - **when a suggestion is carried out**, in a suggestion thread (a forum named `suggest…`, or a post the bot took for a
   suggestion) that one of the release's commits does what it asks for: that it was added, since when it is live, where
@@ -82,9 +83,11 @@ something to say, until the bot has replied `BOT_MAX_TALK` times (6) in the thre
   the bot's own copy of the code and the attachments.
 - `repo.mjs`: the bot's own clone of the code in `state/repo`, fetched at most every 5 minutes. The rules, the notes
   and the guide are read from that clone, so a pushed change to them applies within minutes, without a new image or a
-  restart. The live version comes from the module file, else `https://nfsu2.xyz/game.json`. Each new live version
-  goes into `state/releases.json` with its time (the module file's, which `release.sh` writes as the release goes
-  out), and every commit the model reads shows when it went live.
+  restart. The live version comes from the module file, else `https://nfsu2.xyz/game.json`; next to the module file,
+  `release.sh`'s `release.json` names the running image's commit, which is the live version while it names that module
+  (a release of only the page or the server keeps the module's `nfsu2.json`). Each new live version goes into
+  `state/releases.json` with its time (the file's, which `release.sh` writes as the release goes out), and every
+  commit the model reads shows when it went live.
 - `archive.mjs`: every message of every channel the bot sees, kept 7 days in `state/archive/`. At start the bot reads
   the forums' threads with posts in the last 48 hours, nothing older: it lists them (titles and first posts) in
   `state/threads.json`, and looks at the ones opened in that time that it never looked at, so a restart misses no post.
@@ -201,7 +204,7 @@ Run it with `BOT_DRY_RUN=1` for a day. Every reply it would have posted goes to 
 | `BOT_ARCHIVE` | on | `0`: don't keep messages (the model then can't search other channels) |
 | `BOT_STATE` | `state` (`/state` in Docker) | where the clone, the archive, the thread list, the verdicts and the translations go |
 | `BOT_REPO`, `BOT_BRANCH` | this checkout, `main` | where the code comes from (in `compose.yml`: GitHub over SSH) |
-| `BOT_LIVE_FILE` | `/live/nfsu2.json` | the live module's `nfsu2.json`, for its version (`rev`); `compose.yml` mounts `/srv/nfsu2/module` there |
+| `BOT_LIVE_FILE` | `/live/nfsu2.json` | the live module's `nfsu2.json`, for its version (`rev`), and `release.json` beside it (the image's commit); `compose.yml` mounts `/srv/nfsu2/module` there |
 | `BOT_LIVE_URL` | `https://nfsu2.xyz/game.json` | the live version when there is no such file (Cloudflare may refuse it to a server) |
 
 Server-side fallback (`fallbacks: "default"`) is on: when Claude declines a request, the API runs it on another model

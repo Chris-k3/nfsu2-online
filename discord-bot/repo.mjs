@@ -1,10 +1,11 @@
 // The bot's own copy of the code: a clone of BOT_REPO (default: the checkout this folder is in) at BOT_BRANCH, fetched
 // again before an investigation when it is more than 5 minutes old.  The model reads only this copy, never a working
 // tree that someone is editing.  The live server's version (`rev`, the module's commit) comes from the module's
-// nfsu2.json when the bot runs next to the server (BOT_LIVE_FILE, mounted read-only), else from the page's game.json
-// (BOT_LIVE_URL), which Cloudflare may refuse to a server's address.  Each new live version goes into a release history
-// (releasesFile), so the model can tell a player when a fix went live: at the module file's time (release.sh copies it
-// in as the release goes out), or when the bot first saw it.
+// nfsu2.json when the bot runs next to the server (BOT_LIVE_FILE, mounted read-only), or the image's commit from the
+// release.json release.sh writes beside it (a release of only the page or the server keeps the module), else from the
+// page's game.json (BOT_LIVE_URL), which Cloudflare may refuse to a server's address.  Each new live version goes into a
+// release history (releasesFile), so the model can tell a player when a fix went live: at the file's time (release.sh
+// writes it as the release goes out), or when the bot first saw it.
 import { execFile, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -72,10 +73,17 @@ export class Repo {
   async liveRev() {
     if (Date.now() - this.live.at < LIVE_EVERY_MS) return this.live.rev;
     const rev = j => /^[0-9a-f]{4,40}$/.test(j?.rev ?? '') ? j.rev : null;
-    let found = null, via = null;
+    let found = null, via = null, stamp = this.liveFile;
     if (this.liveFile && fs.existsSync(this.liveFile)) {
       try { found = rev(JSON.parse(fs.readFileSync(this.liveFile, 'utf8'))); via = 'file'; }
       catch (e) { console.error(`[repo] live version from ${this.liveFile}: ${e.message}`); }
+      // release.sh's release.json beside it names the running image's commit, a later one after a release of only the
+      // page or the server; only while it names this module (one copied in by hand leaves it stale)
+      const file = path.join(path.dirname(this.liveFile), 'release.json');
+      try {
+        const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+        if (found && j.module === found && rev({ rev: j.image })) { found = j.image; stamp = file; }
+      } catch (e) { if (e.code !== 'ENOENT') console.error(`[repo] ${file}: ${e.message}`); }
     } else if (this.liveFile && !this.saidNoFile) {
       this.saidNoFile = true;
       console.error(`[repo] no ${this.liveFile}: mount the live module's folder there (compose.yml: /srv/nfsu2/module:/live:ro); trying the page`);
@@ -91,7 +99,7 @@ export class Repo {
     this.live = { rev: found, at: Date.now(), via: found ? via : null };
     if (found) {
       let mtime = null;
-      if (via === 'file') try { mtime = fs.statSync(this.liveFile).mtimeMs; } catch { /* gone just now */ }
+      if (via === 'file') try { mtime = fs.statSync(stamp).mtimeMs; } catch { /* gone just now */ }
       this.noteRelease(found, mtime);
     }
     return found;

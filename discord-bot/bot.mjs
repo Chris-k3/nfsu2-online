@@ -500,9 +500,17 @@ async function checkRelease() {
   if (!commits) { seen(); return console.log(`[release] live ${last} -> ${rev}: no new commits (a rollback?)`); }
   const since = new Date(Date.now() - FIX_DAYS * 86400_000).toISOString();
   const open = t => !t.fixed && t.fixChecked !== rev;
-  const candidates = Object.entries(threads)
+  const reports = Object.entries(threads)
     .filter(([, t]) => t.created >= since && open(t) && !isSuggestion(t) && t.category !== 'question')
-    .sort(byActivity).slice(0, 200)
+    .sort(byActivity).slice(0, 200);
+  // a thread the bot never looked at (staff answered before its look) is only a title: its first post too
+  for (const [id, t] of reports.filter(([, t]) => !t.summary && !t.snippet)) {   // one at a time: the rate limits
+    const thread = await client.channels.fetch(id).catch(() => null);
+    const m = await thread?.fetchStarterMessage().catch(() => null);
+    if (m) t.snippet = m.content.replace(/\s+/g, ' ').slice(0, 200);
+  }
+  save();
+  const candidates = reports
     .map(([id, t]) => ({ id, line: `${id} | #${t.forum} | ${t.created.slice(0, 10)} | ${t.category ?? '?'} | ${t.title} | ${t.summary || t.snippet || ''}` }));
   await indexSuggestions().catch(e => console.error(`[release] reading the suggestions: ${e.message}`));
   const wishes = Object.entries(threads).filter(([, t]) => isSuggestion(t) && open(t) && !t.decided)
