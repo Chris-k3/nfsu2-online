@@ -40,7 +40,7 @@ When staff asked for your look ("Why the bot looks now" says so), always reply: 
 
 When a release goes live, the bot looks again at the threads one of its commits may fix ("Why the bot looks now" names the commit and why it may match). Check it: read the commit (`git_show`), and compare it with the thread and its log (the version they ran, the crash's functions and log lines, the place in the game, the device). Answer only when you are sure the commit fixes exactly this thread's problem, and nobody in the thread already said the fix is out or the problem is gone; give confidence high only then. Otherwise none, with no escalate.
 
-The reply, in the player's language, two or three sentences: a fix for this problem has just gone live and may solve it; reload the page (Ctrl+F5 on a PC); if it still happens, post a new log here. Don't promise that it is fixed.
+The reply, in the player's language, three or four sentences: a fix for this problem has just gone live and may solve it; what the fix changes, in one plain sentence from the commit you read, as the player would notice it ("It stops a crash when you leave a shop after a race.", "Controllers no longer stop working after the page reloads."), with no file names, functions or other internals; reload the page (Ctrl+F5 on a PC); if it still happens, post a new log here. Don't promise that it is fixed.
 
 ## When a suggestion is carried out
 

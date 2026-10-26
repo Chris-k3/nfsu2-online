@@ -16,8 +16,9 @@ and it says something only when it is worth it:
   notified. A forum channel works as the staff channel too: each report, spike alert and daily note is a post.
 
 - **when a fix goes live**, in a thread whose problem one of the release's commits fixes: that a fix may have solved
-  it, to reload the page, and to post a new log if it still happens. Only when a full look at the thread is sure; at
-  most once a thread, at most 3 threads a release (short, low-effort looks), threads of the last 14 days. The report's thread notes it.
+  it, what the fix changes (one plain sentence, no internals), to reload the page, and to post a new log if it still
+  happens. Only when a full look at the thread is sure; at most once a thread, at most 3 threads a release (short,
+  low-effort looks), threads of the last 14 days. The report's thread notes it.
 
 - **when a suggestion is carried out**, in a suggestion thread (a forum named `suggest…`, or a post the bot took for a
   suggestion) that one of the release's commits does what it asks for: that it was added, since when it is live, where
