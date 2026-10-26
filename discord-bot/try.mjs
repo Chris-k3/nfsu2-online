@@ -1,0 +1,55 @@
+// One look at a made-up forum post, without Discord: what the bot would post, and why.
+//   node --env-file=.env try.mjs [--title T] [--forum F] "the post's text" [attachment ...]
+// Text attachments are read as the bot reads a thread's; images (.png .jpg .gif .webp) go in as pictures.
+import fs from 'node:fs';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { Archive } from './archive.mjs';
+import { investigate, newClient, vet } from './investigate.mjs';
+import { Repo } from './repo.mjs';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const args = process.argv.slice(2);
+const opt = (name, dflt) => { const i = args.indexOf(name); return i < 0 ? dflt : args.splice(i, 2)[1]; };
+const title = opt('--title', 'Bug');
+const forum = opt('--forum', 'bug-reports');
+const [text, ...files] = args;
+if (!text) { console.error('usage: try.mjs [--title T] [--forum F] "post text" [attachment ...]'); process.exit(2); }
+
+const env = process.env;
+const state = path.resolve(HERE, env.BOT_STATE || 'state');
+const repo = new Repo({
+  source: env.BOT_REPO || execFileSync('git', ['-C', HERE, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim(),
+  branch: env.BOT_BRANCH || 'main', dir: path.join(state, 'repo'), liveUrl: env.BOT_LIVE_URL || 'https://nfsu2.xyz/game.json',
+});
+const archiveDir = path.join(state, 'archive');
+const archive = fs.existsSync(archiveDir) ? new Archive(archiveDir) : null;
+fs.mkdirSync(state, { recursive: true });
+const workDir = fs.mkdtempSync(path.join(state, 'try-'));
+
+const TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' };
+const lines = [`Forum: #${forum}`, `Title: ${title}`, 'Tags: none', 'Why the bot looks now: a new post', '',
+  `[${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC] player (the poster):`, text];
+const images = [];
+files.forEach((f, i) => {
+  const type = TYPES[path.extname(f).toLowerCase()];
+  if (type) { images.push({ type, data: fs.readFileSync(f).toString('base64') }); lines.push(`  [picture ${images.length}: ${path.basename(f)}]`); return; }
+  const name = `${i + 1}-${path.basename(f).replace(/[^\w.-]+/g, '_')}`;
+  fs.copyFileSync(f, path.join(workDir, name));
+  lines.push(`  [attachment: attachments/${name}, ${Math.round(fs.statSync(f).size / 1024)} KB]`);
+});
+
+try {
+  const res = await investigate({
+    client: newClient(), model: env.BOT_MODEL || 'claude-opus-5-5', effort: env.BOT_EFFORT || 'high',
+    repo, archive, workDir, thread: lines.join('\n'), images,
+  });
+  for (const l of res.log) console.log(`  ${l}`);
+  console.log(JSON.stringify(res.verdict, null, 2));
+  const { post, why } = vet(res.verdict, { minConfidence: env.BOT_MIN_CONFIDENCE || 'medium' });
+  console.log(`\n${post ? `--- would post (${why}) ---\n${post}\n---` : `--- would post nothing (${why}) ---`}`);
+  console.log(`${res.turns} turns${res.cost != null ? `, $${res.cost.toFixed(3)}` : ''}, tokens ${JSON.stringify(res.usage)}`);
+} finally {
+  fs.rmSync(workDir, { recursive: true, force: true });
+}
