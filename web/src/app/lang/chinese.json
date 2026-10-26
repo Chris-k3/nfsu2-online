@@ -402,7 +402,7 @@
   "a folder (printable, under 1024 bytes)": "資料夾（可顯示字元，少於 1024 位元組）",
   "text of 1 to 63 bytes without control characters": "1 至 63 位元組、不含控制字元的文字",
   "<width>x<height> (320 to 16384 each)": "<寬>x<高>（各 320 至 16384）",
-  "default, all, none or a list of ticks, timer, particles, trail, audio, rtf, rain (-name removes one)": "default、all、none，或由 ticks、timer、particles、trail、audio、rtf、rain 組成的清單（「-名稱」可移除其中一項）",
+  "default, all, none or a list of ticks, timer, particles, trail, audio, rtf, rain, spinners (-name removes one)": "default、all、none，或由 ticks、timer、particles、trail、audio、rtf、rain、spinners 組成的清單（「-名稱」可移除其中一項）",
   "a network interface name (letters and digits, e.g. en0)": "網路介面名稱（字母與數字，例如 en0）",
   "an IPv4 address a.b.c.d": "IPv4 位址 a.b.c.d",
   "xx:xx:xx:xx:xx:xx (hex, not all zero)": "xx:xx:xx:xx:xx:xx（十六進位，不可全為零）",

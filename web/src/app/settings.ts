@@ -294,9 +294,9 @@ export const TEMPLATE = `# NFSU2 settings, read at every launch.
 # work.  Cutscenes stay at 30 fps in every mode.  [NFSU2_FPS]
 #fps = auto
 # Fixes for subsystems that count frames: default (all above 60 fps, none
-# at 60, ticks,particles,rain at 30), all, none, or a list of
-# ticks,timer,particles,trail,audio,rtf,rain (a leading '-' removes one,
-# e.g. default,-audio).  [NFSU2_HFR_FIX]
+# at 60, ticks,particles,rain,spinners at 30), all, none, or a list of
+# ticks,timer,particles,trail,audio,rtf,rain,spinners (a leading '-' removes
+# one, e.g. default,-audio).  [NFSU2_HFR_FIX]
 #hfr_fixes = default
 # Length factor of the NOS / streak trail.  [NFSU2_NOS_TRAIL_LEN]
 #nos_trail_length = 1.0
@@ -498,7 +498,7 @@ function listOk(v: string, words: readonly string[], minus: boolean): boolean {
   const toks = v.split(/[, \t]+/).filter(Boolean);
   return toks.length > 0 && toks.every(t => words.includes(lower(minus && t[0] === '-' ? t.slice(1) : t)));
 }
-const FIX_WORDS = ['default', 'all', 'none', 'ticks', 'timer', 'particles', 'trail', 'audio', 'rtf', 'rain'];
+const FIX_WORDS = ['default', 'all', 'none', 'ticks', 'timer', 'particles', 'trail', 'audio', 'rtf', 'rain', 'spinners'];
 const PART_WORDS = ['all', 'world', 'signs', 'cars', 'garage', 'sky', 'effects', 'frontend', 'hud', 'other'];
 /** sscanf %u: strtoull's value (saturated), stored into a 32-bit unsigned */
 const scanU32 = (d: string) => { let x = BigInt(d); const max = (1n << 64n) - 1n; if (x > max) x = max; return Number(x & 0xFFFFFFFFn); };
@@ -536,7 +536,7 @@ const KIND_TEXT: Partial<Record<Kind, string>> = {
   path: N('a folder (printable, under 1024 bytes)'),
   text: N('text of 1 to 63 bytes without control characters'),
   wxh: N('<width>x<height> (320 to 16384 each)'),
-  fixes: N('default, all, none or a list of ticks, timer, particles, trail, audio, rtf, rain (-name removes one)'),
+  fixes: N('default, all, none or a list of ticks, timer, particles, trail, audio, rtf, rain, spinners (-name removes one)'),
   ifname: N('a network interface name (letters and digits, e.g. en0)'),
   ipv4: N('an IPv4 address a.b.c.d'),
   mac: N('xx:xx:xx:xx:xx:xx (hex, not all zero)'),

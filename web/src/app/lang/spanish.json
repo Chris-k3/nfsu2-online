@@ -462,7 +462,7 @@
   "a folder (printable, under 1024 bytes)": "una carpeta (caracteres imprimibles, menos de 1024 bytes)",
   "text of 1 to 63 bytes without control characters": "un texto de 1 a 63 bytes sin caracteres de control",
   "<width>x<height> (320 to 16384 each)": "<ancho>x<alto> (de 320 a 16384 cada uno)",
-  "default, all, none or a list of ticks, timer, particles, trail, audio, rtf, rain (-name removes one)": "default, all, none o una lista de ticks, timer, particles, trail, audio, rtf, rain (-nombre quita uno)",
+  "default, all, none or a list of ticks, timer, particles, trail, audio, rtf, rain, spinners (-name removes one)": "default, all, none o una lista de ticks, timer, particles, trail, audio, rtf, rain, spinners (-nombre quita uno)",
   "a network interface name (letters and digits, e.g. en0)": "un nombre de interfaz de red (letras y dígitos, p. ej., en0)",
   "an IPv4 address a.b.c.d": "una dirección IPv4 a.b.c.d",
   "xx:xx:xx:xx:xx:xx (hex, not all zero)": "xx:xx:xx:xx:xx:xx (hexadecimal, no todo ceros)",

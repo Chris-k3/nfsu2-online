@@ -447,7 +447,7 @@
   "a folder (printable, under 1024 bytes)": "map (afdrukbare tekens, kleiner dan 1024 bytes)",
   "text of 1 to 63 bytes without control characters": "tekst van 1 tot 63 bytes zonder stuurtekens",
   "<width>x<height> (320 to 16384 each)": "<breedte>x<hoogte> (elk 320 tot 16384)",
-  "default, all, none or a list of ticks, timer, particles, trail, audio, rtf, rain (-name removes one)": "default, all, none of een lijst van ticks, timer, particles, trail, audio, rtf, rain (-naam verwijdert er een)",
+  "default, all, none or a list of ticks, timer, particles, trail, audio, rtf, rain, spinners (-name removes one)": "default, all, none of een lijst van ticks, timer, particles, trail, audio, rtf, rain, spinners (-naam verwijdert er een)",
   "a network interface name (letters and digits, e.g. en0)": "netwerkinterfacenaam (letters en cijfers, bijv. en0)",
   "an IPv4 address a.b.c.d": "IPv4-adres a.b.c.d",
   "xx:xx:xx:xx:xx:xx (hex, not all zero)": "xx:xx:xx:xx:xx:xx (hex, niet allemaal nul)",

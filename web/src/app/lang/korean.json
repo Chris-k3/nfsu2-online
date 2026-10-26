@@ -402,7 +402,7 @@
   "a folder (printable, under 1024 bytes)": "폴더(출력 가능한 문자, 1024바이트 미만)",
   "text of 1 to 63 bytes without control characters": "제어 문자가 없는 1~63바이트 텍스트",
   "<width>x<height> (320 to 16384 each)": "<너비>x<높이>(각각 320~16384)",
-  "default, all, none or a list of ticks, timer, particles, trail, audio, rtf, rain (-name removes one)": "default, all, none 또는 ticks, timer, particles, trail, audio, rtf, rain 목록(-이름으로 하나 제외)",
+  "default, all, none or a list of ticks, timer, particles, trail, audio, rtf, rain, spinners (-name removes one)": "default, all, none 또는 ticks, timer, particles, trail, audio, rtf, rain, spinners 목록(-이름으로 하나 제외)",
   "a network interface name (letters and digits, e.g. en0)": "네트워크 인터페이스 이름(영문자와 숫자, 예: en0)",
   "an IPv4 address a.b.c.d": "IPv4 주소 a.b.c.d",
   "xx:xx:xx:xx:xx:xx (hex, not all zero)": "xx:xx:xx:xx:xx:xx(16진수, 모두 0은 안 됨)",

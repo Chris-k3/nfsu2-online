@@ -447,7 +447,7 @@
   "a folder (printable, under 1024 bytes)": "en mapp (utskrivbara tecken, under 1024 byte)",
   "text of 1 to 63 bytes without control characters": "text på 1 till 63 byte utan styrtecken",
   "<width>x<height> (320 to 16384 each)": "<bredd>x<höjd> (320 till 16384 vardera)",
-  "default, all, none or a list of ticks, timer, particles, trail, audio, rtf, rain (-name removes one)": "default, all, none eller en lista av ticks, timer, particles, trail, audio, rtf, rain (-namn tar bort ett)",
+  "default, all, none or a list of ticks, timer, particles, trail, audio, rtf, rain, spinners (-name removes one)": "default, all, none eller en lista av ticks, timer, particles, trail, audio, rtf, rain, spinners (-namn tar bort ett)",
   "a network interface name (letters and digits, e.g. en0)": "ett namn på ett nätverksgränssnitt (bokstäver och siffror, t.ex. en0)",
   "an IPv4 address a.b.c.d": "en IPv4-adress a.b.c.d",
   "xx:xx:xx:xx:xx:xx (hex, not all zero)": "xx:xx:xx:xx:xx:xx (hex, inte bara nollor)",

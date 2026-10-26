@@ -402,7 +402,7 @@
   "a folder (printable, under 1024 bytes)": "โฟลเดอร์ (อักขระที่พิมพ์ได้ น้อยกว่า 1024 ไบต์)",
   "text of 1 to 63 bytes without control characters": "ข้อความยาว 1 ถึง 63 ไบต์ที่ไม่มีอักขระควบคุม",
   "<width>x<height> (320 to 16384 each)": "<กว้าง>x<สูง> (แต่ละค่า 320 ถึง 16384)",
-  "default, all, none or a list of ticks, timer, particles, trail, audio, rtf, rain (-name removes one)": "default, all, none หรือรายการของ ticks, timer, particles, trail, audio, rtf, rain (-ชื่อ เพื่อเอาออกหนึ่งรายการ)",
+  "default, all, none or a list of ticks, timer, particles, trail, audio, rtf, rain, spinners (-name removes one)": "default, all, none หรือรายการของ ticks, timer, particles, trail, audio, rtf, rain, spinners (-ชื่อ เพื่อเอาออกหนึ่งรายการ)",
   "a network interface name (letters and digits, e.g. en0)": "ชื่อเน็ตเวิร์กอินเทอร์เฟซ (ตัวอักษรและตัวเลข เช่น en0)",
   "an IPv4 address a.b.c.d": "ที่อยู่ IPv4 แบบ a.b.c.d",
   "xx:xx:xx:xx:xx:xx (hex, not all zero)": "xx:xx:xx:xx:xx:xx (เลขฐานสิบหก ห้ามเป็นศูนย์ทั้งหมด)",

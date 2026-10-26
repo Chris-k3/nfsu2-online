@@ -402,7 +402,7 @@
   "a folder (printable, under 1024 bytes)": "フォルダー（表示可能な文字、1024バイト未満）",
   "text of 1 to 63 bytes without control characters": "制御文字を含まない1～63バイトのテキスト",
   "<width>x<height> (320 to 16384 each)": "<幅>x<高さ>（それぞれ320～16384）",
-  "default, all, none or a list of ticks, timer, particles, trail, audio, rtf, rain (-name removes one)": "default、all、none、または ticks、timer、particles、trail、audio、rtf、rain のリスト（-名前 で1つ除外）",
+  "default, all, none or a list of ticks, timer, particles, trail, audio, rtf, rain, spinners (-name removes one)": "default、all、none、または ticks、timer、particles、trail、audio、rtf、rain、spinners のリスト（-名前 で1つ除外）",
   "a network interface name (letters and digits, e.g. en0)": "ネットワークインターフェース名（英数字、例: en0）",
   "an IPv4 address a.b.c.d": "IPv4アドレス a.b.c.d",
   "xx:xx:xx:xx:xx:xx (hex, not all zero)": "xx:xx:xx:xx:xx:xx（16進数、すべて0は不可）",

@@ -477,7 +477,7 @@
   "a folder (printable, under 1024 bytes)": "папка (печатные символы, меньше 1024 байт)",
   "text of 1 to 63 bytes without control characters": "текст от 1 до 63 байт без управляющих символов",
   "<width>x<height> (320 to 16384 each)": "<ширина>x<высота> (каждая от 320 до 16384)",
-  "default, all, none or a list of ticks, timer, particles, trail, audio, rtf, rain (-name removes one)": "default, all, none или список из ticks, timer, particles, trail, audio, rtf, rain (-имя убирает один пункт)",
+  "default, all, none or a list of ticks, timer, particles, trail, audio, rtf, rain, spinners (-name removes one)": "default, all, none или список из ticks, timer, particles, trail, audio, rtf, rain, spinners (-имя убирает один пункт)",
   "a network interface name (letters and digits, e.g. en0)": "имя сетевого интерфейса (буквы и цифры, например en0)",
   "an IPv4 address a.b.c.d": "адрес IPv4 a.b.c.d",
   "xx:xx:xx:xx:xx:xx (hex, not all zero)": "xx:xx:xx:xx:xx:xx (шестнадцатеричные цифры, не все нули)",
