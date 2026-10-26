@@ -381,12 +381,13 @@ static void place(uint32_t pl){
 }
 
 /* the pause menu's label, in the game's language (the Latin-script ones as their language files write theirs, in
- * Latin-1; Polish without its own letters; English for the others, whose fonts draw ASCII as it is) */
+ * Latin-1; Polish and Turkish without their own letters; English for the others, whose fonts draw ASCII as it is) */
 static void label(void){
     static const struct { const char *lang, *text; } T[] = {
         { "french", "Mode photo" }, { "german", "Fotomodus" }, { "italian", "Modalit\xe0 foto" },
         { "spanish", "Modo foto" }, { "dutch", "Fotomodus" }, { "swedish", "Fotol\xe4ge" },
         { "danish", "Fototilstand" }, { "portuguese", "Modo Foto" }, { "polish", "Tryb foto" },
+        { "turkish", "Foto Modu" },
     };
     const char *l = language_name(), *s = "Photo Mode";
     if (l == P.lang) return;
