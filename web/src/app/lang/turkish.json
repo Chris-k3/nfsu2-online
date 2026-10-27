@@ -1014,5 +1014,11 @@
   "This browser's saves are newer: the progress since {when} is replaced.": "Bu tarayıcının kayıtları daha yeni: {when} sonrasındaki ilerlemenin yerine bunlar geçer.",
   "A copy of the saves here stays in this browser for {n} days: Put back under Cloud saves brings it back.": "Buradaki kayıtların bir kopyası bu tarayıcıda {n} gün kalır: Bulut kayıtları altındaki Geri koy onu geri getirir.",
   "Kept in this browser: the saves replaced {when}.": "Bu tarayıcıda saklanıyor: {when} değiştirilen kayıtlar.",
-  "Cloud saves are paused until you pick.": "Sen seçene kadar bulut kayıtları duraklatıldı."
+  "Cloud saves are paused until you pick.": "Sen seçene kadar bulut kayıtları duraklatıldı.",
+  "Radio: {mode}": "Radyo: {mode}",
+  "Music folder": "Müzik klasörü",
+  "All": "Tümü",
+  "Playlist": "Çalma listesi",
+  "No music yet: pick a folder first.": "Henüz müzik yok: önce bir klasör seç.",
+  "Shuffle": "Karıştır"
 }

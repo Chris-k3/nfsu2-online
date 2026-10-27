@@ -48,6 +48,9 @@ import { privacy, SCRUB_NOTE } from './privacy';
 import { SavesPanel } from './saves-ui';
 import { saveScreenshot } from './shots';
 import { forgetLink, VaultPanel } from './vault-ui';
+import { Radio, MODES, radioWasOn, type Mode } from '../radio';
+import { canPickMusic, pickMusic } from '../radio-folder';
+import { RadioLink } from './radio-link';
 import { FpsOverlay, FPS_MODES, type FpsMode } from './overlay';
 import { LobbyPanel } from './lobby';
 import { ICON as CHAT_ICON, QuickChat } from './quickchat';
@@ -124,6 +127,11 @@ let fatal: { what: string; code?: string } | null = null;   // why the running g
 // the last game lost its graphics (GPU-LOST): Safari's WebGPU gives this page no adapter any more, so Play reloads it
 let gpuGone = false;
 let fps: FpsOverlay;
+let statusAt: { memory: WebAssembly.Memory; ptr: number } | null = null;   // the running game's status block
+let radioLink: RadioLink | null = null;  // the radio's words of the running game, once the game says it has them
+const radioPort = () => radioLink ??= statusAt ? RadioLink.open(statusAt.memory, statusAt.ptr) : null;
+let radio: Radio | null = null;          // made at the first click on Radio: a player who never uses it runs none of it
+const theRadio = () => radio ??= new Radio(radioPort, l => log.add(`[radio] ${l}`));
 let lobbyPanel: LobbyPanel;
 let quickChat: QuickChat;                // free roam's fixed phrases (quickchat.ts)
 let settings: SettingsPanel;
@@ -592,7 +600,16 @@ async function startGame() {
     phrasesOf(r.env.NFSU2_ROAM_SAY_PHRASES), groupsOf(r.env.NFSU2_ROAM_SAY_GROUPS));
   fps.memory = session.proc.memory;
   const st = session;
-  const waitStatus = setInterval(() => { if (st.status) { fps.reader = st.status; clearInterval(waitStatus); } }, 100);
+  let tries = 0;
+  const waitStatus = setInterval(() => {
+    if (!st.status) return;
+    if (!fps.reader) { fps.reader = st.status; if (session === st) statusAt = { memory: st.proc.memory, ptr: st.status.ptr }; }
+    if (session === st && radioPort()) {
+      $('.menu-radio').hidden = !canPickMusic();   // the menu may have been opened before the game's status block was known
+      if (radioWasOn()) void theRadio().resume();
+    }
+    if (radioLink || ++tries > 50) clearInterval(waitStatus);
+  }, 100);
   fps.set((r.env.NFSU2_FPS_COUNTER as FpsMode) in { off: 1, on: 1, detailed: 1 } ? r.env.NFSU2_FPS_COUNTER as FpsMode : 'off');
   const key = cap(menuKey());
   const hint = offlineNote + (fsNote || (full ? (touchFirst() ? t('{key} opens the menu.', { key }) : t('{key} opens the menu. Hold Esc to leave full screen.', { key }))
@@ -740,6 +757,8 @@ function endStage() {
   exitFullscreen();
   untrack?.(); untrack = null;
   fps.stop(); fps.reader = null; fps.memory = null;
+  radio?.stop('the game closed');
+  radioLink = null; statusAt = null;
   lobbyPanel.clear();
   for (const id of ['#crews-pop', '#menu']) { const d = $<HTMLDialogElement>(id); if (d.open) d.close(); }
   // a Quit question still open belongs to the game that ended (its answer would
@@ -980,7 +999,7 @@ async function screenshot() {
 // ----------------------------------------------------------- page menu --
 function openMenu() {
   const m = $<HTMLDialogElement>('#menu');
-  if (m.open) { m.close(); return; }                // (its Crews popup too: the menu's close)
+  if (m.open) { $<HTMLDialogElement>('#playlist').close(); m.close(); return; }                // (its Crews popup too: the menu's close)
   const fsButton = m.querySelector<HTMLButtonElement>('[data-act="fullscreen"]')!;
   fsButton.textContent = isFullscreen() ? t('Leave full screen') : t('Full screen');
   fsButton.hidden = !canFullscreen() && fromHomeScreen();         // from an iPhone's Home Screen: already without bars
@@ -992,6 +1011,7 @@ function openMenu() {
   crews.hidden = roamCrews === null || !session?.net?.crews;
   crews.textContent = crewsLabel();
   m.querySelector<HTMLButtonElement>('[data-act="quit"]')!.textContent = quitLabel();
+  showRadio(m);
   const line = $('#menu-save');
   if (saved) line.textContent = t('Last saved at {when} ({name}).', { when: when(saved.at), name: saved.name });
   else {
@@ -1054,6 +1074,53 @@ async function menuCrews(list: Crew[], focus: (root: HTMLElement) => Element | n
   catch (e) { log.add(`[app] settings.ini not written: ${e}`); }
   log.add(`[app] crews: ${list.length ? list.map(c => `${c.name} (${c.rgb})`).join(', ') : 'none'} (the page menu)`);
 }
+function showRadio(m: HTMLElement) {
+  const button = m.querySelector<HTMLButtonElement>('[data-act="radio"]')!, on = radio?.on ?? false;
+  m.querySelector<HTMLElement>('.menu-radio')!.hidden = !radioPort() || !canPickMusic();    // a game without the radio's words (an older build) has no Radio row
+  button.classList.toggle('selected', on);
+  button.setAttribute('aria-pressed', String(on));
+  $('#radio-label').textContent = t('Radio: {mode}', { mode: on ? t(N('on')) : t(N('off')) }) + (radio?.folder ? ` · ${radio.folder}` : '');
+}
+async function radioClick(act: 'radio' | 'radio-folder') {
+  const r = theRadio();
+  try { await (act === 'radio-folder' ? r.chooseFolder(pickMusic) : r.on ? r.turnOff() : r.turnOn(pickMusic)); } catch (e) { log.add(`[radio] ${act}: ${e}`); }
+}
+const MODE_WORDS: Record<Mode, string> = { menu: N('Menu'), racing: N('Race'), all: N('All'), off: N('Off') };
+/** The Playlist window lists the folder's tracks with their modes; drawn once for a folder, one change listener for all rows. */
+let playlistDrawn: readonly string[] | null = null;
+function openPlaylist() {
+  const body = $('#playlist-body'), paths = radio?.trackPaths ?? [], make = (tag: string, props: object) => Object.assign(document.createElement(tag), props);
+  if (playlistDrawn !== paths) {
+    playlistDrawn = paths;
+    const rows = document.createDocumentFragment();
+    let folder = '';
+    paths.forEach((name, i) => {
+      const at = name.lastIndexOf('/'), dir = name.slice(0, Math.max(0, at));
+      if (dir !== folder) rows.append(make('div', { className: 'track-folder', textContent: folder = dir }));
+      const seg = make('div', { className: 'seg' });
+      seg.setAttribute('role', 'radiogroup'); seg.setAttribute('aria-label', name);
+      for (const m of MODES) {
+        const opt = make('label', { className: 'opt' }), input = make('input', { type: 'radio', name: `mode${i}`, value: m, checked: radio?.mode(name) === m });
+        input.dataset.track = String(i);
+        opt.append(input, t(MODE_WORDS[m]));
+        seg.append(opt);
+      }
+      const row = make('div', { className: 'track' });
+      row.append(make('span', { textContent: name.slice(at + 1), title: name }), seg);
+      rows.append(row);
+    });
+    body.replaceChildren(rows);
+    if (!paths.length) body.textContent = t('No music yet: pick a folder first.');
+  }
+  $('#playlist-shuffle').hidden = !paths.length;
+  $<HTMLInputElement>('#playlist-shuffle input').checked = radio?.shuffle ?? false;
+  $<HTMLDialogElement>('#playlist').showModal();
+}
+const setShuffle = (e: Event) => radio?.setShuffle((e.target as HTMLInputElement).checked);
+function setTrackMode(e: Event) {
+  const r = e.target as HTMLInputElement, name = playlistDrawn?.[Number(r.dataset.track)];
+  if (name !== undefined) radio?.setMode(name, r.value as Mode);
+}
 async function menuAction(act: string) {
   const m = $<HTMLDialogElement>('#menu');
   switch (act) {
@@ -1076,6 +1143,8 @@ async function menuAction(act: string) {
       break;
     }
     case 'crews': openCrews(); break;
+    case 'radio-folder': case 'radio': await radioClick(act); showRadio(m); break;
+    case 'playlist': openPlaylist(); break;
     case 'help': m.close(); openHelp(); break;
     case 'offline':
       m.close();
@@ -1397,6 +1466,8 @@ export async function boot() {
   $<HTMLButtonElement>('#reload').onclick = () => void reload();
   $<HTMLButtonElement>('#log-btn').onclick = downloadLog;
   $('#menu').addEventListener('click', e => { const a = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-act]'); if (a) void menuAction(a.dataset.act!); });
+  $('#playlist-body').addEventListener('change', setTrackMode);
+  $('#playlist-shuffle').addEventListener('change', setShuffle);
   $('#menu').addEventListener('close', () => {
     const pop = $<HTMLDialogElement>('#crews-pop'); if (pop.open) pop.close();      // the menu's Crews go with it
     $('#stage').classList.remove('cursor'); $('#stage').querySelector('canvas')?.focus();

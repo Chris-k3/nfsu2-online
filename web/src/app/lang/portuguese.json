@@ -887,6 +887,12 @@
     "many": "{n} de pontos",
     "other": "{n} pontos"
   },
+  "Radio: {mode}": "Rádio: {mode}",
+  "Music folder": "Pasta de músicas",
+  "All": "Todas",
+  "Playlist": "Playlist",
+  "No music yet: pick a folder first.": "Ainda não há músicas: escolha uma pasta primeiro.",
+  "Shuffle": "Aleatório",
   "Your career is saved only in this browser. Browsers sometimes clear a website's data, for example when the device runs low on space or when browsing data is cleared, and your saves go with it.": "Sua carreira está salva só neste navegador. Às vezes os navegadores apagam os dados de um site, por exemplo quando o aparelho fica sem espaço ou quando os dados de navegação são apagados, e seus jogos salvos vão junto.",
   "Cloud saves keep a copy on this server under a keyphrase that only you have. With it you get your saves back, here or in another browser.": "Os jogos salvos na nuvem guardam uma cópia neste servidor, com uma frase-chave que só você tem. Com ela você recupera seus jogos salvos, aqui ou em outro navegador.",
   "You can change this any time under Cloud saves on the start page.": "Você pode mudar isso quando quiser em Jogos salvos na nuvem, na página inicial.",

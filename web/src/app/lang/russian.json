@@ -909,6 +909,12 @@
     "many": "{n} очков",
     "other": "{n} очка"
   },
+  "Radio: {mode}": "Радио: {mode}",
+  "Music folder": "Папка с музыкой",
+  "All": "Все",
+  "Playlist": "Плейлист",
+  "No music yet: pick a folder first.": "Музыки пока нет: сначала выберите папку.",
+  "Shuffle": "Случайный порядок",
   "Your career is saved only in this browser. Browsers sometimes clear a website's data, for example when the device runs low on space or when browsing data is cleared, and your saves go with it.": "Ваша карьера сохранена только в этом браузере. Браузеры иногда удаляют данные сайтов, например когда на устройстве заканчивается место или когда очищаются данные браузера, и ваши сохранения пропадают вместе с ними.",
   "Cloud saves keep a copy on this server under a keyphrase that only you have. With it you get your saves back, here or in another browser.": "Облачные сохранения хранят копию на этом сервере под ключевой фразой, которая есть только у вас. С ней вы вернёте свои сохранения — здесь или в другом браузере.",
   "You can change this any time under Cloud saves on the start page.": "Это можно изменить в любой момент в разделе «Облачные сохранения» на стартовой странице.",

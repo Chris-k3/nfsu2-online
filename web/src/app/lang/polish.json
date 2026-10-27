@@ -909,6 +909,12 @@
     "many": "{n} punktów",
     "other": "{n} punktu"
   },
+  "Radio: {mode}": "Radio: {mode}",
+  "Music folder": "Folder z muzyką",
+  "All": "Wszystkie",
+  "Playlist": "Lista odtwarzania",
+  "No music yet: pick a folder first.": "Brak muzyki: najpierw wybierz folder.",
+  "Shuffle": "Losowo",
   "Your career is saved only in this browser. Browsers sometimes clear a website's data, for example when the device runs low on space or when browsing data is cleared, and your saves go with it.": "Twoja kariera jest zapisana tylko w tej przeglądarce. Przeglądarki czasem usuwają dane strony, na przykład gdy na urządzeniu kończy się miejsce albo gdy dane przeglądania zostaną wyczyszczone, a wtedy znikają też twoje zapisy.",
   "Cloud saves keep a copy on this server under a keyphrase that only you have. With it you get your saves back, here or in another browser.": "Zapisy w chmurze przechowują kopię na tym serwerze pod frazą dostępu, którą masz tylko ty. Dzięki niej odzyskasz swoje zapisy, tutaj lub w innej przeglądarce.",
   "You can change this any time under Cloud saves on the start page.": "Możesz to zmienić w każdej chwili w sekcji „Zapisy w chmurze” na stronie startowej.",
