@@ -495,8 +495,10 @@ async function startGame() {
     else { await writeFile(SAVE, reg, registryDefaults); log.add(`[app] first launch, registry seeded with the built-in defaults (/save/${reg})`); }
   } else if (isPhone()) {
     // a phone that started before the phone graphics (phonegraphics.ts): once
-    const up = phoneUpgrade(await readText(SAVE, reg) ?? '', registryDefaults);
-    if (up) {
+    const text = await readText(SAVE, reg);        // null: not read (it is there), left as it is for the next start
+    const up = text === null ? null : phoneUpgrade(text, registryDefaults);
+    if (text === null) log.add(`[app] phone graphics: /save/${reg} could not be read, left as it is`);
+    else if (up) {
       await writeFile(SAVE, reg, up.text);
       log.add(up.lowered ? '[app] phone graphics: the graphics options still had the built-in defaults, now a phone\'s'
         : '[app] phone graphics: the graphics options were changed in this browser, they stay');
