@@ -898,5 +898,6 @@
   "Orbit or free": "Rondom of vrij",
   "Wheel": "Scrollwiel",
   "Hide the panel": "Paneel verbergen",
-  "Photo mode while you drive, F12 again for the photo (shown in Saves)": "Fotomodus tijdens het rijden, nog eens F12 voor de foto (te zien bij Opgeslagen spellen)"
+  "Photo mode while you drive, F12 again for the photo (shown in Saves)": "Fotomodus tijdens het rijden, nog eens F12 voor de foto (te zien bij Opgeslagen spellen)",
+  "The graphics stopped during your last game, and {browser} has not given them back to this page yet. The page checks again every 10 seconds: wait a minute or two. If Play stays off, close {browser} completely (every window) and open it again. If the graphics stop again, update the graphics driver (from Intel, AMD or NVIDIA).": "De graphics stopten tijdens je laatste spel, en {browser} heeft ze nog niet aan deze pagina teruggegeven. De pagina controleert het elke 10 seconden opnieuw: wacht een minuut of twee. Blijft Spelen uit, sluit {browser} dan helemaal af (elk venster) en open hem opnieuw. Stoppen de graphics weer, werk dan het grafische stuurprogramma bij (van Intel, AMD of NVIDIA)."
 }

@@ -920,5 +920,6 @@
   "Orbit or free": "Orbite ou libre",
   "Wheel": "Molette",
   "Hide the panel": "Masquer le panneau",
-  "Photo mode while you drive, F12 again for the photo (shown in Saves)": "Mode photo en conduisant, F12 à nouveau pour la photo (visible dans Sauvegardes)"
+  "Photo mode while you drive, F12 again for the photo (shown in Saves)": "Mode photo en conduisant, F12 à nouveau pour la photo (visible dans Sauvegardes)",
+  "The graphics stopped during your last game, and {browser} has not given them back to this page yet. The page checks again every 10 seconds: wait a minute or two. If Play stays off, close {browser} completely (every window) and open it again. If the graphics stop again, update the graphics driver (from Intel, AMD or NVIDIA).": "Le rendu graphique s'est arrêté pendant votre dernière partie, et {browser} ne l'a pas encore rendu à cette page. La page vérifie à nouveau toutes les 10 secondes : attendez une minute ou deux. Si Jouer reste désactivé, fermez complètement {browser} (toutes ses fenêtres), puis rouvrez-le. Si le rendu graphique s'arrête encore, mettez à jour le pilote graphique (chez Intel, AMD ou NVIDIA)."
 }

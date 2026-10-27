@@ -841,5 +841,6 @@
   "Orbit or free": "Yörünge ya da serbest",
   "Wheel": "Tekerlek",
   "Hide the panel": "Paneli gizle",
-  "Photo mode while you drive, F12 again for the photo (shown in Saves)": "Sürerken fotoğraf modu, fotoğraf için yeniden F12 (Kayıtlar'da gösterilir)"
+  "Photo mode while you drive, F12 again for the photo (shown in Saves)": "Sürerken fotoğraf modu, fotoğraf için yeniden F12 (Kayıtlar'da gösterilir)",
+  "The graphics stopped during your last game, and {browser} has not given them back to this page yet. The page checks again every 10 seconds: wait a minute or two. If Play stays off, close {browser} completely (every window) and open it again. If the graphics stop again, update the graphics driver (from Intel, AMD or NVIDIA).": "Son oyununda grafikler durdu ve {browser} bunları bu sayfaya henüz geri vermedi. Sayfa her 10 saniyede bir yeniden kontrol eder: bir iki dakika bekle. Oyna hâlâ kapalıysa tarayıcıyı tamamen kapat (tüm pencereleri) ve yeniden aç. Grafikler yine durursa grafik sürücüsünü güncelle (Intel, AMD veya NVIDIA'dan)."
 }

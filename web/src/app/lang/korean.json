@@ -832,5 +832,6 @@
   "Orbit or free": "궤도 또는 자유",
   "Wheel": "휠",
   "Hide the panel": "패널 숨기기",
-  "Photo mode while you drive, F12 again for the photo (shown in Saves)": "주행 중 사진 모드, F12를 다시 누르면 사진 촬영('저장 데이터'에 표시)"
+  "Photo mode while you drive, F12 again for the photo (shown in Saves)": "주행 중 사진 모드, F12를 다시 누르면 사진 촬영('저장 데이터'에 표시)",
+  "The graphics stopped during your last game, and {browser} has not given them back to this page yet. The page checks again every 10 seconds: wait a minute or two. If Play stays off, close {browser} completely (every window) and open it again. If the graphics stop again, update the graphics driver (from Intel, AMD or NVIDIA).": "지난 게임 중에 그래픽이 멈췄고, {browser}이(가) 아직 이 페이지에 그래픽을 돌려주지 않았어요. 페이지가 10초마다 다시 확인하니 1~2분 기다려 주세요. 그래도 '플레이'가 꺼져 있으면 {browser}을(를) 완전히 닫은 뒤(모든 창) 다시 여세요. 그래픽이 또 멈추면 그래픽 드라이버를 업데이트하세요(Intel, AMD 또는 NVIDIA에서)."
 }

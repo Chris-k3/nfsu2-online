@@ -194,6 +194,16 @@ function renderProblems() {
   note.hidden = st?.state !== 'warn';
   if (st?.state === 'warn') live(note, () => detail(st), st.code); else live(note, () => '');
 }
+/** No graphics since the last game's went (GPU-ADAPTER-AFTER-LOST): asked again every 10 s while the page shows, as the
+ *  browser may give them back after a while (Chrome: two minutes); the log says when they came back. */
+function recheckGpu(since = performance.now()) {
+  setTimeout(async () => {
+    const c = document.visibilityState === 'visible' ? await checkGpu(true) : null;
+    if (!c || c.code === 'GPU-ADAPTER-AFTER-LOST') { recheckGpu(since); return; }
+    log.add(`[app] the graphics are back after ${((performance.now() - since) / 1000).toFixed(0)} s`);
+    setCheck(c);
+  }, 10_000);
+}
 function blocking(): Check | undefined { return ORDER.map(id => checks.get(id)).find(c => c?.state === 'fail'); }
 
 /** Decide the start page's headline from what is known so far. */
@@ -1465,7 +1475,7 @@ export async function boot() {
   void saves.refresh();
   void vault.start();
   void instance.whenOwner.then(async () => { await loadSettings(); evaluate(); void settings.refresh(); void saves.refresh(); vault.ownerNow(); syncPicker(); });
-  void checkGpu().then(setCheck);
+  void checkGpu(lastGame?.ended?.why === 'GPU-LOST').then(c => { setCheck(c); if (c.code === 'GPU-ADAPTER-AFTER-LOST') recheckGpu(); });
   // Firefox's answer to its storage prompt comes later: the check again then
   void checkStorage().then(({ answer, ...c }) => { setCheck(c); void answer?.then(setCheck); });
   refreshMeasured = measureRefresh(60).then(r => { displayHz = r.hz; log.add(`[app] display refresh ${r.raw.toFixed(1)} Hz -> ${r.hz}`); });

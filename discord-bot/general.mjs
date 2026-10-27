@@ -79,6 +79,11 @@ const FIXES = {
     re: /GPU-ADAPTER-WIN(?!-)|DirectX|Direct3D/i,
     en: 'Update the graphics driver (from Intel, AMD or NVIDIA), then quit Chrome completely and start it again; graphics without DirectX 12, such as Intel HD 4000 and older, cannot run the game.',
   },
+  'gpu-adapter-after-lost': {
+    when: 'GPU-ADAPTER-AFTER-LOST: "The graphics stopped during your last game, and Chrome has not given them back to this page yet"',
+    re: /GPU-ADAPTER-AFTER-LOST|given them back/i,
+    en: 'Wait a minute or two on the page; if Play stays off, quit Chrome completely (every window) and start it again. If the graphics stop again, update the graphics driver (from Intel, AMD or NVIDIA).',
+  },
   'gpu-adapter-win-arm': {
     when: 'GPU-ADAPTER-WIN-ARM: "On Windows computers with an ARM chip (Snapdragon, for one), Chrome keeps WebGPU off"',
     re: /GPU-ADAPTER-WIN-ARM|snapdragon|\bARM\b/i,

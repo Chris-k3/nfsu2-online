@@ -832,5 +832,6 @@
   "Orbit or free": "オービットかフリー",
   "Wheel": "ホイール",
   "Hide the panel": "パネルを隠す",
-  "Photo mode while you drive, F12 again for the photo (shown in Saves)": "運転中にフォトモード、もう一度 F12 で撮影（「セーブデータ」に表示）"
+  "Photo mode while you drive, F12 again for the photo (shown in Saves)": "運転中にフォトモード、もう一度 F12 で撮影（「セーブデータ」に表示）",
+  "The graphics stopped during your last game, and {browser} has not given them back to this page yet. The page checks again every 10 seconds: wait a minute or two. If Play stays off, close {browser} completely (every window) and open it again. If the graphics stop again, update the graphics driver (from Intel, AMD or NVIDIA).": "前回のゲーム中にグラフィックが停止し、{browser}がまだこのページにグラフィックを戻していません。このページは10秒ごとに再確認するので、1、2分お待ちください。それでも「プレイ」が押せない場合は、{browser}を完全に閉じて（すべてのウィンドウ）、もう一度開いてください。グラフィックがまた停止する場合は、グラフィックドライバーを更新してください（Intel、AMD、NVIDIAから入手できます）。"
 }

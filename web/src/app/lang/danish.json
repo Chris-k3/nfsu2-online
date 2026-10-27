@@ -898,5 +898,6 @@
   "Orbit or free": "Kredsløb eller fri",
   "Wheel": "Hjul",
   "Hide the panel": "Skjul panelet",
-  "Photo mode while you drive, F12 again for the photo (shown in Saves)": "Fototilstand mens du kører, F12 igen for billedet (vises i Gemte spil)"
+  "Photo mode while you drive, F12 again for the photo (shown in Saves)": "Fototilstand mens du kører, F12 igen for billedet (vises i Gemte spil)",
+  "The graphics stopped during your last game, and {browser} has not given them back to this page yet. The page checks again every 10 seconds: wait a minute or two. If Play stays off, close {browser} completely (every window) and open it again. If the graphics stop again, update the graphics driver (from Intel, AMD or NVIDIA).": "Grafikken stoppede under dit sidste spil, og {browser} har ikke givet den tilbage til siden endnu. Siden tjekker igen hvert 10. sekund: vent et minut eller to. Hvis Spil stadig er slået fra, så luk {browser} helt (alle vinduer), og åbn den igen. Hvis grafikken stopper igen, skal du opdatere grafikdriveren (fra Intel, AMD eller NVIDIA)."
 }

@@ -898,5 +898,6 @@
   "Orbit or free": "Umkreisen oder frei",
   "Wheel": "Mausrad",
   "Hide the panel": "Leiste ausblenden",
-  "Photo mode while you drive, F12 again for the photo (shown in Saves)": "Fotomodus beim Fahren, noch einmal F12 für das Foto (zu sehen unter „Spielstände“)"
+  "Photo mode while you drive, F12 again for the photo (shown in Saves)": "Fotomodus beim Fahren, noch einmal F12 für das Foto (zu sehen unter „Spielstände“)",
+  "The graphics stopped during your last game, and {browser} has not given them back to this page yet. The page checks again every 10 seconds: wait a minute or two. If Play stays off, close {browser} completely (every window) and open it again. If the graphics stop again, update the graphics driver (from Intel, AMD or NVIDIA).": "Die Grafik ist in deinem letzten Spiel ausgefallen, und {browser} hat sie dieser Seite noch nicht zurückgegeben. Die Seite prüft alle 10 Sekunden erneut: warte ein, zwei Minuten. Bleibt „Spielen“ aus, schließe den Browser ganz (jedes Fenster) und öffne ihn wieder. Fällt die Grafik erneut aus, aktualisiere den Grafiktreiber (von Intel, AMD oder NVIDIA)."
 }

@@ -942,5 +942,6 @@
   "Orbit or free": "Орбита или свободная",
   "Wheel": "Колесо",
   "Hide the panel": "Скрыть панель",
-  "Photo mode while you drive, F12 again for the photo (shown in Saves)": "Фоторежим во время езды, ещё раз F12 — снимок (виден в «Сохранениях»)"
+  "Photo mode while you drive, F12 again for the photo (shown in Saves)": "Фоторежим во время езды, ещё раз F12 — снимок (виден в «Сохранениях»)",
+  "The graphics stopped during your last game, and {browser} has not given them back to this page yet. The page checks again every 10 seconds: wait a minute or two. If Play stays off, close {browser} completely (every window) and open it again. If the graphics stop again, update the graphics driver (from Intel, AMD or NVIDIA).": "Графика перестала работать во время вашей последней игры, и {browser} пока не вернул её этой странице. Страница проверяет снова каждые 10 секунд: подождите минуту-другую. Если «Играть» так и не включится, полностью закройте браузер (все окна) и откройте его снова. Если графика снова перестанет работать, обновите графический драйвер (от Intel, AMD или NVIDIA)."
 }

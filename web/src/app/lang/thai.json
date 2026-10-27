@@ -832,5 +832,6 @@
   "Orbit or free": "โคจรหรืออิสระ",
   "Wheel": "ล้อเมาส์",
   "Hide the panel": "ซ่อนแผง",
-  "Photo mode while you drive, F12 again for the photo (shown in Saves)": "โหมดถ่ายภาพขณะขับ กด F12 อีกครั้งเพื่อถ่ายภาพ (แสดงใน “เซฟเกม”)"
+  "Photo mode while you drive, F12 again for the photo (shown in Saves)": "โหมดถ่ายภาพขณะขับ กด F12 อีกครั้งเพื่อถ่ายภาพ (แสดงใน “เซฟเกม”)",
+  "The graphics stopped during your last game, and {browser} has not given them back to this page yet. The page checks again every 10 seconds: wait a minute or two. If Play stays off, close {browser} completely (every window) and open it again. If the graphics stop again, update the graphics driver (from Intel, AMD or NVIDIA).": "กราฟิกหยุดทำงานระหว่างเกมล่าสุดของคุณ และ {browser} ยังไม่คืนกราฟิกให้หน้านี้ หน้านี้จะตรวจสอบอีกครั้งทุก 10 วินาที โปรดรอสักหนึ่งหรือสองนาที หาก “เล่น” ยังกดไม่ได้ ให้ปิด {browser} ทั้งหมด (ทุกหน้าต่าง) แล้วเปิดใหม่ หากกราฟิกหยุดทำงานอีก ให้อัปเดตไดรเวอร์กราฟิก (จาก Intel, AMD หรือ NVIDIA)"
 }
