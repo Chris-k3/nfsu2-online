@@ -145,6 +145,9 @@ void dispatch_indirect(CPU *c, uint32_t addr);
 #define MSG_LOOK_CANCEL 0x7345710fu   /* "Looking for LAN servers ..."'s Cancel */
 #define MSG_RETRY       0x73c044ecu   /* "lost the connection ... reconnect?" Retry (the host's server not up yet) */
 #define G_SNAPSHOT      0x00851148u   /* the crib's snapshot of the profile (0: none) */
+#define G_MC_MODE       0x00836514u   /* the memory card's job (0x4A3100): & 0xf how it ends (0x4A31D0: 1 a message to the */
+#define G_MC_FROM       0x00836518u   /* package that asked, the crib's Return; 2 a switch to the next package, by name) */
+#define G_MC_NEXT       0x0083651cu
 #define G_LANSTATE      0x008500d0u   /* the LAN object's UI state: 2 the server list's, 0x11 idle, 0x12 busy */
 #define FN_LANSTATE     0x005031b0u   /* thiscall 0x850080 (state) */
 #define G_NET           0x00850080u   /* the network race's settings */
@@ -1126,6 +1129,9 @@ static void step_back(CPU *c, long f){
     for (int i = 0; i < 5; i++) if (on(lan_screens[i])){ if (act_ok(lan_screens[i], f)){ autotest_tap(K_ESC, 6); acted(f); } return; }
     if (on("UI_Main.fng")){
         if (!act_ok("UI_Main.fng", f)) return;
+        /* the main menu again after the crib's Return to Explore (its save went there instead, unsaved: a 2026-10-27
+         * report, the host's server gone on the way back): the career once more, until the way back's time is up */
+        if (M.crib_go){ M.resumed = M.crib_go = 0; mlog("the main menu after the crib: the career again%s", ""); }
         uint32_t a[3] = { S_MAIN, gstr_tmp(c, "UI_StartCareer.fng"), 0 };
         call(c, FN_FE_SWITCH, 0, 3, a);
         M.career = 1; acted(f);
@@ -1150,7 +1156,14 @@ static void step_back(CPU *c, long f){
         M.next = f + SETTLE;
         return;
     }
-    if (on("MC_Main.fng")){ keys("LR"); M.next = f + 90; return; }               /* the autosave's prompts: yes / OK */
+    if (on("MC_Main.fng")){                                                      /* the autosave's prompts: yes / OK */
+        uint32_t mode = rd(G_MC_MODE), next = rd(G_MC_NEXT);
+        char nm[40] = "";
+        if ((mode & 0xfu) == 2u && okm(next, sizeof nm)) for (unsigned i = 0; i + 1 < sizeof nm && MR8(next + i); i++){ nm[i] = (char)MR8(next + i); nm[i + 1] = 0; }
+        fprintf(stderr, "[mprace] f=%ld the save: mode 0x%x, from 0x%x, next 0x%x%s%s; dialog %u, top %s\n", autotest_frame(), mode,
+                rd(G_MC_FROM), next, nm[0] ? " " : "", nm, rd(G_DLG), autotest_top_fng() ? autotest_top_fng() : "?");
+        keys("LR"); M.next = f + 90; return;
+    }
 }
 
 /* a guest string (scratch, up to 8 of them alive) */
