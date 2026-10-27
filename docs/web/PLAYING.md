@@ -340,10 +340,10 @@ Good to know:
   apart. It sounds while the game runs, not in the pause menu or on the map. It works in Online and LAN races too.
   How loud the horns are (yours and the others'): the game's Options, Audio, Horn Volume, also in the pause menu's
   Options, from 10 % to 100 % (the most, and the default). Moving it sounds your horn at the new volume.
-- **Quick chat:** say one of sixteen set phrases to the players near you. There is no typing, so there is nothing to
-  read that someone made up, and everyone reads a phrase in their own language. Press 1 to 4 for a group, then 1 to 4
-  for its phrase; on a controller, flick the right stick (up, right, down, left) for a group, then again for the
-  phrase; on a touch screen, the chat button shows all sixteen. Esc closes it.
+- **Quick chat:** say one of your sixteen set phrases to the players near you. There is no typing, so there is nothing
+  to read that someone made up, and everyone reads a phrase in their own language. Press 1 to 4 for a group, then 1 to
+  4 for its phrase; on a controller, flick the right stick (up, right, down, left) for a group, then again for the
+  phrase; on a touch screen, the chat button shows all sixteen. Esc closes it. These are the sixteen you start with:
 
   | 1 Hi | 2 Reply | 3 Drive | 4 Race |
   |---|---|---|---|
@@ -352,11 +352,15 @@ Good to know:
   | Thanks! | Sorry! | Let's go! | gg |
   | Bye! | lol | Nice! | One more? |
 
+  Settings, Online, Your phrases, Choose phrases puts any of about 150 phrases in each place (greetings, replies,
+  thanks and sorry, compliments, driving together, car meets, races, reactions, help) and names each group.
+
   A phrase shows over your car and in the chat log on the left, for the players within 250 m (where they hear your
   horn) and everyone in your race lobby, wherever they are; in the lobby's card it shows beside your name. Over a car
   only while its name shows (within 100 m, in front of you, the game's player-names option on). Three phrases in six
   seconds at most; then the picker asks you to wait. Settings, Online, Quick chat turns it off: you then neither see
-  nor send phrases, and the others' games send you none. Players on an older version neither see yours nor send any.
+  nor send phrases, and the others' games send you none. Players on an older version neither see yours nor send any,
+  and those who have not reloaded the page since the phrases came see only the first sixteen.
 - **Engines:** the others hear your engine from your car, as you hear it yourself: the game's own recordings of your
   car's engine (each car has its own, and the engine upgrades change it), pulling as you accelerate and letting off as
   you lift, at your revs, with the limiter and a launch's wheelspin as your game plays them; louder the nearer they

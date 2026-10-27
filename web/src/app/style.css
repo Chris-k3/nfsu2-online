@@ -288,6 +288,20 @@ kbd .glyph { display: inline-block; width: 14px; height: 14px; vertical-align: -
 .set-list { grid-template-columns: minmax(0, 1fr); grid-template-areas: "label" "help" "ctl"; }
 /* one line (not the phone's wrap): a wrapping column stretches to its widest item, and a long name would widen the page */
 .set-list .set-control { flex-direction: column; flex-wrap: nowrap; align-items: stretch; justify-content: flex-start; margin-top: 8px; }
+/* Your phrases (settings-ui.ts phraseControl): under Choose phrases, a column for each of 1 to 4 (two on a phone): the
+ * key, the group's name, its four phrases, each a value box as narrow as the column; Reset under them */
+.phrases > summary { min-height: 40px; }
+.phrase-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px 12px; margin: 4px 0 8px; }
+@media (max-width: 720px) { .phrase-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.phrase-col { display: grid; gap: 8px; align-content: start; min-width: 0; }
+.phrase-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.phrase-head kbd {
+  flex: none; min-width: 24px; padding: 0 6px; text-align: center; border: 1px solid var(--edge); border-radius: 4px;
+  background: var(--field); font: 700 13px/22px var(--font); color: var(--text);
+}
+.set .phrase-col select { width: 100%; min-width: 0; height: 36px; font-size: 14px; line-height: 20px; text-overflow: ellipsis; }
+.set .phrase-head select { color: var(--text); font-style: normal; text-transform: uppercase; letter-spacing: 0.02em; }
+.phrases > .text-btn { padding: 0; }
 .crew-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 /* (its chips are pills of the line, the box after the last of them) */
 .crews { display: contents; list-style: none; }

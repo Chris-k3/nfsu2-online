@@ -13,6 +13,7 @@ import { readText, writeFile } from './savefs';
 import { playHorn, stopHorn } from './horn-preview';
 import { checkCrew, CREW_BIG, CREW_COLOUR_NAMES, CREW_MAX, CREW_PALETTE, crewsOf, crewsValue, freeColour, rgbsValue, type Crew } from './crews';
 import { roomHash } from './players';
+import { CATS, DEFAULT_GROUPS, DEFAULT_PHRASES, groupsOf, PHRASES, phrasesOf, SLOTS } from './phrases';
 import { LANGUAGES, live, N, NATIVE, t, tn, tvars, type Language, type Msg } from './i18n';
 
 type Control =
@@ -25,7 +26,10 @@ type Control =
   | { t: 'num'; min?: number; max?: number; step?: number; unit?: string }
   | { t: 'text'; placeholder?: string }
   /** the crews (crews.ts): a line per crew with Leave, and a box with Join for one more */
-  | { t: 'crews'; placeholder: string };
+  | { t: 'crews'; placeholder: string }
+  /** quick chat's sixteen (phrases.ts): under "Choose phrases", four columns of a name and four phrases, each a
+   *  drop-down list */
+  | { t: 'phrases' };
 
 /** link: the words of help that link to a page (a mod's, say), opened in a new tab */
 interface Item { key: string; label: string; help: string; link?: { text: string; href: string }; c: Control; more?: boolean }
@@ -52,7 +56,8 @@ const GROUPS: Group[] = [
       ['cucaracha', N('La Cucaracha')], ['clown', N('Clown horn')], ['trombone', N('Sad trombone')]], preview: { play: playHorn, stop: stopHorn } } },
     { key: 'roam_room', label: N('Room'), help: N('Leave empty to drive with everyone. With a name, free roam shows only the players who set the same name. Not private: everyone on this server still sees your name.'), c: { t: 'text', placeholder: N('everyone') } },
     { key: 'roam_collide', label: N('Ghost mode'), help: N('You drive through the other players\' cars, and they through yours. Off: you collide with them, and a car that appears on yours lets you through until you are apart.'), c: { t: 'switch', inv: true } },
-    { key: 'quick_chat', label: N('Quick chat'), help: N('Say one of sixteen set phrases to the players near you in free roam: 1 to 4, then 1 to 4 (on a controller, the right stick twice; on a touch screen, the chat button). Theirs show over their cars.'), c: { t: 'switch' } },
+    { key: 'quick_chat', label: N('Quick chat'), help: N('Say one of your sixteen phrases to the players near you in free roam: 1 to 4, then 1 to 4 (on a controller, the right stick twice; on a touch screen, the chat button). Theirs show over their cars.'), c: { t: 'switch' } },
+    { key: 'quick_chat_phrases', label: N('Your phrases'), help: N('Which sixteen quick chat has, in four groups of four. Everyone reads what you say in their own language.'), c: { t: 'phrases' } },
     { key: 'online', label: N('Online mode'), help: N('The game\'s Online menu takes you straight to the Online Main Menu under your name, without the EA Login screens: lobby, chat and races with everyone playing from this server.'), c: { t: 'switch' }, more: true },
     { key: 'roam_max_cars', label: N('Players\' cars shown'), help: N('The nearest. Phones start at 16 and tablets at 24: many cars loading at once can take more memory than they have.'), c: { t: 'seg', opts: [['16', '16'], ['20', '20'], ['24', '24'], ['28', '28'], ['32', '32']] }, more: true },
   ] },
@@ -92,7 +97,7 @@ const GROUPS: Group[] = [
 
 /** a row's second key, which its control writes with its own and its Reset resets too (not listed under "Other
  *  settings in this file"): the Crews row's colours */
-const COMPANION: Record<string, string> = { roam_crew: 'roam_crew_colours' };
+const COMPANION: Record<string, string> = { roam_crew: 'roam_crew_colours', quick_chat_phrases: 'quick_chat_groups' };
 const COMPANIONS = new Set(Object.values(COMPANION));
 /** Every key the panel shows (the check in app-test.mjs compares this with the template). */
 export const PANEL_KEYS = [...GROUPS.flatMap(g => g.items.map(i => i.key)), ...COMPANIONS];
@@ -267,6 +272,7 @@ function shown(it: Item, v: string): string {
   const c = it.c;
   if (c.t === 'switch') return (v === 'on') !== !!c.inv ? t('on') : t('off');
   if (c.t === 'seg' || c.t === 'select') { const o = c.opts.find(([x]) => x.toLowerCase() === v.toLowerCase()); return o ? optLabel(it, o[0], o[1]) : v; }
+  if (c.t === 'phrases') return phrasesOf(v).map(p => t(PHRASES[p].text)).join(', ');
   if (v === '') return t('empty');
   return c.t === 'num' && c.unit ? `${v} ${c.unit}` : v;
 }
@@ -348,6 +354,7 @@ export class SettingsPanel {
   private status: Msg = () => '';          // the Online group's line (setStatus)
   private crewCounts = new Map<number, number>();   // how many are in free roam in each crew, by hash (setCrewCounts)
   private crewDraft = '';                  // the crew name being typed, kept across re-renders
+  private phrasesOpen = false;             // Your phrases' Choose phrases open, kept across re-renders
   /** root: the Settings section; online: the section of the group that is its own (Online, under Saves) */
   constructor(private root: HTMLElement, private deps: SettingsDeps, private online: HTMLElement) {
     root.querySelector<HTMLButtonElement>('#settings-text-save')!.onclick = () => void this.saveRaw();
@@ -511,11 +518,13 @@ export class SettingsPanel {
     const old = this.find<HTMLElement>(`.set[data-key="${key}"]`);
     const it = ITEMS.get(key);
     if (!old || !it) { this.render(); return; }
-    const focused = old.contains(document.activeElement);
+    const focused = old.contains(document.activeElement), was = focused ? document.activeElement!.id : '';
     const fresh = this.row(it);
     old.replaceWith(fresh);
     if (it.more) fresh.parentElement!.querySelector('summary')!.textContent = this.moreLabel(GROUP_OF.get(key)!);
-    if (focused) this.focusRow(fresh);
+    // the same control again where it has an id (Your phrases' lists), else the row's first
+    const same = was ? fresh.querySelector<HTMLElement>(`#${CSS.escape(was)}`) : null;
+    if (same) same.focus(); else if (focused) this.focusRow(fresh);
   }
 
   private focusRow(row: HTMLElement) {
@@ -607,6 +616,10 @@ export class SettingsPanel {
       row.classList.add('set-list');
       described = crewControl({ list: crewsOf(cur, this.current('roam_crew_colours')), id, labelId: label.id, placeholder: c.placeholder, counts: this.crewCounts,
         draft: this.crewDraft, onDraft: v => { this.crewDraft = v; }, change: (list, focus) => void this.setCrews(list, focus) }, ctl);
+    } else if (c.t === 'phrases') {
+      row.classList.add('set-list');
+      described = this.phraseControl(ctl, id, phrasesOf(cur), groupsOf(this.current('quick_chat_groups')),
+        setInFile ? () => void this.put(it.key, null, [[comp!, null]]) : null, t(it.label));
     } else {
       const inp = document.createElement('input'); inp.id = id;
       inp.type = c.t === 'num' ? 'number' : 'text';
@@ -629,7 +642,8 @@ export class SettingsPanel {
       if (c.t === 'num' && c.unit) { const u = document.createElement('span'); u.className = 'unit'; u.textContent = c.unit; ctl.append(u); }
       described = inp;
     }
-    if (setInFile && c.t !== 'crews') {               // (the Crews row has none: each crew's x leaves it)
+    if (setInFile && c.t !== 'crews' && c.t !== 'phrases') {   // (the Crews row has none: each crew's x leaves it; Your
+                                                               // phrases has its own, beside Choose phrases)
       const r = document.createElement('button'); r.type = 'button'; r.className = 'text-btn'; r.textContent = t('Reset');
       r.setAttribute('aria-label', t('Reset {label}', { label: t(it.label) }));
       r.title = t('Back to the default ({value})', { value: shown(it, DEFAULTS.get(it.key) ?? '') });
@@ -647,6 +661,58 @@ export class SettingsPanel {
     this.describe(described, row);
     if (this.ro()) for (const el of row.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>('button, input, select')) el.disabled = true;
     return row;
+  }
+
+  /**
+   * Your phrases into ctl: "Choose phrases" opens four columns, one for each of 1 to 4, of the group's name and its
+   * four phrases, each a drop-down list (the phrases in the library's categories).  A change saves both lines at once
+   * (the default: both back to the template's); reset: the row's Reset, or null when the file sets neither.
+   */
+  private phraseControl(ctl: HTMLElement, id: string, layout: number[], groups: string[], reset: (() => void) | null, label: string): HTMLElement {
+    const det = document.createElement('details'); det.className = 'phrases'; det.open = this.phrasesOpen;
+    det.ontoggle = () => { this.phrasesOpen = det.open; };
+    const sum = document.createElement('summary'); sum.id = id; sum.textContent = t('Choose phrases');
+    const grid = document.createElement('div'); grid.className = 'phrase-grid';
+    const save = () => {
+      const p = [...grid.querySelectorAll<HTMLSelectElement>('select[data-slot]')].map(s => +s.value);
+      const g = [...grid.querySelectorAll<HTMLSelectElement>('select[data-group]')].map(s => s.value);
+      const dflt = p.every((x, i) => x === DEFAULT_PHRASES[i]) && g.every((x, i) => x === DEFAULT_GROUPS[i]);
+      void this.put('quick_chat_phrases', dflt ? null : p.join(','), [['quick_chat_groups', dflt ? null : g.join(',')]]);
+    };
+    for (let g = 0; g < 4; g++) {
+      const col = document.createElement('div'); col.className = 'phrase-col';
+      col.setAttribute('role', 'group'); col.setAttribute('aria-label', t('Group {n}', { n: g + 1 }));
+      const head = document.createElement('div'); head.className = 'phrase-head';
+      const key = document.createElement('kbd'); key.textContent = String(g + 1); key.setAttribute('aria-hidden', 'true');
+      const name = document.createElement('select'); name.id = `${id}-g${g}`; name.dataset.group = String(g);
+      name.setAttribute('aria-label', t('Group {n}: its name', { n: g + 1 }));
+      for (const c of CATS) name.append(new Option(t(c.name), c.id, false, c.id === groups[g]));
+      name.onchange = save;
+      head.append(key, name);
+      col.append(head);
+      for (let i = 0; i < 4; i++) {
+        const s = document.createElement('select'); s.id = `${id}-${g * 4 + i}`; s.dataset.slot = String(g * 4 + i);
+        s.setAttribute('aria-label', t('Group {n}, phrase {i}', { n: g + 1, i: i + 1 }));
+        for (const c of CATS) {
+          const og = document.createElement('optgroup'); og.label = t(c.name);
+          PHRASES.forEach((p, n) => { if (p.cat === c.id) og.append(new Option(t(p.text), String(n), false, n === layout[g * 4 + i])); });
+          s.append(og);
+        }
+        s.onchange = save;
+        col.append(s);
+      }
+      grid.append(col);
+    }
+    det.append(sum, grid);
+    if (reset) {
+      const r = document.createElement('button'); r.type = 'button'; r.className = 'text-btn'; r.textContent = t('Reset');
+      r.setAttribute('aria-label', t('Reset {label}', { label }));
+      r.title = t('Back to the default ({value})', { value: DEFAULT_PHRASES.slice(0, SLOTS).map(p => t(PHRASES[p].text)).join(', ') });
+      r.onclick = reset;
+      det.append(r);
+    }
+    ctl.append(det);
+    return sum;
   }
 
   /** the control is described by its help line, its own note (the Crews box's) and any state line under it */

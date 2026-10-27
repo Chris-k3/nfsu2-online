@@ -51,6 +51,7 @@ import { forgetLink, VaultPanel } from './vault-ui';
 import { FpsOverlay, FPS_MODES, type FpsMode } from './overlay';
 import { LobbyPanel } from './lobby';
 import { ICON as CHAT_ICON, QuickChat } from './quickchat';
+import { groupsOf, phrasesOf } from './phrases';
 import { GameSession } from './game';
 import { AwayCheck, AWAY_LIMITS, type AwayLimits } from './away';
 import { PlayTime, SMS_AFTER_MS } from './playtime';
@@ -582,7 +583,8 @@ async function startGame() {
   pauseHint.start(session);
   driftPanel.start(session);
   photo.start(session);
-  quickChat.start(session, net && r.env.NFSU2_ROAM === '1' && r.env.NFSU2_ROAM_SAY !== '0');
+  quickChat.start(session, net && r.env.NFSU2_ROAM === '1' && r.env.NFSU2_ROAM_SAY !== '0',
+    phrasesOf(r.env.NFSU2_ROAM_SAY_PHRASES), groupsOf(r.env.NFSU2_ROAM_SAY_GROUPS));
   fps.memory = session.proc.memory;
   const st = session;
   const waitStatus = setInterval(() => { if (st.status) { fps.reader = st.status; clearInterval(waitStatus); } }, 100);

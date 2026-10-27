@@ -2099,16 +2099,16 @@ static int hud_on_top(uint32_t pkg){
     cstr(top ? rd32(top + 0xcu) : 0, a, sizeof a); cstr(pkg, b, sizeof b);
     return a[0] && !strcasecmp(a, b);
 }
-/* Quick chat (the rest after the race lobbies, say_*): players say one of the page's fixed phrases
- * (web/src/app/quickchat.ts), a number on the wire, so each player reads it in their own language and nobody types
- * anything.  The page shows a line over the car of each player who said something lately, where the name over it
- * is: tags_update tells it where, with every frame (roam_plat_say_marks).  Not in the Windows plugin (no page). */
+/* Quick chat (the rest after the race lobbies, say_*): players say one of the page's set phrases
+ * (web/src/app/phrases.ts), a number on the wire, so each player reads it in their own language and nobody types
+ * anything.  Any number goes through: the page knows which it has (a newer page's it does not show).  The page
+ * shows a line over the car of each player who said something lately, where the name over it is: tags_update tells
+ * it where, with every frame (roam_plat_say_marks).  Not in the Windows plugin (no page). */
 #ifdef ROAM_HOST_WIN
 #define SAYS            0
 #else
 #define SAYS            1
 #endif
-#define SAY_PHRASES     16            /* the page's phrases: a number past them (a newer game's) is not shown */
 #define SAY_NEAR_M      250.f         /* heard from as far as a horn is (horn.c FAR_M), and from anyone in our race lobby */
 #define SAY_SHOW_US     5000000       /* the line over the car: as long as the page shows it */
 #define SAY_BURST       3             /* at most this many from one player in SAY_WINDOW_US (the page keeps the player's
@@ -4660,7 +4660,6 @@ static int say_in_lobby(uint32_t id){
 }
 static void say_send(int phrase, int64_t host, int can){
     if (!can){ rlog("[roam] f=%ld quick chat: phrase %d not said (not driving in free roam)\n", rh_frame(), phrase); return; }
-    if (phrase >= SAY_PHRASES){ rlog("[roam] f=%ld quick chat: no phrase %d\n", rh_frame(), phrase); return; }
     if (say_burst(g_say.mine, host)){ rlog("[roam] f=%ld quick chat: phrase %d not said (too many at once)\n", rh_frame(), phrase); return; }
     say_stamp(g_say.mine, host);
     int to = rc_send_say(&g_s, (uint8_t)phrase, ++g_say.seq);
@@ -4681,7 +4680,6 @@ static void say_recv(uint32_t from, int phrase, uint8_t seq, int64_t host, int c
     if (g_lp_ok && p->mo.n){ const float *b = p->mo.s[p->mo.n - 1].p; float dx = g_lp[0] - b[0], dy = g_lp[1] - b[1]; d = rc_sqrtf(dx * dx + dy * dy); }
     if (w->heard && seq == w->seq) why = "again";                                   /* the same one twice */
     else if (!can) why = "not in free roam";
-    else if (phrase >= SAY_PHRASES) why = "a phrase this game does not have";
     else if (!lobby && !(d <= SAY_NEAR_M)) why = "too far";
     else if (say_burst(w->t, host)) why = "too many at once";
     else if (w->at && phrase == w->phrase && host - w->at < SAY_AGAIN_US) why = "the same again";
