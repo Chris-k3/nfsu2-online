@@ -1048,5 +1048,31 @@
   "Group {n}: its name": "Gruppe {n}: navn",
   "Group {n}, phrase {i}": "Gruppe {n}, sætning {i}",
   "16 quick chat phrase numbers, separated by commas": "16 hurtigchat-sætningsnumre, adskilt af kommaer",
-  "4 of hi, reply, thanks, nice, drive, meet, race, react, help, separated by commas": "4 af hi, reply, thanks, nice, drive, meet, race, react, help, adskilt af kommaer"
+  "4 of hi, reply, thanks, nice, drive, meet, race, react, help, separated by commas": "4 af hi, reply, thanks, nice, drive, meet, race, react, help, adskilt af kommaer",
+  "no profiles": "ingen profiler",
+  "saved {when}": "gemt {when}",
+  "Newer": "Nyere",
+  "This browser": "Denne browser",
+  "Cloud": "Skyen",
+  "The saves this browser had before cloud saves replaced them ({when}) come back in place of the ones here. The saves here now are kept instead, so you can switch back.": "De gemte spil, som denne browser havde, før gemte spil fra skyen erstattede dem ({when}), kommer tilbage i stedet for dem, der er her. De gemte spil, der er her nu, bevares i stedet, så du kan skifte tilbage.",
+  "Put back the replaced saves?": "Læg de erstattede gemte spil tilbage?",
+  "Put back": "Læg tilbage",
+  "Putting back stopped: {error}.": "Tilbagelægningen stoppede: {error}.",
+  "Put back. They go to the cloud now.": "Lagt tilbage. De sendes til skyen nu.",
+  "Put back.": "Lagt tilbage.",
+  "Cloud saves stay paused until you pick. Esc goes back without playing.": "Gemning i skyen forbliver sat på pause, indtil du vælger. Esc går tilbage uden at spille.",
+  "Which saves do you want to keep?": "Hvilke gemte spil vil du beholde?",
+  "The saves here could not be kept, so nothing was replaced: {error}.": "De gemte spil her kunne ikke bevares, så intet blev erstattet: {error}.",
+  "They replace the cloud's saves from {when}, here and in every browser that syncs with this keyphrase.": "De erstatter skyens gemte spil fra {when}, her og i alle browsere, der synkroniserer med denne nøglefrase.",
+  "They replace the cloud's saves, here and in every browser that syncs with this keyphrase.": "De erstatter skyens gemte spil, her og i alle browsere, der synkroniserer med denne nøglefrase.",
+  "The cloud's saves are newer: what was played on them since is lost.": "Skyens gemte spil er nyere: det, der er spillet på dem siden, går tabt.",
+  "The cloud's saves from {when} replace the ones here.": "Skyens gemte spil fra {when} erstatter dem her.",
+  "The cloud's saves replace the ones here.": "Skyens gemte spil erstatter dem her.",
+  "This browser's saves are newer: the progress since {when} is replaced.": "Denne browsers gemte spil er nyere: fremskridt siden {when} erstattes.",
+  "A copy of the saves here stays in this browser for {n} days: Put back under Cloud saves brings it back.": {
+    "one": "En kopi af de gemte spil her bliver i denne browser i {n} dag: Læg tilbage under Gemte spil i skyen henter den tilbage.",
+    "other": "En kopi af de gemte spil her bliver i denne browser i {n} dage: Læg tilbage under Gemte spil i skyen henter den tilbage."
+  },
+  "Kept in this browser: the saves replaced {when}.": "Bevaret i denne browser: de gemte spil, der blev erstattet {when}.",
+  "Cloud saves are paused until you pick.": "Gemning i skyen er sat på pause, indtil du vælger."
 }

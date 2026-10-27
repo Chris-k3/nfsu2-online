@@ -1070,5 +1070,32 @@
   "Group {n}: its name": "Grupo {n}: nombre",
   "Group {n}, phrase {i}": "Grupo {n}, frase {i}",
   "16 quick chat phrase numbers, separated by commas": "16 números de frases del chat rápido, separados por comas",
-  "4 of hi, reply, thanks, nice, drive, meet, race, react, help, separated by commas": "4 de entre hi, reply, thanks, nice, drive, meet, race, react, help, separados por comas"
+  "4 of hi, reply, thanks, nice, drive, meet, race, react, help, separated by commas": "4 de entre hi, reply, thanks, nice, drive, meet, race, react, help, separados por comas",
+  "no profiles": "sin perfiles",
+  "saved {when}": "guardado: {when}",
+  "Newer": "Más reciente",
+  "This browser": "Este navegador",
+  "Cloud": "Nube",
+  "The saves this browser had before cloud saves replaced them ({when}) come back in place of the ones here. The saves here now are kept instead, so you can switch back.": "Las partidas guardadas que tenía este navegador antes de que las de la nube las sustituyeran ({when}) vuelven en lugar de las de aquí. Las de ahora se conservan, así que puedes volver a cambiar.",
+  "Put back the replaced saves?": "¿Recuperar las partidas sustituidas?",
+  "Put back": "Recuperar",
+  "Putting back stopped: {error}.": "La recuperación se detuvo: {error}.",
+  "Put back. They go to the cloud now.": "Recuperadas. Ahora van a la nube.",
+  "Put back.": "Recuperadas.",
+  "Cloud saves stay paused until you pick. Esc goes back without playing.": "Las partidas en la nube quedan en pausa hasta que elijas. Esc vuelve sin jugar.",
+  "Which saves do you want to keep?": "¿Qué partidas guardadas quieres conservar?",
+  "The saves here could not be kept, so nothing was replaced: {error}.": "No se pudieron conservar las partidas guardadas de aquí, así que no se sustituyó nada: {error}.",
+  "They replace the cloud's saves from {when}, here and in every browser that syncs with this keyphrase.": "Sustituyen a las partidas de la nube ({when}), aquí y en todos los navegadores que se sincronizan con esta frase clave.",
+  "They replace the cloud's saves, here and in every browser that syncs with this keyphrase.": "Sustituyen a las partidas de la nube, aquí y en todos los navegadores que se sincronizan con esta frase clave.",
+  "The cloud's saves are newer: what was played on them since is lost.": "Las partidas de la nube son más recientes: se pierde lo jugado en ellas desde entonces.",
+  "The cloud's saves from {when} replace the ones here.": "Las partidas de la nube ({when}) sustituyen a las de aquí.",
+  "The cloud's saves replace the ones here.": "Las partidas de la nube sustituyen a las de aquí.",
+  "This browser's saves are newer: the progress since {when} is replaced.": "Las partidas de este navegador son más recientes: se sustituye el progreso desde {when}.",
+  "A copy of the saves here stays in this browser for {n} days: Put back under Cloud saves brings it back.": {
+    "one": "Una copia de las partidas guardadas de aquí se queda en este navegador {n} día: Recuperar, en Partidas en la nube, la trae de vuelta.",
+    "many": "Una copia de las partidas guardadas de aquí se queda en este navegador {n} de días: Recuperar, en Partidas en la nube, la trae de vuelta.",
+    "other": "Una copia de las partidas guardadas de aquí se queda en este navegador {n} días: Recuperar, en Partidas en la nube, la trae de vuelta."
+  },
+  "Kept in this browser: the saves replaced {when}.": "Conservadas en este navegador: las partidas sustituidas ({when}).",
+  "Cloud saves are paused until you pick.": "Las partidas en la nube están en pausa hasta que elijas."
 }

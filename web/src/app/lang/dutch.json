@@ -1048,5 +1048,31 @@
   "Group {n}: its name": "Groep {n}: naam",
   "Group {n}, phrase {i}": "Groep {n}, zin {i}",
   "16 quick chat phrase numbers, separated by commas": "16 snelchat-zinnummers, gescheiden door komma's",
-  "4 of hi, reply, thanks, nice, drive, meet, race, react, help, separated by commas": "4 van hi, reply, thanks, nice, drive, meet, race, react, help, gescheiden door komma's"
+  "4 of hi, reply, thanks, nice, drive, meet, race, react, help, separated by commas": "4 van hi, reply, thanks, nice, drive, meet, race, react, help, gescheiden door komma's",
+  "no profiles": "geen profielen",
+  "saved {when}": "opgeslagen {when}",
+  "Newer": "Nieuwer",
+  "This browser": "Deze browser",
+  "Cloud": "Cloud",
+  "The saves this browser had before cloud saves replaced them ({when}) come back in place of the ones here. The saves here now are kept instead, so you can switch back.": "De opgeslagen spellen die deze browser had voordat opgeslagen spellen uit de cloud ze vervingen ({when}), komen terug in plaats van die hier. De opgeslagen spellen die hier nu staan, worden in plaats daarvan bewaard, zodat je terug kunt wisselen.",
+  "Put back the replaced saves?": "De vervangen opgeslagen spellen terugzetten?",
+  "Put back": "Terugzetten",
+  "Putting back stopped: {error}.": "Terugzetten gestopt: {error}.",
+  "Put back. They go to the cloud now.": "Teruggezet. Ze gaan nu naar de cloud.",
+  "Put back.": "Teruggezet.",
+  "Cloud saves stay paused until you pick. Esc goes back without playing.": "Opslaan in de cloud blijft gepauzeerd tot je kiest. Esc gaat terug zonder te spelen.",
+  "Which saves do you want to keep?": "Welke opgeslagen spellen wil je houden?",
+  "The saves here could not be kept, so nothing was replaced: {error}.": "De opgeslagen spellen hier konden niet worden bewaard, dus er is niets vervangen: {error}.",
+  "They replace the cloud's saves from {when}, here and in every browser that syncs with this keyphrase.": "Ze vervangen de opgeslagen spellen in de cloud van {when}, hier en in elke browser die met deze sleutelzin synchroniseert.",
+  "They replace the cloud's saves, here and in every browser that syncs with this keyphrase.": "Ze vervangen de opgeslagen spellen in de cloud, hier en in elke browser die met deze sleutelzin synchroniseert.",
+  "The cloud's saves are newer: what was played on them since is lost.": "De opgeslagen spellen in de cloud zijn nieuwer: wat er sindsdien op is gespeeld, gaat verloren.",
+  "The cloud's saves from {when} replace the ones here.": "De opgeslagen spellen in de cloud van {when} vervangen die hier.",
+  "The cloud's saves replace the ones here.": "De opgeslagen spellen in de cloud vervangen die hier.",
+  "This browser's saves are newer: the progress since {when} is replaced.": "De opgeslagen spellen van deze browser zijn nieuwer: de voortgang sinds {when} wordt vervangen.",
+  "A copy of the saves here stays in this browser for {n} days: Put back under Cloud saves brings it back.": {
+    "one": "Een kopie van de opgeslagen spellen hier blijft {n} dag in deze browser: Terugzetten onder Opgeslagen spellen in de cloud haalt hem terug.",
+    "other": "Een kopie van de opgeslagen spellen hier blijft {n} dagen in deze browser: Terugzetten onder Opgeslagen spellen in de cloud haalt hem terug."
+  },
+  "Kept in this browser: the saves replaced {when}.": "Bewaard in deze browser: de opgeslagen spellen die {when} zijn vervangen.",
+  "Cloud saves are paused until you pick.": "Opslaan in de cloud is gepauzeerd tot je kiest."
 }

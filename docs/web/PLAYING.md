@@ -228,7 +228,12 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
     all of it and copies it, the arrow downloads it as a file.
   - From then on that browser syncs by itself: its saves go to the server after the game saves and when it closes,
     and a newer save from your other browser comes in when the page opens and when you press Play. If both browsers
-    changed them since they last synced, the page asks which to keep. A browser with no profiles never sends its
+    changed them since they last synced, the page asks which to keep: it shows both, their profiles, money and when
+    they were saved, marks the newer one, and asks again before either replaces the other. Nothing syncs until you
+    pick, so Play asks first. A send the server kept without the page hearing back (a timeout, a frozen tab) is no
+    conflict: the page knows it as its own. Before the cloud's saves replace the ones in this browser (Use the cloud's,
+    Load, Go back), the page keeps a copy of yours here for 30 days, and Put back brings it back (swapping again is
+    possible). A browser with no profiles never sends its
     empty saves by itself: it offers the cloud's instead (keeping the empty ones asks first: every browser on the
     keyphrase loses its profiles). The page also asks before cloud saves with no profiles, or older than the ones in
     this browser (a server gone back), replace yours.

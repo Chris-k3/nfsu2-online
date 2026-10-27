@@ -416,6 +416,19 @@ summary:hover { color: var(--text); }
 #vault-conflict { margin-top: 12px; }
 #vault-on { margin-top: 4px; gap: 4px 16px; }
 #vault-on .text-btn { padding: 0; height: 24px; }
+/* a conflict's two sides (vault-ui.ts sidesOf), in the section and in its questions: two cards side by side, where on
+ * top (the newer one marked beside it and framed), its profiles, banks and when under it; the saves a cloud version
+ * replaced, with Put back */
+.vault-sides { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin: 8px 0 0; padding: 0; list-style: none; font-size: 14px; line-height: 20px; }
+.vault-sides li { display: grid; grid-template-columns: 1fr auto; align-content: start; gap: 2px 8px; padding: 10px 12px; border: 2px solid var(--line); border-radius: 8px; }
+.vault-sides li.newer { border-color: var(--lime); }
+.vault-sides b { grid-row: 1; min-width: 0; color: var(--muted); font-weight: 400; }
+.vault-sides span { grid-row: 2; grid-column: 1 / -1; min-width: 0; }
+.vault-sides em { grid-row: 1; grid-column: 2; color: var(--lime); font-style: normal; font-weight: 700; }
+.dlg ul.vault-sides { margin: 0 0 16px; padding: 0; color: inherit; }
+.dlg p.warn { color: var(--warn); }
+#vault-replaced { margin-top: 8px; }
+#vault-replaced .text-btn { padding: 0; height: 24px; }
 /* the keyphrase just made at Play (shell.ts askCloud): shown whole, in a value box like the section's, wrapped at its
  * dashes; Copy and Download keyphrase as text under it */
 .keyphrase {

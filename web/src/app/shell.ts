@@ -424,6 +424,11 @@ async function startGame() {
     showNewer();
     return;
   }
+  // a cloud-saves conflict waiting (nothing syncs until it is settled): settled first, or no game; before the questions
+  // that write settings.ini, which the cloud's saves would replace
+  const cloud = await vault.askAtPlay();
+  if (cloud === 'stop') return;
+  if (cloud === 'taken') await loadSettings().catch(e => log.add(`[app] settings.ini not read again: ${e}`));
   // (the free-roam question says when the server is full: answered, it is not asked again what to do about that)
   const roamAsked = await askRoam();
   if (!roamAsked) await askCloud();
@@ -1384,7 +1389,8 @@ export async function boot() {
   // keyphrase saves (on a server that keeps them): synced by the tab that owns the saves, once its settings are loaded
   vault = new VaultPanel($('#vault'), {
     saveDir: SAVE, owner: () => instance.owner, playing: () => !!session, busy: () => !!session || starting || !instance.owner,
-    confirm: confirmBox, onRestored: () => { void loadSettings(); void settings.refresh(); void saves.refresh(); }, log: logLine,
+    confirm: confirmBox, choose: (title, body, ok, cancel) => choiceBox(title, body, ok, cancel),
+    onRestored: () => { void loadSettings(); void settings.refresh(); void saves.refresh(); }, log: logLine,
   });
   $<HTMLButtonElement>('#play').onclick = () => void play();
   $<HTMLButtonElement>('#retry').onclick = () => void loadModule();
