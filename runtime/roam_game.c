@@ -1661,6 +1661,7 @@ static int begin_load(CPU *c, int k, const uint8_t *cfg, int len, uint32_t gen){
     return 1;
 }
 static void eng_files(CPU *c, Slot *s);
+static int heavy_take(void);
 /* the loading ride is in: put it on the slot's car */
 static int finish_load(CPU *c, int k){
     Slot *s = &g_sl[k];
@@ -1674,6 +1675,7 @@ static int finish_load(CPU *c, int k){
         }
         return 0;
     }
+    if (!heavy_take()) return 0;                    /* in: put on its car the next frame */
     gcall1(c, FN_LOADER_WAIT, G_CARLOADER, s->h_new);
     uint32_t car = s->car;
     if (!s->have_orig){                             /* an opponent car, first time: keep its own ride */
@@ -4894,10 +4896,18 @@ static int loads_waiting(void){
     return n;
 }
 /* What costs a frame time: a car of our own made (its paint textures, its
- * first ride asked for, or CreateCar), a ride asked for.  At most two a
- * frame: 32 friends arriving at once made 29 cars in one frame (112 ms) */
+ * first ride asked for, or CreateCar), a ride asked for, a loaded ride put
+ * on its car (SetRideInfo makes its render info: ~1 ms).  At most two a
+ * frame: 32 friends arriving at once made 29 cars in one frame (112 ms), and
+ * in a crowd coming and going (roam_crowd_busy.txt) 116 frames of 3,600
+ * took 3 to 6 of them */
 #define HEAVY_PER_FRAME 2
 static int g_heavy;
+static int heavy_take(void){
+    if (g_heavy >= HEAVY_PER_FRAME) return 0;
+    g_heavy++;
+    return 1;
+}
 /* "nearest" for the slots, as the server's hub weighs its links (nfsu2-roam
  * RoamOptions soon_ms, look_ms, view_m): the nearest of the distances SOON_S
  * and LOOK_S on, both cars at their speeds, and from our view point, VIEW_M
