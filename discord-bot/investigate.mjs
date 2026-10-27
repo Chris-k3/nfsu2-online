@@ -6,6 +6,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { costOf } from './spend.mjs';
 import { TOOL_DEFS, Tools } from './tools.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -27,12 +28,6 @@ export const VERDICT = {
     confidence: { type: 'string', enum: ['low', 'medium', 'high'] },
     tags: { type: 'array', items: { type: 'string' }, description: 'names from "Tags you may add" in the thread\'s header; [] for none' },
   },
-};
-
-// $ per million tokens: input, output, cache write (5 minutes), cache read
-const PRICES = {
-  'claude-opus-5-5': [4, 20, 5, 0.2],
-  'claude-sonnet-5-5': [2, 10, 2.5, 0.2],
 };
 
 async function systemBlocks(repo) {
@@ -103,6 +98,7 @@ export async function investigate({ client, model, effort, maxTurns = MAX_TURNS,
   step(`code at ${recent.head.split(' ')[0]}, live ${recent.live.split(' ')[0]}${recent.notLive ? `, ${recent.notLive.split('\n').length} commit(s) not live yet` : ''}; asking ${model}`);
   const messages = [{ role: 'user', content: opening({ now: new Date().toISOString().slice(0, 16) + 'Z', recent, threads, thread, images }) }];
   const usage = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
+  let cost = 0;                                  // null once a turn's model has no prices
   const log = [];
   let verdict = null;
   const seen = new Set();
@@ -123,6 +119,8 @@ export async function investigate({ client, model, effort, maxTurns = MAX_TURNS,
     const u = res.usage;
     usage.input += u.input_tokens; usage.output += u.output_tokens;
     usage.cacheWrite += u.cache_creation_input_tokens ?? 0; usage.cacheRead += u.cache_read_input_tokens ?? 0;
+    const c = costOf(res.model ?? model, u);
+    cost = cost == null || c == null ? null : cost + c;
 
     if (res.stop_reason === 'refusal') { log.push(`refused (${res.stop_details?.category ?? 'no category'})`); step(log.at(-1)); break; }
     if (res.stop_reason === 'max_tokens') { log.push('ran out of output tokens'); step(log.at(-1)); break; }
@@ -158,8 +156,6 @@ export async function investigate({ client, model, effort, maxTurns = MAX_TURNS,
       `${verdict.duplicate_of ? `, same as ${verdict.duplicate_of}` : ''} (${verdict.confidence}): ${verdict.summary}`);
   }
 
-  const p = PRICES[model];
-  const cost = p ? (usage.input * p[0] + usage.output * p[1] + usage.cacheWrite * p[2] + usage.cacheRead * p[3]) / 1e6 : null;
   return { verdict, usage, cost, turns: messages.filter(m => m.role === 'assistant').length, log };
 }
 

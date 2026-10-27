@@ -79,6 +79,12 @@ file) posted in a thread by anyone but staff always gets a look, also past the t
 who replies to the bot's message (with the ping or without) or mentions it gets a look too, and an answer when there is
 something to say, until the bot has replied `BOT_MAX_TALK` times (6) in the thread.
 
+Every model call goes on a meter (`spend.mjs`, `state/spend.json`): looks, sorting, tags, translations, release checks,
+against `BOT_BUDGET` dollars a month (200, UTC months). Only the looks wait for money: each day they may spend what is
+left of the month over the days left in it, so a quiet day leaves more for the rest and a busy week can't spend the
+month. A look past today's share waits for the next day and runs then; staff's mentions still get theirs at once. The
+bot's first log line says what the month and the day spent so far.
+
 ## How it works
 
 - `bot.mjs`: Discord (discord.js). It decides when to look, builds the thread's text, saves attachments, inlines
@@ -223,7 +229,7 @@ Run it with `BOT_DRY_RUN=1` for a day. Every reply it would have posted goes to 
 | `BOT_WAIT_S` | `120` | quiet time after the poster's last message before the look (at most 10 minutes after the first) |
 | `BOT_MAX_REPLIES` | `2` | replies per thread on the bot's own (logs, bumps and staff's mentions get a look past it) |
 | `BOT_MAX_TALK` | `6` | replies per thread in all, answering people who reply to the bot or mention it |
-| `BOT_MAX_PER_DAY` | `80` | looks per day (each costs money) |
+| `BOT_BUDGET` | `200` | dollars a month for every model call; looks past the day's share wait for the next day |
 | `BOT_ARCHIVE` | on | `0`: don't keep messages (the model then can't search other channels) |
 | `BOT_STATE` | `state` (`/state` in Docker) | where the clone, the archive, the thread list, the verdicts and the translations go |
 | `BOT_REPO`, `BOT_BRANCH` | this checkout, `main` | where the code comes from (in `compose.yml`: GitHub over SSH) |

@@ -16,6 +16,7 @@ import { matchFeatures, matchFixes } from './fixes.mjs';
 import { General } from './general.mjs';
 import { blocks, investigate, newClient, picture, vet } from './investigate.mjs';
 import { Repo, defaultSource } from './repo.mjs';
+import { Spend, metered } from './spend.mjs';
 import { Tags } from './tags.mjs';
 import { COMMAND as TRANSLATE, Translator } from './translate.mjs';
 
@@ -33,7 +34,7 @@ const CFG = {
   waitS: Number(env.BOT_WAIT_S || 120),
   maxReplies: Number(env.BOT_MAX_REPLIES || 2),
   maxTalk: Number(env.BOT_MAX_TALK || 6),        // replies per thread in all, answering people who reply to the bot
-  maxPerDay: Number(env.BOT_MAX_PER_DAY || 80),
+  budget: Number(env.BOT_BUDGET || 200),         // $ a month (UTC) for every model call; the looks wait when it runs short
   minConfidence: env.BOT_MIN_CONFIDENCE || 'medium',
   archive: env.BOT_ARCHIVE !== '0',
   state: path.resolve(HERE, env.BOT_STATE || 'state'),
@@ -85,7 +86,8 @@ function save() {
 const archive = CFG.archive ? new Archive(path.join(CFG.state, 'archive')) : null;
 const repo = new Repo({ source: CFG.repo, branch: CFG.branch, dir: path.join(CFG.state, 'repo'), liveUrl: CFG.liveUrl, liveFile: CFG.liveFile,
   releasesFile: path.join(CFG.state, 'releases.json') });
-const anthropic = newClient();
+const spend = new Spend(path.join(CFG.state, 'spend.json'), CFG.budget);
+const anthropic = metered(newClient(), c => spend.add(c));
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
   partials: [Partials.Channel],
@@ -152,11 +154,17 @@ async function pump() {
   busy = false;
 }
 
-const day = { date: '', n: 0 };
-function underCap() {
-  const d = new Date().toISOString().slice(0, 10);
-  if (day.date !== d) Object.assign(day, { date: d, n: 0 });
-  return day.n < CFG.maxPerDay;
+/** at the turn of the UTC day (and at start): the looks the budget put off (st.later), oldest first; a thread with a look
+ *  on its way already gets that one */
+function lookLater() {
+  const later = Object.entries(threads).filter(([, t]) => t.later).sort((a, b) => a[1].later.at.localeCompare(b[1].later.at));
+  for (const [id, t] of later) {
+    if (!timers.has(id)) enqueue(id, t.later.why, t.later.extra);
+    delete t.later;
+  }
+  if (later.length) { console.log(`[bot] ${later.length} look(s) the budget put off, now`); save(); }
+  const next = new Date(); next.setUTCHours(24, 0, 5, 0);
+  setTimeout(lookLater, next - Date.now());
 }
 
 // ---------------------------------------------------------------------------------------------------- a look --
@@ -176,7 +184,12 @@ async function look(threadId, why, extra) {
   if (talk && st.replies >= CFG.maxTalk) return say(`skipped: ${st.replies} replies already, the most for answering replies`);
   if (!anyway && st.status === 'staff') return say('skipped: staff are in the thread');
   if (!anyway && st.replies >= CFG.maxReplies) return say(`skipped: ${st.replies} replies already`);
-  if (!underCap()) return say(`skipped: ${CFG.maxPerDay} looks today already`);
+  // staff asked: a look past the budget too.  Any other waits for the next day
+  if (!byStaff && !spend.allows()) {
+    st.later = { why, ...(extra ? { extra } : {}), at: new Date().toISOString() }; save();
+    return say(`skipped: today's $${spend.share().toFixed(2)} of the budget is spent, a look after midnight UTC`);
+  }
+  delete st.later;
 
   const msgs = [...(await thread.messages.fetch({ limit: 100 })).values()].reverse();
   const starter = await thread.fetchStarterMessage().catch(() => null);
@@ -195,7 +208,6 @@ async function look(threadId, why, extra) {
     `${fs.readdirSync(staffDir).filter(f => SAVES_ZIP.test(f.replace(/^\d+-/, ''))).length} save backup(s), ${images.length} picture(s)` +
     `${images.length ? ` (${images.reduce((s, p) => s + (p.tokens ?? 0), 0)} tokens)` : ''}`);
 
-  day.n++;
   const started = Date.now();
   // staff are waiting for this one: "typing…" in the thread until the reply is there (Discord shows it ~10 s a call)
   const typing = byStaff && setInterval(() => thread.sendTyping().catch(() => {}), 8000);
@@ -212,8 +224,9 @@ async function look(threadId, why, extra) {
     say(`failed: ${e.message}`);
   }
   const v = res.verdict;
+  // a poster who brought what the bot asked for, or who bumped, always hears back
   let { post, why: outcome } = fix && v?.action !== 'answer' ? { post: null, why: v?.action ?? 'no verdict' }
-    : vet(v, { minConfidence: fix ? 'high' : byStaff || why === 'follow-up' ? 'low' : CFG.minConfidence });   // a poster who brought what the bot asked for always hears back
+    : vet(v, { minConfidence: fix ? 'high' : byStaff || bumped || why === 'follow-up' ? 'low' : CFG.minConfidence });
   if (byStaff && !post) {                        // staff asked: always a reply, at least what the look found
     const text = v ? `${v.summary}` : 'I could not finish a look at this thread just now; the developer has the details.';
     post = vet({ ...(v ?? {}), action: 'answer', confidence: 'high', reply: text }, {}).post;
@@ -809,7 +822,8 @@ async function indexForums() {
 client.on(Events.ClientReady, c => {
   console.log(`[bot] ${c.user.tag} on ${c.guilds.cache.size} server(s); ${CFG.dryRun ? 'dry run (replies go to the staff channel only), ' : ''}` +
     `${CFG.forums.length ? `forums ${CFG.forums.join(', ')}` : 'every forum'}, ` +
-    `${CFG.staffChannel ? `staff channel ${CFG.staffChannel}` : 'no staff channel'}, model ${CFG.model} (${CFG.effort})`);
+    `${CFG.staffChannel ? `staff channel ${CFG.staffChannel}` : 'no staff channel'}, model ${CFG.model} (${CFG.effort}), ` +
+    `$${spend.month.toFixed(2)} of $${CFG.budget} spent this month, $${spend.today.toFixed(2)} of $${spend.share().toFixed(2)} today`);
   repo.sync(true).catch(e => console.error(`[repo] ${e.message}`));
   c.application.commands.set([TRANSLATE]).catch(e => console.error(`[translate] the command: ${e.message}`));
   let checking = null;                           // one check at a time: the first one reads every suggestion
@@ -819,6 +833,7 @@ client.on(Events.ClientReady, c => {
   setInterval(() => general.tick().catch(e => console.error(`[general] ${e.message}`)), 60_000);
   // posts that came in shortly before a restart still get their look
   for (const [id, t] of Object.entries(threads)) if (t.status === 'new' && Date.now() - Date.parse(t.created) < STARTUP_MS) schedule(id, 'new post');
+  lookLater();
 });
 
 /** an event handler that logs what goes wrong instead of taking the bot down */
