@@ -63,6 +63,7 @@ export class PhotoMode {
   private fingers = new Map<number, [number, number]>();
   private pinch: { d: number; x: number; y: number } | null = null;
   private shooting = false;
+  private flashTimer = 0;
 
   constructor(private stage: HTMLElement, private deps: {
     shoot(): Promise<void>; screenshot(): void; log(s: string): void;
@@ -100,8 +101,7 @@ export class PhotoMode {
     }
     this.tilt.addEventListener('dblclick', () => { this.tilt.value = '0'; this.send(PH_ROLL, 0); });
     const f = this.flash = document.createElement('div');
-    f.className = 'photo-flash'; f.hidden = true;
-    f.addEventListener('animationend', () => { f.hidden = true; });
+    f.className = 'photo-flash'; f.hidden = true;          // (hidden by a timer: with reduced motion no animation ends)
     stage.append(p, f);
     addEventListener('keydown', e => this.onKey(e as KeyboardEvent, true), { capture: true });
     addEventListener('keyup', e => this.onKey(e as KeyboardEvent, false), { capture: true });
@@ -168,6 +168,8 @@ export class PhotoMode {
     this.shooting = true;
     const f = this.flash;
     f.hidden = true; void f.offsetWidth; f.hidden = false;
+    clearTimeout(this.flashTimer);
+    this.flashTimer = setTimeout(() => { f.hidden = true; }, 400);
     try { await this.deps.shoot(); } finally { this.shooting = false; }
   }
 
@@ -202,7 +204,7 @@ export class PhotoMode {
       this.setBare(false);
       this.deps.log('[app] photo mode: on');
     } else {
-      this.root.hidden = true;
+      this.root.hidden = true; this.flash.hidden = true;
       this.deps.log('[app] photo mode: off');
     }
   }

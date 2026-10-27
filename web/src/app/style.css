@@ -888,4 +888,5 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.64); }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
+  .photo-flash { display: none !important; }          /* no white flash at all, rather than a still one */
 }
