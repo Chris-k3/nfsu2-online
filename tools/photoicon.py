@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""The pause menu's Photo Mode icon (runtime/photo.c): a still camera drawn in the style of the game's own
-INGAME_ICON_* textures (white, the parts in alpha levels with gaps between them, tinted by the menu), shown in place
-of INGAME_ICON_VOIP_ON, which nothing in the PC game draws.  Writes runtime/web/photo_icon.h: that texture's key as
-texrep_web.c sees its level 0 (CRC-32, Adler-32, size, D3DFORMAT) and the drawing's alpha at 512 x 256 (the icon is
-2:1, drawn stretched to a square), run-length coded.
+"""The pause menu's Photo Mode icon (runtime/photo.c): a still camera (tools/photo_icon.svg, white in alpha levels
+like the game's own INGAME_ICON_* textures, tinted by the menu), shown in place of INGAME_ICON_VOIP_ON, which nothing
+in the PC game draws.  Writes runtime/web/photo_icon.h: that texture's key as texrep_web.c sees its level 0 (CRC-32,
+Adler-32, size, D3DFORMAT) and the drawing's alpha at 512 x 256 (the SVG is the game's 128 x 64, four times over),
+run-length coded.
 
-    .venv/bin/python3 tools/photoicon.py [game folder] [--png out.png]
+    .venv/bin/python3 tools/photoicon.py [game folder] [--png out.png]      (needs cairosvg)
 """
-import os, re, sys, zlib
-from PIL import Image, ImageDraw
+import io, os, sys, zlib
+import cairosvg
+from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import texpacks as T
@@ -16,28 +17,12 @@ import texpacks as T
 GAME = '/home/thom/nfsu2-data/Need for Speed - Underground 2'
 NAME = 'INGAME_ICON_VOIP_ON'
 W, H = 512, 256
-N = 1024                                   # drawn square, at twice the size
-RIM, FILL, DARK = 210, 120, 70             # the alpha levels the game's icons use (rims, faces, shade)
+SVG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'photo_icon.svg')
 
 
 def draw():
-    im = Image.new('L', (N, N), 0)
-    d = ImageDraw.Draw(im)
-    def disc(r, a): d.ellipse((512 - r, 560 - r, 512 + r, 560 + r), fill=a)
-    d.polygon([(372, 300), (652, 300), (700, 370), (324, 370)], fill=RIM)           # the prism's hump
-    d.polygon([(398, 318), (626, 318), (662, 362), (362, 362)], fill=FILL)
-    d.rounded_rectangle((232, 280, 344, 336), 16, fill=RIM)                          # the shutter button
-    d.rounded_rectangle((150, 360, 874, 760), 60, fill=RIM)                          # the body
-    d.rounded_rectangle((176, 386, 848, 734), 44, fill=FILL)
-    d.rectangle((176, 430, 848, 470), fill=DARK)                                     # its band
-    disc(196, 0)                                                                     # the gap round the lens
-    disc(176, RIM)
-    disc(150, DARK)
-    disc(112, FILL)
-    disc(70, DARK)
-    d.pieslice((452, 500, 572, 620), 200, 250, fill=255)                             # the glint
-    d.rounded_rectangle((736, 402, 812, 446), 10, fill=165)                          # the flash window
-    return im.resize((W, H), Image.LANCZOS)
+    png = cairosvg.svg2png(url=SVG, output_width=W, output_height=H)
+    return Image.open(io.BytesIO(png)).convert('RGBA').getchannel('A')
 
 
 def rle(b):
