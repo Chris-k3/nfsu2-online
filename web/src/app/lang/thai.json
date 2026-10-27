@@ -366,7 +366,7 @@
   "Controller": "คอนโทรลเลอร์",
   "More controller settings": "การตั้งค่าคอนโทรลเลอร์เพิ่มเติม",
   "Rumble": "การสั่น",
-  "On controllers that have it: crashes, hard landings and the game's own force feedback.": "สำหรับคอนโทรลเลอร์ที่รองรับ: การชน การลงพื้นแรง ๆ และฟอร์ซฟีดแบ็กของเกมเอง",
+  "On controllers that have it, and with the touch controls the phone's vibration: crashes, hard landings, the game's own force feedback and the tick of each button press.": "สำหรับคอนโทรลเลอร์ที่รองรับ และการสั่นของโทรศัพท์เมื่อใช้ปุ่มสัมผัส: การชน การลงพื้นแรง ๆ ฟอร์ซฟีดแบ็กของเกมเอง และการสั่นเบา ๆ ทุกครั้งที่กดปุ่ม",
   "On keeps a controller once it was connected; hotplug only while connected.": "เปิด: เก็บคอนโทรลเลอร์ไว้เมื่อเคยเชื่อมต่อแล้ว ฮอตปลั๊ก: เฉพาะขณะเชื่อมต่ออยู่",
   "Hotplug": "ฮอตปลั๊ก",
   "Menu buttons": "ปุ่มเมนู",

@@ -372,7 +372,7 @@
   "Controller": "Oyun kolu",
   "More controller settings": "Diğer oyun kolu ayarları",
   "Rumble": "Titreşim",
-  "On controllers that have it: crashes, hard landings and the game's own force feedback.": "Destekleyen oyun kollarında: çarpışmalar, sert inişler ve oyunun kendi kuvvet geri bildirimi.",
+  "On controllers that have it, and with the touch controls the phone's vibration: crashes, hard landings, the game's own force feedback and the tick of each button press.": "Destekleyen oyun kollarında ve dokunmatik kontrollerle telefonun titreşiminde: çarpışmalar, sert inişler, oyunun kendi kuvvet geri bildirimi ve her düğmeye basıştaki kısa titreşim.",
   "On keeps a controller once it was connected; hotplug only while connected.": "Açık, bir kez bağlanan oyun kolunu tutar; çalışırken takma yalnızca bağlıyken.",
   "Hotplug": "Çalışırken takma",
   "Menu buttons": "Menü düğmeleri",

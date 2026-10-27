@@ -366,7 +366,7 @@
   "Controller": "コントローラー",
   "More controller settings": "その他のコントローラー設定",
   "Rumble": "振動",
-  "On controllers that have it: crashes, hard landings and the game's own force feedback.": "対応するコントローラーで: クラッシュ、激しい着地、ゲーム本来のフォースフィードバック。",
+  "On controllers that have it, and with the touch controls the phone's vibration: crashes, hard landings, the game's own force feedback and the tick of each button press.": "対応するコントローラーと、タッチ操作時のスマホの振動で: クラッシュ、激しい着地、ゲーム本来のフォースフィードバック、ボタンを押すたびの軽い振動。",
   "On keeps a controller once it was connected; hotplug only while connected.": "「オン」は一度接続したコントローラーを保持し、「ホットプラグ」は接続中だけ使います。",
   "Hotplug": "ホットプラグ",
   "Menu buttons": "メニューボタン",

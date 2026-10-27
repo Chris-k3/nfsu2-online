@@ -81,7 +81,7 @@ const GROUPS: Group[] = [
     { key: 'max_pixels', label: N('Pixel limit'), help: N('Most pixels the screen-size resolution renders at 100% and below (0 = no limit). 150% and 200% scale up from it.'), c: { t: 'num', min: 0, step: 100000 }, more: true },
   ] },
   { title: N('Controller'), more: N('More controller settings'), items: [
-    { key: 'rumble', label: N('Rumble'), help: N('On controllers that have it: crashes, hard landings and the game\'s own force feedback.'), c: { t: 'switch' } },
+    { key: 'rumble', label: N('Rumble'), help: N('On controllers that have it, and with the touch controls the phone\'s vibration: crashes, hard landings, the game\'s own force feedback and the tick of each button press.'), c: { t: 'switch' } },
     { key: 'gamepad', label: N('Controller'), help: N('On keeps a controller once it was connected; hotplug only while connected.'), c: { t: 'seg', opts: [['on', N('On')], ['hotplug', N('Hotplug')], ['off', N('Off')]] }, more: true },
     { key: 'gamepad_menu_keys', label: N('Menu buttons'), help: N('A, B and View also act as Enter, Esc and Q in the menus.'), c: { t: 'switch' }, more: true },
     { key: 'gamepad_deadzone', label: N('Stick dead zone'), help: N('Fraction of full travel, 0 to 0.9.'), c: { t: 'num', min: 0, max: 0.9, step: 0.01 }, more: true },

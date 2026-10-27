@@ -422,7 +422,7 @@
   "Controller": "Manette",
   "More controller settings": "Plus de paramètres de manette",
   "Rumble": "Vibration",
-  "On controllers that have it: crashes, hard landings and the game's own force feedback.": "Sur les manettes qui la prennent en charge : chocs, atterrissages brutaux et retour de force du jeu.",
+  "On controllers that have it, and with the touch controls the phone's vibration: crashes, hard landings, the game's own force feedback and the tick of each button press.": "Sur les manettes qui la prennent en charge et, avec les commandes tactiles, la vibration du téléphone : chocs, atterrissages brutaux, retour de force du jeu et le petit à-coup à chaque appui sur un bouton.",
   "On keeps a controller once it was connected; hotplug only while connected.": "Activé : une manette reste prise en compte une fois connectée ; À chaud : seulement tant qu'elle est connectée.",
   "Hotplug": "À chaud",
   "Menu buttons": "Boutons de menu",

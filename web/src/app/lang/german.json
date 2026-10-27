@@ -408,7 +408,7 @@
   "Controller": "Controller",
   "More controller settings": "Weitere Controller-Einstellungen",
   "Rumble": "Rumble",
-  "On controllers that have it: crashes, hard landings and the game's own force feedback.": "Bei Controllern, die das können: Unfälle, harte Landungen und das eigene Force Feedback des Spiels.",
+  "On controllers that have it, and with the touch controls the phone's vibration: crashes, hard landings, the game's own force feedback and the tick of each button press.": "Bei Controllern, die das können, und mit der Touch-Steuerung die Vibration des Handys: Unfälle, harte Landungen, das eigene Force Feedback des Spiels und das kurze Ticken bei jedem Tastendruck.",
   "On keeps a controller once it was connected; hotplug only while connected.": "Ein behält einen Controller, sobald er einmal verbunden war; Hotplug nur, solange er verbunden ist.",
   "Hotplug": "Hotplug",
   "Menu buttons": "Menütasten",

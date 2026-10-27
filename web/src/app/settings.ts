@@ -318,8 +318,10 @@ export const TEMPLATE = `# NFSU2 settings, read at every launch.
 # hotplug = only while one is connected (DirectInput behaviour); off = no
 # controller.  The bindings are set in the game's Controls menu.  [NFSU2_PAD]
 #gamepad = on
-# Rumble on controllers that have it (Xbox, DualSense and others in Chrome):
-# crashes and hard landings, and the game's own force feedback.  [NFSU2_FF]
+# Rumble on controllers that have it (Xbox, DualSense and others in Chrome),
+# and with the touch controls the phone's vibration: crashes and hard
+# landings, the game's own force feedback and the tick of each button press.
+# [NFSU2_FF]
 #rumble = on
 # Stick dead zone (fraction of full travel, 0 to 0.9) and trigger dead zone.
 # [NFSU2_PAD_DEADZONE, NFSU2_PAD_TRIGGER_DEADZONE]

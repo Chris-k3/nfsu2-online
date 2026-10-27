@@ -422,7 +422,7 @@
   "Controller": "Controller",
   "More controller settings": "Altre impostazioni del controller",
   "Rumble": "Vibrazione",
-  "On controllers that have it: crashes, hard landings and the game's own force feedback.": "Sui controller che la supportano: incidenti, atterraggi bruschi e il force feedback del gioco.",
+  "On controllers that have it, and with the touch controls the phone's vibration: crashes, hard landings, the game's own force feedback and the tick of each button press.": "Sui controller che la supportano e, con i comandi touch, la vibrazione del telefono: incidenti, atterraggi bruschi, il force feedback del gioco e il piccolo colpo a ogni pressione di un pulsante.",
   "On keeps a controller once it was connected; hotplug only while connected.": "Attivato: un controller resta in uso una volta collegato; Hotplug: solo finché è collegato.",
   "Hotplug": "Hotplug",
   "Menu buttons": "Pulsanti per i menu",

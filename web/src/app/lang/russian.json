@@ -436,7 +436,7 @@
   "Controller": "Геймпад",
   "More controller settings": "Дополнительные настройки геймпада",
   "Rumble": "Вибрация",
-  "On controllers that have it: crashes, hard landings and the game's own force feedback.": "На геймпадах, где она есть: аварии, жёсткие приземления и собственная отдача игры.",
+  "On controllers that have it, and with the touch controls the phone's vibration: crashes, hard landings, the game's own force feedback and the tick of each button press.": "На геймпадах, где она есть, а с сенсорным управлением — вибрация телефона: аварии, жёсткие приземления, собственная отдача игры и короткий отклик при каждом нажатии кнопки.",
   "On keeps a controller once it was connected; hotplug only while connected.": "«Вкл.» сохраняет геймпад после первого подключения; «Пока подключён» — только во время подключения.",
   "Hotplug": "Пока подключён",
   "Menu buttons": "Кнопки меню",

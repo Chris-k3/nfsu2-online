@@ -366,7 +366,7 @@
   "Controller": "컨트롤러",
   "More controller settings": "컨트롤러 설정 더 보기",
   "Rumble": "진동",
-  "On controllers that have it: crashes, hard landings and the game's own force feedback.": "진동을 지원하는 컨트롤러에서: 충돌, 세게 착지할 때, 게임 본래의 포스 피드백.",
+  "On controllers that have it, and with the touch controls the phone's vibration: crashes, hard landings, the game's own force feedback and the tick of each button press.": "진동을 지원하는 컨트롤러와, 터치 컨트롤을 쓸 때 휴대폰 진동에서: 충돌, 세게 착지할 때, 게임 본래의 포스 피드백, 버튼을 누를 때마다의 짧은 진동.",
   "On keeps a controller once it was connected; hotplug only while connected.": "'켜짐'은 한 번 연결된 컨트롤러를 계속 유지하고, '핫플러그'는 연결된 동안에만 써요.",
   "Hotplug": "핫플러그",
   "Menu buttons": "메뉴 버튼",

@@ -436,7 +436,7 @@
   "Controller": "Kontroler",
   "More controller settings": "Więcej ustawień kontrolera",
   "Rumble": "Wibracje",
-  "On controllers that have it: crashes, hard landings and the game's own force feedback.": "Na kontrolerach, które je mają: zderzenia, twarde lądowania i własne sprzężenie zwrotne gry.",
+  "On controllers that have it, and with the touch controls the phone's vibration: crashes, hard landings, the game's own force feedback and the tick of each button press.": "Na kontrolerach, które je mają, a przy sterowaniu dotykowym wibracje telefonu: zderzenia, twarde lądowania, własne sprzężenie zwrotne gry i krótkie drgnięcie przy każdym naciśnięciu przycisku.",
   "On keeps a controller once it was connected; hotplug only while connected.": "„Wł.” zachowuje kontroler po pierwszym podłączeniu; „Gdy podłączony” – tylko w czasie podłączenia.",
   "Hotplug": "Gdy podłączony",
   "Menu buttons": "Przyciski menu",

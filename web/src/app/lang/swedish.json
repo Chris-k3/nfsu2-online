@@ -408,7 +408,7 @@
   "Controller": "Handkontroll",
   "More controller settings": "Fler inställningar för handkontroll",
   "Rumble": "Vibration",
-  "On controllers that have it: crashes, hard landings and the game's own force feedback.": "På handkontroller som har det: krockar, hårda landningar och spelets egen force feedback.",
+  "On controllers that have it, and with the touch controls the phone's vibration: crashes, hard landings, the game's own force feedback and the tick of each button press.": "På handkontroller som har det, och med pekkontrollerna telefonens vibration: krockar, hårda landningar, spelets egen force feedback och det lilla tick vid varje knapptryck.",
   "On keeps a controller once it was connected; hotplug only while connected.": "På behåller en handkontroll när den väl har anslutits; Hotplug bara medan den är ansluten.",
   "Hotplug": "Hotplug",
   "Menu buttons": "Menyknappar",

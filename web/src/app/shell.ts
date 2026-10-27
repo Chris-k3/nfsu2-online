@@ -567,7 +567,7 @@ async function startGame() {
   playTime = new PlayTime(session, playTimeLimit(), logLine);
   // a phone's render scale (device.ts): whether it has room for all its pixels, for its next game
   if (r.source.NFSU2_RENDER === 'device') renderCheck = new RenderCheck(session, r.env.NFSU2_RENDER, renderCheckTimes(), logLine);
-  touch.start(session);
+  touch.start(session, r.env.NFSU2_FF !== '0');   // Rumble off: no tick under a finger either
   textField.start(session);
   pauseHint.start(session);
   driftPanel.start(session);

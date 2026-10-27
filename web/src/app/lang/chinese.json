@@ -366,7 +366,7 @@
   "Controller": "控制器",
   "More controller settings": "更多控制器設定",
   "Rumble": "震動",
-  "On controllers that have it: crashes, hard landings and the game's own force feedback.": "適用於支援震動的控制器：碰撞、重落地，以及遊戲本身的力回饋。",
+  "On controllers that have it, and with the touch controls the phone's vibration: crashes, hard landings, the game's own force feedback and the tick of each button press.": "適用於支援震動的控制器，以及使用觸控操作時的手機震動：碰撞、重落地、遊戲本身的力回饋，以及每次按下按鈕時的輕震。",
   "On keeps a controller once it was connected; hotplug only while connected.": "開啟：控制器連接過一次後就會保留；熱插拔：僅在連接期間使用。",
   "Hotplug": "熱插拔",
   "Menu buttons": "選單按鈕",
