@@ -14,7 +14,7 @@ from PIL import Image
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import texpacks as T
 
-GAME = '/home/thom/nfsu2-data/Need for Speed - Underground 2'
+GAME = os.path.expanduser('~/nfsu2-data/Need for Speed - Underground 2')
 NAME = 'INGAME_ICON_VOIP_ON'
 W, H = 512, 256
 SVG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'photo_icon.svg')
