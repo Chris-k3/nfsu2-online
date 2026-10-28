@@ -54,6 +54,14 @@ and it says something only when it is worth it:
   go to the staff channel at once, without a model, and a daily note at 06:00 UTC sums up what the general channels
   kept bringing up (threads as links, in two messages when it runs long).
 
+- **The developer's answer, once for every thread**: mention the bot in a report's thread in the staff channel (or
+  in a reply to the report's message) with the answer after the mention, such as "@NFS Helper these are hidden races:
+  they show on the street when you drive near". The bot posts it in every open forum thread of that report, each in
+  its poster's language (one Haiku call), starting "From the developer:", with the message's files (4 at most); the
+  report gets a line with where it went, and the bot's own looks stay out of those threads as if staff had answered.
+  A mention outside a report's thread, or without an answer, gets a one-line hint. In a dry run the posts go to the
+  staff channel.
+
 - **Translate**, in any message's Apps menu (right-click, or a long press on a phone): the message and its
   translation in one box, a divider between them and nothing else, seen only by the one who asked. A message not in
   English is translated into English; one in English into the thread's language (in a plain channel, the language the
