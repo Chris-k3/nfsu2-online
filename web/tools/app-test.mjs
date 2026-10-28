@@ -40,6 +40,12 @@
 //   slowgpu   a renderer that comes after the game stopped waiting for it (NFSU2_RENDERER_WAIT_MS)
 //             is refused and the game stopped with the reason, not left on a black screen; the page
 //             points to #bug-reports on Discord
+//   gpulost   every WebGPU call failing in the middle of a game, as in Safari once its graphics process went away
+//             (createCommandEncoder throws, device.lost never comes): the game is stopped with GPU-LOST instead of a
+//             frozen picture, the page says Play reloads it, and Play does reload it (then plays); the reloaded
+//             page's line on the last game says what it held at its last copy (its textures); a reloaded page that
+//             gets no adapter at first (Chrome after a hung device) says GPU-ADAPTER-AFTER-LOST, asks again by itself
+//             and plays once the adapter is back
 //   crash     a trap (exit 134): "Stopped" with the error code, the trap in the log, the pointer to
 //             #bug-reports on Discord; a normal close after it takes the pointer away
 //   leak     three Play -> Stop rounds with sound on in one tab (the second with free roam on, so
@@ -51,6 +57,10 @@
 //             server says free roam is busy (/players roamBusy: nothing written, asked at the next Play); without
 //             a name no name line, Esc is Not now (roam = off), not asked again; with one, the name to change (a
 //             refused one keeps the question open), Enter in it turns free roam on with the new name
+//   cloudask  the fifth Play in a browser (four games counted), with a profile there and no cloud saves, asks to turn
+//             them on: not at a Play that asked about free roam, not without a profile, not before the fifth; Esc is
+//             Not now, not asked again; Turn on makes a keyphrase and shows it (Copy, Download keyphrase, Continue: the
+//             game starts, the browser syncs), on the 4 px grid at 1280 and 390 px; the cloud copy deleted after
 //   full      a full server (needs one started with --max-peers 1: the step holds that place itself): the first
 //             Play's free-roam question says the server is full, and nothing more is asked after it; in line, the
 //             place over the game and the page menu's Stop waiting; in once the place frees up; a later Play asks to
@@ -234,6 +244,13 @@ try {
     const resetAll = { roamRate: /^#roam_rate = 20$/m.test(file3), ask: resetAsk, left: file4.split('\n').filter(l => /^[A-Za-z_]+ = /.test(l)),
       disabled: await page.locator('#settings-reset-all').isDisabled() };
     const resetOk = resetAll.roamRate && resetAsk === 'Reset all settings?' && resetAll.left.join('|') === 'roam_name = Tester' && resetAll.disabled;
+    // the steps after this one play with movies off and the detailed counter (play's F8, saves' and restore's
+    // settings.ini): set again after the reset
+    n0 = await saved(page);
+    await page.click('.set[data-key="movies"] .switch'); await settle(page, n0++);
+    const more = page.locator('#settings details:has(> summary:has-text("More display"))');
+    if (!await more.evaluate(d => d.open)) await page.click('#settings summary:has-text("More display")');
+    await page.click('.set[data-key="fps_counter"] .opt:has-text("Detailed")'); await settle(page, n0++);
     report('settings', fileOk && envOk && /not a whole number in 0\.\.32/.test(refusedMsg) && /ignored/.test(rawMsg) &&
       /ultrawide/.test(hudState) && /roam_rate = 30/.test(otherText) && /roam_port = 47300 \(ignored: only used by the Mac app\)/.test(otherText) && after.movies === 'false' && after.fps === '120' && after.name === 'Tester' && /^#hud = wide$/m.test(file2) && /\(2 changed\)$/.test(moreDisplay) &&
       resetOk && listenPlaying === 'true' && listened,
@@ -794,6 +811,63 @@ try {
     await c2.close();
   }
 
+  // ---------------------------------------------------------- gpulost --
+  // Safari's graphics process went away (a player's iPhone log, 2026-10-24): every frame's createCommandEncoder threw
+  // InvalidStateError from then on, device.lost never came, and the picture stayed frozen while the game played on
+  if (want('gpulost')) {
+    const c2 = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    await c2.addInitScript(() => {
+      const ce = GPUDevice.prototype.createCommandEncoder;
+      GPUDevice.prototype.createCommandEncoder = function (...a) {
+        if (window.__gpuGone) throw new DOMException('GPUDevice.createCommandEncoder: Unable to make command encoder.', 'InvalidStateError');
+        return ce.apply(this, a);
+      };
+      // no adapter until the time in sessionStorage (set before the reload): Chrome after a hung Direct3D 12 device
+      const ra = GPU.prototype.requestAdapter;
+      GPU.prototype.requestAdapter = function (...a) {
+        return Date.now() < Number(sessionStorage.getItem('noAdapterUntil') ?? 0) ? Promise.resolve(null) : ra.apply(this, a);
+      };
+    });
+    const p = watch(await c2.newPage(), 'L');
+    await open(p, `save=${RUN}-l&fresh&env=NOMOVIES%3D1`);
+    await p.click('#play');
+    await waitPhase(p, ['playing'], 60000);
+    await p.waitForFunction(() => (window.__nfsu2.log.tail(400) ?? []).some(l => /\[gpu\] display \d+ Hz/.test(l)), null, { timeout: 60000, polling: 500 });
+    await p.waitForTimeout(3000);
+    await p.evaluate(() => { window.__gpuGone = true; });
+    const ph = await waitPhase(p, ['exited'], 30000).catch(() => phase(p));
+    const tail = (await p.evaluate(() => window.__nfsu2.log.tail(600))).join('\n');
+    const r = { phase: ph, headline: await p.locator('#status').textContent(), sub: await p.locator('#status-sub').textContent(),
+      failed: (tail.match(/\[gpu\] encode failed: InvalidStateError: GPUDevice\.createCommandEncoder/g) ?? []).length,
+      gone: /\[gpu\] device gone: 60 times in a row/.test(tail), stopped: /\[app\] the graphics stopped working: stopping the game/.test(tail),
+      bugReport: await p.locator('#report').isVisible() };
+    await shot(p, 'gpulost-exited.png');
+    // Play reloads the page (a fresh one: the log starts over), and the next Play plays
+    const nav = p.waitForEvent('framenavigated', { timeout: 30000 }).then(() => true, () => false);
+    await p.evaluate(() => sessionStorage.setItem('noAdapterUntil', String(Date.now() + 15000)));
+    await p.click('#play');
+    r.reloaded = await nav;
+    if (r.reloaded) {
+      // no adapter yet: the page says why (not GPU-ADAPTER-WIN's old graphics), and Play comes on once it is back
+      r.afterLost = await p.waitForFunction(() => /GPU-ADAPTER-AFTER-LOST/.test(document.querySelector('#problems')?.textContent ?? ''),
+        null, { timeout: 15000, polling: 200 }).then(() => true, () => false);
+      await shot(p, 'gpulost-no-adapter.png');
+      const backRe = /^\[app\] the graphics are back after \d+ s/;
+      r.back = await p.waitForFunction(re => window.__nfsu2?.log.tail(50).find(l => new RegExp(re).test(l)) ?? null, backRe.source,
+        { timeout: 40000, polling: 500 }).then(h => h.jsonValue(), () => null);
+      await waitPhase(p, ['ready', 'error'], 60000);
+      const after = await p.evaluate(() => window.__nfsu2.log.tail(50));
+      r.logAfter = after.some(l => /the last game lost its graphics/.test(l));
+      // the line on the last game says what it held at its last copy (lastgame.ts): the textures, at least
+      r.held = after.find(l => /^\[app\] the last game .*; at that copy it held textures [1-9]\d* MB/.test(l)) ?? null;
+      await p.click('#play');
+      r.playsAgain = await waitPhase(p, ['playing'], 60000).then(() => true, () => false);
+    }
+    report('gpulost', r.phase === 'exited' && r.headline === 'Stopped' && r.failed >= 1 && r.gone && r.stopped &&
+      /the graphics stopped working\. Play reloads this page/.test(r.sub) && r.bugReport && r.reloaded && !r.logAfter && !!r.held && r.afterLost && !!r.back && r.playsAgain, r);
+    await c2.close();
+  }
+
   // ------------------------------------------------------------ crash --
   // a trap ends the game with exit 134 (game-worker.ts): the start page says so and
   // points to #bug-reports on Discord; a normal end afterwards takes that line away.
@@ -1006,6 +1080,124 @@ try {
       first.cancel === 'Not now' && first.focus === 'confirm-ok' && afterEsc.join() === 'roam = off' && !again && named.field === 'Racer' &&
       refused.open && /not a name/.test(refused.why) && [...afterOn].sort().join() === 'roam = on,roam_name = New Racer' && env.NFSU2_ROAM === '1' && env.NFSU2_ROAM_NAME === 'New Racer',
       { busy, first, afterEsc, askedAgain: again, named, refused, afterOn, env: { NFSU2_ROAM: env.NFSU2_ROAM, NFSU2_ROAM_NAME: env.NFSU2_ROAM_NAME } });
+  }
+
+  // --------------------------------------------------------- cloudask --
+  // a player's page (no test settings: the question is not asked on a test page) in a context of its own
+  if (want('cloudask')) {
+    const c6 = await browser.newContext({ viewport: { width: 1280, height: 800 }, acceptDownloads: true, permissions: ['clipboard-write'] });
+    const r = watch(await c6.newPage(), 'C');
+    const KEY = 'nfsu2-cloud-offer:save';
+    const count = () => r.evaluate(k => localStorage.getItem(k), KEY);
+    const setCount = v => r.evaluate(([k, v]) => localStorage.setItem(k, v), [KEY, v]);
+    // a profile file is all the question looks for (the game is stopped before it reads one)
+    const profile = on => r.evaluate(async on => {
+      const save = await (await navigator.storage.getDirectory()).getDirectoryHandle('save', { create: true });
+      if (!on) { await save.removeEntry('NFS Underground 2', { recursive: true }).catch(() => {}); return; }
+      const d = await (await save.getDirectoryHandle('NFS Underground 2', { create: true })).getDirectoryHandle('CLOUDT', { create: true });
+      const w = await (await d.getFileHandle('CLOUDT', { create: true })).createWritable(); await w.write(new Uint8Array(4096).fill(7)); await w.close();
+    }, on);
+    const title = () => r.evaluate(() => document.querySelector('#confirm[open]') ? document.querySelector('#confirm-title').textContent : null);
+    const stop = async () => {
+      await r.waitForFunction(() => !!window.__nfsu2.session, null, { timeout: 60000 });
+      await r.evaluate(() => window.__nfsu2.session.terminate());
+      await waitPhase(r, ['exited'], 30000);
+    };
+    // Play, every question answered with Esc: the titles asked
+    const playAll = async () => {
+      const asked = [];
+      const p0 = await phase(r);
+      await r.click('#play');
+      for (;;) {
+        const t = await r.waitForFunction(p0 => document.querySelector('#confirm[open]') ? document.querySelector('#confirm-title').textContent
+          : window.__nfsu2.phase !== p0 && ['playing', 'exited'].includes(window.__nfsu2.phase) ? 1 : null, p0, { timeout: 60000, polling: 100 }).then(h => h.jsonValue());
+        if (t === 1) break;
+        asked.push(t);
+        await r.keyboard.press('Escape');
+        await r.waitForFunction(() => !document.querySelector('#confirm[open]'), null, { timeout: 5000 });
+      }
+      await stop();
+      return { asked, count: await count() };
+    };
+    await r.goto(`${BASE}/`);
+    await waitPhase(r, ['ready', 'error'], 60000);
+    await r.waitForFunction(() => !document.querySelector('#vault').hidden, null, { timeout: 10000 });
+    await profile(true); await setCount('4');
+    const withRoam = await playAll();                      // the first Play asks about free roam: that one only
+    await profile(false);
+    const noProfile = await playAll();
+    await profile(true); await setCount('3');
+    const fourth = await playAll();
+    // the fifth: asked; Esc is Not now
+    await r.click('#play');
+    await r.waitForSelector('#confirm[open]', { timeout: 10000 });
+    const first = await r.evaluate(() => ({ title: document.querySelector('#confirm-title').textContent, text: document.querySelector('#confirm-body').innerText,
+      ok: document.querySelector('#confirm-ok').textContent, cancel: document.querySelector('#confirm-cancel').textContent,
+      cancelShown: !document.querySelector('#confirm-cancel').hidden, focus: document.activeElement?.id ?? null }));
+    await r.locator('#confirm').screenshot({ path: path.join(OUT, 'cloud-ask.png') });
+    await r.keyboard.press('Escape');
+    // the phase is still the last game's 'exited' until this game starts
+    await r.waitForFunction(() => window.__nfsu2.phase !== 'exited', null, { timeout: 10000 });
+    await waitPhase(r, ['playing', 'exited'], 60000);
+    const afterEsc = { count: await count(), link: await r.evaluate(() => localStorage.getItem('nfsu2-keyphrase:save')) };
+    await stop();
+    const again = await playAll();
+    // another player's fifth: Turn on
+    await setCount('4');
+    await r.click('#play');
+    await r.waitForSelector('#confirm[open]', { timeout: 10000 });
+    await r.click('#confirm-ok');
+    await r.waitForFunction(() => document.querySelector('#confirm[open]') && document.querySelector('#confirm-title').textContent === 'Your keyphrase', null, { timeout: 30000 });
+    // every edge on the 4 px grid, inside the dialog's border, and nothing wider than it, at both widths
+    const grid = () => r.evaluate(() => {
+      const dlg = document.querySelector('#confirm'), d = dlg.getBoundingClientRect(), top = d.top + dlg.clientTop, off = [];
+      for (const el of document.querySelectorAll('#confirm h2, #confirm-body p, #confirm-body .row, #confirm-body button, #confirm .row.end')) {
+        if (!el.offsetParent) continue;
+        const b = el.getBoundingClientRect();
+        for (const [k, v] of [['top', b.top - top], ['bottom', b.bottom - top]]) if (Math.round(v) % 4) off.push(`${el.tagName.toLowerCase()}.${el.className || el.id} ${k} ${v}`);
+        if (b.right > d.right - 24 + 0.5) off.push(`${el.tagName.toLowerCase()}.${el.className} past the dialog's padding`);
+      }
+      return { off, width: d.width, overflow: document.documentElement.scrollWidth > innerWidth };
+    });
+    const shown = await r.evaluate(() => ({ text: document.querySelector('#confirm-body').innerText, phrase: document.querySelector('#confirm-body .keyphrase')?.textContent ?? '',
+      ok: document.querySelector('#confirm-ok').textContent, cancelShown: !document.querySelector('#confirm-cancel').hidden, focus: document.activeElement?.id ?? null }));
+    const wide = await grid();
+    await r.locator('#confirm').screenshot({ path: path.join(OUT, 'cloud-keyphrase.png') });
+    await r.setViewportSize({ width: 390, height: 844 });
+    await r.waitForTimeout(200);
+    const narrow = await grid();
+    await r.locator('#confirm').screenshot({ path: path.join(OUT, 'cloud-keyphrase-390.png') });
+    await r.setViewportSize({ width: 1280, height: 800 });
+    await r.click('#confirm-body button:has-text("Copy")');
+    const copied = await r.waitForFunction(() => document.querySelector('#confirm-body button')?.textContent === 'Copied.', null, { timeout: 3000 }).then(() => true, () => false);
+    const dl = r.waitForEvent('download');
+    await r.click('#confirm-body button:has-text("Download keyphrase")');
+    const file = fs.readFileSync(await (await dl).path(), 'utf8');
+    const stillOpen = await title();
+    await r.click('#confirm-ok');
+    await r.waitForFunction(() => window.__nfsu2.phase !== 'exited', null, { timeout: 10000 });
+    await waitPhase(r, ['playing', 'exited'], 60000);
+    const played = await phase(r);
+    const after = await r.evaluate(() => ({ link: JSON.parse(localStorage.getItem('nfsu2-keyphrase:save') ?? 'null'), count: localStorage.getItem('nfsu2-cloud-offer:save'),
+      when: document.querySelector('#vault-when').textContent }));
+    await stop();
+    const cloudLog = (await r.evaluate(() => window.__nfsu2.log.tail(2000))).filter(l => /cloud saves:|keyphrase:/.test(l));
+    // the cloud copy goes (the dev server's state stays clean)
+    await r.click('#vault-delete');
+    await r.waitForSelector('#confirm[open]', { timeout: 5000 });
+    await r.click('#confirm-ok');
+    const deleted = await r.waitForFunction(() => /Deleted from the cloud/.test(document.querySelector('#vault-msg').textContent), null, { timeout: 15000 }).then(() => true, () => false);
+    await c6.close();
+    const ROAM = 'Free roam with others?', ASK = 'Turn on cloud saves?';
+    report('cloudask', withRoam.asked.join() === ROAM && withRoam.count === '5' && noProfile.asked.length === 0 && noProfile.count === '6' &&
+      fourth.asked.length === 0 && fourth.count === '4' && first.title === ASK && first.ok === 'Turn on' && first.cancel === 'Not now' && first.cancelShown &&
+      first.focus === 'confirm-ok' && afterEsc.count === 'asked' && afterEsc.link === null && again.asked.length === 0 &&
+      /^nfsu2-xyz(-[a-z]+){8}$/.test(shown.phrase) && shown.ok === 'Continue' && !shown.cancelShown && shown.focus === 'confirm-ok' &&
+      !wide.off.length && !narrow.off.length && !narrow.overflow && copied && file.trim() === shown.phrase && stillOpen === 'Your keyphrase' &&
+      played === 'playing' && after.link?.phrase === shown.phrase && after.count === 'asked' && /^Synced/.test(after.when) &&
+      cloudLog.some(l => /cloud saves: not now/.test(l)) && cloudLog.some(l => /cloud saves: turned on/.test(l)) && deleted,
+      { withRoam, noProfile, fourth, first, afterEsc, again, shown, wide, narrow, copied, file: file.trim(), stillOpen, played,
+        after: { phrase: after.link?.phrase, count: after.count, when: after.when }, cloudLog, deleted });
   }
 
   // ------------------------------------------------------------- full --

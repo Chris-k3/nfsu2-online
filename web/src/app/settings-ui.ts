@@ -11,8 +11,10 @@
 import { checkSetting, DEFAULTS, keyDef, resolveEnv, settingsPut, TEMPLATE, type Resolved } from './settings';
 import { readText, writeFile } from './savefs';
 import { playHorn, stopHorn } from './horn-preview';
-import { checkCrew, CREW_COLOUR_NAMES, CREW_MAX, CREW_PALETTE, crewsOf, crewsValue, freeColour, rgbsValue, type Crew } from './crews';
+import { checkCrew, CREW_BIG, CREW_COLOUR_NAMES, CREW_MAX, CREW_PALETTE, crewsOf, crewsValue, freeColour, rgbsValue, type Crew } from './crews';
 import { roomHash } from './players';
+import { onlineName } from './claim';
+import { CATS, DEFAULT_GROUPS, DEFAULT_PHRASES, groupsOf, PHRASES, phrasesOf, SLOTS } from './phrases';
 import { LANGUAGES, live, N, NATIVE, t, tn, tvars, type Language, type Msg } from './i18n';
 
 type Control =
@@ -25,7 +27,10 @@ type Control =
   | { t: 'num'; min?: number; max?: number; step?: number; unit?: string }
   | { t: 'text'; placeholder?: string }
   /** the crews (crews.ts): a line per crew with Leave, and a box with Join for one more */
-  | { t: 'crews'; placeholder: string };
+  | { t: 'crews'; placeholder: string }
+  /** quick chat's sixteen (phrases.ts): under "Choose phrases", four columns of a name and four phrases, each a
+   *  drop-down list */
+  | { t: 'phrases' };
 
 /** link: the words of help that link to a page (a mod's, say), opened in a new tab */
 interface Item { key: string; label: string; help: string; link?: { text: string; href: string }; c: Control; more?: boolean }
@@ -38,14 +43,14 @@ interface Group { title: string; more: string; items: Item[]; status?: boolean; 
 const LANGUAGE_NAMES: Record<Language, string> = {
   english: N('English'), french: N('French'), german: N('German'), italian: N('Italian'), spanish: N('Spanish'), dutch: N('Dutch'),
   swedish: N('Swedish'), danish: N('Danish'), korean: N('Korean'), chinese: N('Chinese'), japanese: N('Japanese'), russian: N('Russian'),
-  thai: N('Thai'), portuguese: N('Portuguese (Brazil)'), polish: N('Polish'),
+  thai: N('Thai'), portuguese: N('Portuguese (Brazil)'), polish: N('Polish'), turkish: N('Turkish'),
 };
 const LANGUAGE_OPTS = LANGUAGES.map(l => [l, LANGUAGE_NAMES[l]] as [string, string]);
 
 const GROUPS: Group[] = [
   { title: N('Online'), more: N('More online settings'), status: true, own: true, items: [
     { key: 'roam', label: N('Free roam with others'), help: N('Everyone on this server who turns this on sees your car in career free roam, and you see theirs, with their names over them.'), c: { t: 'switch' } },
-    { key: 'roam_name', label: N('Your name'), help: N('What other players see over your car in free roam, and your name in the Online menu (there only letters, digits, - and _, at most 15). Empty uses your profile name.'), c: { t: 'text', placeholder: N('profile name') } },
+    { key: 'roam_name', label: N('Your name'), help: N('What other players see over your car in free roam and in the Online menu: 3 to 15 letters, digits, - or _. Empty uses your profile name.'), c: { t: 'text', placeholder: N('profile name') } },
     { key: 'roam_crew', label: N('Crews'), help: N('Friends who type the same crew name always see each other in free roam, however far apart, with names and map arrows in the crew\'s colour. Up to 4 crews. Anyone who types the name joins.'), c: { t: 'crews', placeholder: N('Crew name') } },
     { key: 'horn', label: N('Your horn'), help: N('N or the controller\'s left stick click, in free roam and in races with other players.'), c: { t: 'select', opts: [
       ['dual', N('Dual tone')], ['single', N('Single tone')], ['truck', N('Air horn')], ['train', N('Train horn')], ['klaxon', N('Klaxon')],
@@ -53,9 +58,10 @@ const GROUPS: Group[] = [
     { key: 'roam_room', label: N('Room'), help: N('Leave empty to drive with everyone. With a name, free roam shows only the players who set the same name. Not private: everyone on this server still sees your name.'), c: { t: 'text', placeholder: N('everyone') } },
     { key: 'roam_block', label: N('Blocked players'), help: N('Names over cars, separated by commas: you and they never see each other in free roam. The server\'s operator sees who blocks whom.'), c: { t: 'text', placeholder: N('nobody') } },
     { key: 'roam_collide', label: N('Ghost mode'), help: N('You drive through the other players\' cars, and they through yours. Off: you collide with them, and a car that appears on yours lets you through until you are apart.'), c: { t: 'switch', inv: true } },
-    { key: 'quick_chat', label: N('Quick chat'), help: N('Say one of sixteen set phrases to the players near you in free roam: 1 to 4, then 1 to 4 (on a controller, the right stick twice; on a touch screen, the chat button). Theirs show over their cars.'), c: { t: 'switch' } },
+    { key: 'quick_chat', label: N('Quick chat'), help: N('Say one of your sixteen phrases to the players near you in free roam: 1 to 4, then 1 to 4 (on a controller, the right stick twice; on a touch screen, the chat button). Theirs show over their cars.'), c: { t: 'switch' } },
+    { key: 'quick_chat_phrases', label: N('Your phrases'), help: N('Which sixteen quick chat has, in four groups of four. Everyone reads what you say in their own language.'), c: { t: 'phrases' } },
     { key: 'online', label: N('Online mode'), help: N('The game\'s Online menu takes you straight to the Online Main Menu under your name, without the EA Login screens: lobby, chat and races with everyone playing from this server.'), c: { t: 'switch' }, more: true },
-    { key: 'roam_max_cars', label: N('Players\' cars shown'), help: N('The nearest, 0 to 32.'), c: { t: 'num', min: 0, max: 32, step: 1 }, more: true },
+    { key: 'roam_max_cars', label: N('Players\' cars shown'), help: N('The nearest. Phones start at 16 and tablets at 24: many cars loading at once can take more memory than they have.'), c: { t: 'seg', opts: [['16', '16'], ['20', '20'], ['24', '24'], ['28', '28'], ['32', '32']] }, more: true },
   ] },
   { title: N('Game'), more: N('More game settings'), items: [
     { key: 'language', label: N('Language'), help: N('The game\'s menus and subtitles, the voices in languages with a dub, and this page.'), c: { t: 'select', opts: LANGUAGE_OPTS } },
@@ -82,7 +88,7 @@ const GROUPS: Group[] = [
     { key: 'max_pixels', label: N('Pixel limit'), help: N('Most pixels the screen-size resolution renders at 100% and below (0 = no limit). 150% and 200% scale up from it.'), c: { t: 'num', min: 0, step: 100000 }, more: true },
   ] },
   { title: N('Controller'), more: N('More controller settings'), items: [
-    { key: 'rumble', label: N('Rumble'), help: N('On controllers that have it: crashes, hard landings and the game\'s own force feedback.'), c: { t: 'switch' } },
+    { key: 'rumble', label: N('Rumble'), help: N('On controllers that have it, and with the touch controls the phone\'s vibration: crashes, hard landings, the game\'s own force feedback and the tick of each button press.'), c: { t: 'switch' } },
     { key: 'gamepad', label: N('Controller'), help: N('On keeps a controller once it was connected; hotplug only while connected.'), c: { t: 'seg', opts: [['on', N('On')], ['hotplug', N('Hotplug')], ['off', N('Off')]] }, more: true },
     { key: 'gamepad_menu_keys', label: N('Menu buttons'), help: N('A, B and View also act as Enter, Esc and Q in the menus.'), c: { t: 'switch' }, more: true },
     { key: 'gamepad_deadzone', label: N('Stick dead zone'), help: N('Fraction of full travel, 0 to 0.9.'), c: { t: 'num', min: 0, max: 0.9, step: 0.01 }, more: true },
@@ -93,7 +99,7 @@ const GROUPS: Group[] = [
 
 /** a row's second key, which its control writes with its own and its Reset resets too (not listed under "Other
  *  settings in this file"): the Crews row's colours */
-const COMPANION: Record<string, string> = { roam_crew: 'roam_crew_colours' };
+const COMPANION: Record<string, string> = { roam_crew: 'roam_crew_colours', quick_chat_phrases: 'quick_chat_groups' };
 const COMPANIONS = new Set(Object.values(COMPANION));
 /** Every key the panel shows (the check in app-test.mjs compares this with the template). */
 export const PANEL_KEYS = [...GROUPS.flatMap(g => g.items.map(i => i.key)), ...COMPANIONS];
@@ -132,11 +138,12 @@ export interface CrewControl {
 }
 
 /**
- * A crews control into ctl: a row of chips, one per crew in the player's order (its colour in the game, a button that
- * opens the palette under the chips; its name, how many are in free roam in it when the server says, and Leave), and
- * under them a value box with Join in it (or Enter).  Join waits for a name that can join (crews.ts checkCrew), and the note
+ * A crews control into ctl: one line of pills that wraps, a chip per crew in the player's order (its colour in the
+ * game, a button that opens the palette under the line; its name, how many are in free roam in it when the server
+ * says, and Leave), then a value box with Join in it (or Enter).  Join waits for a name that can join (crews.ts checkCrew), and the note
  * under the box says why one cannot; with 4 crews the box waits for one to be left.  A Leave keeps the others'
- * colours; a Join takes the first colour no crew has.  Returns the box's field.
+ * colours; a Join takes the first colour no crew has.  A line under the chips names a crew counted with more than
+ * CREW_BIG players (showCrewCounts).  Returns the box's field.
  */
 export function crewControl(o: CrewControl, ctl: HTMLElement): HTMLInputElement {
   const list = o.list;
@@ -158,7 +165,8 @@ export function crewControl(o: CrewControl, ctl: HTMLElement): HTMLInputElement 
     li.append(dot, text, leave);
     ul.append(li);
   });
-  /** crew i's palette, under the crews (the chips stay where they are), one open at a time: a radio group of the 8
+  const line = document.createElement('div'); line.className = 'crew-line';
+  /** crew i's palette, under the line (the chips stay where they are), one open at a time: a radio group of the 8
    *  colours, its own marked; the arrows move along it, Enter, Space or a tap picks one and closes it, Esc (or the dot
    *  again) closes it.  Esc stays here: in the menu's Crews popup it does not close the popup too. */
   const palette = (dot: HTMLButtonElement, c: Crew, i: number, what: string) => {
@@ -194,10 +202,10 @@ export function crewControl(o: CrewControl, ctl: HTMLElement): HTMLInputElement 
       } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
     };
     g.append(...sw);
-    ul.after(g);
+    line.after(g);
     sw.find(b => b.tabIndex === 0)!.focus();
   };
-  if (o.counts) showCrewCounts(ul, o.counts);
+  const big = document.createElement('p'); big.className = 'set-note warn crews-big'; big.hidden = true;
   const box = document.createElement('div'); box.className = 'crew-add';
   const inp = document.createElement('input'); inp.type = 'text'; inp.id = o.id; inp.placeholder = t(o.placeholder);
   inp.autocomplete = 'off'; inp.spellcheck = false; inp.enterKeyHint = 'done';
@@ -222,14 +230,25 @@ export function crewControl(o: CrewControl, ctl: HTMLElement): HTMLInputElement 
   inp.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); add(); } };
   join.onclick = add;
   box.append(inp, join);
-  ctl.append(ul, box, note);
+  line.append(ul, box);
+  ctl.append(line, big, note);
+  if (o.counts) showCrewCounts(ctl, o.counts);
   check();
   return inp;
 }
 
 /** the counts on a crews control's chips: a figure by a person's outline (a screen reader gets "{n} in free roam"), the
- *  chip's tooltip its name and that; nothing for a crew counts lacks */
+ *  chip's tooltip its name and that; nothing for a crew counts lacks.  Under the chips, the crews counted with more
+ *  than CREW_BIG: the server's hub no longer links them first (in one room; the count is of every room). */
 export function showCrewCounts(root: ParentNode, counts: Map<number, number>) {
+  for (const ul of root.querySelectorAll<HTMLElement>('ul.crews')) {
+    const line = ul.closest('.crew-line')?.parentElement?.querySelector<HTMLElement>('.crews-big');
+    if (!line) continue;
+    const big = [...ul.querySelectorAll<HTMLElement>('.crew[data-hash]')].filter(li => (counts.get(Number(li.dataset.hash)) ?? 0) > CREW_BIG)
+      .map(li => t('{name} has more than 64 players in free roam: in a crew that big, crew-mates far away no longer always show, only the ones nearby, as with everyone else. A less common name works better.',
+        { name: li.querySelector('.crew-name')?.textContent ?? '' }));
+    line.textContent = big.join(' '); line.hidden = !big.length;
+  }
   for (const li of root.querySelectorAll<HTMLElement>('.crew[data-hash]')) {
     const n = counts.get(Number(li.dataset.hash)), el = li.querySelector('.crew-count')!, name = li.querySelector('.crew-name')!.textContent ?? '';
     if (n === undefined) { el.replaceChildren(); li.title = name; continue; }
@@ -255,6 +274,7 @@ function shown(it: Item, v: string): string {
   const c = it.c;
   if (c.t === 'switch') return (v === 'on') !== !!c.inv ? t('on') : t('off');
   if (c.t === 'seg' || c.t === 'select') { const o = c.opts.find(([x]) => x.toLowerCase() === v.toLowerCase()); return o ? optLabel(it, o[0], o[1]) : v; }
+  if (c.t === 'phrases') return phrasesOf(v).map(p => t(PHRASES[p].text)).join(', ');
   if (v === '') return t('empty');
   return c.t === 'num' && c.unit ? `${v} ${c.unit}` : v;
 }
@@ -324,6 +344,8 @@ export interface SettingsDeps {
   onLoaded?(): void;
   /** the page's question box (Reset all settings asks first) */
   confirm?(title: string, body: string, ok: string, danger?: boolean): Promise<boolean>;
+  /** Your name's row as made: its claim line and button go in (claim-ui.ts NameRow) */
+  nameRow?(row: HTMLElement, input: HTMLInputElement, ctl: HTMLElement): void;
 }
 
 export class SettingsPanel {
@@ -336,6 +358,7 @@ export class SettingsPanel {
   private status: Msg = () => '';          // the Online group's line (setStatus)
   private crewCounts = new Map<number, number>();   // how many are in free roam in each crew, by hash (setCrewCounts)
   private crewDraft = '';                  // the crew name being typed, kept across re-renders
+  private phrasesOpen = false;             // Your phrases' Choose phrases open, kept across re-renders
   /** root: the Settings section; online: the section of the group that is its own (Online, under Saves) */
   constructor(private root: HTMLElement, private deps: SettingsDeps, private online: HTMLElement) {
     root.querySelector<HTMLButtonElement>('#settings-text-save')!.onclick = () => void this.saveRaw();
@@ -380,6 +403,9 @@ export class SettingsPanel {
   private ro() { return !!this.deps.readOnly?.(); }
 
   /** key's line, and also's (a row's second key: COMPANION) in the same write */
+  /** Your name written (a claim made under it: claim-ui.ts) */
+  async putName(name: string) { await this.put('roam_name', name); }
+
   private async put(key: string, value: string | null, also: [string, string | null][] = []) {
     if (this.ro()) { this.deps.say?.(t(READ_ONLY)); return; }
     let next = this.text ?? TEMPLATE, removed = 0;
@@ -499,11 +525,13 @@ export class SettingsPanel {
     const old = this.find<HTMLElement>(`.set[data-key="${key}"]`);
     const it = ITEMS.get(key);
     if (!old || !it) { this.render(); return; }
-    const focused = old.contains(document.activeElement);
+    const focused = old.contains(document.activeElement), was = focused ? document.activeElement!.id : '';
     const fresh = this.row(it);
     old.replaceWith(fresh);
     if (it.more) fresh.parentElement!.querySelector('summary')!.textContent = this.moreLabel(GROUP_OF.get(key)!);
-    if (focused) this.focusRow(fresh);
+    // the same control again where it has an id (Your phrases' lists), else the row's first
+    const same = was ? fresh.querySelector<HTMLElement>(`#${CSS.escape(was)}`) : null;
+    if (same) same.focus(); else if (focused) this.focusRow(fresh);
   }
 
   private focusRow(row: HTMLElement) {
@@ -595,6 +623,10 @@ export class SettingsPanel {
       row.classList.add('set-list');
       described = crewControl({ list: crewsOf(cur, this.current('roam_crew_colours')), id, labelId: label.id, placeholder: c.placeholder, counts: this.crewCounts,
         draft: this.crewDraft, onDraft: v => { this.crewDraft = v; }, change: (list, focus) => void this.setCrews(list, focus) }, ctl);
+    } else if (c.t === 'phrases') {
+      row.classList.add('set-list');
+      described = this.phraseControl(ctl, id, phrasesOf(cur), groupsOf(this.current('quick_chat_groups')),
+        setInFile ? () => void this.put(it.key, null, [[comp!, null]]) : null, t(it.label));
     } else {
       const inp = document.createElement('input'); inp.id = id;
       inp.type = c.t === 'num' ? 'number' : 'text';
@@ -602,7 +634,9 @@ export class SettingsPanel {
       else if (c.placeholder) inp.placeholder = t(c.placeholder);
       inp.value = cur;
       inp.onchange = () => {
-        const v = inp.value.trim();
+        let v = inp.value.trim();
+        // Your name in the form the Online menu and free roam both use (claim.ts)
+        if (it.key === 'roam_name' && v) v = onlineName(v) ?? v;
         if (v === this.current(it.key) && (v !== '' || !this.resolved.file[it.key]?.raw)) return;   // unchanged (a late change event)
         if (v === '') { void this.put(it.key, null); return; }
         const chk = checkSetting(it.key, v);
@@ -617,7 +651,8 @@ export class SettingsPanel {
       if (c.t === 'num' && c.unit) { const u = document.createElement('span'); u.className = 'unit'; u.textContent = c.unit; ctl.append(u); }
       described = inp;
     }
-    if (setInFile) {
+    if (setInFile && c.t !== 'crews' && c.t !== 'phrases') {   // (the Crews row has none: each crew's x leaves it; Your
+                                                               // phrases has its own, beside Choose phrases)
       const r = document.createElement('button'); r.type = 'button'; r.className = 'text-btn'; r.textContent = t('Reset');
       r.setAttribute('aria-label', t('Reset {label}', { label: t(it.label) }));
       r.title = t('Back to the default ({value})', { value: shown(it, DEFAULTS.get(it.key) ?? '') });
@@ -625,6 +660,7 @@ export class SettingsPanel {
       ctl.prepend(r);                                // first: the control keeps its place at the right edge
     }
     row.append(label, help, ctl);
+    if (it.key === 'roam_name' && c.t === 'text') this.deps.nameRow?.(row, ctl.querySelector('input')!, ctl);
     const bad = ([[it.key, f], [comp, f2]] as const).filter(([, x]) => x?.refused)
       .map(([k, x]) => t('settings.ini line {line}: {key} = {why}, so the default is used.', { line: x!.phys, key: k!, why: x!.why ? tvars(x!.why.t, x!.why.v) : x!.refused! }));
     if (bad.length) this.state(row, bad.join(' '), 'bad');
@@ -635,6 +671,58 @@ export class SettingsPanel {
     this.describe(described, row);
     if (this.ro()) for (const el of row.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>('button, input, select')) el.disabled = true;
     return row;
+  }
+
+  /**
+   * Your phrases into ctl: "Choose phrases" opens four columns, one for each of 1 to 4, of the group's name and its
+   * four phrases, each a drop-down list (the phrases in the library's categories).  A change saves both lines at once
+   * (the default: both back to the template's); reset: the row's Reset, or null when the file sets neither.
+   */
+  private phraseControl(ctl: HTMLElement, id: string, layout: number[], groups: string[], reset: (() => void) | null, label: string): HTMLElement {
+    const det = document.createElement('details'); det.className = 'phrases'; det.open = this.phrasesOpen;
+    det.ontoggle = () => { this.phrasesOpen = det.open; };
+    const sum = document.createElement('summary'); sum.id = id; sum.textContent = t('Choose phrases');
+    const grid = document.createElement('div'); grid.className = 'phrase-grid';
+    const save = () => {
+      const p = [...grid.querySelectorAll<HTMLSelectElement>('select[data-slot]')].map(s => +s.value);
+      const g = [...grid.querySelectorAll<HTMLSelectElement>('select[data-group]')].map(s => s.value);
+      const dflt = p.every((x, i) => x === DEFAULT_PHRASES[i]) && g.every((x, i) => x === DEFAULT_GROUPS[i]);
+      void this.put('quick_chat_phrases', dflt ? null : p.join(','), [['quick_chat_groups', dflt ? null : g.join(',')]]);
+    };
+    for (let g = 0; g < 4; g++) {
+      const col = document.createElement('div'); col.className = 'phrase-col';
+      col.setAttribute('role', 'group'); col.setAttribute('aria-label', t('Group {n}', { n: g + 1 }));
+      const head = document.createElement('div'); head.className = 'phrase-head';
+      const key = document.createElement('kbd'); key.textContent = String(g + 1); key.setAttribute('aria-hidden', 'true');
+      const name = document.createElement('select'); name.id = `${id}-g${g}`; name.dataset.group = String(g);
+      name.setAttribute('aria-label', t('Group {n}: its name', { n: g + 1 }));
+      for (const c of CATS) name.append(new Option(t(c.name), c.id, false, c.id === groups[g]));
+      name.onchange = save;
+      head.append(key, name);
+      col.append(head);
+      for (let i = 0; i < 4; i++) {
+        const s = document.createElement('select'); s.id = `${id}-${g * 4 + i}`; s.dataset.slot = String(g * 4 + i);
+        s.setAttribute('aria-label', t('Group {n}, phrase {i}', { n: g + 1, i: i + 1 }));
+        for (const c of CATS) {
+          const og = document.createElement('optgroup'); og.label = t(c.name);
+          PHRASES.forEach((p, n) => { if (p.cat === c.id) og.append(new Option(t(p.text), String(n), false, n === layout[g * 4 + i])); });
+          s.append(og);
+        }
+        s.onchange = save;
+        col.append(s);
+      }
+      grid.append(col);
+    }
+    det.append(sum, grid);
+    if (reset) {
+      const r = document.createElement('button'); r.type = 'button'; r.className = 'text-btn'; r.textContent = t('Reset');
+      r.setAttribute('aria-label', t('Reset {label}', { label }));
+      r.title = t('Back to the default ({value})', { value: DEFAULT_PHRASES.slice(0, SLOTS).map(p => t(PHRASES[p].text)).join(', ') });
+      r.onclick = reset;
+      det.append(r);
+    }
+    ctl.append(det);
+    return sum;
   }
 
   /** the control is described by its help line, its own note (the Crews box's) and any state line under it */

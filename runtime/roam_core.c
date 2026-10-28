@@ -311,6 +311,17 @@ static int racerep_ok(const rc_racerep *r){
     uint32_t n = 0; while (n < RC_RACEREP_NAME && r->name[n]) n++;
     return printable(r->name, n);
 }
+/* a RACERES's fields: a lobby and a race, 1 to RC_LOBBY_MAX rows, known flags (one row ours at most), numbers in range */
+static int raceres_ok(const rc_raceres *r){
+    if (!r->lobby || !r->race || r->n < 1 || r->n > RC_LOBBY_MAX) return 0;
+    int ours = 0;
+    for (int k = 0; k < r->n; k++){
+        if (r->row[k].flags & ~(RC_RS_FINISHED | RC_RS_OURS) || !in(r->row[k].time, 0.f, 100000.f) || !in(r->row[k].done, 0.f, 1000.f)
+            || !in(r->row[k].dist, 0.f, 1e6f)) return 0;
+        ours += (r->row[k].flags & RC_RS_OURS) != 0;
+    }
+    return ours <= 1;
+}
 int rc_encode(const rc_msg *m, uint8_t *out, int cap){
     rc_w w; rc_w_init(&w, out, (uint32_t)(cap < RC_MAX_DGRAM ? cap : RC_MAX_DGRAM));
     rc_put8(&w, RC_MAGIC0); rc_put8(&w, RC_MAGIC1); rc_put8(&w, RC_MAGIC2); rc_put8(&w, RC_MAGIC3);
@@ -338,6 +349,12 @@ int rc_encode(const rc_msg *m, uint8_t *out, int cap){
             uint32_t ip = m->u.peers.e[i].ip;
             rc_put8(&w, ip >> 24); rc_put8(&w, ip >> 16); rc_put8(&w, ip >> 8); rc_put8(&w, ip);
             rc_put16(&w, m->u.peers.e[i].port); rc_put32(&w, m->u.peers.e[i].id);
+        }
+        if (m->h.flags & RC_HF_CREW){                                  /* the hub's crew marks */
+            if (m->u.peers.n_mine > RC_CREW_MAX) return -1;
+            rc_put8(&w, m->u.peers.n_mine);
+            for (int i = 0; i < m->u.peers.n_mine; i++){ if (!m->u.peers.mine[i]) return -1; rc_put32(&w, m->u.peers.mine[i]); }
+            for (int i = 0; i < m->u.peers.n; i++) rc_put8(&w, m->u.peers.crew[i]);
         }
         break;
     case RC_MSG_SNAP:
@@ -375,7 +392,7 @@ int rc_encode(const rc_msg *m, uint8_t *out, int cap){
         rc_put8(&w, l->op); rc_put8(&w, l->arg); rc_put8(&w, l->state); rc_put8(&w, l->max);
         rc_put32(&w, l->to); rc_put32(&w, l->lobby); rc_put32(&w, l->race);
         rc_put16(&w, (uint16_t)l->x); rc_put16(&w, (uint16_t)l->y); rc_put16(&w, l->t_ms); rc_put8(&w, l->n);
-        rc_put8(&w, 0);                                                   /* reserved */
+        rc_put8(&w, l->away_s);                                           /* (reserved before it: 0) */
         for (int i = 0; i < l->n; i++) rc_put32(&w, l->ids[i]);
         break; }
     case RC_MSG_LOBBIES:
@@ -395,6 +412,15 @@ int rc_encode(const rc_msg *m, uint8_t *out, int cap){
         rc_putb(&w, nm, RC_RACEREP_NAME);
         break; }
     case RC_MSG_SAY: rc_put8(&w, m->u.say.phrase); rc_put8(&w, m->u.say.seq); rc_put8(&w, 0); rc_put8(&w, 0); break;
+    case RC_MSG_RACERES: {
+        const rc_raceres *r = &m->u.raceres;
+        if (!raceres_ok(r)) return -1;
+        rc_put32(&w, r->lobby); rc_put32(&w, r->race); rc_put8(&w, r->mode); rc_put8(&w, r->laps); rc_put8(&w, r->n); rc_put8(&w, 0);
+        for (int k = 0; k < r->n; k++){
+            rc_put32(&w, r->row[k].id); rc_put8(&w, r->row[k].flags); rc_put8(&w, 0); rc_put8(&w, 0); rc_put8(&w, 0);
+            rc_putf(&w, r->row[k].time); rc_putf(&w, r->row[k].done); rc_putf(&w, r->row[k].dist);
+        }
+        break; }
     default: return -1;
     }
     if (w.err || w.n + RC_CRC > w.cap) return -1;
@@ -453,6 +479,15 @@ int rc_decode(const uint8_t *buf, int len, rc_msg *m){
             m->u.peers.e[i].port = (uint16_t)rc_get16(&r); m->u.peers.e[i].id = rc_get32(&r);
             if (!r.err && (!m->u.peers.e[i].port || !m->u.peers.e[i].id)) return RC_E_FIELD;
         }
+        if ((m->h.flags & RC_HF_CREW) && !r.err && r.n < r.len){       /* the hub's crew marks */
+            m->u.peers.n_mine = (uint8_t)rc_get8(&r);
+            if (!r.err && m->u.peers.n_mine > RC_CREW_MAX) return RC_E_FIELD;
+            for (int i = 0; i < m->u.peers.n_mine; i++) m->u.peers.mine[i] = rc_get32(&r);
+            for (int i = 0; i < m->u.peers.n; i++) m->u.peers.crew[i] = (uint8_t)rc_get8(&r);
+            if (r.err) return RC_E_SHORT;
+            for (int i = 0; i < m->u.peers.n_mine; i++) if (!m->u.peers.mine[i]) return RC_E_FIELD;
+            r.n = r.len;                                              /* (a newer hub's additions) */
+        }
         break;
     case RC_MSG_SNAP: {
         m->u.snap.status = (uint8_t)rc_get8(&r); m->u.snap.epoch = (uint8_t)rc_get8(&r);
@@ -505,7 +540,7 @@ int rc_decode(const uint8_t *buf, int len, rc_msg *m){
         l->op = (uint8_t)rc_get8(&r); l->arg = (uint8_t)rc_get8(&r); l->state = (uint8_t)rc_get8(&r); l->max = (uint8_t)rc_get8(&r);
         l->to = rc_get32(&r); l->lobby = rc_get32(&r); l->race = rc_get32(&r);
         l->x = (int16_t)rc_get16(&r); l->y = (int16_t)rc_get16(&r); l->t_ms = (uint16_t)rc_get16(&r); l->n = (uint8_t)rc_get8(&r);
-        (void)rc_get8(&r);
+        l->away_s = (uint8_t)rc_get8(&r);
         if (r.err) return RC_E_SHORT;
         if (l->n > RC_LOBBY_MAX) return RC_E_FIELD;
         for (int i = 0; i < l->n; i++) l->ids[i] = rc_get32(&r);
@@ -535,6 +570,19 @@ int rc_decode(const uint8_t *buf, int len, rc_msg *m){
         /* the phrase as it came: a newer game may have more of them (the game side ignores one it does not know) */
         m->u.say.phrase = (uint8_t)rc_get8(&r); m->u.say.seq = (uint8_t)rc_get8(&r); (void)rc_get8(&r); (void)rc_get8(&r);
         break;
+    case RC_MSG_RACERES: {
+        rc_raceres *q = &m->u.raceres;
+        q->lobby = rc_get32(&r); q->race = rc_get32(&r); q->mode = (uint8_t)rc_get8(&r); q->laps = (uint8_t)rc_get8(&r);
+        q->n = (uint8_t)rc_get8(&r); (void)rc_get8(&r);
+        if (r.err) return RC_E_SHORT;
+        if (q->n < 1 || q->n > RC_LOBBY_MAX) return RC_E_FIELD;
+        for (int k = 0; k < q->n; k++){
+            q->row[k].id = rc_get32(&r); q->row[k].flags = (uint8_t)rc_get8(&r); (void)rc_get8(&r); (void)rc_get8(&r); (void)rc_get8(&r);
+            q->row[k].time = rc_getf(&r); q->row[k].done = rc_getf(&r); q->row[k].dist = rc_getf(&r);
+        }
+        if (r.err) return RC_E_SHORT;
+        if (!raceres_ok(q)) return RC_E_FIELD;
+        break; }
     default: return RC_E_TYPE;
     }
     if (r.err) return RC_E_SHORT;
@@ -887,6 +935,14 @@ int rc_send_racerep(rc_session *s, const rc_racerep *r){
     tx_to(s, s->conf.hub_ip, s->conf.hub_port, &m);
     return s->tx != before;
 }
+int rc_send_raceres(rc_session *s, const rc_raceres *r){
+    if (s->closed || !s->conf.hub_ip || !s->hub_heard_us) return 0;
+    rc_msg m; hdr(s, &m, RC_MSG_RACERES);
+    m.u.raceres = *r;
+    uint32_t before = s->tx;
+    tx_to(s, s->conf.hub_ip, s->conf.hub_port, &m);
+    return s->tx != before;
+}
 int rc_take_lobby(rc_session *s, uint32_t *from, rc_lobby *l){
     if (!s->n_lobby_in) return 0;
     *from = s->lobby_in[0].from; *l = s->lobby_in[0].l;
@@ -975,16 +1031,20 @@ void rc_set_crews(rc_session *s, const uint32_t *crews, int n){
         if (!dup) s->conf.crews[s->conf.n_crews++] = crews[i];
     }
     for (int k = s->conf.n_crews; k < RC_CREW_MAX; k++) s->conf.crews[k] = 0;
-    /* HELLOs due at the next tick: the hub links us by them, a peer colours us by them */
+    /* HELLOs due at the next tick: the hub links us by them (and marks us
+     * for our crew-mates); without a hub, a peer colours us by them */
     s->hub_hello_tx = INT64_MIN / 4;
-    for (int i = 0; i < RC_TABLE; i++) if (s->peer[i].state != RC_PS_FREE) s->peer[i].last_hello_tx = INT64_MIN / 4;
+    if (!s->conf.hub_ip) for (int i = 0; i < RC_TABLE; i++) if (s->peer[i].state != RC_PS_FREE) s->peer[i].last_hello_tx = INT64_MIN / 4;
 }
 int rc_peer_crew(const rc_session *s, int i){
     if (i < 0 || i >= RC_TABLE) return -1;
     const rc_peer *p = &s->peer[i];
-    for (int c = 0; c < s->conf.n_crews && c < RC_CREW_MAX; c++)
+    for (int c = 0; c < s->conf.n_crews && c < RC_CREW_MAX; c++){
         for (int k = 0; k < p->n_crews && k < RC_CREW_MAX; k++)
             if (s->conf.crews[c] && p->crews[k] == s->conf.crews[c]) return c;
+        for (int k = 0; k < p->n_hub_crews && k < RC_CREW_MAX; k++)
+            if (s->conf.crews[c] && p->hub_crews[k] == s->conf.crews[c]) return c;
+    }
     return -1;
 }
 static int group_count(const rc_session *s){
@@ -1043,11 +1103,13 @@ int rc_add_peer(rc_session *s, uint32_t ip, uint16_t port, int configured, int64
     return i;
 }
 /* `to`: the peer it goes to (none for the beacon and the hub); crews: with
- * our crews (the hub, a peer that reads them) */
+ * our crews (the hub; a peer that reads them, but only without a hub: with
+ * one, the hub marks our crew-mates on their lists, and no peer learns our
+ * crews) */
 static void fill_hello(rc_session *s, rc_msg *m, const rc_peer *to, int crews){
     hdr(s, m, RC_MSG_HELLO);
-    m->h.flags = RC_HF_STATEX | RC_HF_CREW;
-    if (crews){
+    m->h.flags = RC_HF_STATEX | RC_HF_CREW | RC_HF_HUBCREW;
+    if (crews && (!to || !s->conf.hub_ip)){
         int n = s->conf.n_crews < 0 ? 0 : s->conf.n_crews > RC_CREW_MAX ? RC_CREW_MAX : s->conf.n_crews;
         for (int i = 0; i < n; i++) if (s->conf.crews[i]) m->u.hello.crews[m->u.hello.n_crews++] = s->conf.crews[i];
     }
@@ -1161,6 +1223,7 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
         if (m.h.type == RC_MSG_LOBBIES){ lobbies_from_hub(s, &m); return; }
         if (m.h.type != RC_MSG_PEERS) return;
         s->hub_heard_us = now; s->hub_lists++;
+        int marks = (m.h.flags & RC_HF_CREW) != 0;
         for (int k = 0; k < m.u.peers.n; k++){
             uint32_t id = m.u.peers.e[k].id;
             if (id == s->conf.self_id) continue;
@@ -1170,7 +1233,12 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
                 j = rc_add_peer(s, m.u.peers.e[k].ip, m.u.peers.e[k].port, 0, now);
                 if (j < 0) continue;
             }
-            s->peer[j].hub_listed_us = now;
+            rc_peer *q = &s->peer[j];
+            q->hub_listed_us = now;
+            /* the crews of ours it is in, as the hub marks them (none: a list without marks) */
+            q->n_hub_crews = 0;
+            for (int c = 0; marks && c < m.u.peers.n_mine; c++)
+                if (m.u.peers.crew[k] >> c & 1u) q->hub_crews[q->n_hub_crews++] = m.u.peers.mine[c];
         }
         return;
     }
@@ -1257,8 +1325,8 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
                 note(s, RC_EV_LEAVE, i, p->name, " left: ", "no longer hears us");
             }
         }
-        /* it reads crews now: ours at once (the HELLOs before had none) */
-        if (!was && p->reads_crews && s->conf.n_crews && p->state != RC_PS_CANDIDATE && now - p->last_hello_tx > 100000)
+        /* it reads crews now: ours at once (the HELLOs before had none); with a hub, it hears of them from the hub */
+        if (!was && p->reads_crews && s->conf.n_crews && !s->conf.hub_ip && p->state != RC_PS_CANDIDATE && now - p->last_hello_tx > 100000)
             send_hello(s, p, now);
         want_cfg(s, p, p->cfg_rev_seen, now);
         break; }

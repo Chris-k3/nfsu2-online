@@ -21,11 +21,13 @@ enum { MPR_IDLE = 0, MPR_OUT, MPR_LAN, MPR_RACE, MPR_BACK, MPR_DONE, MPR_FAILED 
 #define MPRACE_QUIT_FEE 75
 /* a race's evening out (mprace.c balance_race): a car's engine power at most this much up, and down; the faster
  * cars' share of the way (their target between the cars' middle and the best); how much of its way to the target
- * each car's rating goes (the rest of the gap stays: the better car stays a little ahead) */
+ * each car's rating goes (the rest of the gap stays: the better car stays a little ahead), and in a drag race (where
+ * the smallest edge decides) */
 #define MPRACE_BALANCE_UP    0.50f
 #define MPRACE_BALANCE_DOWN  0.25f
 #define MPRACE_BALANCE_SHARE (1.f / 3.f)
 #define MPRACE_BALANCE_CLOSE 0.90f
+#define MPRACE_BALANCE_CLOSE_DRAG 1.00f
 
 /* the career has a car of its own, one the LAN race can take (not a new
  * career's prologue car): a trip without one would race a car made of
@@ -42,6 +44,13 @@ void mprace_ack(void);
  * prize the career's bank got for it */
 int  mprace_place(void);
 int  mprace_prize(void);
+/* the race's results as the game showed them (its results' rows, in their order): each racer's LAN name, whether it
+ * finished, its time (s) or, in a drift race, its points, its row's time whether it finished or not (s: one still on
+ * the way when the race ended, 30 s after the first, has that), how far it came (laps), the way it drove (m: its
+ * average speed for its time) and which is ours; how many (0: no results) */
+#define MPRACE_RESULTS_MAX 6
+typedef struct { char name[16]; int finished, ours, points; float time, clock, done, dist; } MpResult;
+int  mprace_results(MpResult *r, int max);
 /* our car's engine power in the race as evened out (1: as it was) */
 float mprace_factor(void);
 /* a network race of this type (its N_MODE: circuit 0, sprint 1, drag 2, drift 3, URL 4, Street X 10) evens

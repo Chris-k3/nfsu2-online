@@ -6,7 +6,9 @@
 //!    busy cap too, and one of another crew or another room is not; at most 16 crew links a player, the nearest, kept
 //!    while the crew drives about; a crew of 65 in one room is no reason for a link;
 //! 3. the counts: the browsers in free roam or paused there, by crew, in any room, a browser once; on the hub's thread
-//!    as of its last tick.
+//!    as of its last tick;
+//! 4. the lists' crew marks (roam_core.h RC_HF_HUBCREW): a player that reads them and is in a crew learns which of its
+//!    peers share one of its crews, and no other player's crews; the others get the lists of before.
 
 mod kit;
 
@@ -16,7 +18,7 @@ use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use kit::*;
-use nfsu2_roam::{RoamHub, RoamMsg, RoamOptions, decode_roam};
+use nfsu2_roam::{RoamHub, RoamMsg, RoamOptions, decode_roam, encode_peers};
 use nfsu2_util::{FrameCtx, Host};
 
 /// a HELLO as roam_core.c lays it out (core version 7, in free roam, room "blue", named "p") with these header flags:
@@ -97,6 +99,61 @@ fn the_wire_a_hello_names_its_crews_after_its_ids() {
     assert_eq!((k.info("bad"), k.info("players")), (1.0, 0.0));
     k.from(V(0), &hello_raw(HF_CREW, 2, &ids, &tail(2, &[a, b])));
     assert_eq!((k.info("bad"), k.info("players")), (1.0, 1.0));
+}
+
+// the lists' crew marks: to a player whose HELLO says it reads them (core 8) and that is in a crew, its own crews, then
+// a mark a link, bit c: that player is in its crew c too (whatever its core: the hub has its crews); a player of core 7
+// or in no crew gets a list of before, byte for byte; and no list carries a crew of anyone but its receiver
+#[test]
+fn the_lists_mark_crew_mates_and_name_no_other_crews() {
+    let (x, y, z, w) = (fnv1a("bluebirds"), fnv1a("owls"), fnv1a("hawks"), fnv1a("wrens"));
+    for (how, o) in ways() {
+        let mut k = Kit::new(o);
+        // A (x, y), B (y, z), C a core 7 (z, x), D in no crew, E (z, w): all within 40 m, so all linked
+        let who: [(Option<&[u32]>, bool); 5] =
+            [(Some(&[x, y]), true), (Some(&[y, z]), true), (Some(&[z, x]), false), (None, true), (Some(&[z, w]), true)];
+        for (i, &(crews, hubcrew)) in who.iter().enumerate() {
+            let i = i as u32;
+            k.from(V(i), &hello_with(100 + i, &HelloOpts { core: if hubcrew { 8 } else { 7 }, crews, hubcrew, ..Default::default() }));
+            k.from(V(i), &snap(100 + i, [i as f64 * 10.0 + 0.25, 0.25, 0.0]));
+        }
+        k.hub.tick();
+        let sent = k.sent.lock().clone();
+        let of =
+            |i: u32| sent.iter().find(|(vip, _)| *vip == V(i)).map(|(_, f)| f.clone()).unwrap_or_else(|| panic!("{how}: a list to {i}"));
+        let mark = |i: u32, j: u32| {
+            let f = of(i);
+            let at = peers_of(&f).iter().position(|e| e.vip == V(j)).unwrap_or_else(|| panic!("{how}: {j} on {i}'s list"));
+            crew_marks(&f).unwrap_or_else(|| panic!("{how}: marks on {i}'s list")).1[at]
+        };
+        for i in 0..5 {
+            assert_eq!(peers_of(&of(i)).len(), 4, "{how}: {i} linked with the 4 others");
+        }
+        assert_eq!(crew_marks(&of(0)).map(|m| m.0), Some(vec![x, y]), "{how}: A's own crews");
+        assert_eq!(
+            [mark(0, 1), mark(0, 2), mark(0, 3), mark(0, 4)],
+            [0b10, 0b01, 0, 0],
+            "{how}: B in y, C in x (a core 7: the hub has its crews)"
+        );
+        assert_eq!(crew_marks(&of(1)).map(|m| m.0), Some(vec![y, z]), "{how}: B's own crews");
+        assert_eq!([mark(1, 0), mark(1, 2), mark(1, 3), mark(1, 4)], [0b01, 0b10, 0, 0b10], "{how}: A in y, C and E in z");
+        assert_eq!([mark(4, 0), mark(4, 1), mark(4, 2), mark(4, 3)], [0, 0b01, 0b01, 0], "{how}: E (z, w): B and C in z");
+        for (i, why) in [(2, "a core 7"), (3, "in no crew")] {
+            let f = of(i);
+            assert_eq!(crew_marks(&f), None, "{how}: {why}: no marks");
+            assert_eq!(
+                &f[16..],
+                &encode_peers(0xB0B, u16::from_le_bytes([f[28], f[29]]), &peers_of(&f))[..],
+                "{how}: {why}: a list of before"
+            );
+        }
+        // no crew of anyone but the receiver in its datagram (C's x and z are A's and B's too: w is E's alone)
+        let has = |f: &[u8], h: u32| f.windows(4).any(|b| b == h.to_le_bytes());
+        for i in 0..4 {
+            assert!(!has(&of(i)[16..], w), "{how}: E's crew w on {i}'s list");
+        }
+        assert!(!has(&of(0)[16..], z) && !has(&of(3)[16..], x) && !has(&of(2)[16..], y), "{how}: no crews but its own");
+    }
 }
 
 /// a player of core version 7 at (x, y), with these crews (None: a HELLO of before), its HELLO and its SNAP
@@ -372,7 +429,7 @@ fn in_free_roam_by_crew() {
 }
 
 fn ctx() -> FrameCtx {
-    FrameCtx { group: Arc::from("client"), site: None, cause: None, slot: None }
+    FrameCtx { group: Arc::from("client"), site: None, cause: None, slot: None, owner: None }
 }
 
 // on its thread the hub keeps the crews' counts of its last tick for /players

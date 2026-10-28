@@ -8,7 +8,8 @@
 //   - publishes a display clock from requestAnimationFrame (HOST_KIND_VSYNC)
 //     that the game's frame pacer locks to;
 //   - reads frames back for the autotest "dump" command and F12 (dump()), as
-//     PNGs made in png-worker.ts.
+//     PNGs made in png-worker.ts, and textures for the game (a frame's rb_*:
+//     the DVD and magazine covers' pictures, which it waits for in LockRect).
 // Triggers: Atomics.waitAsync on the game's doorbell, every rAF, and every
 // finished GPU frame.  The main thread never blocks.
 import type { GameProcess } from '../host/process';
@@ -35,22 +36,30 @@ export interface RendererOptions {
   gpuTiming?: boolean;
   /** keep canvas.width/height at the element's size in device pixels (the game resets its device to follow) */
   autoSize?: boolean;
+  /** false: at a render scale below 1 the canvas stays at the view's size and the picture is composited over it (the
+   *  path before fitPicture; A/B and diagnostics) */
+  cssScale?: boolean;
   /** most frames the GPU may have queued (default 2) */
   maxInFlight?: number;
   /** false: always draw into the back buffer and composite it (the path before direct
-   *  canvas drawing; A/B and diagnostics) */
+   *  canvas drawing; default in Firefox, which shows half-drawn frames otherwise; A/B and diagnostics) */
   direct?: boolean;
   /** unpack DXT textures on the CPU even when the GPU has texture-compression-bc (tests the
    *  path of PowerVR and Mali phones on a desktop GPU) */
   noBC?: boolean;
+  /** without BC, unpack DXT1 too rather than rewrite it as ASTC (astc.ts) where the GPU has texture-compression-astc
+   *  (A/B and diagnostics) */
+  noASTC?: boolean;
   /** while a frame waits for a slot, poll the GPU with empty submits (default: in Firefox, whose
    *  onSubmittedWorkDone otherwise waits for its 100 ms poll timer; see pokeLoop) */
   poke?: boolean;
   /** diagnostics: a slower GPU, from a pass of this many iterations of busy work for each pixel
    *  of a 512x512 target in every frame (tests frame pacing on GPUs slower than this one) */
   gpuBurn?: number;
-  /** the GPU device was lost (the graphics driver reset, the browser's graphics process crashed): nothing
-   *  is drawn from then on, and only a new game process can show the game again (see detach) */
+  /** the GPU device was lost (the graphics driver reset, the browser's graphics process crashed; device.lost, or
+   *  in Safari every WebGPU call failing frame after frame): nothing is drawn from then on, and only a new game
+   *  process can show the game again (see detach), in Safari only after a reload of the page (requestAdapter
+   *  gives no adapter until then) */
   onLost?: () => void;
   /** every frame drawn, in the same task: quick chat's places over the cars in it (gpu_proto.h GwMarks): n marks of
    *  4 numbers in m (id, x, y as parts of the game's picture, scale; reused, read it at once) */
@@ -75,6 +84,11 @@ export interface RendererStats {
   /** frames that waited over 20 ms for a slot (every one taken by frames the GPU had not reported
    *  done), the longest such wait in ms, and the empty submits sent while frames waited (poke) */
   slotWaits: number; slotWaitMsMax: number; pokes: number;
+  /** frames drawn over unseen: submitted after another one between the same two rendering updates (rAF) */
+  unshown: number;
+  /** the game's textures on the GPU now, bytes: all of them, those unpacked from DXT, and those DXT1 as ASTC (no
+   *  texture-compression-bc) */
+  texBytes: number; unpackBytes: number; astcBytes: number;
 }
 
 /** Per-frame distributions since the last reset (the perf benchmark's race window). */
@@ -112,15 +126,37 @@ export interface Renderer {
   detach(): void;
 }
 
+/** how much of the textures' MB the log's lines give is DXT unpacked or as ASTC: " (40 unpacked from DXT, 30 DXT1 as
+ *  ASTC)", '' with BC */
+export function texSplit(unpacked: number, astc: number): string {
+  const MB = (b: number) => (b / 1048576).toFixed(0);
+  const parts = [unpacked ? `${MB(unpacked)} unpacked from DXT` : '', astc ? `${MB(astc)} DXT1 as ASTC` : ''].filter(Boolean);
+  return parts.length ? ` (${parts.join(', ')})` : '';
+}
+/** The game's control block has another layout than this renderer's (gpu_proto.h GW_LAYOUT): the page and the game
+ *  module are of different builds (the page from offline mode's copies, sw.ts, the module from the server) */
+export class OtherBuild extends Error {}
+/** WebGPU calls that failed this many times in a row (one try per frame, a second at 60 fps): the device is gone */
+const LOST_AFTER = 60;
+/** an exception for the log: Safari's stack has no line with the message, Chrome's starts with it */
+const errText = (x: unknown) => {
+  if (!(x instanceof Error)) return String(x);
+  const head = `${x.name}: ${x.message}`;
+  return x.stack?.startsWith(head) ? x.stack : x.stack ? `${head}\n${x.stack}` : head;
+};
+
 export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElement, opts: RendererOptions = {}): Promise<Renderer> {
   const log = opts.log ?? ((s: string) => console.log(s));
+  const attachedAt = performance.now();
   if (!navigator.gpu) throw new Error('WebGPU is not available in this browser');
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
   if (!adapter) throw new Error('no WebGPU adapter');
-  // without BC the encoder unpacks the DXT textures as they upload (dxt.ts)
+  // without BC the encoder unpacks the DXT textures as they upload (dxt.ts), but for DXT1 on a GPU with ASTC (Apple's),
+  // which it rewrites as ASTC 4x4 (astc.ts): a quarter of the memory unpacked takes
   const bc = adapter.features.has('texture-compression-bc') && !opts.noBC;
-  if (!bc) log(`[gpu] ${opts.noBC ? 'noBC' : 'no texture-compression-bc'}: DXT textures are unpacked to BGRA8 as they upload`);
-  const want: GPUFeatureName[] = bc ? ['texture-compression-bc'] : [];
+  const astc = !bc && adapter.features.has('texture-compression-astc') && !opts.noASTC;
+  if (!bc) log(`[gpu] ${opts.noBC ? 'noBC' : 'no texture-compression-bc'}: ${astc ? 'DXT1 textures go up as ASTC 4x4, DXT3 and DXT5 (and DXT1 with transparent texels) unpacked to BGRA8' : 'DXT textures are unpacked to BGRA8 as they upload'}`);
+  const want: GPUFeatureName[] = bc ? ['texture-compression-bc'] : astc ? ['texture-compression-astc'] : [];
   for (const f of ['texture-component-swizzle', 'texture-compression-unaligned', 'timestamp-query'])
     if (adapter.features.has(f as GPUFeatureName)) want.push(f as GPUFeatureName);
   const device = await adapter.requestDevice({ requiredFeatures: want, requiredLimits: {
@@ -131,18 +167,23 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
     if (errors <= 20) log(`[gpu] WebGPU error: ${(e as GPUUncapturedErrorEvent).error.message}`);
   };
   device.addEventListener('uncapturederror', onError);
-  device.lost.then(i => {
-    if (i.reason === 'destroyed') return;            // our own destroy(): detach, or giving up before it
-    log(`[gpu] device lost: ${i.reason} ${i.message}`);
+  // the device is gone (onLost, once): device.lost, or frames that cannot be encoded any more (pump)
+  let ownDestroy = false, lostSaid = false;
+  const lost = (why: string) => {
+    if (ownDestroy || lostSaid) return;
+    lostSaid = true;
+    log(`[gpu] ${why}`);
     opts.onLost?.();
-  });
+  };
+  // our own destroy() (detach, or giving up before it) says nothing, whatever reason the browser gives
+  device.lost.then(i => lost(`device lost: ${i.reason} ${i.message}`));
   // Until the renderer holds the control block, every way out gives the device
   // and the canvas back (a game stopped before it registered its blocks included).
   let configured: GPUCanvasContext | null = null;
   const giveUp: (e: unknown) => never = (e) => {
     try { configured?.unconfigure(); } catch { /* not configured */ }
     device.removeEventListener('uncapturederror', onError);
-    device.destroy();
+    ownDestroy = true; device.destroy();
     throw e;
   };
 
@@ -150,8 +191,12 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
   const canvasFormat = navigator.gpu.getPreferredCanvasFormat();
   // in the encoder's format the game draws its screen straight into the canvas
   // texture whenever the sizes match (Encoder.encodeFrame), so the canvas texture
-  // takes every use the back buffer has
-  const direct = canvasFormat === 'bgra8unorm' && opts.direct !== false;
+  // takes every use the back buffer has.  Not in Firefox: it shows the canvas texture
+  // while the next frame draws into it (Firefox 158 on a Mac, a race: 3 of 25
+  // screenshots a third to a half black, the rest of the picture half drawn).  From
+  // the back buffer the canvas gets each picture whole, in one copy (0 of 25).
+  const firefox = /\bFirefox\//.test(navigator.userAgent);
+  const direct = canvasFormat === 'bgra8unorm' && (opts.direct ?? !firefox);
   const canvasUsage = GPUTextureUsage.RENDER_ATTACHMENT
     | (direct ? GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST : 0);
   try { ctx.configure({ device, format: canvasFormat, alphaMode: 'opaque', usage: canvasUsage }); }
@@ -168,8 +213,10 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
   const cw = reg.ptr >> 2;
   {
     const u = u32();
-    if (u[cw + C.magic] !== P.GW_MAGIC || u[cw + C.layout] !== P.LAYOUT)
-      giveUp(new Error(`GPU control block mismatch: magic ${u[cw + C.magic].toString(16)} layout ${u[cw + C.layout].toString(16)} (page ${P.LAYOUT.toString(16)})`));
+    if (u[cw + C.magic] !== P.GW_MAGIC || u[cw + C.layout] !== P.LAYOUT) {
+      const what = `GPU control block mismatch: magic ${u[cw + C.magic].toString(16)} layout ${u[cw + C.layout].toString(16)} (page ${P.LAYOUT.toString(16)})`;
+      giveUp(u[cw + C.magic] === P.GW_MAGIC ? new OtherBuild(what) : new Error(what));
+    }
     // one renderer per control block, ever: a second one (or one after a detach) would
     // not have the textures and shaders queued before it.  The game marks the block
     // detached itself when it stopped waiting for a renderer (30 s, gpu_web.c)
@@ -187,10 +234,13 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
   try { const j = localStorage.getItem(WARM_KEY); if (j) enc.loadWarm(JSON.parse(j)); } catch { /* storage off: no warm-up */ }
   const vw = vreg.ptr >> 2, vf = vreg.ptr >> 3;
 
-  // page -> game: view size, pixel ratio, features
+  // page -> game: view size, pixel ratio, features.  The view is the canvas element's box in device pixels (what
+  // canvas.width/height are when the page sizes the canvas), kept apart from canvas.width/height, which follow the
+  // game's picture at a render scale below 1 (fitPicture).
+  let viewW = canvas.width, viewH = canvas.height;
   const publishView = () => {
     const u = u32();
-    u[cw + C.viewW] = canvas.width; u[cw + C.viewH] = canvas.height;
+    u[cw + C.viewW] = viewW; u[cw + C.viewH] = viewH;
     u[cw + C.dpr1000] = Math.round(devicePixelRatio * 1000);
     u[cw + C.features] = P.FEAT_BC | (device.features.has('texture-component-swizzle') ? P.FEAT_SWIZZLE : 0);
   };
@@ -228,7 +278,7 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
   // (wgpu-core's Queue::submit runs Device::maintain), so while a frame waits the pump sends one
   // at once and then every 1-2 ms (Firefox's Atomics.waitAsync times out that finely; its
   // setTimeout takes 4.5 ms).  Chrome reports done work on its own: no pokes there.
-  const poke = opts.poke ?? /\bFirefox\//.test(navigator.userAgent);
+  const poke = opts.poke ?? firefox;
   const pokeCell = new Int32Array(new SharedArrayBuffer(4));
   let waitingSince = 0, poking = false, slotWaits = 0, slotWaitMsMax = 0, pokes = 0;
   let winWaits = 0, winWaitMax = 0, winWaitT = performance.now();
@@ -262,6 +312,15 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
     } else if (!winWaits) winWaitT = now;
   };
 
+  // Safari's graphics process went away (it starts again by itself, for other pages): from then on every call into
+  // it throws (createCommandEncoder: InvalidStateError) and device.lost never comes, so the picture would stay
+  // frozen while the game plays on.  So many failures in a row are a lost device.
+  let failRun = 0;
+  const failed = (what: string, x: unknown) => {
+    errors++; failRun++;
+    log(`[gpu] ${what} failed: ${errText(x)}`);
+    if (failRun === LOST_AFTER) lost(`device gone: ${LOST_AFTER} times in a row the WebGPU calls failed`);
+  };
   const pump = () => {
     if (!alive || pumping) return;
     pumping = true;
@@ -275,12 +334,11 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
         const s = Atomics.load(I, cw + C.state), r = s & 3, e = (s >> 2) & 3;
         // a pending frame: its resources first, nothing recorded after it
         const limit = r && !e ? U[cw + C.frame + (r - 1) * (P.FRAME_BYTES >> 2) + F.rqEnd] : head;
-        enc.drain(limit);
+        try { enc.drain(limit); } catch (x) { failed('resource upload', x); break; }
         waiting(!!r && !e && inFlight >= maxInFlight);
         if (!r || e || inFlight >= maxInFlight) break;
         if (Atomics.compareExchange(I, cw + C.state, s, s | (r << 2)) !== s) continue;
-        try { encodeAndSubmit(r - 1); }
-        catch (x) { errors++; log(`[gpu] encode failed: ${(x as Error).stack ?? x}`); }
+        try { encodeAndSubmit(r - 1); failRun = 0; } catch (x) { failed('encode', x); }
         Atomics.store(I, cw + C.state, 0); Atomics.notify(I, cw + C.state);
       }
     } finally { pumping = false; }
@@ -319,12 +377,55 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
   let tsTarget: GPUTextureView | null = null;
   const tsView = () => tsTarget ??= device.createTexture({ size: [1, 1], format: 'bgra8unorm', usage: GPUTextureUsage.RENDER_ATTACHMENT }).createView();
 
+  // A rendering update (an rAF) shows the canvas once: of the frames submitted between two of them only the last is
+  // ever on the screen (counted in raf).  The canvas texture tells nothing here: WebKit gives every frame a texture of
+  // its own (at 120 fps on its 30 Hz rAF, 1 of 3,571 frames got the one before it).
+  let sinceRaf = 0, unshown = 0, winUnshown = 0, winUnshownFrames = 0, winUnshownT = performance.now();
+  // A line a minute for the log (what a phone's log is read for): frames, the browser's rAF rate, frames drawn over
+  // unseen, how long the GPU took to finish a frame (submit to onSubmittedWorkDone: GPU-bound as it nears the frame
+  // time, a hot phone as it climbs), frames that waited for the GPU, and the textures' memory on the GPU (a phone's
+  // graphics process runs out of memory first).
+  const SUMMARY_MS = 60_000;
+  let winDone: number[] = [], winWaits0 = 0;
+  const MB = (b: number) => (b / 1048576).toFixed(0);
+  const summary = (now: number) => {
+    const d = winDone.sort((a, b) => a - b), q = (p: number) => d.length ? d[Math.min(d.length - 1, Math.floor(p * d.length))].toFixed(1) : '-';
+    log(`[gpu] ${((now - winUnshownT) / 1000).toFixed(0)} s to t=${((now - attachedAt) / 1000).toFixed(0)} s: ${winUnshownFrames} frames, rAF ${rafHz.toFixed(1)} Hz, ` +
+        `${winUnshown} drawn over unseen, GPU done p50 ${q(0.5)} / p90 ${q(0.9)} / max ${d.length ? d[d.length - 1].toFixed(0) : '-'} ms, ` +
+        `${slotWaits - winWaits0} waited for the GPU, textures ${MB(enc.texBytes)} MB${texSplit(enc.unpackBytes, enc.astcBytes)}${errors ? `, ${errors} WebGPU errors so far` : ''}`);
+    winUnshown = 0; winUnshownFrames = 0; winUnshownT = now; winDone = []; winWaits0 = slotWaits;
+  };
+  // A render scale below 1 (a phone's 75 %): the game draws a picture smaller than the view, and the composite drew it
+  // stretched over the whole canvas, a pass over every screen pixel a frame.  When the picture has the view's shape
+  // (within 2 pixels, as the composite's aspect-fit would have it fill the canvas), the canvas's own size becomes the
+  // picture's, the frame draws straight into it (Encoder.encodeFrame's direct path), and CSS stretches the canvas over
+  // its box: the browser's compositor scales it as it puts the page on the screen anyway.  Another shape (a picture
+  // pillarboxed in the view) or the full scale: the canvas at the view's size, as before.  The full scale includes an
+  // odd view's picture, a row or column short (the game draws even sizes, gpu_web.c view_wh): stretched by that one
+  // pixel, every row of the picture was resampled, 1-pixel lines grey in the middle of the screen (a player's
+  // 2560x1305 window showed shimmering lines).
+  const fitPicture = (b: number) => {
+    if (opts.cssScale === false) return;
+    const U = u32(), fw = cw + C.frame + b * (P.FRAME_BYTES >> 2), bw = U[fw + F.bbW], bh = U[fw + F.bbH];
+    let w = viewW, h = viewH;
+    if (bw > 0 && bh > 0 && (bw < (viewW & ~1) || bh < (viewH & ~1))) {
+      const sc = Math.min(viewW / bw, viewH / bh);
+      if (Math.abs(Math.round(bw * sc) - viewW) <= 2 && Math.abs(Math.round(bh * sc) - viewH) <= 2) { w = bw; h = bh; }
+    }
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w; canvas.height = h;
+      log(`[gpu] canvas ${w}x${h} for the view's ${viewW}x${viewH}${w !== viewW || h !== viewH ? ': the picture stretched by CSS, no composite' : ''}`);
+    }
+  };
   const encodeAndSubmit = (b: number) => {
     const t0 = performance.now();
     const ce = device.createCommandEncoder();
     const slot = timing && !qBusy[qNext] ? qNext : -1;
     if (slot >= 0) { qNext = (qNext + 1) % TQ; enc.firstPassTs = { querySet: qs!, beginningOfPassWriteIndex: 2 * slot }; }
+    fitPicture(b);
     const cur = ctx.getCurrentTexture();
+    sinceRaf++; winUnshownFrames++;
+    if (t0 - winUnshownT > SUMMARY_MS) summary(t0);
     const st = enc.encodeFrame(b, ce, direct ? cur : undefined);
     burn?.(ce);
     const scr = enc.screen!;   // the canvas texture itself, or the back buffer
@@ -338,7 +439,7 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
       imgRect = { x: 0, y: 0, w: cur.width, h: cur.height };
       // GPU timing ends with a pass of its own that reads one texel of the screen, so it
       // waits for every pass that drew there (a pass without that dependency may run early)
-      if (tsEnd) enc.copyQuad(ce, cur.createView(), tsView(), 'bgra8unorm', nearest, undefined, true, tsEnd);
+      if (tsEnd) enc.copyQuad(ce, enc.screenView!, tsView(), 'bgra8unorm', nearest, undefined, true, tsEnd);
     } else {
       // composite: the back buffer aspect-fit into the canvas at its own resolution
       const cvw = cur.width, cvh = cur.height;
@@ -347,7 +448,8 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
       const one = w === scr.width && h === scr.height;
       const rect: [number, number, number, number] = [Math.floor((cvw - w) / 2), Math.floor((cvh - h) / 2), w, h];
       imgRect = { x: rect[0], y: rect[1], w, h };
-      enc.copyQuad(ce, scr.createView(), cur.createView(), canvasFormat, one ? nearest : linear, rect, true, tsEnd);
+      // the back buffer's own view: its bind group is made once (Encoder.copyBg), not every frame
+      enc.copyQuad(ce, enc.screenView!, cur.createView(), canvasFormat, one ? nearest : linear, rect, true, tsEnd);
     }
     if (slot >= 0) {
       ce.resolveQuerySet(qs!, 2 * slot, 2, qResolve!, 256 * slot);     // resolve offsets are 256-aligned
@@ -368,8 +470,12 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
       const sn = enc.snapshot(ce, id);
       if (sn) { log(`[gpu] dump texture ${id}: ${sn.info}`); reads.push({ name: `${dumpName}_tex${id}`, rb: copyOut(ce, sn.tex) }); }
     }
+    // a texture the game waits for (gpu_web.c metal_read_texture), drawn by this very frame
+    const rbId = U[fw + F.rbId], rbTex = rbId ? enc.readable(ce, U[fw + F.rbTex]) : null;
+    const rbRead = rbTex ? copyOut(ce, rbTex) : null;
     device.queue.submit([ce.finish()]);
     enc.afterSubmit();
+    if (rbId) readForGame(rbId, rbRead, U[fw + F.rbDst], U[fw + F.rbPitch], U[fw + F.rbRows]);
     // quick chat's places over the cars in this very frame (GwMarks in its constants, from a module that writes them)
     if (opts.onMarks) {
       const k = (U[fw + F.k] + P.K_MARKS) >>> 2;
@@ -390,7 +496,9 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
     const tSub = performance.now();
     device.queue.onSubmittedWorkDone().then(() => {
       inFlight--;
-      if (done.length < 4096) done.push(performance.now() - tSub);
+      const dms = performance.now() - tSub;
+      if (done.length < 4096) done.push(dms);
+      if (winDone.length < 16384) winDone.push(dms);
       pump();
     });
     const ms = performance.now() - t0;
@@ -421,6 +529,26 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
     const buf = device.createBuffer({ size: bpr * t.height, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
     ce.copyTextureToBuffer({ texture: t }, { buffer: buf, bytesPerRow: bpr }, [t.width, t.height, 1]);
     return { buf, w: t.width, h: t.height, bpr };
+  };
+
+  // The game's lock buffer gets the texture's rows once the GPU has them, unless the game stopped waiting: it then
+  // cancelled the request in rbWant, and the buffer is not the page's to write any more.  The claim, the bytes and
+  // rbDone happen in one go.
+  const readForGame = (id: number, rb: Readback | null, dst: number, pitch: number, rows: number) => {
+    const answer = (px: ArrayBuffer | null) => {
+      const I = i32();
+      if (Atomics.compareExchange(I, cw + C.rbWant, id, id | P.RB_FLAG) !== id) return;
+      if (px && rb) {
+        const m = new Uint8Array(mem.buffer), n = Math.min(pitch, rb.w * 4);
+        for (let y = 0; y < Math.min(rows, rb.h); y++) m.set(new Uint8Array(px, y * rb.bpr, n), dst + y * pitch);
+      }
+      Atomics.store(I, cw + C.rbDone, px ? id : id | P.RB_FLAG);
+      Atomics.notify(I, cw + C.rbDone);
+    };
+    if (!rb) { log(`[gpu] texture read back for the game: not there`); answer(null); return; }
+    const job = rb.buf.mapAsync(GPUMapMode.READ).then(() => { answer(rb.buf.getMappedRange()); rb.buf.unmap(); },
+      x => { log(`[gpu] texture read back for the game failed: ${x}`); answer(null); }).finally(() => rb.buf.destroy());
+    pending.add(job); job.finally(() => pending.delete(job));
   };
 
   const linear = device.createSampler({ minFilter: 'linear', magFilter: 'linear' });
@@ -462,10 +590,20 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
     if (lastT) {
       const d = t - lastT;
       if (d > 2 && d < 100) { iv.push(d); if (iv.length > 120) iv.shift(); }
+      // frames drawn over unseen since the last one (not across a gap: a hidden tab has no rAF)
+      if (sinceRaf > 1 && d < 100) { unshown += sinceRaf - 1; winUnshown += sinceRaf - 1; }
     }
+    sinceRaf = 0;
     lastT = t;
     if (iv.length >= 30) {
-      const sorted = iv.slice().sort((a, b) => a - b), med = sorted[sorted.length >> 1];
+      // the median over spans of 4 frames, not of single intervals: Safari on an iPhone or iPad gives rAF times in
+      // whole milliseconds, so at 60 Hz an interval is 16 or 17 ms and their median at times said 62.5 Hz ("display
+      // 63 Hz"), at 120 Hz always 125: not a standard rate, so the period went out unsnapped and the pacer lost its
+      // vsync lock.  Over 4 frames the rounding is a quarter of a millisecond, inside snap()'s 2.5 %.
+      const sp: number[] = [];
+      for (let i = 3; i < iv.length; i++) sp.push((iv[i] + iv[i - 1] + iv[i - 2] + iv[i - 3]) / 4);
+      sp.sort((a, b) => a - b);
+      const med = sp[sp.length >> 1];
       rafHz = 1000 / med;
       const h = snap(rafHz);
       if (h !== cand) { cand = h; candSince = t; }
@@ -498,14 +636,16 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
     }
   })();
 
-  // canvas size: the page's choice, or with autoSize the element's size in
-  // device pixels (devicePixelContentBoxSize: exact, follows zoom and screens)
+  // the view: the element's size in device pixels (devicePixelContentBoxSize: exact, follows zoom and screens); the
+  // canvas size is the page's choice, or with autoSize that size too
   const ro = new ResizeObserver(entries => {
-    if (opts.autoSize) for (const e of entries) {
+    for (const e of entries) {
       const d = e.devicePixelContentBoxSize?.[0];
       const w = d ? d.inlineSize : Math.round(e.contentRect.width * devicePixelRatio);
       const h = d ? d.blockSize : Math.round(e.contentRect.height * devicePixelRatio);
-      if (w > 0 && h > 0 && (canvas.width !== w || canvas.height !== h)) { canvas.width = w; canvas.height = h; }
+      if (!(w > 0 && h > 0)) continue;
+      viewW = w; viewH = h;
+      if (opts.autoSize && (canvas.width !== w || canvas.height !== h)) { canvas.width = w; canvas.height = h; }
     }
     publishView();
   });
@@ -517,7 +657,8 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
       pipelineMs: enc.pipeMs, pipelineMsMax: enc.pipeMsMax, gpuMsAvg: gpuMsN ? gpuMsTotal / gpuMsN : 0, gpuMsMax,
       encodeMsAvg: frames ? encMsTotal / frames : 0, encodeMsLast: encMsLast, drawsLast, passesLast, rafHz, inFlight,
       dumps: u32()[cw + C.dumpsDone], missingTarget: enc.missingTarget, conflicts: enc.conflicts, zMismatch: enc.zMismatch, noVs: enc.noVs,
-      direct: directFrames, screenReadFirst: enc.screenReadFirst, slotWaits, slotWaitMsMax, pokes }),
+      direct: directFrames, screenReadFirst: enc.screenReadFirst, slotWaits, slotWaitMsMax, pokes, unshown,
+      texBytes: enc.texBytes, unpackBytes: enc.unpackBytes, astcBytes: enc.astcBytes }),
     window: (reset = false) => {
       const pct = (a: number[]) => {
         if (!a.length) return [];
@@ -552,7 +693,7 @@ export async function attachRenderer(proc: GameProcess, canvas: HTMLCanvasElemen
       void Promise.allSettled([...pending]).then(() => pngWorker?.terminate());
       try { ctx.unconfigure(); } catch { /* already gone */ }
       device.removeEventListener('uncapturederror', onError);
-      device.destroy();
+      ownDestroy = true; device.destroy();
       log(`[gpu] renderer detached after ${frames} frames`);
     },
   };

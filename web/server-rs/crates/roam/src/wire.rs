@@ -21,6 +21,14 @@ pub(crate) const MSG_RACEREP: u8 = 14;
 /// its payload's bytes (roam_core.h RC_RACEREP_BYTES) and its car name's (RC_RACEREP_NAME)
 const RACEREP_BYTES: usize = 64;
 const RACEREP_NAME: usize = 16;
+/// the race's results as the reporter's game showed them (roam_core.h RC_MSG_RACERES): only to the hub, which compares
+/// the players' games' results for a racer far ahead of the others
+pub(crate) const MSG_RACERES: u8 = 16;
+/// its head and each row (roam_core.h RC_RACERES_HEAD, RC_RACERES_ROW); a row's flags (RC_RS_FINISHED, RC_RS_OURS)
+const RACERES_HEAD: usize = 12;
+const RACERES_ROW: usize = 20;
+pub(crate) const RS_FINISHED: u8 = 0x01;
+pub(crate) const RS_OURS: u8 = 0x02;
 /// HELLO's flag: this player takes race lobbies (roam_core.h RC_HF_LOBBY)
 pub(crate) const HF_LOBBY: u16 = 0x0080;
 /// HELLO's flag: this player reads crews (roam_core.h RC_HF_CREW), and its HELLO may end with its crews, after the
@@ -29,6 +37,9 @@ pub(crate) const HF_LOBBY: u16 = 0x0080;
 pub(crate) const HF_CREW: u16 = 0x0200;
 /// the most crews a player is in (roam_core.h RC_CREW_MAX: the start page's four words)
 pub(crate) const CREWS: usize = 4;
+/// HELLO's flag: this player reads the crew marks of the hub's PEERS (roam_core.h RC_HF_HUBCREW, core 8): HF_CREW on a
+/// PEERS says the list ends in them (`write_peers`).  A core before it counts the longer list as bad, so it gets none.
+pub(crate) const HF_HUBCREW: u16 = 0x0400;
 /// the most ids a HELLO names (roam_core.h RC_MAX_PEERS: its decoder takes no more)
 const SEEN_MAX: usize = 32;
 /// a LOBBY's ops (roam_core.h RC_LOBBY_*) the hub keeps: the host's advert and its end, and a player's ask to join
@@ -59,18 +70,23 @@ pub(crate) enum Msg<'a> {
         name: &'a [u8],
         /// its flags say it takes race lobbies (HF_LOBBY)
         lobbies: bool,
+        /// its flags say it reads the crew marks of the hub's PEERS (HF_HUBCREW)
+        marks: bool,
         /// its crews as it sent them (HF_CREW), 0 after them: none for a HELLO without the flag, or with the flag
         /// and nothing after its ids
         crews: [u32; CREWS],
     },
     /// v: the newest state's velocity, 0 where roam_core's decoder would not take it (not finite, 200 m/s or more);
-    /// heading: where its car points, 256 a turn (the game's atan2 of the forward row, roam_game.c)
+    /// heading: where its car points, 256 a turn (the game's atan2 of the forward row, roam_game.c); t_us: its time on
+    /// the sender's clock (µs, wraps), which counts on while the clock epoch `clock` stays
     Snap {
         sender: u32,
         status: u8,
         p: [f64; 3],
         v: [f64; 3],
         heading: u8,
+        t_us: u32,
+        clock: u8,
     },
     /// the world map's question (roam_core.h RC_MSG_MAPREQ): req is echoed in the answer
     MapReq {
@@ -93,6 +109,8 @@ pub(crate) enum Msg<'a> {
     },
     /// a player's report of a race it raced (roam_core.h rc_racerep), checked as roam_core.c's racerep_ok
     RaceRep(RaceRep<'a>),
+    /// the race's results as its game showed them (roam_core.h rc_raceres), checked as roam_core.c's raceres_ok
+    RaceRes(RaceRes),
     Bye,
     Other,
 }
@@ -176,6 +194,58 @@ fn racerep(d: &[u8], o: usize) -> Option<RaceRep<'_>> {
     })
 }
 
+/// roam_core.h rc_raceres: the race, and its results' rows in their order
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct RaceRes {
+    pub lobby: u32,
+    pub race: u32,
+    pub mode: u8,
+    pub laps: u8,
+    pub n: usize,
+    pub rows: [ResRow; LOBBY_PLAYERS],
+}
+
+/// one racer's row: its player's id (0: one the reporter could not name), RS_* flags, its time (s, a finisher's), how
+/// far it came (laps) and the way it drove (m: its average speed for its time, as the reporter's game counted it)
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct ResRow {
+    pub id: u32,
+    pub flags: u8,
+    pub time: f64,
+    pub done: f64,
+    pub dist: f64,
+}
+
+/// a RACERES's payload (at o, `len` bytes), or None where roam_core.c's decoder would not take it
+fn raceres(d: &[u8], o: usize, len: usize) -> Option<RaceRes> {
+    if len < RACERES_HEAD {
+        return None;
+    }
+    let n = d[o + 10] as usize;
+    if !(1..=LOBBY_PLAYERS).contains(&n) || len != RACERES_HEAD + RACERES_ROW * n {
+        return None;
+    }
+    let (lobby, race) = (u32_le(d, o), u32_le(d, o + 4));
+    if lobby == 0 || race == 0 {
+        return None;
+    }
+    let mut rows = [ResRow::default(); LOBBY_PLAYERS];
+    for (k, row) in rows.iter_mut().enumerate().take(n) {
+        let at = o + RACERES_HEAD + RACERES_ROW * k;
+        let (time, done, dist) = (f32_le(d, at + 8), f32_le(d, at + 12), f32_le(d, at + 16));
+        let flags = d[at + 4];
+        let fits = |x: f64, max: f64| x.is_finite() && (0.0..=max).contains(&x);
+        if flags & !(RS_FINISHED | RS_OURS) != 0 || !fits(time, 100_000.0) || !fits(done, 1000.0) || !fits(dist, 1e6) {
+            return None;
+        }
+        *row = ResRow { id: u32_le(d, at), flags, time, done, dist };
+    }
+    if rows[..n].iter().filter(|r| r.flags & RS_OURS != 0).count() > 1 {
+        return None;
+    }
+    Some(RaceRes { lobby, race, mode: d[o + 8], laps: d[o + 9], n, rows })
+}
+
 fn u16_le(d: &[u8], o: usize) -> u16 {
     u16::from_le_bytes([d[o], d[o + 1]])
 }
@@ -256,7 +326,7 @@ pub(crate) fn decode(d: &[u8]) -> Option<(u8, u32, Msg<'_>)> {
                     }
                 }
             }
-            Msg::Hello { sender, core, status, room, name, lobbies: flags & HF_LOBBY != 0, crews }
+            Msg::Hello { sender, core, status, room, name, lobbies: flags & HF_LOBBY != 0, marks: flags & HF_HUBCREW != 0, crews }
         }
         MSG_SNAP => {
             if end < 22 + 52 {
@@ -271,7 +341,7 @@ pub(crate) fn decode(d: &[u8]) -> Option<(u8, u32, Msg<'_>)> {
             if !p.iter().all(|x| x.is_finite()) || p[0].abs() > 20000.0 || p[1].abs() > 20000.0 || p[2].abs() > 2000.0 {
                 return None;
             }
-            Msg::Snap { sender, status, p, v: velocity(d, 38), heading: heading(d, 50) }
+            Msg::Snap { sender, status, p, v: velocity(d, 38), heading: heading(d, 50), t_us: u32_le(d, 22), clock: d[21] }
         }
         MSG_MAPREQ if end == HDR + 2 => Msg::MapReq { req: u16_le(d, 16) },
         MSG_LOBBY => {
@@ -294,6 +364,7 @@ pub(crate) fn decode(d: &[u8]) -> Option<(u8, u32, Msg<'_>)> {
             Msg::Lobby { op, to: u32_le(d, 20), lobby, race, x: u16_le(d, 32) as i16, y: u16_le(d, 34) as i16, n: n as u8, max, state, ids }
         }
         MSG_RACEREP if end == HDR + RACEREP_BYTES => Msg::RaceRep(racerep(d, HDR)?),
+        MSG_RACERES => Msg::RaceRes(raceres(d, HDR, end - HDR)?),
         MSG_BYE => Msg::Bye,
         _ => Msg::Other,
     };
@@ -315,7 +386,7 @@ pub fn decode_roam(d: &[u8]) -> Option<RoamMsg> {
         },
         Msg::Snap { sender, status, p, .. } => RoamMsg::Snap { sender, status, p },
         Msg::Bye => RoamMsg::Bye { sender },
-        Msg::MapReq { .. } | Msg::Lobby { .. } | Msg::RaceRep(_) | Msg::Other => RoamMsg::Other { kind, sender },
+        Msg::MapReq { .. } | Msg::Lobby { .. } | Msg::RaceRep(_) | Msg::RaceRes(_) | Msg::Other => RoamMsg::Other { kind, sender },
     })
 }
 
@@ -324,24 +395,50 @@ pub(crate) fn peers_len(n: usize) -> usize {
     HDR + 1 + 10 * n + CRC
 }
 
-/// Writes a PEERS datagram into `b` (exactly `peers_len(n)` bytes long): list = [{ vip, port, id }] (at most 32:
-/// roam_core's RC_MAX_PEERS; 7 for a core of version 1).
-pub(crate) fn write_peers(b: &mut [u8], sender: u32, seq: u16, list: impl ExactSizeIterator<Item = PeerEntry>) {
+/// the length of a PEERS datagram of n entries that ends in crew marks for a player of k crews (`write_peers`)
+pub(crate) fn peers_crew_len(n: usize, k: usize) -> usize {
+    peers_len(n) + 1 + 4 * k + n
+}
+
+/// Writes a PEERS datagram into `b` (exactly `peers_len(n)` bytes long, or `peers_crew_len(n, mine.len())` with crews):
+/// list = [{ vip, port, id }] (at most 32: roam_core's RC_MAX_PEERS; 7 for a core of version 1).  With `mine` (the
+/// receiver's crews, at most CREWS, none 0) the list ends in its crew marks (HF_CREW on it): `mine`, then a byte per
+/// entry, `marks[i]` bit c: entry i is in crew `mine[c]` too.  So a player learns which of its peers are in its crews
+/// without anyone's crews but its own going out.
+pub(crate) fn write_peers(
+    b: &mut [u8],
+    sender: u32,
+    seq: u16,
+    list: impl ExactSizeIterator<Item = PeerEntry>,
+    mine: &[u32],
+    marks: &[u8],
+) {
     let len = b.len();
+    let n = list.len();
     b[..4].copy_from_slice(b"N2FR");
     b[4] = 1;
     b[5] = MSG_PEERS;
     b[6..8].copy_from_slice(&(len as u16).to_le_bytes());
     b[8..12].copy_from_slice(&sender.to_le_bytes());
     b[12..14].copy_from_slice(&seq.to_le_bytes());
-    b[14..16].copy_from_slice(&[0, 0]);
+    b[14..16].copy_from_slice(&if mine.is_empty() { 0 } else { HF_CREW }.to_le_bytes());
     // the count's low byte: one byte holds every count roam_core reads (RC_MAX_PEERS at most, as above)
-    b[16] = list.len() as u8;
+    b[16] = n as u8;
     for (i, e) in list.enumerate() {
         let o = 17 + 10 * i;
         b[o..o + 4].copy_from_slice(&e.vip.to_be_bytes());
         b[o + 4..o + 6].copy_from_slice(&e.port.to_le_bytes());
         b[o + 6..o + 10].copy_from_slice(&e.id.to_le_bytes());
+    }
+    if !mine.is_empty() {
+        let mut o = 17 + 10 * n;
+        b[o] = mine.len() as u8;
+        o += 1;
+        for c in mine {
+            b[o..o + 4].copy_from_slice(&c.to_le_bytes());
+            o += 4;
+        }
+        b[o..o + n].copy_from_slice(&marks[..n]);
     }
     let crc = crc32fast::hash(&b[..len - CRC]);
     b[len - CRC..].copy_from_slice(&crc.to_le_bytes());
@@ -349,8 +446,13 @@ pub(crate) fn write_peers(b: &mut [u8], sender: u32, seq: u16, list: impl ExactS
 
 /// A PEERS datagram: `write_peers` into a buffer of its own
 pub fn encode_peers(sender: u32, seq: u16, list: &[PeerEntry]) -> Vec<u8> {
-    let mut b = vec![0u8; peers_len(list.len())];
-    write_peers(&mut b, sender, seq, list.iter().copied());
+    encode_peers_crews(sender, seq, list, &[], &[])
+}
+
+/// A PEERS datagram with crew marks (`write_peers`; none with `mine` empty)
+pub fn encode_peers_crews(sender: u32, seq: u16, list: &[PeerEntry], mine: &[u32], marks: &[u8]) -> Vec<u8> {
+    let mut b = vec![0u8; if mine.is_empty() { peers_len(list.len()) } else { peers_crew_len(list.len(), mine.len()) }];
+    write_peers(&mut b, sender, seq, list.iter().copied(), mine, marks);
     b
 }
 

@@ -4,7 +4,7 @@
 // the renderer refuses a control block whose layout word differs.
 
 export const GW_MAGIC = 0x55504757;
-export const GW_VERSION = 4;
+export const GW_VERSION = 5;
 export const GW_NBUF = 2;
 // GwHL: the other cars' headlights at this byte offset of every frame's VS constant arena (group 0 binding 3)
 export const K_HL = 256, HL_BYTES = 656, HL_MAX = 8;
@@ -14,7 +14,8 @@ export const K_MARKS = 1024, MARKS_BYTES = 528, MARKS_MAX = 32, MARKS_MAGIC = 0x
 // the VS constant arena is bound in windows of this many 16-byte rows (GW_KWIN_ROWS)
 export const KWIN_ROWS = 4096;
 
-// GwDraw: 156 bytes, all 32-bit fields (word index = byte offset / 4)
+// GwDraw: 156 bytes, all 32-bit fields (word index = byte offset / 4).  A blit's first and count: its source
+// rectangle, left | top << 16 and right | bottom << 16 (count 0 = the whole source)
 export const DRAW_BYTES = 156, DRAW_WORDS = 39;
 export const enum D {
   first = 0, count = 1, tex = 2, target = 3, kind = 4, blend = 5, aref = 6, depth = 7,
@@ -24,11 +25,13 @@ export const enum D {
 }
 export const enum Kind { Draw = 0, Clear = 1, Blit = 2 }
 
-// GwFrame: 136 bytes
-export const FRAME_BYTES = 136;
+// GwFrame: 156 bytes.  rbId nonzero: after the frame, texture rbTex's level 0 goes to the game, rbRows rows of
+// rbPitch bytes at wasm address rbDst (see C.rbWant)
+export const FRAME_BYTES = 156;
 export const enum F {
   seq = 0, dn = 1, vn = 2, rvn = 3, kn = 4, pscn = 5, draws = 6, tv = 7, raw = 8, k = 9, psc = 10,
   rqEnd = 11, bbW = 12, bbH = 13, clearArgb = 14, poolSize = 15, dump = 16, dumpFrame = 17, dumpLabel = 18, // byte 72, 64 chars
+  rbId = 34, rbTex = 35, rbDst = 36, rbPitch = 37, rbRows = 38,
 }
 
 // GwCtl (word indices)
@@ -36,8 +39,13 @@ export const CTL_BYTES = 96 + 2 * FRAME_BYTES;
 export const enum C {
   magic = 0, version = 1, layout = 2, size = 3, state = 4, bell = 5, attached = 6, rqHead = 7, rqTail = 8,
   rqPtr = 9, rqCap = 10, framesDone = 11, viewW = 12, viewH = 13, dpr1000 = 14, features = 15,
-  stDraws = 16, stPasses = 17, stEncUs = 18, stErrors = 19, dumpsDone = 20, stPipelines = 21, frame = 24,
+  stDraws = 16, stPasses = 17, stEncUs = 18, stErrors = 19, dumpsDone = 20, stPipelines = 21, rbWant = 22, rbDone = 23,
+  frame = 24,
 }
+// a texture read back: the page claims the request in rbWant (CAS rbId -> rbId | RB_FLAG; the game cancels one it
+// stopped waiting for with a CAS to 0) before it writes rbDst, then stores rbDone = rbId (written) or
+// rbId | RB_FLAG (could not read it) and notifies
+export const RB_FLAG = 0x80000000;
 export const FEAT_BC = 1, FEAT_SWIZZLE = 2;
 // GwCtl.attached: 0 before a renderer attached, then ATTACHED, and DETACHED for good once it let go
 // (or once the game stopped waiting for one: its CAS 0 -> DETACHED after 30 s)

@@ -185,12 +185,14 @@ static void t_roundtrip(void){
     memset(&m, 0, sizeof m); m.h.type = RC_MSG_LOBBY; m.h.sender = 7;
     { rc_lobby *l = &m.u.lobby;
       l->op = RC_LOBBY_ADVERT; l->arg = 0; l->state = RC_LS_STARTING; l->max = 6; l->to = 0xCAFEF00Du; l->lobby = 0x1234ABCDu;
-      l->race = 0x9E3779B9u; l->x = -1234; l->y = 4321; l->t_ms = 5000; l->n = 3; l->ids[0] = 7; l->ids[1] = 0x51; l->ids[2] = 0x52;
+      l->race = 0x9E3779B9u; l->x = -1234; l->y = 4321; l->t_ms = 5000; l->n = 3; l->away_s = 17; l->ids[0] = 7; l->ids[1] = 0x51; l->ids[2] = 0x52;
       int n = rc_encode(&m, b, sizeof b);
       const rc_lobby *e = &d.u.lobby;
       CHECK(n == RC_HDR + 24 + 12 + RC_CRC && rc_decode(b, n, &d) == RC_OK && e->op == RC_LOBBY_ADVERT && e->state == RC_LS_STARTING &&
             e->max == 6 && e->to == 0xCAFEF00Du && e->lobby == 0x1234ABCDu && e->race == 0x9E3779B9u && e->x == -1234 && e->y == 4321 &&
-            e->t_ms == 5000 && e->n == 3 && e->ids[0] == 7 && e->ids[2] == 0x52, "LOBBY round trip (%d bytes)", n);
+            e->t_ms == 5000 && e->n == 3 && e->away_s == 17 && e->ids[0] == 7 && e->ids[2] == 0x52, "LOBBY round trip (%d bytes)", n);
+      /* the away byte where the reserved one was (after n): what older games and the hub skip */
+      CHECK(b[RC_HDR + 22] == 3 && b[RC_HDR + 23] == 17, "LOBBY away byte after n");
       /* op 0, op past the last, reason past the last, state past the last, max 1, max 7, max 2 (< 3 players),
          lobby 0, race 0, the second player the same as the first, the third player 0 */
       static const struct { int at; uint8_t v; int zero3; } bad[] = { { RC_HDR, 0, 0 }, { RC_HDR, RC_LOBBY__N, 0 }, { RC_HDR + 1, RC_LL__N, 0 },
@@ -247,6 +249,36 @@ static void t_roundtrip(void){
           CHECK(rc_decode(c, n, &d) == RC_E_FIELD, "RACEREP with a bad field refused (%d)", k);
       }
       r->place = 7; CHECK(rc_encode(&m, b, sizeof b) < 0, "RACEREP with a place past its cars not encoded"); }
+    /* RACERES: RC_RACERES_HEAD + n rows of RC_RACERES_ROW; no lobby, no race, no rows or more than RC_LOBBY_MAX, an
+       unknown flag, two rows ours, a time or a distance out of range refused, a byte more refused */
+    memset(&m, 0, sizeof m); m.h.type = RC_MSG_RACERES; m.h.sender = 7;
+    { rc_raceres *r = &m.u.raceres;
+      r->lobby = 0x1234ABCDu; r->race = 0x9E3779B9u; r->mode = 1; r->laps = 2; r->n = 3;
+      r->row[0].id = 7; r->row[0].flags = RC_RS_FINISHED | RC_RS_OURS; r->row[0].time = 21.5f; r->row[0].done = 2.f; r->row[0].dist = 5800.f;
+      r->row[1].id = 8; r->row[1].flags = 0; r->row[1].done = 0.61f; r->row[1].dist = 1750.5f;
+      r->row[2].id = 0; r->row[2].flags = 0; r->row[2].done = 0.f;
+      int n = rc_encode(&m, b, sizeof b);
+      const rc_raceres *e = &d.u.raceres;
+      CHECK(n == RC_HDR + RC_RACERES_HEAD + 3 * RC_RACERES_ROW + RC_CRC && rc_decode(b, n, &d) == RC_OK && e->lobby == 0x1234ABCDu &&
+            e->race == 0x9E3779B9u && e->mode == 1 && e->laps == 2 && e->n == 3 && e->row[0].id == 7 &&
+            e->row[0].flags == (RC_RS_FINISHED | RC_RS_OURS) && e->row[0].time == 21.5f && e->row[0].done == 2.f &&
+            e->row[0].dist == 5800.f &&
+            e->row[1].id == 8 && !e->row[1].flags && e->row[1].done == 0.61f && e->row[1].dist == 1750.5f && !e->row[2].id,
+            "RACERES round trip (%d bytes)", n);
+      static const struct { int at; uint8_t v; int zero3; } bad[] = { { RC_HDR, 0, 1 }, { RC_HDR + 4, 0, 1 }, { RC_HDR + 10, 0, 0 },
+          { RC_HDR + 10, 7, 0 }, { RC_HDR + 16, 4, 0 }, { RC_HDR + 36, 2, 0 }, { RC_HDR + 23, 0xFF, 0 }, { RC_HDR + 27, 0x7F, 0 },
+          { RC_HDR + 31, 0xFF, 0 } };
+      int nb = (int)(sizeof bad / sizeof bad[0]);
+      for (int k = 0; k < nb; k++){
+          uint8_t c[RC_MAX_DGRAM]; memcpy(c, b, (size_t)n);
+          c[bad[k].at] = bad[k].v;
+          if (bad[k].zero3) for (int j = 1; j < 4; j++) c[bad[k].at + j] = 0;
+          uint32_t crc = rc_crc32(c, (uint32_t)n - RC_CRC); for (int j = 0; j < 4; j++) c[n - 4 + j] = (uint8_t)(crc >> (8 * j));
+          int got = rc_decode(c, n, &d);
+          CHECK(got == RC_E_FIELD || got == RC_E_SHORT || got == RC_E_TRAIL, "RACERES with a bad field refused (%d: %d)", k, got);
+      }
+      r->n = 0; CHECK(rc_encode(&m, b, sizeof b) < 0, "RACERES of no rows not encoded");
+      r->n = 3; r->row[1].flags = RC_RS_OURS; CHECK(rc_encode(&m, b, sizeof b) < 0, "RACERES with two rows ours not encoded"); }
     /* car record */
     rc_carcfg cc, c2; memset(&cc, 0, sizeof cc);
     cc.type_hash = 0x12345678u; strcpy(cc.type_name, "350Z"); cc.ride_b[3] = 1;
@@ -287,10 +319,10 @@ static void t_roundtrip(void){
 
 /* ---- 3. hostile datagrams ----------------------------------------------------------------- */
 static void t_fuzz(long iters){
-    uint8_t b[1600], base[15][RC_MAX_DGRAM]; int bn[15];
+    uint8_t b[1600], base[16][RC_MAX_DGRAM]; int bn[16];
     rc_msg m;
     /* one valid datagram of each type, to mutate */
-    for (int t = 1; t <= 15; t++){
+    for (int t = 1; t <= 16; t++){
         memset(&m, 0, sizeof m); m.h.type = (uint8_t)t; m.h.sender = 9;
         if (t == RC_MSG_HELLO){ strcpy(m.u.hello.name, "abc"); m.u.hello.n_seen = 2; }
         if (t == RC_MSG_PEERS){ m.u.peers.n = 2; m.u.peers.e[0].ip = 0x7f000001u; m.u.peers.e[0].port = 1; m.u.peers.e[0].id = 1; m.u.peers.e[1] = m.u.peers.e[0]; }
@@ -305,6 +337,9 @@ static void t_fuzz(long iters){
         if (t == RC_MSG_RACEREP){ m.u.racerep.lobby = 5; m.u.racerep.race = 6; m.u.racerep.players = 2; m.u.racerep.place = 1;
                                   m.u.racerep.factor = 1.f; strcpy(m.u.racerep.name, "350Z"); }
         if (t == RC_MSG_SAY){ m.u.say.phrase = 3; m.u.say.seq = 1; }
+        if (t == RC_MSG_RACERES){ m.u.raceres.lobby = 5; m.u.raceres.race = 6; m.u.raceres.n = 2; m.u.raceres.row[0].id = 9;
+                                  m.u.raceres.row[0].flags = RC_RS_FINISHED | RC_RS_OURS; m.u.raceres.row[0].time = 60.f;
+                                  m.u.raceres.row[0].done = 2.f; m.u.raceres.row[1].id = 10; m.u.raceres.row[1].done = 1.5f; }
         bn[t - 1] = rc_encode(&m, base[t - 1], RC_MAX_DGRAM);
     }
     rc_session s; rc_config cf; memset(&cf, 0, sizeof cf); cf.self_id = 1; cf.port = 1; cf.max_players = 8; cf.rate_hz = 20; cf.test_mode = 1;
@@ -317,7 +352,7 @@ static void t_fuzz(long iters){
         int kind = (int)(rnd() % 4);
         if (kind == 0){ len = (int)(rnd() % 1300); for (int i = 0; i < len; i++) b[i] = (uint8_t)rnd(); }
         else {
-            int t = (int)(rnd() % 15); len = bn[t]; memcpy(b, base[t], (size_t)len);
+            int t = (int)(rnd() % 16); len = bn[t]; memcpy(b, base[t], (size_t)len);
             int nm = 1 + (int)(rnd() % 6);
             for (int k = 0; k < nm; k++) b[rnd() % (uint32_t)len] = (uint8_t)rnd();
             if (kind == 2) len = (int)(rnd() % (uint32_t)(len + 1));
@@ -369,6 +404,7 @@ static int g_twoaddr_from = -1;             /* this node's HELLOs also arrive fr
 static int g_nox_from = -1;                 /* this node's HELLOs go out without RC_HF_STATEX (an older core) */
 static int g_nocrew_from = -1;              /* this node's HELLOs go out without RC_HF_CREW (an older core) */
 static int g_crew_to_old;                   /* HELLOs with crews sent to that node */
+static int g_crew_p2p;                      /* HELLOs with crews sent from one node to another (with a hub: none) */
 static int g_snapx_rx[NN], g_snap_rx[NN];   /* SNAPs each node was sent with and without state extensions */
 static uint32_t node_ip(int i){ return 0x7f000001u; (void)i; }
 static uint16_t node_port(int i){ return (uint16_t)(50000 + i); }
@@ -382,11 +418,13 @@ static int g_cfg_tx[NN];                    /* CFG datagrams each node sent */
 #define HUB_PORT 47210
 static int g_hub_on, g_hub_link[NN][NN], g_hub_hello[NN], g_hub_snap[NN], g_hub_snapx[NN], g_hub_bye[NN], g_hub_lobby[NN];
 static int g_hub_ncrews[NN]; static uint32_t g_hub_crews[NN][RC_CREW_MAX];   /* each node's crews, as its last HELLO to the hub had them */
+static uint16_t g_hub_flags[NN];            /* ...and its flags: with RC_HF_HUBCREW its lists end in crew marks */
 static rc_lobby g_hub_lobby_last[NN];
 static int64_t g_hub_next;
 static void hub_in(int from, const uint8_t *b, int len){
     rc_msg m; if (rc_decode(b, len, &m) != RC_OK) return;
-    if (m.h.type == RC_MSG_HELLO){ g_hub_hello[from]++; g_hub_ncrews[from] = m.u.hello.n_crews; memcpy(g_hub_crews[from], m.u.hello.crews, sizeof g_hub_crews[from]); }
+    if (m.h.type == RC_MSG_HELLO){ g_hub_hello[from]++; g_hub_flags[from] = m.h.flags;
+                                   g_hub_ncrews[from] = m.u.hello.n_crews; memcpy(g_hub_crews[from], m.u.hello.crews, sizeof g_hub_crews[from]); }
     else if (m.h.type == RC_MSG_SNAP){ g_hub_snap[from]++; if (m.h.flags & RC_HF_STATEX) g_hub_snapx[from]++; }
     else if (m.h.type == RC_MSG_BYE) g_hub_bye[from]++;
     else if (m.h.type == RC_MSG_LOBBY){ g_hub_lobby[from]++; g_hub_lobby_last[from] = m.u.lobby; }
@@ -398,6 +436,7 @@ static void net_send(void *u, uint32_t ip, uint16_t port, const uint8_t *buf, in
     if (to >= 0 && len > 15 && buf[5] == RC_MSG_SNAP){ if (buf[14] & RC_HF_STATEX) g_snapx_rx[to]++; else g_snap_rx[to]++; }
     if (to < 0 || g_drop[from][to]) return;
     if (to == g_nocrew_from && len > 15 && buf[5] == RC_MSG_HELLO){ rc_msg d; if (rc_decode(buf, len, &d) == RC_OK && d.u.hello.n_crews) g_crew_to_old++; }
+    if (len > 15 && buf[5] == RC_MSG_HELLO){ rc_msg d; if (rc_decode(buf, len, &d) == RC_OK && d.u.hello.n_crews) g_crew_p2p++; }
     if (g_loss_pct && (int)(rnd() % 100u) < g_loss_pct) return;
     for (int copy = 0; copy < 2; copy++){
         if (copy && (int)(rnd() % 100u) >= g_dup_pct) break;
@@ -454,10 +493,19 @@ static void net_run(int64_t until, int nn){
             g_hub_next = g_now + 1000000;
             for (int i = 0; i < nn && g_qn < 20000; i++){
                 rc_msg m; memset(&m, 0, sizeof m); m.h.type = RC_MSG_PEERS; m.h.sender = 0xB0B;
+                /* crew marks as the server's hub makes them: to a node that reads them and is in a crew */
+                if ((g_hub_flags[i] & RC_HF_HUBCREW) && g_hub_ncrews[i] > 0){
+                    m.h.flags = RC_HF_CREW; m.u.peers.n_mine = (uint8_t)g_hub_ncrews[i];
+                    memcpy(m.u.peers.mine, g_hub_crews[i], sizeof m.u.peers.mine);
+                }
                 for (int j = 0; j < nn; j++)
                     if (g_hub_link[i][j] && m.u.peers.n < RC_MAX_PEERS){
                         m.u.peers.e[m.u.peers.n].ip = node_ip(j); m.u.peers.e[m.u.peers.n].port = node_port(j);
-                        m.u.peers.e[m.u.peers.n].id = g_n[j].conf.self_id; m.u.peers.n++; }
+                        m.u.peers.e[m.u.peers.n].id = g_n[j].conf.self_id;
+                        for (int c = 0; m.h.flags && c < g_hub_ncrews[i]; c++)
+                            for (int d = 0; d < g_hub_ncrews[j]; d++)
+                                if (g_hub_crews[j][d] == g_hub_crews[i][c]) m.u.peers.crew[m.u.peers.n] |= (uint8_t)(1u << c);
+                        m.u.peers.n++; }
                 Pkt *p = &g_q[g_qn++];
                 p->at = g_now + g_lat_us; p->to = i; p->ip = HUB_IP; p->port = HUB_PORT; p->len = rc_encode(&m, p->b, sizeof p->b);
             }
@@ -1239,7 +1287,7 @@ static void t_statex(void){
     CHECK(ok2 && !P.ext && !P.nos && !P.hyd && !P.thumps && !P.slipx && P.slip[6] == 0 && !P.eng, "the older peer's pose has none");
 }
 
-/* ---- 4f. crews: the HELLO's tail, only to the hub and to a peer that reads them -------------- */
+/* ---- 4f. crews: the HELLO's tail to the hub, and without a hub to a peer that reads them; the hub's marks ---- */
 static void t_crews(void){
     uint8_t b[RC_MAX_DGRAM]; rc_msg m, d; memset(&m, 0, sizeof m);
     uint32_t A = rc_room_hash("Blue Room"), B = rc_room_hash("Night Owls");
@@ -1270,15 +1318,43 @@ static void t_crews(void){
     CHECK(rc_decode(lb, n, &d) == RC_E_FIELD, "a crew 0 heard is bad");
     m.h.flags = 0; CHECK(rc_encode(&m, b, sizeof b) < 0, "crews without the flag are not sent");
 
-    /* sessions: 0 in crews A and B, 1 in B, 2 an older core (its HELLO without the flag); 0 also reports to a hub */
+    /* the hub's PEERS with crew marks (RC_HF_CREW on a PEERS): the receiver's crews, then a byte per entry */
+    memset(&m, 0, sizeof m); m.h.type = RC_MSG_PEERS; m.h.sender = 0xB0B; m.h.flags = RC_HF_CREW;
+    m.u.peers.n = 3;
+    for (int k = 0; k < 3; k++){ m.u.peers.e[k].ip = 0x0A4D0010u + (uint32_t)k; m.u.peers.e[k].port = 47210; m.u.peers.e[k].id = 0x20u + (uint32_t)k; }
+    m.u.peers.n_mine = 2; m.u.peers.mine[0] = A; m.u.peers.mine[1] = B; m.u.peers.crew[0] = 2; m.u.peers.crew[1] = 0; m.u.peers.crew[2] = 3;
+    n = rc_encode(&m, b, sizeof b);
+    int pbase = 16 + 1 + 3 * 10 + 4;
+    CHECK(n == pbase + 1 + 8 + 3 && b[pbase - 4] == 2 && le32(b + pbase - 3) == A && le32(b + pbase + 1) == B && b[n - 7] == 2 && b[n - 5] == 3,
+          "PEERS: the receiver's crews and a mark an entry after the entries (%d bytes)", n);
+    CHECK(rc_decode(b, n, &d) == RC_OK && d.u.peers.n == 3 && d.u.peers.n_mine == 2 && d.u.peers.mine[0] == A && d.u.peers.mine[1] == B &&
+          d.u.peers.crew[0] == 2 && d.u.peers.crew[1] == 0 && d.u.peers.crew[2] == 3 && d.u.peers.e[2].id == 0x22u, "PEERS' crew marks round trip");
+    memcpy(lb, b, (size_t)n - 4); lb[n - 4] = 0xAA; lb[n - 3] = 0xBB; ln = n + 2; lb[6] = (uint8_t)ln; lb[7] = (uint8_t)(ln >> 8);
+    c = rc_crc32(lb, (uint32_t)ln - 4); for (int k = 0; k < 4; k++) lb[ln - 4 + k] = (uint8_t)(c >> (8 * k));
+    CHECK(rc_decode(lb, ln, &d) == RC_OK && d.u.peers.crew[2] == 3, "bytes after the marks skipped (a newer hub's)");
+    lb[15] &= (uint8_t)~(RC_HF_CREW >> 8); c = rc_crc32(lb, (uint32_t)ln - 4); for (int k = 0; k < 4; k++) lb[ln - 4 + k] = (uint8_t)(c >> (8 * k));
+    CHECK(rc_decode(lb, ln, &d) == RC_E_TRAIL, "without the flag the marks are trailing bytes: an older core gets none");
+    memcpy(lb, b, (size_t)n); lb[pbase - 4] = RC_CREW_MAX + 1; c = rc_crc32(lb, (uint32_t)n - 4); for (int k = 0; k < 4; k++) lb[n - 4 + k] = (uint8_t)(c >> (8 * k));
+    CHECK(rc_decode(lb, n, &d) == RC_E_FIELD, "more than RC_CREW_MAX crews of the receiver is bad");
+    memcpy(lb, b, (size_t)n); memset(lb + pbase + 1, 0, 4); c = rc_crc32(lb, (uint32_t)n - 4); for (int k = 0; k < 4; k++) lb[n - 4 + k] = (uint8_t)(c >> (8 * k));
+    CHECK(rc_decode(lb, n, &d) == RC_E_FIELD, "a crew 0 in the marks is bad");
+    memcpy(lb, b, (size_t)n - 5); ln = n - 1; lb[6] = (uint8_t)ln; lb[7] = (uint8_t)(ln >> 8);
+    c = rc_crc32(lb, (uint32_t)ln - 4); for (int k = 0; k < 4; k++) lb[ln - 4 + k] = (uint8_t)(c >> (8 * k));
+    CHECK(rc_decode(lb, ln, &d) == RC_E_SHORT, "marks cut short are bad");
+    m.u.peers.n_mine = 0; n = rc_encode(&m, b, sizeof b);
+    CHECK(n == pbase + 1 + 3 && rc_decode(b, n, &d) == RC_OK && d.u.peers.n_mine == 0, "the flag and no crews of the receiver: marks of nothing");
+    m.h.flags = 0; n = rc_encode(&m, b, sizeof b);
+    CHECK(n == pbase && rc_decode(b, n, &d) == RC_OK && d.u.peers.n_mine == 0 && !d.u.peers.crew[0], "without the flag: a list of before");
+
+    /* sessions without a hub (a LAN of its own): 0 in crews A and B, 1 in B, 2 an older core (its HELLO without the
+     * flag); the crews go in the HELLOs */
     mesh(3, 8);
     g_n[0].conf.crews[0] = A; g_n[0].conf.crews[1] = B; g_n[0].conf.n_crews = 2;
     g_n[1].conf.crews[0] = B; g_n[1].conf.n_crews = 1;
     g_nocrew_from = 2; g_crew_to_old = 0; memset(g_hub_ncrews, 0, sizeof g_hub_ncrews);
-    g_n[0].conf.hub_ip = HUB_IP; g_n[0].conf.hub_port = HUB_PORT;
     for (int i = 1; i < 3; i++){ rc_add_peer(&g_n[0], node_ip(i), node_port(i), 1, g_now); rc_add_peer(&g_n[i], node_ip(0), node_port(0), 1, g_now); }
     drive(3, g_now + 3000000);
-    g_nocrew_from = -1; g_n[0].conf.hub_ip = 0;
+    g_nocrew_from = -1;
     int p1 = peer_of(0, 0x501), p2 = peer_of(0, 0x502), k0 = peer_of(1, 0x500), j0 = peer_of(2, 0x500);
     CHECK(est(0) == 2 && est(1) >= 1 && est(2) >= 1, "crews or none, everyone sees everyone (%d %d %d)", est(0), est(1), est(2));
     CHECK(p1 >= 0 && rc_peer_crew(&g_n[0], p1) == 1 && k0 >= 0 && rc_peer_crew(&g_n[1], k0) == 0,
@@ -1286,11 +1362,9 @@ static void t_crews(void){
     CHECK(p2 >= 0 && rc_peer_crew(&g_n[0], p2) < 0 && !g_n[0].peer[p2].reads_crews && j0 >= 0 && rc_peer_crew(&g_n[2], j0) < 0,
           "the older core is in no crew");
     CHECK(!g_crew_to_old && !g_n[2].rx_bad, "no crews to the older core (%d HELLOs, %u bad)", g_crew_to_old, g_n[2].rx_bad);
-    CHECK(g_hub_ncrews[0] == 2 && g_hub_crews[0][0] == A && g_hub_crews[0][1] == B, "the hub gets the crews (%d)", g_hub_ncrews[0]);
 
     /* crews changed while the sessions run (the page's menu): the others hear them within a tick or two */
     uint32_t none[1] = { 0 }, two[3] = { B, 0, A };
-    g_n[0].conf.hub_ip = HUB_IP; g_n[0].conf.hub_port = HUB_PORT;
     rc_set_crews(&g_n[1], none, 1);
     drive(3, g_now + 100000);
     CHECK(rc_peer_crew(&g_n[0], p1) < 0 && g_n[1].conf.n_crews == 0, "node 1 left its crews: no longer in node 0's (%d)", rc_peer_crew(&g_n[0], p1));
@@ -1301,8 +1375,42 @@ static void t_crews(void){
     CHECK(g_n[1].conf.n_crews == 2 && g_n[1].conf.crews[0] == B && g_n[1].conf.crews[1] == A, "0s left out (%d crews)", g_n[1].conf.n_crews);
     CHECK(rc_peer_crew(&g_n[0], p1) == 0 && rc_peer_crew(&g_n[1], k0) == 1, "...and joined again, as each one's crews number them now (%d, %d)",
           rc_peer_crew(&g_n[0], p1), rc_peer_crew(&g_n[1], k0));
-    CHECK(g_hub_ncrews[0] == 1 && g_hub_crews[0][0] == A, "the hub hears the change at once (%d crews, within %lld us)", g_hub_ncrews[0], (long long)(g_now - t0));
-    g_n[0].conf.hub_ip = 0;
+    (void)t0;
+
+    /* with the server's hub: 0 in A and B, 1 in B, 2 in none.  The crews go to the hub only, never from one node
+     * to another, and each node learns from the hub's marks which of its peers share one of its crews */
+    mesh(3, 8);
+    g_n[0].conf.crews[0] = A; g_n[0].conf.crews[1] = B; g_n[0].conf.n_crews = 2;
+    g_n[1].conf.crews[0] = B; g_n[1].conf.n_crews = 1;
+    g_hub_on = 1; g_hub_next = 0; memset(g_hub_link, 0, sizeof g_hub_link);
+    memset(g_hub_ncrews, 0, sizeof g_hub_ncrews); memset(g_hub_flags, 0, sizeof g_hub_flags);
+    for (int i = 0; i < 3; i++){ g_n[i].conf.hub_ip = HUB_IP; g_n[i].conf.hub_port = HUB_PORT; }
+    hub_links(0, 1); hub_links(0, 2); hub_links(1, 2);
+    g_crew_p2p = 0;
+    drive(3, g_now + 4000000);
+    p1 = peer_of(0, 0x501); p2 = peer_of(0, 0x502); k0 = peer_of(1, 0x500); j0 = peer_of(2, 0x500);
+    int k2 = peer_of(1, 0x502);
+    CHECK(est(0) == 2 && est(1) == 2 && est(2) == 2, "hub: everyone it lists established (%d %d %d)", est(0), est(1), est(2));
+    CHECK((g_hub_flags[0] & RC_HF_HUBCREW) && g_hub_ncrews[0] == 2 && g_hub_crews[0][1] == B && g_hub_ncrews[1] == 1 && g_hub_ncrews[2] == 0,
+          "hub: it gets each one's crews, and that it reads the marks");
+    CHECK(!g_crew_p2p, "hub: no HELLO from one node to another names a crew (%d)", g_crew_p2p);
+    CHECK(p1 >= 0 && k0 >= 0 && !g_n[0].peer[p1].n_crews && !g_n[1].peer[k0].n_crews, "hub: no node knows another's crews");
+    CHECK(rc_peer_crew(&g_n[0], p1) == 1 && rc_peer_crew(&g_n[1], k0) == 0, "hub: the shared crew from its marks, as each one's crews number it (%d, %d)",
+          rc_peer_crew(&g_n[0], p1), rc_peer_crew(&g_n[1], k0));
+    CHECK(p2 >= 0 && rc_peer_crew(&g_n[0], p2) < 0 && k2 >= 0 && rc_peer_crew(&g_n[1], k2) < 0 && j0 >= 0 && rc_peer_crew(&g_n[2], j0) < 0,
+          "hub: a node in no crew is in none of theirs, and sees none");
+    /* node 1 leaves its crew, then joins A and B again in the other order: the hub's next list (1 s) says so */
+    rc_set_crews(&g_n[1], none, 1);
+    drive(3, g_now + 1500000);
+    CHECK(rc_peer_crew(&g_n[0], p1) < 0 && rc_peer_crew(&g_n[1], k0) < 0, "hub: node 1 left: no longer in node 0's crews (%d)", rc_peer_crew(&g_n[0], p1));
+    uint32_t ba[2] = { B, A };
+    rc_set_crews(&g_n[1], ba, 2);
+    drive(3, g_now + 1500000);
+    CHECK(rc_peer_crew(&g_n[0], p1) == 0 && rc_peer_crew(&g_n[1], k0) == 0, "hub: joined again: in A, node 0's first, and in B, node 1's first (%d, %d)",
+          rc_peer_crew(&g_n[0], p1), rc_peer_crew(&g_n[1], k0));
+    CHECK(!g_crew_p2p, "hub: still no crews between the nodes (%d)", g_crew_p2p);
+    g_hub_on = 0; for (int i = 0; i < 3; i++) g_n[i].conf.hub_ip = 0;
+    memset(g_hub_ncrews, 0, sizeof g_hub_ncrews); memset(g_hub_flags, 0, sizeof g_hub_flags);
 }
 
 /* ---- 4e. race lobbies: LOBBY only to a peer that takes them, only for us; the hub's LOBBIES -- */

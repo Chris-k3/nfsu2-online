@@ -1,22 +1,24 @@
 //! The online races' results per persona: the one thing the online host keeps on disk
 //! (<state>/online/stats.json).  What is in it is public in the game anyway (the rankings and every player's online
 //! career): a persona name, its races, wins and losses per race type, ranked and unranked, rating points, best times
-//! per track, the month they were last seen.  Nothing about who plays a persona: no account name, address, password
-//! or adapter id.
+//! per track, its records (top speed, longest jump ...), the month they were last seen.  Nothing about who plays a
+//! persona: no account name, address, password or adapter id.
 //!
 //! A race counts once: the first result report (rank, RESU) from one of its players that passes the checks in
 //! lobby.rs; the others' reports are only compared with it.  Rating points per race: (players - place) * 100 /
 //! (players - 1), so the winner gets 100 and the last 0, ranked races only.  Every count is kept twice: overall and
-//! for the current month (the month's counts start again when it changes, as the game's monthly rankings did).
-//! Personas not seen for `prune_months` months are forgotten; with MAX_PERSONAS of them, the least recently seen goes
-//! for a new one (the Online audit's ONL-7: a full store refused every new player), and a persona keeps its best
-//! times on MAX_BEST tracks.  The rankings are built at most every `board_ms` (the game asks for them often:
-//! building one of 100,000 records took 18 ms), and names are found by their beginning in a sorted list (EA
+//! for the current month (the month's counts start again when it changes, as the game's monthly rankings did).  A
+//! persona's records come from its own entry in its own reports (`add_records`: what another player's game saw of it
+//! is a guess).  Personas not seen for `prune_months` months are forgotten; with MAX_PERSONAS of them, the least
+//! recently seen goes for a new one (the Online audit's ONL-7: a full store refused every new player), and a persona
+//! keeps its best times on MAX_BEST tracks.  The rankings are built at most every `board_ms` (the game asks for them
+//! often: building one of 100,000 records took 18 ms), and names are found by their beginning in a sorted list (EA
 //! Messenger's search).
 //!
 //! Written atomically (a temporary file, then rename), at most every `save_ms` and when the server stops, byte for
-//! byte as the Node server it replaced wrote it (the file that one left is read as it is).  A file that does not
-//! parse is kept aside (stats.json.bad-<time>) and the server starts with no results.
+//! byte as the Node server it replaced wrote it, but for a persona's records ("rec", only once it has one; the file
+//! that server left is read as it is).  A file that does not parse is kept aside (stats.json.bad-<time>) and the
+//! server starts with no results.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -37,6 +39,9 @@ use crate::{Clocks, LogFn, files};
 pub const RACE_TYPES: [&str; 6] = ["circuit", "sprint", "drag", "drift", "streetx", "url"];
 const MAX_PERSONAS: usize = 100_000;
 const MAX_BEST: usize = 300;
+/// the largest figure a record takes (a report's figure past it is no car's): top speed in m/s (540 km/h), drift
+/// points, powerslide in m, jump in s
+const RECORD_MAX: [f64; 4] = [150.0, 100_000_000.0, 10_000.0, 60.0];
 
 /// one race type's counts (f64: a hand-edited file's numbers are kept, fractions too, from 0 to 2^31)
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -53,8 +58,20 @@ pub struct Counts {
 /// the counts by race type (in the file an object of the types raced, `{ "0": {...}, "3": {...} }`, in key order)
 pub type Table = [Option<Counts>; 6];
 
+/// a persona's records, as its Personal Stats screen shows them (0: none yet): top speed (m/s), biggest drift points,
+/// longest powerslide (m), longest jump (s), quickest drag finished (s).  Overall only: the screens read STAT, not the
+/// month's LMSTAT (SPEED2.EXE 0x4d3490, 0x4be680).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Records {
+    pub top: f64,
+    pub drift: f64,
+    pub slide: f64,
+    pub jump: f64,
+    pub drag: f64,
+}
+
 /// a persona's record: its name, the month it was last seen, its counts overall (all) and for the month, its best
-/// times ("type:track" -> seconds)
+/// times ("type:track" -> seconds), its records
 #[derive(Clone, Debug)]
 pub struct Record {
     pub name: String,
@@ -63,6 +80,7 @@ pub struct Record {
     pub month_key: String,
     pub month: Table,
     pub best: IndexMap<String, f64>,
+    pub records: Records,
 }
 
 /// a player of a race: place 1..n, 0 = did not finish; time in seconds
@@ -233,6 +251,7 @@ impl Stats {
                 month_key: m,
                 month: Default::default(),
                 best: IndexMap::new(),
+                records: Records::default(),
             };
             self.p.insert(k.clone(), r);
             if let Some(s) = &mut self.sorted {
@@ -297,19 +316,48 @@ impl Stats {
         self.touch();
     }
 
+    /// A player's own entry in its race report (lobby.rs: one taken report per player, the player finished): each
+    /// figure that beats the persona's record becomes it.  A figure no car makes (`RECORD_MAX`: a top speed over
+    /// 540 km/h ...) is not taken; quickest drag is a drag race's time (`check_result` checked it).
+    pub fn add_records(&mut self, name: &str, kind: u32, p: &ReportPlayer) {
+        let fits = |x: f64, max: f64| x.is_finite() && x > 0.0 && x <= max;
+        let x = [p.top, p.drift_best as f64, p.slide, p.jump];
+        let drag = (RACE_TYPES.get(kind as usize) == Some(&"drag") && fits(p.time, f64::MAX)).then_some(p.time);
+        // (nothing to keep: no record made for it)
+        if drag.is_none() && !x.iter().zip(RECORD_MAX).any(|(x, max)| fits(*x, max)) {
+            return;
+        }
+        let Some(r) = self.rec(name, true) else { return };
+        let old = r.records;
+        let rec = &mut r.records;
+        for ((x, max), kept) in x.into_iter().zip(RECORD_MAX).zip([&mut rec.top, &mut rec.drift, &mut rec.slide, &mut rec.jump]) {
+            if fits(x, max) && x > *kept {
+                *kept = jsx::round(x * 1000.0) / 1000.0;
+            }
+        }
+        if let Some(t) = drag
+            && (rec.drag == 0.0 || t < rec.drag)
+        {
+            rec.drag = jsx::round(t * 1000.0) / 1000.0;
+        }
+        if r.records != old {
+            self.touch();
+        }
+    }
+
     /// The 38 numbers of the game's STAT field (hex, each followed by a comma), as its Personal Stats screen reads
-    /// them (found by sending distinct values): [0] not shown, [1] client disconnects, [2] host disconnects (both
-    /// shown as a share of the games), [3] top speed (mm/s), [4] biggest drift points, [5] longest powerslide (mm),
-    /// [6] longest jump (ms), [7] quickest drag (ms); then per race type rating, ranked wins, ranked losses, unranked
-    /// wins, unranked losses (Games, Wins and Losses on the screen are their sums).  The race reports' own figures
-    /// (speeds, jumps) are not read yet: [3]..[7] stay 0.
+    /// them (found by sending distinct values; SPEED2.EXE 0x4d3490 and its rows' units): [0] not shown, [1] client
+    /// disconnects, [2] host disconnects (both shown as a share of the games), [3] top speed (mm/s), [4] biggest drift
+    /// points, [5] longest powerslide (mm), [6] longest jump (ms), [7] quickest drag (ms) (the records: STAT only);
+    /// then per race type rating, ranked wins, ranked losses, unranked wins, unranked losses (Games, Wins and Losses
+    /// on the screen are their sums).
     pub fn stat_field(&mut self, name: Option<&str>, monthly: bool) -> String {
-        let table: Table = match name.filter(|n| !n.is_empty()).and_then(|n| self.rec(n, false)) {
+        let (table, rec): (Table, Records) = match name.filter(|n| !n.is_empty()).and_then(|n| self.rec(n, false)) {
             Some(r) => {
                 if monthly {
-                    r.month
+                    (r.month, Records::default())
                 } else {
-                    r.all
+                    (r.all, r.records)
                 }
             }
             None => Default::default(),
@@ -318,7 +366,8 @@ impl Stats {
         for c in table.iter().flatten() {
             dc += c.dc;
         }
-        let mut v = vec![0.0, dc, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let milli = |x: f64| jsx::round(x * 1000.0);
+        let mut v = vec![0.0, dc, 0.0, milli(rec.top), rec.drift, milli(rec.slide), milli(rec.jump), milli(rec.drag)];
         for c in &table {
             let c = c.unwrap_or_default();
             v.extend([c.points, c.rw, c.rl, c.uw, c.ul]);
@@ -459,7 +508,24 @@ impl Stats {
                 s.push(':');
                 s.push_str(&num(*v));
             }
-            s.push_str("}}");
+            s.push('}');
+            // (a persona with none: as the Node server wrote it)
+            if r.records != Records::default() {
+                s.push_str(",\"rec\":{");
+                let mut first = true;
+                for (k, v) in rec_fields(&r.records) {
+                    if v == 0.0 {
+                        continue;
+                    }
+                    if !first {
+                        s.push(',');
+                    }
+                    first = false;
+                    s.push_str(&format!("\"{k}\":{}", num(v)));
+                }
+                s.push('}');
+            }
+            s.push('}');
         }
         s.push_str("]}");
         s
@@ -599,7 +665,27 @@ fn clean(r: &Value, name: &str) -> Record {
     let key = month_str(month.and_then(|m| if m.is_object() { m.get("key") } else { None })).unwrap_or_else(|| seen.clone());
     let mt = month.and_then(|m| if m.is_object() { m.get("t") } else { None });
     let all = counts(r.get("all").filter(|_| r.is_object()));
-    Record { name: name.to_string(), seen, all, month_key: key, month: counts(mt), best }
+    let mut rec = Records::default();
+    if let Some(Value::Object(o)) = r.get("rec") {
+        let take = |k: &str, max: f64| match o.get(k).and_then(Value::as_f64) {
+            Some(x) if x.is_finite() && x > 0.0 && x <= max => x,
+            _ => 0.0,
+        };
+        let [top, drift, slide, jump] = RECORD_MAX;
+        rec = Records {
+            top: take("top", top),
+            drift: take("drift", drift),
+            slide: take("slide", slide),
+            jump: take("jump", jump),
+            drag: take("drag", 1e9),
+        };
+    }
+    Record { name: name.to_string(), seen, all, month_key: key, month: counts(mt), best, records: rec }
+}
+
+/// a record's figures by their names in the file
+fn rec_fields(r: &Records) -> [(&'static str, f64); 5] {
+    [("top", r.top), ("drift", r.drift), ("slide", r.slide), ("jump", r.jump), ("drag", r.drag)]
 }
 
 /// a player's rating points for one race of `n` players (place 1..n, 0 = did not finish): (n - place) * 100 / (n - 1),
@@ -612,11 +698,16 @@ pub fn race_points(ranked: bool, n: usize, place: u32) -> f64 {
 ///   [0] version 3, [1] players, [2] race type, [3] the reporter's index, [4..5] track (big-endian), [6] direction,
 ///   [7] laps; then per player 55 bytes: [0] index into the report's NAME list, [1] place, [2] 0x01 finished / 0x0c
 ///   dropped out, [3] the car, [8..11] the total time in seconds (float, big-endian; a dropped player's: until it
-///   left), [12..15] the best lap, more floats (speeds and other figures, not read), [32..35] -1.0 for a dropped
-///   player (the research says [44..47]: both are taken), [44..47] the drift score (an integer, big-endian: the
-///   racer's points after its last lap, what the game's own results show for drift; SPEED2.EXE 0x5fec5d), [53] a bit
-///   mask, each set bit adding 2 bytes after the record (one byte here: UNVERIFIED)
-/// (from the reports of real races here and the research's notes; the fields not used are UNVERIFIED).
+///   left), [12..15] the best lap, [16..19] average speed, [20..23] top speed (m/s), [24..27] 0-60 time,
+///   [28..31] quarter mile time (s), [32..35] quarter mile speed (m/s; -1.0 for a dropped player, the research says
+///   [44..47]: both are taken), [36..39] longest jump (s: the longest run of the car's drift-score style 35, more than
+///   0.75 m off the ground, SPEED2.EXE 0x56f0b1, kept by 0x56d500), [40..43] longest powerslide (m: style 34's
+///   longest run of the car's distance, 0x56f5fb), [44..47] the drift score (an integer: the racer's points after its
+///   last lap, what the game's own results show for drift; 0x5fec5d), [48..51] the biggest single drift's points (an
+///   integer, the drift style's best), [53] a bit mask, each set bit adding 2 bytes after the record (one byte
+///   here: UNVERIFIED)
+/// (from the builder, 0x5fe8d0, and the reports of real races here; the fields not used are UNVERIFIED).  A player's
+/// figures are measured by the reporter's game: its own are what it raced, the others' what it saw of them.
 #[derive(Clone, Debug)]
 #[allow(dead_code)] // decoded whole (the report as the game wrote it), read in part
 pub struct RaceReport {
@@ -637,6 +728,12 @@ pub struct ReportPlayer {
     pub time: f64,
     pub score: i32,
     pub dropped: bool,
+    pub top: f64,
+    /// its average speed (m/s): times its time, the way it drove
+    pub avg: f64,
+    pub jump: f64,
+    pub slide: f64,
+    pub drift_best: i32,
 }
 
 /// a race report from its base64 (rank RESU): None for anything that does not parse
@@ -650,6 +747,8 @@ pub fn decode_result(b64: &str) -> Option<RaceReport> {
         return None;
     }
     let f32_at = |o: usize| f32::from_be_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]) as f64;
+    let i32_at = |o: usize| i32::from_be_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]);
+    let finite = |x: f64| if x.is_finite() { x } else { 0.0 };
     let mut players = Vec::with_capacity(n);
     let mut o = 8;
     for _ in 0..n {
@@ -665,9 +764,14 @@ pub fn decode_result(b64: &str) -> Option<RaceReport> {
             index: b[o],
             place: b[o + 1],
             car: b[o + 3],
-            time: if time.is_finite() { time } else { 0.0 },
-            score: i32::from_be_bytes([b[o + 44], b[o + 45], b[o + 46], b[o + 47]]),
+            time: finite(time),
+            score: i32_at(o + 44),
             dropped,
+            top: finite(f32_at(o + 20)),
+            avg: finite(f32_at(o + 16)),
+            jump: finite(f32_at(o + 36)),
+            slide: finite(f32_at(o + 40)),
+            drift_best: i32_at(o + 48),
         });
         o += 55 + extra;
     }
@@ -840,6 +944,9 @@ pub(crate) mod tests {
         let p: Vec<(u8, u8, f64, bool)> =
             r.players.iter().map(|p| (p.index, p.place, (p.time * 100.0).round() / 100.0, p.dropped)).collect();
         assert_eq!(p, [(1, 1, 186.82, false), (0, 2, 187.67, false)]);
+        let tops: Vec<f64> = r.players.iter().map(|p| (p.top * 1000.0).round() / 1000.0).collect();
+        assert_eq!(tops, [42.126, 42.212], "top speeds in m/s (152 km/h)");
+        assert!(r.players.iter().all(|p| p.jump == 0.0 && p.slide == 0.0 && p.drift_best == 0), "no jump, slide or drift");
         assert!(decode_result("not base64 at all!").is_none());
         let b64 = |b: &[u8]| {
             use base64::Engine;
@@ -865,6 +972,61 @@ pub(crate) mod tests {
         dropped[63 + 44..63 + 48].copy_from_slice(&(-1f32).to_be_bytes());
         let d: Vec<bool> = decode_result(&b64(&dropped)).unwrap().players.iter().map(|p| p.dropped).collect();
         assert_eq!(d, [false, true]);
+        // the records' figures: jump [36..39], powerslide [40..43] (floats), biggest drift [48..51] (an integer)
+        dropped[8 + 36..8 + 40].copy_from_slice(&1.5f32.to_be_bytes());
+        dropped[8 + 40..8 + 44].copy_from_slice(&20.25f32.to_be_bytes());
+        dropped[8 + 48..8 + 52].copy_from_slice(&70_000i32.to_be_bytes());
+        let p = &decode_result(&b64(&dropped)).unwrap().players[0];
+        assert_eq!((p.jump, p.slide, p.drift_best), (1.5, 20.25, 70_000));
+    }
+
+    // records: a player's own figures, the best kept (a figure no car makes is not), quickest drag from drag races
+    // only, in STAT [3]..[7] (none in the month's LMSTAT), saved and read back
+    #[test]
+    fn records() {
+        let dir = tempfile::tempdir().unwrap();
+        let t = Rc::new(Cell::new(T0));
+        let opts = || StatsOptions::new(Some(dir.path().to_path_buf()), clocks(t.clone()), quiet());
+        let mut st = Stats::new(opts());
+        let me = |time, top, jump, slide, drift_best| ReportPlayer {
+            index: 0,
+            place: 1,
+            car: 0,
+            time,
+            score: 0,
+            dropped: false,
+            top,
+            avg: 0.0,
+            jump,
+            slide,
+            drift_best,
+        };
+        st.add_records("Alpha", 0, &me(100.0, 0.0, 0.0, 0.0, 0));
+        assert!(st.rec("Alpha", false).is_none(), "nothing to keep: no record made");
+        st.add_records("Alpha", 0, &me(100.0, 42.1257, 1.5, 12.25, 5300));
+        st.add_records("Alpha", 0, &me(100.0, 40.0, 2.25, 0.0, 9000));
+        st.add_records("Alpha", 0, &me(100.0, 900.0, 0.0, f64::NAN, -5));
+        st.add_records("Alpha", 0, &me(11.0, 0.0, 0.0, 0.0, 0));
+        for time in [12.75, 11.5, 13.0] {
+            st.add_records("Alpha", 2, &me(time, 0.0, 0.0, 0.0, 0));
+        }
+        let want = Records { top: 42.126, drift: 9000.0, slide: 12.25, jump: 2.25, drag: 11.5 };
+        assert_eq!(st.rec("Alpha", false).unwrap().records, want);
+        assert_eq!(hexes(&st.stat_field(Some("Alpha"), false))[0..8], [0, 0, 0, 42126, 9000, 12250, 2250, 11500]);
+        assert_eq!(hexes(&st.stat_field(Some("Alpha"), true))[0..8], [0; 8], "the month's: none");
+        st.stop();
+        let text = std::fs::read_to_string(dir.path().join("stats.json")).unwrap();
+        assert!(text.contains(r#""best":{},"rec":{"top":42.126,"drift":9000,"slide":12.25,"jump":2.25,"drag":11.5}}"#), "{text}");
+        let mut b = Stats::new(opts());
+        assert_eq!(b.rec("Alpha", false).unwrap().records, want);
+        // a hand-edited file: a figure no car makes, or no number, is none
+        std::fs::write(
+            dir.path().join("stats.json"),
+            r#"{"personas":[{"name":"Okay","seen":"2026-10","all":{},"rec":{"top":1e9,"jump":"x","slide":-3,"drag":12}}]}"#,
+        )
+        .unwrap();
+        let mut c = Stats::new(opts());
+        assert_eq!(c.rec("Okay", false).unwrap().records, Records { drag: 12.0, ..Default::default() });
     }
 
     // ONL-7: the results store: room for new players when full, ... best times capped (the store's parts; the

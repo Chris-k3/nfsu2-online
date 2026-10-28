@@ -9,9 +9,11 @@ publish.workspace = true
 [dependencies]
 nfsu2-util.workspace = true
 nfsu2-names.workspace = true
+nfsu2-claims.workspace = true
 tokio.workspace = true
 bytes.workspace = true
 parking_lot.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 indexmap.workspace = true
 sha2.workspace = true

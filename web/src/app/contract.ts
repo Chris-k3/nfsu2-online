@@ -68,6 +68,8 @@ export interface NetOptions extends CommonOptions {
   queue?: (q: NetQueue | null) => void;
   /** this browser's own id (page-id.ts): the operator's bans name a page by it */
   id?: string;
+  /** the token of the keyphrase this page plays with (claim.ts): whose claimed names it may play under */
+  claim?: string;
   /** free roam: the names of the players this one blocks: the server's hub links none of them with it */
   block?: string[];
   /** the operator removed this player from playing with others (a kick or a ban) */
@@ -90,6 +92,9 @@ export interface RendererSubsystem extends Subsystem {
   dump?(name: string): Promise<Blob>;
   /** each frame's time from its submit until the GPU had done it, ms, since the last call (rendercheck.ts) */
   doneMs?(): number[];
+  /** the game's textures on the GPU now, bytes, those unpacked from DXT and those DXT1 as ASTC (the log's copy,
+   *  lastgame.ts) */
+  textures?(): { bytes: number; unpacked: number; astc: number };
 }
 
 export interface AudioSubsystem extends Subsystem {
@@ -106,6 +111,12 @@ export interface InputSubsystem extends Subsystem {
   /** Download log: the game's line on its last frame (and stall report), then "[watchdog] log download ready".
    *  false: it cannot reach the game */
   logReport?(): boolean;
+  /** a text message of ours for the game's phone (runtime/sms.c), by its number; false: it cannot reach the game */
+  sms?(id: number): boolean;
+  /** photo mode (runtime/photo.c, photo.ts): what (its PH_* number) and its values; false: it cannot reach the game */
+  photo?(what: number, a?: number, b?: number): boolean;
+  /** every key and button the game holds goes up (photo mode takes the keys) */
+  releaseAll?(): void;
   /** performance.now() of the player's last key, mouse or controller input; null: the page cannot tell
    *  (the game's own driver plays an input script) */
   lastInput?(): number | null;
@@ -115,6 +126,8 @@ export interface InputSubsystem extends Subsystem {
   touchPad?(t: TouchPad | null): void;
   /** the touch controls' level horizon: the phone's tilt the game's 3D view turns against, radians, + = clockwise */
   viewRoll?(rad: number): void;
+  /** the menus' help bar buttons' size, 1 = the game's own (touch.ts: the Menu button size) */
+  menuScale?(s: number): void;
   /** performance.now() of a real controller's last button press (0: none) */
   padPressed?(): number;
   /** the game's text entry while it is up (a new profile's name, the LAN name), else null */

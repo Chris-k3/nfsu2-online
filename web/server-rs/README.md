@@ -3,9 +3,11 @@
 The game's server, in Rust: it serves the page, the game module and the game's own files, and connects the players
 (the virtual LAN switch, the free-roam hub and the game's Online mode).  Its options are in `src/options.rs`, and the
 crates' docs say why each rule is what it is, with the audits they name.  The state folder keeps `etag.key`,
-`lan-addresses.json`, `online/stats.json`, `online/buddies.json`, `vault/` and the operator's bans (`bans.json`,
-`bans.key`: nfsu2-bans), and has the control socket, `control.sock`, which `nfsu2-server ctl` talks to (who is on,
-kick, ban: src/app/control.rs, docs/web/VPS.md "Kick and ban").
+`lan-addresses.json`, `online/stats.json`, `online/buddies.json`, `online/races.json` (the races going on, from a stop
+to the next start), `vault/`, the claimed names (`names.json`: nfsu2-claims) and the operator's bans (`bans.json`,
+`bans.key`: nfsu2-bans), and has the control
+socket, `control.sock`, which `nfsu2-server ctl` talks to (who is on, kick, ban: src/app/control.rs, docs/web/VPS.md
+"Kick and ban").
 
 It replaced the Node.js server (`web/server/*.mjs`, removed after 6076514) with the same options and environment
 (`NFSU2_*`), the same console lines and the same state files, byte for byte, so a VPS switched with one line
@@ -31,7 +33,7 @@ ports; give each its own `--state`.  Knobs for measurements, from the environmen
 | `NFSU2_BUNDLE_JITTER` | each tick is the tick give or take this many percent of it, at random (default 40; nfsu2-lan conn.rs `Clock` says why) |
 | `NFSU2_BUNDLE_MAX_MS`, `NFSU2_BUNDLE_BUDGET` | longer than `NFSU2_BUNDLE_MS`: the tick follows the crowd up to it, aiming at the budget's bundles a second in all (125,000) |
 | `NFSU2_LAN_SNDBUF` | SO_SNDBUF of /lan connections (default 32 KiB, which Linux doubles; 0: the kernel's own, which grows to 4 MB) |
-| `NFSU2_COMPRESS_THREADS` | the threads that compress the game data's blocks once at brotli's best into the state folder's `blocks/` (src/app/kept.rs; default 2, at the lowest priority; 0: none, every block compressed as it is sent) |
+| `NFSU2_COMPRESS_THREADS` | the threads that compress the game data's blocks once at brotli's best into the state folder's `blocks/` (src/app/kept.rs; default 2, at the lowest priority, waiting while the CPU quota the server shares is 70 % used; 0: none, every block compressed as it is sent) |
 | `NFSU2_REPO` | where the defaults are (web/dist, out/web/nfsu2.wasm, the state in out/web/server): the repo it was built from |
 
 ## The container image
@@ -205,6 +207,7 @@ behind, the switch dropped their snapshots; the server stayed at 1.5 cores): 400
 | nfsu2-roam | the free-roam hub |
 | nfsu2-online | the game's Online mode |
 | nfsu2-vault | keyphrase saves (`/vault`): each player's saves as the page sealed them, one file per keyphrase, the copy of an earlier day, the caps, the sweep of the unused |
+| nfsu2-claims | claimed names (`/names`): which keyphrase may play under a name, for 180 days after it last played; one name a keyphrase, a change a week; read by the Online lobby, EA Messenger and the free-roam hub |
 | nfsu2-server (src/) | the routes, the rules, the wiring, the start-up |
 | nfsu2-roamload | thousands of simulated players: driving or idle, in line, leaving and coming back (as web/tools/roam-crowd.mjs, lighter) |
 

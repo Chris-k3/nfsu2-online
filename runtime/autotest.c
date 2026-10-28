@@ -62,6 +62,8 @@
  *     wzero [now]              world-time origin for absolute Nwms lines: the
  *                              start of the current race (GameFlow 6) when
  *                              racing, else (or with "now") the current time
+ *     photo WHAT [ARGS]        photo mode as the page drives it (photo.c
+ *                              photo_script: on, off, orbit, free, turn X Y ...)
  *     headlights MODE          the other cars' headlights (headlights.c): its
  *                              NFSU2_HEADLIGHTS modes, for an A/B in one run
  *     displayhz HZ             act as if the window moved to a screen with
@@ -116,6 +118,8 @@
  *     blur MS                  app deactivation for MS ms, then reactivation
  *                              (the game freezes meanwhile, see lifecycle.c)
  *     audioreset               handle a default output device change now
+ *     audiostall MS            test-only, browser: the audio pump mixes nothing
+ *                              for MS ms, so the worklet underruns
  *   real-keyboard path (runtime/keyboard_mac.m): NSEvents are made and posted
  *   into AppKit's event queue on the main thread, so they go through the
  *   same handler as keys typed on a real keyboard (Win32 messages, DIK
@@ -225,12 +229,12 @@ static void key_event(unsigned dik, int down){
 
 /* ---- script ----------------------------------------------------------- */
 enum { C_DOWN, C_UP, C_TAP, C_TYPE, C_DUMP, C_WAITMEM, C_LOG, C_QUIT, C_PEEK, C_POKE, C_WAITFNG, C_TAPUNTIL,
-       C_CLOSE, C_BLUR, C_AUDIORESET, C_WZERO, C_DISPLAYHZ, C_TEXREP, C_HEADLIGHTS,
+       C_CLOSE, C_BLUR, C_AUDIORESET, C_AUDIOSTALL, C_WZERO, C_DISPLAYHZ, C_TEXREP, C_HEADLIGHTS,
        C_PAD, C_TAPPAD, C_AXIS, C_TAPPADUNTIL,
        C_NSDOWN, C_NSUP, C_NSTAP, C_NSREPEAT, C_NSTYPE, C_NSFOCUS, C_NSMOUSE, C_NSTAPUNTIL,
        C_LOOP, C_ENDLOOP, C_STATUS, C_STALL, C_CAREER,
        C_COVRESET, C_COVDUMP, C_TRACE, C_UNTRACE, C_EXPECT, C_WAITEXPR, C_MARK, C_EDGE, C_ROAM,
-       C_SRVCYCLE, C_CLICK };
+       C_SRVCYCLE, C_CLICK, C_PHOTO };
 /* roam.c: free-roam multiplayer research probes ("roam <sub> ...") */
 int roam_cmd(CPU *c, const char *line, long *wait_start);
 #define PAD_PLUG 0xFFFFu           /* C_PAD: "pad connect|disconnect" */
@@ -350,6 +354,7 @@ static void load_script(const char *path){
         else if (!strcasecmp(cmd, "close")) e.cmd = C_CLOSE;
         else if (!strcasecmp(cmd, "blur")) { e.cmd = C_BLUR; e.n = a1[0] ? atol(a1) : 3000; }
         else if (!strcasecmp(cmd, "audioreset")) e.cmd = C_AUDIORESET;
+        else if (!strcasecmp(cmd, "audiostall")) { e.cmd = C_AUDIOSTALL; e.n = a1[0] ? atol(a1) : 200; }
         else if (!strcasecmp(cmd, "wzero")){ e.cmd = C_WZERO; e.n = !strcasecmp(a1, "now"); }
         else if (!strcasecmp(cmd, "displayhz")) { e.cmd = C_DISPLAYHZ; e.n = atol(a1); }
         else if (!strcasecmp(cmd, "trace")) { e.cmd = C_TRACE; e.n = atol(a1);
@@ -374,6 +379,7 @@ static void load_script(const char *path){
         else if (!strcasecmp(cmd, "srvcycle")) { e.cmd = C_SRVCYCLE; e.n = a1[0] ? atol(a1) : 1; e.val = a2[0] ? (uint32_t)atol(a2) : 0u; }
         else if (!strcasecmp(cmd, "texrep")) { e.cmd = C_TEXREP; e.n = !strcasecmp(a1, "off") ? 0 : !strcasecmp(a1, "on") ? 1 : -1; }
         else if (!strcasecmp(cmd, "headlights")) { e.cmd = C_HEADLIGHTS; snprintf(e.text, sizeof e.text, "%s", a1); }
+        else if (!strcasecmp(cmd, "photo")) { e.cmd = C_PHOTO; snprintf(e.text, sizeof e.text, "%s", rest); }
         else if (!strcasecmp(cmd, "waitfng")){ e.cmd = C_WAITFNG;
             snprintf(e.text, sizeof e.text, "%s", a1); e.n = a2[0] ? atol(a2) : 0; }
         else if (!strcasecmp(cmd, "tapuntil")){ e.cmd = C_TAPUNTIL;
@@ -698,12 +704,24 @@ static int fire(CPU *c, Ev *e, double tms){
         fprintf(stderr, "[autotest] f=%ld blur %ld ms\n", g_frame, e->n); lifecycle_simulate_blur(e->n); break; }
     case C_AUDIORESET: { void audio_device_changed(const char *);
         audio_device_changed("autotest audioreset"); break; }
+    case C_AUDIOSTALL:
+#ifdef __wasm__
+        { void audio_test_stall(int); fprintf(stderr, "[autotest] f=%ld audiostall %ld ms (test-only)\n", g_frame, e->n);
+          audio_test_stall((int)e->n); }
+#else
+        fprintf(stderr, "[autotest] f=%ld audiostall: the browser's audio pump only\n", g_frame);
+#endif
+        break;
     case C_WZERO: {
         double hfr_race_start_ms(void);
         double rs = hfr_race_start_ms();
         g_wzero = (!e->n && rs >= 0) ? rs : hfr_sim_ms();
         fprintf(stderr, "[autotest] f=%ld t=%.0fms world-time origin at w=%.3fms (now w=%.3fms)\n",
                 g_frame, tms, g_wzero, hfr_sim_ms());
+        break; }
+    case C_PHOTO: {        /* "photo ...": photo mode as the page drives it (photo.c photo_script) */
+        int photo_script(const char *s);
+        fprintf(stderr, "[autotest] f=%ld t=%.0fms photo %s%s\n", g_frame, tms, e->text, photo_script(e->text) ? "" : " (not known)");
         break; }
     case C_HEADLIGHTS: {   /* "headlights MODE": the other cars' headlights (headlights.c), A/B in one run */
         int headlights_set(const char *mode);
@@ -949,7 +967,9 @@ static void status_line(double t, double tms, const char *label){
      * since the last line (runtime/web/gcpu.c, win32_ext.c) */
     if (k > 0) k = (int)strlen(ms);
     if (k > 0 && k < (int)sizeof ms){ int gcpu_status(char *, size_t); k += gcpu_status(ms + k, sizeof ms - (size_t)k); }
-    if (k > 0 && k < (int)sizeof ms){ int win32_gil_status(char *, size_t); win32_gil_status(ms + k, sizeof ms - (size_t)k); }
+    if (k > 0 && k < (int)sizeof ms){ int win32_gil_status(char *, size_t); k += win32_gil_status(ms + k, sizeof ms - (size_t)k); }
+    /* the frame pacer's spin on the clock per sleep since the last line (win32_ext.c sleep_precise_ns) */
+    if (k > 0 && k < (int)sizeof ms){ int pacer_spin_status(char *, size_t); pacer_spin_status(ms + k, sizeof ms - (size_t)k); }
 #endif
     fprintf(stderr, "[status]%s%s f=%ld t=%.1fs fps=%.1f cpu=%.0f%% gcpu=%.2fms/f flow=%u rss=%ldMB%s\n",
             label ? " " : "", label ? label : "", g_frame, tms / 1e3, dt > 0 ? nf / dt : 0.0,

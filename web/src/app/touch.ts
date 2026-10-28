@@ -3,7 +3,9 @@
 //             this browser:
 //               buttons  ◀ ▶ press the arrow keys, so the game's own keyboard steering applies (the default)
 //               stick    a thumb stick where the left thumb lands: the controller's left stick
-//               tilt     the phone is the wheel, from its motion sensor: the controller's left stick
+//               tilt     the phone is the wheel, from its motion sensor: the controller's left stick.  Straight ahead
+//                        is how the phone is held when driving first starts with tilt, kept through menus and races
+//                        until the Straight ahead button sets it anew
 //   pedals    Gas and Brake press the up and down arrows; Nitro and the handbrake are the controller's LB and RB
 //             (Alt, the nitrous key, would turn the other keys into Alt+key).  Nitro holds Gas too, so the thumb on
 //             Gas can go up to it, and a thumb slides between Gas, Brake and Nitro without letting go.  With tilt,
@@ -17,6 +19,15 @@
 //             Not in a cutscene (a race's start); faded in and out.  A switch in the Controls sheet's touch tab.
 //   menus     the arrow keys as a D-pad bottom left, OK (Enter) and Back (Esc) bottom right, in the bars beside the
 //             game's 4:3 menus; a tap on the game stays a click.  The game repeats a held arrow itself.
+//   cancels   the controls take every touch themselves (touch-action: none), so a cancelled one is the phone's: a
+//             gesture of its own took every finger (on many phones three fingers take a screenshot), and they do
+//             nothing more until lifted.  Driving, the first loss of three in this page says so (Nitro gives gas too:
+//             a thumb slid up to it from Gas needs no third finger).  A finger whose lift never came at all is let go
+//             when a new touch begins with no finger down.
+//   size      all of them (and the menu's button) bigger or smaller, from the Controls sheet's touch tab, kept in this
+//             browser: auto (autoTouchSize, for the screen) unless 80 to 150 % is picked; style.css --ts on the stage.
+//             The game's menus' small buttons likewise (menuSize: the help bar's and the scrollers' arrows, auto
+//             big enough for a finger), sent to the game (input menuScale, runtime/menusize.c).
 // The controller part is a virtual one the input module merges with a real one (gamepad.ts withTouch).
 // The driving controls show while the game says the player drives ("drive" in its status block,
 // runtime/web/status_web.c: 1 in a race, 2 in free roam, + 4 with a manual gearbox, + 8 in a cutscene), the menu's
@@ -26,7 +37,7 @@
 import { PAD_A, PAD_LB, PAD_RB, PAD_X } from '../input/proto';
 import type { GameSession } from './game';
 import { touchFirst } from './device';
-import { N, t } from './i18n';
+import { N, percent, t } from './i18n';
 
 export type Steering = 'buttons' | 'stick' | 'tilt';
 export const STEERING: readonly Steering[] = ['buttons', 'stick', 'tilt'];
@@ -75,6 +86,84 @@ export function setLevelHorizon(on: boolean) {
 /** fn runs when the switch changes */
 export function onLevelHorizon(fn: () => void) { addEventListener(LEVEL_EVENT, fn); }
 
+/** a size: auto (for the screen), or a share of the size at 100 % */
+export type Size = 'auto' | number;
+/** a size kept in this browser, picked in the Controls sheet's touch tab: auto unless another was picked */
+export interface SizeSetting {
+  readonly sizes: readonly Size[];
+  get(): Size;
+  set(to: Size): void;
+  /** the size now: the one picked, or auto's for the screen */
+  scale(): number;
+  /** a size in the Controls sheet's list, in the page's language: auto with what it gives on this screen */
+  name(s: Size): string;
+  /** fn runs when the choice changes, or what auto gives (the screen's size changed) */
+  on(fn: () => void): void;
+  /** auto may give another size now (the screen's changed, or what it measures is there) */
+  check(): void;
+}
+function sizeSetting(store: string, sizes: readonly Size[], auto: () => number): SizeSetting {
+  let now: Size = (() => {
+    try { const n = Number(localStorage.getItem(store)); return sizes.includes(n) ? n : 'auto'; } catch { return 'auto'; }
+  })();
+  let autoNow = 0;
+  const changed = () => dispatchEvent(new Event(store));
+  const self: SizeSetting = {
+    sizes,
+    get: () => now,
+    set(to) {
+      if (to === now || !sizes.includes(to)) return;
+      now = to;
+      try { if (to === 'auto') localStorage.removeItem(store); else localStorage.setItem(store, String(to)); } catch { /* not kept: a private window */ }
+      changed();
+    },
+    scale: () => now === 'auto' ? auto() : now,
+    name: s => s === 'auto' ? t('Auto ({size})', { size: percent(auto()) }) : percent(s),
+    on: fn => addEventListener(store, fn),
+    check() { const a = auto(); if (a !== autoNow) { autoNow = a; changed(); } },
+  };
+  addEventListener('resize', () => self.check());
+  return self;
+}
+
+/** the px the controls take between their margins at 100 % (style.css), the most they do (free roam with a manual
+ *  gearbox): across, the row of small buttons; down, that row over the controls under the left thumb.  Upright, the
+ *  space under the picture: across, the steering beside the pedals; down, two rows over the left thumb's */
+const ROOM = { across: 608, down: 300 }, ROOM_UPRIGHT = { across: 384, down: 372 };
+/** the controls' root, once there: its padding is their margins */
+let edges: HTMLElement | null = null;
+const upright = () => document.documentElement.hasAttribute('data-touch') && innerHeight >= innerWidth;
+/** the touch controls' auto: 100 % (the size they were made at) on a phone, more on a tablet (125 % from 750 px
+ *  across), but no more than fits on this screen: in steps of 5 %, 80 % at the least */
+function autoTouchSize(): number {
+  const w = innerWidth, h = innerHeight;
+  const want = Math.min(1.25, Math.max(1, Math.min(w, h) / 600));
+  // their margins: the root's padding (style.css .touch), 12 px before it is there; upright, the top's under the picture
+  const m = edges ? getComputedStyle(edges) : null, px = (v?: string) => parseFloat(v ?? '') || 12;
+  const room = upright() ? ROOM_UPRIGHT : ROOM;
+  const fit = Math.min((w - px(m?.paddingLeft) - px(m?.paddingRight)) / room.across,
+    (h - px(m?.paddingTop) - px(m?.paddingBottom)) / room.down);
+  return Math.max(0.8, Math.floor(Math.min(want, fit) * 20 + 1e-9) / 20);
+}
+/** the touch controls' size (style.css --ts) */
+export const touchSize = sizeSetting('nfsu2-touch-size', ['auto', 0.8, 0.9, 1, 1.1, 1.25, 1.5], autoTouchSize);
+
+/** the game's menus' help bar buttons and scroller arrows, their height in the menus' 640 x 480 units: the bar's
+ *  frames, 24 (the arrows are 26) */
+const MENU_BUTTON_UNITS = 24, MENU_BUTTON_PX = 36;
+/** the menus' auto, on a touch screen: big enough that a help bar button is MENU_BUTTON_PX high, in steps of 25 %,
+ *  up to 200 %; with a mouse, the game's own size.  The menus fill the picture's height, or its width where it is
+ *  narrower than 4:3 (upright: a 4:5 picture at the top, style.css) */
+function autoMenuSize(): number {
+  if (!touchFirst()) return 1;
+  let w = innerWidth, h = innerHeight;
+  if (upright()) { h = Math.min(1.25 * w, 0.6 * h); w = 0.8 * h; }
+  const unit = Math.min(w / 640, h / 480);
+  return Math.min(2, Math.max(1, Math.floor(MENU_BUTTON_PX / (MENU_BUTTON_UNITS * unit) * 4 + 1e-9) / 4));
+}
+/** the game's menus' small buttons: the help bar's and the scrollers' arrows (runtime/menusize.c) */
+export const menuSize = sizeSetting('nfsu2-menu-size', ['auto', 1, 1.25, 1.5, 1.75, 2], autoMenuSize);
+
 /** label: what a screen reader says (English, translated where drawn); text: the words on it, if any; keys: the keys
  *  it holds (two controls may hold the same one: it is down while either is) */
 interface Ctl {
@@ -87,6 +176,9 @@ interface Ctl {
 
 /** which controls show: the driving ones, the menu's, or none */
 type Mode = 'drive' | 'menu' | '';
+
+/** the phone's gesture took three fingers off the controls and the player was told (once in a page) */
+let toldCancel = false;
 
 const path = (d: string) => `<svg viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
 const ICONS = {
@@ -134,9 +226,13 @@ export class TouchControls {
   private byFinger = new Map<number, Ctl>();
   /** the keys the controls hold, each with how many hold it */
   private keys = new Map<string, number>();
+  /** fingers on the controls cancelled together (the phone's gesture): how many the controls held, how many went */
+  private cancelled: { held: number; n: number } | null = null;
   private steering = steering();
   private session: GameSession | null = null;
   private raf = 0;
+  // the tick under a finger pressing a control (off with the Rumble setting)
+  private ticks = true;
   private drive = 0;
   private frames = 0;
   private statusAt = 0;
@@ -153,7 +249,8 @@ export class TouchControls {
   private knobEl: HTMLElement;
   private stickFinger = -1;
   private stickX0 = 0;
-  // tilt: the roll that counts as straight ahead (null: the next reading), whether the sensor answered
+  // tilt: the roll that counts as straight ahead (null: the next reading; kept when the driving controls go and come
+  // back, cleared when tilt is picked or the game ends), whether the sensor answered
   private center: number | null = null;
   private lastRoll: number | null = null;
   private tiltHeard = false;
@@ -163,8 +260,13 @@ export class TouchControls {
   private levelK = 0;
   private levelAt = 0;
   private sentRoll = 0;
+  /** the controls' size now (touchSize), the menus' small buttons' (menuSize) */
+  private scale = 0;
+  private menuScale = 0;
+  /** the game's input the menus' size went to (it comes some frames after the start) */
+  private menuTo: unknown = null;
 
-  constructor(stage: HTMLElement, private deps: TouchDeps) {
+  constructor(private stage: HTMLElement, private deps: TouchDeps) {
     const root = this.root = document.createElement('div');
     root.className = 'touch'; root.hidden = true; root.dataset.nfsu2Ui = '';
     root.dataset.steering = this.steering;
@@ -212,6 +314,12 @@ export class TouchControls {
     this.relabel();
     onSteering(() => this.applySteering(steering()));
     stage.append(root);
+    touchSize.on(() => this.applySize());
+    menuSize.on(() => this.applyMenuSize());
+    edges = root;
+    this.applySize();
+    touchSize.check();
+    menuSize.check();
 
     root.addEventListener('pointerdown', this.onDown);
     root.addEventListener('pointermove', this.onMove);
@@ -241,10 +349,12 @@ export class TouchControls {
     }
   }
 
-  /** a game started: the controls follow its state until stop() */
-  start(s: GameSession) {
+  /** a game started: the controls follow its state until stop() (ticks: the phone ticks under a finger) */
+  start(s: GameSession, ticks: boolean) {
     this.session = s;
+    this.ticks = ticks;
     this.drive = 0;
+    this.menuTo = null;
     const tick = () => { this.frame(); this.raf = requestAnimationFrame(tick); };
     this.raf = requestAnimationFrame(tick);
   }
@@ -252,7 +362,7 @@ export class TouchControls {
   /** for tests and logs: what the controls do now (shown: the driving ones, menu: the menu's) */
   state() {
     return { shown: this.mode === 'drive', menu: this.mode === 'menu', drive: this.drive, steering: this.steering, lx: this.lx,
-      buttons: this.padButtons, keys: [...this.keys.keys()], roll: this.sentRoll };
+      buttons: this.padButtons, keys: [...this.keys.keys()], roll: this.sentRoll, menuScale: this.menuScale, menuSent: !!this.menuTo };
   }
 
   /** the game ended: everything let go, nothing of it kept */
@@ -260,6 +370,7 @@ export class TouchControls {
     cancelAnimationFrame(this.raf);
     this.setMode('');
     this.levelK = this.tilt = 0;
+    this.center = this.lastRoll = null;
     if (this.sentRoll) { this.sentRoll = 0; this.session?.input?.viewRoll?.(0); }
     this.session = null;
     this.drive = this.frames = 0;
@@ -275,6 +386,7 @@ export class TouchControls {
       if (st) { this.drive = st.get('drive') ?? 0; this.frames = st.get('frames') ?? 0; }
     }
     if (!this.away && (s.input?.padPressed?.() ?? 0) > this.touchedAt) this.away = true;
+    if (s.input && s.input !== this.menuTo) { this.menuTo = s.input; this.applyMenuSize(true); }
     this.update();
     this.level(now);
   }
@@ -327,6 +439,8 @@ export class TouchControls {
   }
   private onDown = (e: PointerEvent) => {
     e.preventDefault();                       // the game's canvas keeps the focus, no mouse events follow
+    // the first finger of a new touch: no other is down, so one the controls still hold never lifted (the phone's)
+    if (e.pointerType === 'touch' && e.isPrimary) this.dropFingers();
     const el = (e.target as HTMLElement).closest<HTMLElement>('[data-ctl]');
     const c = el ? this.ctls.get(el.dataset.ctl!) : undefined;
     if (c) { this.byFinger.set(e.pointerId, c); this.press(c, e.pointerId); return; }
@@ -344,6 +458,7 @@ export class TouchControls {
     this.release(c, e.pointerId);
   };
   private onUp = (e: PointerEvent) => {
+    if (e.type === 'pointercancel') this.noteCancel(e.pointerId);
     if (e.pointerId === this.stickFinger) { this.stickUp(); this.sendPad(); return; }
     const c = this.byFinger.get(e.pointerId);
     if (!c) return;
@@ -351,13 +466,39 @@ export class TouchControls {
     this.release(c, e.pointerId);
     if (c.act && e.type === 'pointerup') c.act();       // the release is a user activation (tilt's permission)
   };
+  /** a finger on the controls cancelled: the phone's gesture (above) cancels every finger at once, so those of the
+   *  next moment are counted with it; logged, and driving, the first loss of three in this page explained */
+  private noteCancel(finger: number) {
+    if (!this.byFinger.has(finger) && finger !== this.stickFinger) return;
+    if (!this.cancelled) {
+      this.cancelled = { held: this.byFinger.size + (this.stickFinger !== -1 ? 1 : 0), n: 0 };
+      setTimeout(() => {
+        const { held, n } = this.cancelled!;
+        this.cancelled = null;
+        this.deps.log(`[app] touch controls: ${n} of ${held} finger(s) cancelled by the phone`);
+        if (n < 3 || this.mode !== 'drive' || toldCancel) return;
+        toldCancel = true;
+        this.deps.toast(t('The phone took your fingers off the controls: on many phones, three fingers on the screen take a screenshot. Nitro gives gas too, so slide your thumb up to it from Gas, or turn the three-finger gesture off in the phone\'s settings.'), 10000);
+      }, 50);
+    }
+    this.cancelled.n++;
+  }
+  /** every finger the controls hold let go: a new touch began with none down, so their lifts never came */
+  private dropFingers() {
+    const n = this.byFinger.size + (this.stickFinger !== -1 ? 1 : 0);
+    if (!n) return;
+    for (const [finger, c] of this.byFinger) this.release(c, finger);
+    this.byFinger.clear();
+    if (this.stickFinger !== -1) { this.stickUp(); this.sendPad(); }
+    this.deps.log(`[app] touch controls: ${n} finger(s) let go that never lifted (the phone took them)`);
+  }
 
   private press(c: Ctl, finger: number) {
     c.fingers.add(finger);
     if (c.fingers.size > 1) return;
     c.el.classList.add('on');
     if (c.act) return;
-    navigator.vibrate?.(8);
+    if (this.ticks) navigator.vibrate?.(8);
     if (c.upTimer) { clearTimeout(c.upTimer); c.upTimer = 0; return; }   // still down from the last tap
     c.downAt = performance.now();
     for (const k of c.keys ?? []) this.keyDown(k);
@@ -403,12 +544,13 @@ export class TouchControls {
     const rc = this.stickEl.getBoundingClientRect();
     this.baseEl.style.left = `${e.clientX - rc.left}px`; this.baseEl.style.top = `${e.clientY - rc.top}px`;
     this.baseEl.classList.add('on');
-    navigator.vibrate?.(8);
+    if (this.ticks) navigator.vibrate?.(8);
   }
   private stickMove(e: PointerEvent) {
-    const dx = Math.max(-STICK_PX, Math.min(STICK_PX, e.clientX - this.stickX0));
+    const lock = STICK_PX * this.scale;
+    const dx = Math.max(-lock, Math.min(lock, e.clientX - this.stickX0));
     this.knobEl.style.setProperty('--dx', `${dx}px`);
-    this.lx = dx / STICK_PX;
+    this.lx = dx / lock;
     this.sendPad();
   }
   private stickUp() {
@@ -437,7 +579,7 @@ export class TouchControls {
   private tiltOn() {
     removeEventListener('deviceorientation', this.onOrient);
     addEventListener('deviceorientation', this.onOrient);
-    this.center = null; this.tiltHeard = false;
+    this.tiltHeard = false;
     clearTimeout(this.tiltCheck);
     this.tiltCheck = setTimeout(() => {
       if (!this.tiltHeard && this.mode === 'drive' && this.steering === 'tilt')
@@ -467,9 +609,30 @@ export class TouchControls {
     for (const c of this.ctls.values()) if (c.group) { c.fingers.clear(); this.up(c, true); }
     this.stickUp(); this.tiltOff();
     this.steering = to; this.lx = 0;
+    if (to === 'tilt') this.center = null;
     this.root.dataset.steering = to;
     this.ctls.get('mode')!.el.innerHTML = path(ICONS[to]);
     if (this.mode === 'drive') { if (to === 'tilt') this.tiltOn(); this.sendPad(); }
     this.deps.log(`[app] touch controls: steering with ${NAMES[to]}`);
+  }
+
+  // ---- the size --------------------------------------------------------------------------------
+  /** the size picked, or auto's for the screen now, on the stage (style.css --ts) */
+  private applySize() {
+    const s = touchSize.scale();
+    if (s === this.scale) return;
+    const was = this.scale;
+    this.scale = s;
+    this.stage.style.setProperty('--ts', String(s));
+    if (was) this.deps.log(`[app] touch controls: size ${Math.round(s * 100)} %${touchSize.get() === 'auto' ? ' (auto)' : ''}`);
+  }
+  /** the menus' small buttons at the size picked, or auto's, for the game (runtime/menusize.c) */
+  private applyMenuSize(force = false) {
+    const s = menuSize.scale();
+    if (s === this.menuScale && !force) return;
+    const was = this.menuScale;
+    this.menuScale = s;
+    this.session?.input?.menuScale?.(s);
+    if (was && s !== was) this.deps.log(`[app] menu buttons: size ${Math.round(s * 100)} %${menuSize.get() === 'auto' ? ' (auto)' : ''}`);
   }
 }

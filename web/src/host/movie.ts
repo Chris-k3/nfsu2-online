@@ -15,8 +15,9 @@ const WAIT_MS = 250;
 
 export type MovieCodec = 'av1' | 'vp6';
 
-/** Which movies this browser plays: AV1 where its VideoDecoder has a software AV1 decoder (Chrome and Firefox: the
- *  same in a worker as here), else VP6 (Safari, whose AV1 is hardware only, on few Macs and iPhones). */
+/** Which movies this browser plays: AV1 where its VideoDecoder takes AV1 (Chrome and Firefox with their software
+ *  decoder, the same in a worker as here; Safari where the Mac or iPhone decodes AV1 in hardware: it says yes to the
+ *  software preference too), else VP6 (Safari on the others). */
 export async function movieCodec(env: Record<string, string> = {}): Promise<MovieCodec> {
   const forced = env.NFSU2_MOVIE_CODEC?.trim().toLowerCase();
   if (forced === 'vp6' || forced === 'av1') return forced;
@@ -29,7 +30,7 @@ export async function movieCodec(env: Record<string, string> = {}): Promise<Movi
 function config(w: number, h: number): VideoDecoderConfig {
   // the software decoder: every frame's picture comes out as its chunk goes in (optimizeForLatency; without it
   // Chrome and Firefox hold 2-3 frames back), in I420 in Chrome and BGRX in Firefox; Firefox's hardware decoder
-  // left some frames out
+  // left some frames out. Safari's hardware decoder gives each picture at once too, in NV12 (Safari 27, M4 Mac).
   return { codec: AV1_CODEC, codedWidth: w, codedHeight: h, hardwareAcceleration: 'prefer-software', optimizeForLatency: true };
 }
 

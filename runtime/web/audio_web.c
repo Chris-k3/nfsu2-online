@@ -25,14 +25,32 @@
  * missing or stop at any time: no page attached yet, an AudioContext that is
  * suspended until the first user gesture or later interrupted, a stalled
  * device, NOSOUND (settings: sound = off).  So whenever the worklet has not
- * consumed anything for STALL_MS, or the page reports a context that is not
- * running, the pump falls back to the wall clock: it keeps mixing slices at
- * 44.1 kHz real time and drops them.  Cursors keep moving; nothing is heard.
+ * consumed anything for STALL_MS (or two of its gaps, below), or the page
+ * reports a context that is not running, the pump falls back to the wall
+ * clock: it keeps mixing slices at 44.1 kHz real time and drops them.  Cursors
+ * keep moving; nothing is heard.
+ *
+ * Chrome runs the worklet once per render quantum, but in bursts: two output
+ * callbacks' worth back to back (measured headless), so 8 quanta every 23 ms
+ * at a base latency of 11.6 ms, and on a phone with a base latency of ~90 ms
+ * (2026-10-25 reports) ~60 quanta every ~180 ms.  With a 60 ms stall test and a
+ * 23 ms ring that phone's sound was dropped more than it was played
+ * (reproduced with audio_latency 45 and 90).  So the pump learns the worklet's
+ * rhythm: a stall is two of its longest gaps without a read (RHYTHM_*), and
+ * when its bursts are big (over twice the start target) the ring holds one
+ * and a slice (BURST_*; why the ring is 16384 frames now) and the pump mixes
+ * at a steady pace (PACE) instead of refilling a burst at once.  That keeps
+ * the DirectSound play cursor moving in real time: a cursor that stood still
+ * and then jumped by a burst left the game's writer, which follows it, behind
+ * (a skip every burst).  A desktop's bursts keep the old refill.
  *
  *   NOSOUND=1                 no output; the pump still runs (wall clock)
  *   SNDSYNC=1                 audio.m's rate ratio between game and real time
  *   SNDSERVO=1                audio.m's write-position servo (+-3 % trim)
- *   NFSU2_AUDIO_TARGET=<n>    ring fill in frames (default 1024 = 23 ms)
+ *   NFSU2_AUDIO_TARGET=<n>    ring fill in frames (default 1024 = 23 ms); worklet
+ *                             underruns raise it a slice each, SHRINK_QUIET_S
+ *                             without one lower it a slice, down to this (or
+ *                             to a burst and a slice, if more)
  *   NFSU2_AUDIO_STATUS=<s>    an "[audio]" status line every s seconds
  *                             (default 5 when NFSU2_STATUS_EVERY is set)
  *   SNDDUMP, SNDCSV, SNDSTAT, SNDGAP   the Mac's diagnostics, unchanged */
@@ -71,6 +89,12 @@ static int    g_sync_mode = -1;
 /* the status line's window: the playback rate's extremes since the last line */
 static double g_win_rmin = 9.0, g_win_rmax = 0.0, g_win_tmin = 9.0, g_win_tmax = 0.0;
 static double g_win_fmin = 9.0, g_win_fmax = 0.0; static uint64_t g_win_over = 0;
+/* how far ahead of the mixer the game has written (ms, the game's share of the
+ * sound's delay), and the slices mixed before the game wrote them (each one a
+ * glitch): the status line's window and the whole run */
+static double g_win_lmin = 1e9, g_win_lmax = 0.0, g_lead_sum = 0.0, g_lead_max = 0.0;
+static uint64_t g_lead_n = 0, g_starved = 0, g_win_starved = 0, g_skips = 0;
+static _Atomic int g_reported = 0;   /* the game is ending (audio_report): its writer stops, no skip */
 static int g_servo = 0;          /* SNDSERVO=1: audio.m's write-position trim */
 static void update_rate_ratio(void){
     if (g_sync_mode < 0){
@@ -98,10 +122,19 @@ static void update_rate_ratio(void){
 #define OUT_CH     2
 #define FRAMES     2048          /* largest slice mix_into takes */
 #define SLICE      512           /* frames per mix_into call: the Mac's AudioUnit slice */
-#define STALL_MS   60.0          /* no consumption for this long: wall-clock pacing */
-#define START_GRACE_S 0.25       /* ... except right after the consumer appeared */
+#define STALL_MS   60.0          /* no consumption for this long (or 2 rhythms): wall-clock pacing */
+#define START_GRACE_S 0.5        /* ... except right after the consumer appeared (two ~180 ms gaps to learn) */
+#define SHRINK_QUIET_S 20.0      /* no worklet underrun for this long: the ring target a slice lower */
+#define RHYTHM_WIN_S 1.0         /* the worklet's rhythm: the longest gap between its reads in each second, */
+#define RHYTHM_N   5             /* ... the median of the last RHYTHM_N seconds (a hitch is one second's) */
+#define RHYTHM_WAKE_MS 20.0      /* a gap the pump slept through longer than this says nothing */
+#define BURST_SPLIT_MS 3.0       /* reads further apart than this begin a new burst */
+#define BURST_N    9             /* the time between bursts: the median of the last BURST_N */
+#define PACE       1.05          /* ring mode: slices at most this much faster than real time (the target caps it) */
+#define CATCHUP_S  0.03          /* ... and at most this much made up at once after the pump was late */
 
 #define MAXSND 128
+#define SETTLE_SLICES 90          /* ~1 s: a stream's start (a cleared buffer) is no glitch */
 typedef struct {
     uint32_t data, bytes, rate, chans, bits;
     int      used, playing, loop;
@@ -114,6 +147,9 @@ typedef struct {
     double   freq;            /* SetFrequency ratio */
     uint64_t plays, stops, wr_bytes, wr_calls, wr_nonzero;
     uint64_t over;            /* slices in which the cursor overtook the writer */
+    unsigned settled;         /* slices mixed since it played from the top (to SETTLE_SLICES) */
+    int      starving;        /* the last slice was mixed before the game wrote it */
+    double   wtime;           /* when the game last wrote it (mono_s) */
 } SndBuf;
 
 static SndBuf g_snd[MAXSND];
@@ -168,7 +204,7 @@ void audio_play(int id, int loop){
     if (g_snd[id].used){
         /* a buffer that already plays keeps its cursor: the game re-issues
          * Play on its stream all the time */
-        if (!g_snd[id].playing){ g_snd[id].cursor = 0.0; g_replay++; }
+        if (!g_snd[id].playing){ g_snd[id].cursor = 0.0; g_snd[id].settled = 0; g_replay++; }
         else g_reissue++;
         g_snd[id].playing = 1;
         g_snd[id].loop = loop;
@@ -181,6 +217,7 @@ void audio_note_write(int id, uint32_t end_off){
     pthread_mutex_lock(&g_slock);
     if (g_snd[id].used && g_snd[id].bytes){
         g_snd[id].wpos = end_off % g_snd[id].bytes;
+        g_snd[id].wtime = mono_s();
         g_snd[id].wseen = 1;
     }
     pthread_mutex_unlock(&g_slock);
@@ -238,7 +275,12 @@ void audio_stop(int id){
     pthread_mutex_unlock(&g_slock);
 }
 /* GetCurrentPosition: the play cursor and a write cursor 50 ms ahead of it
- * (equal cursors made the game write where we play). */
+ * (equal cursors made the game write where we play).  The game's writer adds
+ * its own 30 ms and margin to the write cursor (sndlead.c), so this is heard
+ * as delay on every sound; it is also what covers the game's sound thread
+ * waiting for the guest lock, ~70 ms at a race's start.  Measured with four
+ * career races at once (2026-10-24): 30 ms made 1-4 skips a run there, 12 ms
+ * 4-5, 50 ms none. */
 #define WRITE_LEAD_MS 50u
 void audio_cursors(int id, uint32_t *play, uint32_t *write){
     uint32_t p = 0, w = 0;
@@ -346,6 +388,28 @@ static void mix_into(float *out, unsigned frames){
         }
         double step = (double)b->rate / (double)OUT_RATE * g_rate_ratio * b->trim * b->freq;
         active++;
+        if (b->settled < SETTLE_SLICES) b->settled++;
+        else if (b->wseen && !atomic_load(&g_out_muted) && !atomic_load(&g_reported)){
+            /* has the game written the part this slice plays?  (it writes at
+             * most 50 + 30 + 200 ms ahead: more is the cursor past the writer) */
+            uint32_t pbyte = ((uint32_t)(b->cursor * (double)bpf)) % b->bytes;
+            uint32_t avail = (b->wpos + b->bytes - pbyte) % b->bytes;
+            if ((double)avail > 0.3 * (double)b->rate * (double)bpf || (double)avail < step * (double)frames * (double)bpf){
+                g_starved++; g_win_starved++;
+                /* the first slice of a skip says how late the game's writer is */
+                if (!b->starving && ++g_skips <= 20)
+                    fprintf(stderr, "sound: a skip at %.1f s: the game last wrote its sound %.0f ms ago\n",
+                            (double)g_mixed_frames / OUT_RATE, (mono_s() - b->wtime) * 1000.0);
+                b->starving = 1;
+            } else {
+                b->starving = 0;
+                double ms = (double)avail * 1000.0 / ((double)b->rate * (double)bpf);
+                g_lead_sum += ms; g_lead_n++;
+                if (ms > g_lead_max) g_lead_max = ms;
+                if (ms < g_win_lmin) g_win_lmin = ms;
+                if (ms > g_win_lmax) g_win_lmax = ms;
+            }
+        }
         for (unsigned f = 0; f < frames; f++){
             double sp = b->cursor + step * (double)f;
             if (sp >= (double)nsrc){
@@ -467,10 +531,71 @@ static void mix_timed(float *out, unsigned frames){
     t = mono_s() - t;
     g_mix_s += t; if (t > g_mix_max_s) g_mix_max_s = t;
 }
-static uint64_t g_to_wall = 0, g_to_ring = 0, g_target_raised = 0;
+static uint64_t g_to_wall = 0, g_to_ring = 0, g_target_raised = 0, g_target_lowered = 0;
 static double   g_wall_s = 0.0, g_pump_t0 = 0.0, g_ring_s0 = 0.0;
 static unsigned g_target = 1024;
+/* the least the target comes back down to: the start (NFSU2_AUDIO_TARGET), or
+ * the size above one a lowering left that then underran */
+static unsigned g_target_floor = 1024;
+static unsigned g_target_start = 1024;
 static double   g_status_every = 0.0;
+/* the part of the ring in use: what the page's worklet reads (AR_PAGE_FRAMES) */
+static unsigned g_ring_n = AUDIO_RING_FRAMES_OLD;
+static unsigned target_max(void){ return g_ring_n - SLICE; }
+
+/* the worklet's rhythm (RHYTHM_*): the longest gap between two of its reads in
+ * each of the last seconds, and g_rhythm_ms, their median with the current
+ * second's (0 until a gap was seen) */
+static double g_gapwin[RHYTHM_N];
+static int    g_ngapwin = 0;
+static double g_rhythm_ms = 0.0;
+static double median(double *v, int n){
+    for (int i = 1; i < n; i++){ double x = v[i]; int j = i; for (; j > 0 && v[j-1] > x; j--) v[j] = v[j-1]; v[j] = x; }
+    return v[n / 2];
+}
+static void rhythm_update(double cur){              /* cur < 0: the current second has none yet */
+    double v[RHYTHM_N + 1]; int n = 0;
+    for (int i = 0; i < g_ngapwin; i++) v[n++] = g_gapwin[i];
+    if (cur >= 0.0) v[n++] = cur;
+    if (n) g_rhythm_ms = median(v, n);
+}
+static void rhythm_window(double max){              /* a second ended: its longest gap joins the last ones */
+    if (g_ngapwin == RHYTHM_N){ memmove(g_gapwin, g_gapwin + 1, sizeof g_gapwin[0] * (RHYTHM_N - 1)); g_ngapwin--; }
+    g_gapwin[g_ngapwin++] = max;
+    rhythm_update(-1.0);
+}
+static double stall_ms(void){ return 2.0 * g_rhythm_ms > STALL_MS ? 2.0 * g_rhythm_ms : STALL_MS; }
+
+/* the worklet's bursts (BURST_*): g_burst_ms, the median time from the start
+ * of one to the start of the next; a late burst does not make the next one
+ * bigger, so this, not the longest gap, says how much one takes */
+static double g_bper[BURST_N];
+static int    g_nbper = 0, g_ibper = 0;
+static double g_burst_ms = 0.0;
+static void burst_add(double ms){
+    g_bper[g_ibper] = ms; g_ibper = (g_ibper + 1) % BURST_N;
+    if (g_nbper < BURST_N) g_nbper++;
+    double v[BURST_N];
+    memcpy(v, g_bper, sizeof v[0] * (size_t)g_nbper);
+    double m = median(v, g_nbper);                  /* sorts v */
+    /* the first two (the start, ~0.3 s): the shorter, as a load's hitch is no burst */
+    g_burst_ms = g_nbper < 3 ? v[0] : m;
+}
+/* the ring target that holds one burst and a slice: only for a worklet whose
+ * bursts are more than twice the start target.  A desktop's (two callbacks of
+ * 10-12 ms) are about the start target, and the pump tops the ring up between
+ * the two; the underruns below cover what that misses, as before. */
+static unsigned burst_need(void){
+    if (!g_nbper) return 0;
+    double f = g_burst_ms * OUT_RATE / 1000.0;
+    if (f <= 2.0 * g_target_start) return 0;
+    unsigned need = (((unsigned)f + 127u) & ~127u) + SLICE;     /* whole quanta: less churn */
+    return need < target_max() ? need : target_max();
+}
+/* autotest "audiostall MS" (test-only): the pump mixes nothing for MS ms, so
+ * the worklet underruns as on a starved device */
+static _Atomic int g_test_stall_ms = 0;
+void audio_test_stall(int ms){ atomic_store(&g_test_stall_ms, ms > 0 ? ms : 1); }
 
 static void status_line(double now, int mode){
     uint32_t w = atomic_load(&RH(AR_W)), r = atomic_load(&RH(AR_R));
@@ -488,18 +613,21 @@ static void status_line(double now, int mode){
     static double last_t = 0, last_mix = 0;
     double el = now - (last_t ? last_t : g_pump_t0), cpu = el > 0 ? (g_mix_s - last_mix) / el * 100.0 : 0.0;
     last_t = now; last_mix = g_mix_s;
-    fprintf(stderr, "[audio] t=%.1fs mode=%s ctx=%s fill=%u target=%u mixed=%.1fs wall=%.1fs mixcpu=%.2f%% peak=%.1fdBFS rms=%.1fdBFS"
-            " loud=%.0f%% underruns=%u worklet_loud=%u muted=%d ratio=%.3f..%.3f trim=%.3f..%.3f frac=%.2f..%.2f over=%llu play:%s\n",
+    fprintf(stderr, "[audio] t=%.1fs mode=%s ctx=%s fill=%u target=%u rhythm=%.0fms burst=%.0fms mixed=%.1fs wall=%.1fs mixcpu=%.2f%%"
+            " peak=%.1fdBFS rms=%.1fdBFS loud=%.0f%% underruns=%u worklet_loud=%u muted=%d ratio=%.3f..%.3f trim=%.3f..%.3f"
+            " frac=%.2f..%.2f over=%llu lead=%.0f..%.0fms starved=%llu play:%s\n",
             now - g_pump_t0, mode == AR_MODE_RING ? "ring" : mode == AR_MODE_WALL ? "wall" : "idle",
-            ctx < 4 ? ctxn[ctx] : "?", w - r, g_target, (double)g_mixed_frames / OUT_RATE, g_wall_s, cpu,
+            ctx < 4 ? ctxn[ctx] : "?", w - r, g_target, g_rhythm_ms, g_burst_ms, (double)g_mixed_frames / OUT_RATE, g_wall_s, cpu,
             dbfs(g_st.last_peak), dbfs(g_st.last_rms),
             g_st.slices ? 100.0 * (double)g_st.loud_slices / (double)g_st.slices : 0.0,
             atomic_load(&RH(AR_UNDERRUNS)), atomic_load(&RH(AR_LOUD)), atomic_load(&g_out_muted),
             g_win_rmin > g_win_rmax ? 1.0 : g_win_rmin, g_win_rmin > g_win_rmax ? 1.0 : g_win_rmax,
             g_win_tmin > g_win_tmax ? 1.0 : g_win_tmin, g_win_tmin > g_win_tmax ? 1.0 : g_win_tmax,
             g_win_fmin > g_win_fmax ? 0.0 : g_win_fmin, g_win_fmin > g_win_fmax ? 0.0 : g_win_fmax,
-            (unsigned long long)g_win_over, cl ? cur : " -");
+            (unsigned long long)g_win_over, g_win_lmin > g_win_lmax ? 0.0 : g_win_lmin, g_win_lmax,
+            (unsigned long long)g_win_starved, cl ? cur : " -");
     g_win_rmin = g_win_tmin = g_win_fmin = 9.0; g_win_rmax = g_win_tmax = g_win_fmax = 0.0; g_win_over = 0;
+    g_win_lmin = 1e9; g_win_lmax = 0.0; g_win_starved = 0;
 }
 
 /* wait until *addr != expect or the timeout: the worklet notifies AR_R */
@@ -517,50 +645,135 @@ static void *pump_main(void *unused){
     double t_r = now, wall_t0 = now, next_status = now + g_status_every;
     uint64_t wall_done = 0;
     uint32_t r_seen = atomic_load(&RH(AR_R)), under_seen = 0;
+    double t_quiet = now, t_lowered = 0;        /* the last underrun or lowering; the last lowering */
+    int lowered = 0;                            /* the target is one a lowering left */
+    double grace_end = 0, t_loop = now;         /* no stall before grace_end; the last time round the loop */
+    double t_win = now, win_max = -1.0;         /* this second of the rhythm, its longest gap (-1: none) */
+    double t_burst = -1.0;                      /* the start of the worklet's last burst (-1: not known) */
+    double t_due = 0;                           /* ring mode: when the next slice is due at the pace */
+    uint32_t fill_seen = 0;                     /* the fill the last time round */
+    int need_lines = 0;
     for (;;){
         now = mono_s();
+        double slept = (now - t_loop) * 1000.0; t_loop = now;
         if (g_status_every > 0 && now >= next_status){ status_line(now, mode); next_status = now + g_status_every; }
+        int stall = atomic_exchange(&g_test_stall_ms, 0);
+        if (stall){
+            static _Atomic uint32_t never = 0;
+            fprintf(stderr, "sound: audiostall: the pump mixes nothing for %d ms (test-only)\n", stall);
+            wait_word(&never, 0, stall / 1000.0);
+            continue;
+        }
         uint32_t r = atomic_load(&RH(AR_R)), w = atomic_load(&RH(AR_W));
-        if (r != r_seen){ r_seen = r; t_r = now; }
         uint32_t fill = w - r;
-        if (fill > AUDIO_RING_FRAMES) fill = AUDIO_RING_FRAMES;     /* never: one producer, one consumer */
+        if (fill > g_ring_n) fill = g_ring_n;      /* never: one producer, one consumer */
+        if (r != r_seen){
+            /* what the time since its last read says about the worklet, unless
+             * that read was before this ring session, the ring had too little
+             * for a quantum (the pump's fault), or the pump slept through it */
+            int valid = mode == AR_MODE_RING && t_r >= g_ring_s0 && fill_seen >= 128u && slept < RHYTHM_WAKE_MS;
+            double gap = (now - t_r) * 1000.0;
+            if (valid && gap > win_max){ win_max = gap; rhythm_update(win_max); }
+            if (gap >= BURST_SPLIT_MS){                         /* a burst begins */
+                if (valid && t_burst >= g_ring_s0) burst_add((now - t_burst) * 1000.0);
+                t_burst = valid ? now : -1.0;
+            }
+            r_seen = r; t_r = now;
+        }
+        fill_seen = fill;
+        if (now - t_win >= RHYTHM_WIN_S){
+            if (win_max >= 0.0) rhythm_window(win_max);
+            t_win = now; win_max = -1.0;
+        }
         int running = atomic_load(&RH(AR_CTX)) == AR_CTX_RUNNING;
-        /* the worklet is consuming: it moved r recently, or the ring has
-         * room it has not been asked to drain yet */
-        int consumer = g_audio_on && running && ((now - t_r) * 1000.0 < STALL_MS || fill + SLICE <= g_target);
+        /* the worklet is consuming: it moved r recently (within two of its
+         * longest gaps), or the ring has room it has not been asked to drain yet */
+        int consumer = g_audio_on && running &&
+                       (now < grace_end || (now - t_r) * 1000.0 < stall_ms() || fill + SLICE <= g_target);
         if (consumer){
             if (mode != AR_MODE_RING){
                 if (mode == AR_MODE_WALL) g_to_ring++;
+                /* the page says which part of the ring its worklet reads
+                 * before it reports a running context */
+                uint32_t pf = atomic_load(&RH(AR_PAGE_FRAMES));
+                g_ring_n = pf >= AUDIO_RING_FRAMES_OLD && pf <= AUDIO_RING_FRAMES && !(pf & (pf - 1u)) ? pf : AUDIO_RING_FRAMES_OLD;
+                if (g_target > target_max()) g_target = target_max();
+                if (g_target_floor > g_target) g_target_floor = g_target;
                 fprintf(stderr, "sound: output paced by the AudioWorklet (ring %u frames, target %u = %.1f ms)\n",
-                        AUDIO_RING_FRAMES, g_target, g_target * 1000.0 / OUT_RATE);
+                        g_ring_n, g_target, g_target * 1000.0 / OUT_RATE);
                 mode = AR_MODE_RING; atomic_store(&RH(AR_MODE), AR_MODE_RING);
-                g_ring_s0 = now; under_seen = atomic_load(&RH(AR_UNDERRUNS));
+                g_ring_s0 = now; under_seen = atomic_load(&RH(AR_UNDERRUNS)); t_quiet = now;
                 /* a worklet that was just connected takes a moment to run
-                 * its first quantum: do not call that a stall */
-                t_r = now + START_GRACE_S;
+                 * its first quantum, and one that reads in bursts its first
+                 * gaps to learn: do not call that a stall */
+                grace_end = now + START_GRACE_S;
+                t_burst = -1.0; t_due = now;
             }
-            /* underruns once the output has settled: keep more in the ring */
+            /* a burst must fit in the ring: no underrun every burst while the
+             * slice-at-a-time raise below catches up */
+            unsigned need = burst_need();
+            if (g_target < need){
+                g_target = need;
+                atomic_store(&RH(AR_TARGET), g_target);
+                if (++need_lines <= 10)
+                    fprintf(stderr, "sound: the worklet reads in bursts %.0f ms apart: the ring holds one, target %u frames (%.1f ms)\n",
+                            g_burst_ms, g_target, g_target * 1000.0 / OUT_RATE);
+            }
+            /* underruns once the output has settled: keep more in the ring.
+             * SHRINK_QUIET_S without one: a slice less again, down to the
+             * floor.  An underrun at a size a lowering left, however much
+             * later, makes the size before it the floor: a device that needs
+             * the room (a hitch every minute, say) gets one click more than
+             * before, not one after every lowering. */
             uint32_t un = atomic_load(&RH(AR_UNDERRUNS));
+            /* ...and not below a burst and a quantum: one whose length jitters
+             * across a rounding step does not move it every SHRINK_QUIET_S */
+            unsigned keep = need ? need + 128u : 0u;
+            unsigned lowest = g_target_floor > keep ? g_target_floor : keep;
             if (un != under_seen){
-                if (now - g_ring_s0 > 1.0 && g_target + SLICE <= 4096u){
+                if (now - g_ring_s0 > 1.0 && g_target + SLICE <= target_max()){
+                    if (lowered){
+                        g_target_floor = g_target + SLICE;
+                        fprintf(stderr, "sound: worklet underrun %.0f s after the ring target was lowered: it stays at %u frames (%.1f ms) or more\n",
+                                now - t_lowered, g_target_floor, g_target_floor * 1000.0 / OUT_RATE);
+                    }
+                    lowered = 0;
                     g_target += SLICE; g_target_raised++;
                     atomic_store(&RH(AR_TARGET), g_target);
                     fprintf(stderr, "sound: worklet underrun (%u so far): ring target raised to %u frames (%.1f ms)\n",
                             un, g_target, g_target * 1000.0 / OUT_RATE);
                 }
-                under_seen = un;
+                under_seen = un; t_quiet = now;
+            } else if (g_target > lowest && now - t_quiet >= SHRINK_QUIET_S){
+                g_target = g_target - SLICE > lowest ? g_target - SLICE : lowest;
+                g_target_lowered++; t_quiet = t_lowered = now; lowered = 1;
+                atomic_store(&RH(AR_TARGET), g_target);
+                fprintf(stderr, "sound: no worklet underrun for %.0f s: ring target lowered to %u frames (%.1f ms)\n",
+                        SHRINK_QUIET_S, g_target, g_target * 1000.0 / OUT_RATE);
             }
-            if (fill + SLICE <= g_target){
-                float *dst = &g_ring.pcm[(w & (AUDIO_RING_FRAMES - 1u)) * OUT_CH];
-                /* SLICE divides the ring size: a slice never wraps */
-                mix_timed(dst, SLICE);
-                stats_add(dst, SLICE);
-                atomic_store(&RH(AR_W), w + SLICE);
-                atomic_store(&RH(AR_MIXED), (uint32_t)g_mixed_frames);
-                g_ring_frames += SLICE;
+            if (fill + SLICE > g_target){              /* full: no time is banked while it waits */
+                if (t_due < now) t_due = now;
+                wait_word(&RH(AR_R), r, 0.004);
                 continue;
             }
-            wait_word(&RH(AR_R), r, 0.004);
+            /* room: with big bursts, a slice when it is due at the pace, or at
+             * once when the ring runs low (a burst came early, the pump was
+             * late); with a desktop's, at once, as ever (the cursor's steps
+             * are small next to the game's write-ahead) */
+            if (need && fill >= SLICE && now < t_due){
+                double s = t_due - now;
+                wait_word(&RH(AR_R), r, s < 0.004 ? s : 0.004);
+                continue;
+            }
+            float *dst = &g_ring.pcm[(w & (g_ring_n - 1u)) * OUT_CH];
+            /* SLICE divides the ring size: a slice never wraps */
+            mix_timed(dst, SLICE);
+            stats_add(dst, SLICE);
+            atomic_store(&RH(AR_W), w + SLICE);
+            atomic_store(&RH(AR_MIXED), (uint32_t)g_mixed_frames);
+            g_ring_frames += SLICE;
+            if (t_due < now - CATCHUP_S) t_due = now - CATCHUP_S;
+            t_due += (double)SLICE / (OUT_RATE * PACE);
             continue;
         }
         /* no consumer: keep the cursors moving on the wall clock */
@@ -599,7 +812,7 @@ void audio_init(void){
     g_sndgap = getenv("SNDGAP") != NULL;
     g_servo = env_on("SNDSERVO");
     { const char *e = getenv("NFSU2_AUDIO_TARGET"); int t = e && *e ? atoi(e) : 0;
-      if (t >= SLICE && t <= 4096) g_target = (unsigned)t; }   /* any size: a slice is mixed when fill + SLICE <= target */
+      if (t >= SLICE && t <= (int)(AUDIO_RING_FRAMES - SLICE)) g_target = g_target_floor = g_target_start = (unsigned)t; }   /* any size: a slice is mixed when fill + SLICE <= target */
     { const char *e = getenv("NFSU2_AUDIO_STATUS");
       if (e && *e) g_status_every = atof(e);
       else if (getenv("NFSU2_STATUS_EVERY")) g_status_every = 5.0; }
@@ -637,6 +850,7 @@ void audio_device_changed(const char *why){
 }
 
 void audio_report(void){
+    atomic_store(&g_reported, 1);
     if (g_dump){ fflush(g_dump); fclose(g_dump); g_dump = NULL; }
     if (g_csv){  fflush(g_csv);  fclose(g_csv);  g_csv  = NULL; }
     fprintf(stderr, "  sound output      : %s, %llu frames mixed, "
@@ -666,10 +880,16 @@ void audio_report(void){
     { uint64_t ov = 0; for (int i = 1; i < g_sndn; i++) ov += g_snd[i].over;
       fprintf(stderr, "  sound cursor overrun: in %llu callbacks the play cursor passed the writer\n",
               (unsigned long long)ov); }
+    fprintf(stderr, "  sound write-ahead : the game wrote %.1f ms ahead of the mixer on average, at most %.1f ms; "
+            "%llu slices mixed before the game wrote them, in %llu skips\n",
+            g_lead_n ? g_lead_sum / (double)g_lead_n : 0.0, g_lead_max, (unsigned long long)g_starved,
+            (unsigned long long)g_skips);
     fprintf(stderr, "  sound output path : AudioWorklet ring, %u-frame slices, target %u frames (%.1f ms), "
-            "%u underruns, target grew %llu times\n",
+            "%u underruns, target grew %llu times and came down %llu times (to %u frames at least); "
+            "the worklet's reads up to %.0f ms apart, its bursts %.0f ms apart, a ring of %u frames\n",
             SLICE, g_target, g_target * 1000.0 / OUT_RATE, atomic_load(&RH(AR_UNDERRUNS)),
-            (unsigned long long)g_target_raised);
+            (unsigned long long)g_target_raised, (unsigned long long)g_target_lowered, g_target_floor,
+            g_rhythm_ms, g_burst_ms, g_ring_n);
     fprintf(stderr, "  sound clock backup: %.1f s on the ring, %.1f s on the wall clock (no output), %llu times ring->wall, %llu times wall->ring\n",
             (double)g_ring_frames / OUT_RATE, g_wall_s, (unsigned long long)g_to_wall, (unsigned long long)g_to_ring);
     fprintf(stderr, "  sound mixer       : %.3f s in total (%.2f%% of the mixed time), longest slice %.3f ms\n",

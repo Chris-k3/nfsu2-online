@@ -13,8 +13,10 @@
 //! Race traffic never comes here: the players' browsers send it to each other through the switch (UDP 3658, a star
 //! around the game's creator), as in LAN play.  Every address a player learns is a virtual one (10.77.x.x).
 //!
-//! What the server keeps: sessions, rooms, games and chat in memory only; on disk only the races' public results per
-//! persona (stats.rs) and each persona's friends list (buddy.rs), names only, under the server's --state directory.
+//! What the server keeps: sessions, rooms, games and chat in memory only (of chat, each persona's last lines for a
+//! complaint about it, which writes them to the log: lobby.rs `said`); on disk only the races' public results per
+//! persona (stats.rs) and each persona's friends list (buddy.rs), names only, under the server's --state directory,
+//! and from a stop to the next start the races going on (races.rs).
 //! Nothing secret is ever read (aries.rs SECRET_KEYS: the password, the CD key and the file checksum are passed over
 //! undecoded).  The log names players by persona and virtual address only, never their real address or what they
 //! typed as a password.  The lines a client causes (logins, games, races, complaints, friends) go through
@@ -37,6 +39,7 @@ mod jsonparse;
 mod jsx;
 mod lobby;
 mod omap;
+mod races;
 mod stats;
 mod timers;
 mod trace;
@@ -84,7 +87,7 @@ pub(crate) struct Clocks {
 /// What the Online host is given.
 #[derive(Clone)]
 pub struct OnlineOptions {
-    /// where stats.json and buddies.json are kept (the server's --state/online); None: in memory only
+    /// where stats.json, buddies.json and races.json are kept (the server's --state/online); None: in memory only
     pub state_dir: Option<PathBuf>,
     /// a console line, and the opaque group id of the client that caused it (None: the server's own line); the
     /// server shows at most a few a minute per client (`nfsu2_util::log::limited`, the Online audit's ONL-8)
@@ -92,6 +95,9 @@ pub struct OnlineOptions {
     pub log: Arc<dyn Fn(&str, Option<&str>) + Send + Sync>,
     /// the dev trace: sees every frame the host sends (the switch's own tap sees what the browsers send)
     pub tap: Option<Tap>,
+    /// the claimed names (nfsu2-claims): who may play under a name, and whose EA Messenger lists are kept; None: every
+    /// name is anyone's, and every list is kept (as before names could be claimed)
+    pub claims: Option<Arc<nfsu2_claims::Claims>>,
 }
 
 enum Event {
@@ -128,6 +134,7 @@ fn run(o: OnlineOptions, rx: mpsc::Receiver<Event>) {
         state_dir: o.state_dir,
         log: Rc::new(move |line: &str, key: Option<&str>| log(line, key)),
         tap: o.tap,
+        claims: o.claims,
         clocks: Rc::new(Clocks { now: Box::new(|| now_ms() as f64), timer: Box::new(mono_ms) }),
         limits: Default::default(),
         buddy_limits: Default::default(),
@@ -212,8 +219,8 @@ impl Host for OnlineHost {
         let _ = self.tx.send(Event::Vips(tx));
         rx
     }
-    /// the server stops: the lobby's links go, stats.json and buddies.json are written, the timers end.  Returns once
-    /// that is done (the files are written before the process goes).
+    /// the server stops: the lobby's links go, stats.json, buddies.json and races.json are written, the timers end.
+    /// Returns once that is done (the files are written before the process goes).
     fn stop(&self) {
         let _ = self.tx.send(Event::Stop);
         let t = self.thread.lock().take();

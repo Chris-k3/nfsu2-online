@@ -60,6 +60,9 @@ pub struct FrameCtx {
     pub cause: Option<Arc<dyn Charge>>,
     /// the frame's place in the host's backlog ([`Backlog`]): given back when the host has handled it (drops it)
     pub slot: Option<Arc<Slot>>,
+    /// the keyphrase its page plays with, as the server knows it (nfsu2-claims: an owner of claimed names), from the
+    /// hello's "claim"; None: none
+    pub owner: Option<Arc<str>>,
 }
 
 /// The frames a host has been posted and not handled yet.  Node's hosts could never fall behind: they ran inside the

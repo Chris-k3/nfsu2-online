@@ -37,11 +37,11 @@ import { CODES, cp1252, isMeta, keyChars, keyVk } from './keymap';
 import { PadPoller, type PadPage, type TouchPad } from './gamepad';
 import { SynthDriver } from './synth';
 import {
-  IEV_FOCUS, IEV_KEY_DOWN, IEV_KEY_TAP, IEV_KEY_UP, IEV_LOG, IEV_MOUSE_DOWN, IEV_MOUSE_MOVE, IEV_MOUSE_UP, IEV_QUIT,
-  IEV_RELEASE_ALL, IEV_TEXT, IEV_WHEEL, IKF_ALT, IKF_CTRL, IKF_DEAD, IKF_REPEAT, IKF_SHIFT, IKF_SYNTH, IKF_TOUCH, IM_ATTACHED,
+  IEV_FOCUS, IEV_KEY_DOWN, IEV_KEY_TAP, IEV_KEY_UP, IEV_LOG, IEV_MOUSE_DOWN, IEV_MOUSE_MOVE, IEV_MOUSE_UP, IEV_QUIT, IEV_SMS,
+  IEV_PHOTO, IEV_RELEASE_ALL, IEV_TEXT, IEV_WHEEL, IKF_ALT, IKF_CTRL, IKF_DEAD, IKF_REPEAT, IKF_SHIFT, IKF_SYNTH, IKF_TOUCH, IM_ATTACHED,
   IM_EV_DROP, IM_EV_R, IM_EV_W, IM_EVENTS, IM_GAME_INACTIVE, IM_HDR_WORDS, IM_KEYS_HELD, IM_MAGIC, IM_MOUSE_X,
   IM_MOUSE_Y, IM_NAMES_GEN, IM_OFF_EV, IM_OFF_NAMES, IM_OFF_SYN, IM_QUIT_REQ, IM_SYN_R, IM_SYN_W, IM_TEXT,
-  IM_TEXT_KIND, IM_TEXT_LEN, IM_TEXT_MAX, IM_TEXT_SEQ, IM_VERSION, IM_VIEW_ROLL, INPUT_EV_N, INPUT_MAGIC, INPUT_NAME_LEN,
+  IM_TEXT_KIND, IM_TEXT_LEN, IM_TEXT_MAX, IM_TEXT_SEQ, IM_MENU_SCALE, IM_VERSION, IM_VIEW_ROLL, INPUT_EV_N, INPUT_MAGIC, INPUT_NAME_LEN,
   INPUT_SYN_N, INPUT_TEXT_BYTES, INPUT_VERSION, IREASON_ELEMENT, IREASON_FULLSCREEN, IREASON_META, IREASON_PAGE,
   IREASON_PAGEHIDE, IREASON_SCRIPT, IREASON_VISIBILITY, IREASON_WINDOW,
 } from './proto';
@@ -86,6 +86,10 @@ export interface InputHandle {
   /** Download log: the game writes how long ago it drew its last frame, after a while what every thread is doing,
    *  then "[watchdog] log download ready" (runtime/watchdog.c).  false: it cannot reach the game */
   logReport(): boolean;
+  /** a text message of ours for the game's phone (runtime/sms.c), by its number.  false: it cannot reach the game */
+  sms(id: number): boolean;
+  /** photo mode (runtime/photo.c): what (its PH_* number) and its values.  false: it cannot reach the game */
+  photo(what: number, a?: number, b?: number): boolean;
   enterFullscreen(): Promise<boolean>;
   exitFullscreen(): Promise<void>;
   toggleFullscreen(): Promise<void>;
@@ -104,6 +108,8 @@ export interface InputHandle {
   touchPad(t: TouchPad | null): void;
   /** the touch controls' level horizon: the phone's tilt the game's 3D view turns against, radians, + = clockwise */
   viewRoll(rad: number): void;
+  /** the menus' help bar buttons' size, 1 = the game's own (touch.ts: the Menu button size) */
+  menuScale(s: number): void;
   /** performance.now() of a real controller's last button press (0: none) */
   padPressed(): number;
   /** the game's text entry while it is up, else null */
@@ -142,7 +148,9 @@ export function attachInput(proc: GameProcess, element: HTMLElement, opts: Input
   let active: boolean | null = null;
   let pads: PadPoller | null = null, synth: SynthDriver | null = null;
   let raf = 0, timer = 0, detached = false;
-  const roll = new Float32Array(1), rollBits = new Int32Array(roll.buffer);
+  const f32 = new Float32Array(1), f32Bits = new Int32Array(f32.buffer);   // a float's bits for a mailbox word
+  let menu = 0;                     // the menus' size asked for (0: none), written once the mailbox is there
+  const putMenu = () => { if (h && !detached && menu) { f32[0] = menu; Atomics.store(h, IM_MENU_SCALE, f32Bits[0]); } };
   // the mailbox was not ours (another writer, another layout): requests cannot reach the game
   let refused = false;
   // quit requests made before the mailbox registered: sent once it does
@@ -389,6 +397,16 @@ export function attachInput(proc: GameProcess, element: HTMLElement, opts: Input
       push(IEV_LOG, 0, 0, 0, [], 0, IREASON_PAGE);
       return true;
     },
+    sms(id) {
+      if (!h || !api.canQuit()) return false;
+      push(IEV_SMS, 0, 0, 0, [], id, IREASON_PAGE);
+      return true;
+    },
+    photo(what, a = 0, b = 0) {
+      if (!h || !api.canQuit()) return false;
+      push(IEV_PHOTO, what, 0, 0, [], a, b);
+      return true;
+    },
     async enterFullscreen() {
       try {
         if (document.fullscreenElement !== element) await element.requestFullscreen({ navigationUI: 'hide' });
@@ -426,7 +444,8 @@ export function attachInput(proc: GameProcess, element: HTMLElement, opts: Input
       if (k && !detached) push(down ? IEV_KEY_DOWN : IEV_KEY_UP, k.dik, k.vk, 0, down ? PAGE_KEY_CHARS[code] ?? [] : []);
     },
     touchPad(t) { pads?.setTouch(t); },
-    viewRoll(rad) { if (h && !detached) { roll[0] = rad; Atomics.store(h, IM_VIEW_ROLL, rollBits[0]); } },
+    viewRoll(rad) { if (h && !detached) { f32[0] = rad; Atomics.store(h, IM_VIEW_ROLL, f32Bits[0]); } },
+    menuScale(s) { menu = s; putMenu(); },
     padPressed() { return pads?.lastPress ?? 0; },
     textEntry() {
       if (!h || !u8) return null;
@@ -505,6 +524,7 @@ export function attachInput(proc: GameProcess, element: HTMLElement, opts: Input
       return;
     }
     h = view; u8 = new Uint8Array(buf); i32 = new Int32Array(buf); base = reg.ptr;
+    putMenu();
     synth = new SynthDriver({
       element, mac, layout: () => layout, log,
       // nsfocus: the page's blur/focus path, sent even if the page state already matches

@@ -419,6 +419,50 @@ async fn with_a_store_a_restart_keeps_each_players_address_for_its_token() {
     sw2.close().await;
 }
 
+// with a store, an address of before the restart that nobody came back for counts as a browser that left for the
+// hosts, once, when its reservation ends (the sweep, or the admission of a newcomer); one a departure reserved, they
+// heard of at the departure.  (The Online host keeps a race and its players' names until it hears they left.)
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn with_a_store_an_address_nobody_came_back_for_is_gone_for_the_hosts() {
+    let _s = serial().await;
+    let dir = tempfile::tempdir().unwrap();
+    let store = dir.path().join("lan-addresses.json");
+    let o = LanOptions { reserve_ms: 400, ..opts() };
+    let kept = |n: u8| format!(r#"{{"v":"10.77.{n}.2","h":"{}"}}"#, nfsu2_util::js::base64url(&[n; 32]));
+    let (a, b) = (ip("10.77.0.2"), ip("10.77.1.2"));
+    let host = || {
+        let gone: Arc<Mutex<Vec<u32>>> = Default::default();
+        let h = FakeHost { vip: 0x0A4D_0001, name: "online".into(), listed: true, vips: Default::default(), gone: gone.clone() };
+        (Arc::new(h), gone)
+    };
+    // the sweep: the two addresses of before, once; Alice, who dropped after the start, at her departure only
+    std::fs::write(&store, format!("[{},{}]", kept(0), kept(1))).unwrap();
+    let (online, gone) = host();
+    let sw = start_full(o.clone(), "", Some(online), None, Some(store.clone())).await;
+    let mut alice = Client::connect(sw.port, "Alice").await;
+    alice.welcome().await;
+    assert!(![a, b].contains(&alice.vip), "a newcomer gets no address of before");
+    assert!(gone.lock().unwrap().is_empty(), "not before their time");
+    sw.lan.terminate_all();
+    wait_for(2000, || gone.lock().unwrap().len() == 1).await;
+    sleep(500).await;
+    sw.lan.keepalive();
+    sw.lan.keepalive();
+    assert_eq!(*gone.lock().unwrap(), [alice.vip, a, b]);
+    alice.closed().await;
+    sw.close().await;
+    // a newcomer's admission: the same, before its welcome
+    std::fs::write(&store, format!("[{},{}]", kept(0), kept(1))).unwrap();
+    let (online, gone) = host();
+    let sw = start_full(o, "", Some(online), None, Some(store.clone())).await;
+    sleep(500).await;
+    let mut carol = Client::connect(sw.port, "Carol").await;
+    carol.welcome().await;
+    assert_eq!(*gone.lock().unwrap(), [a, b]);
+    carol.close().await;
+    sw.close().await;
+}
+
 // addresses: 6000 on 10.77.0.0/19, handed out round twenty-four of its /24s; never .0, .1 or .252 and up; full past them
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn addresses_6000_round_the_twenty_four_24s_full_past_them() {
@@ -538,8 +582,8 @@ async fn breakdown_online_lan_screens_free_roam_older_page_leaving_or_starting()
     let _s = serial().await;
     let in_online = Arc::new(Mutex::new(HashSet::new()));
     let in_roam = Arc::new(Mutex::new(HashSet::new()));
-    let online = Arc::new(FakeHost { vip: 0x0A4D_0001, name: "online".into(), listed: true, vips: in_online.clone() });
-    let roam = Arc::new(FakeHost { vip: 0x0A4D_00FD, name: String::new(), listed: false, vips: in_roam.clone() });
+    let online = Arc::new(FakeHost { vip: 0x0A4D_0001, name: "online".into(), listed: true, vips: in_online.clone(), gone: Default::default() });
+    let roam = Arc::new(FakeHost { vip: 0x0A4D_00FD, name: String::new(), listed: false, vips: in_roam.clone(), gone: Default::default() });
     let sw = start_full(opts(), "", Some(online), Some(roam), None).await;
     let mut all = Vec::new();
     for (name, l) in

@@ -27,7 +27,8 @@
  *   POV 0   D-pad;  POV 1  left stick as four directions (menus)
  *   buttons 0 A, 1 B, 2 X, 3 Y, 4 LB, 5 RB, 6 View, 7 Menu, 8 LS, 9 RS,
  *           10 LT and 11 RT pressed to the end of their travel (as a
- *           DualShock 4 under DirectInput reports L2/R2 twice)
+ *           DualShock 4 under DirectInput reports L2/R2 twice), or half
+ *           way when the game reads that trigger as no axis (fill_state)
  *
  * A steering wheel (PadState.wheel: the page maps the wheel to LX, the gas
  * and brake pedals to RT and LT, its buttons onto the pad's, see
@@ -55,7 +56,8 @@
  *                       reading centred while nothing is connected, so
  *                       bindings survive unplugging.
  *   NFSU2_PAD_TRIGGER_CLICK=<f>  trigger travel (0..1) at which buttons 10/11
- *                       press (default 0.97)
+ *                       press while the game reads the trigger as an axis
+ *                       (default 0.97)
  *   NFSU2_PAD_LOG=1     log enumeration, properties and state changes
  *
  * Force feedback (rumble): the game plays DirectInput effects on a device
@@ -273,6 +275,7 @@ typedef struct {
     int      rest;                       /* hotplug: polls answered at rest since the unplug */
     int      wheel;                      /* created as the wheel (its guidInstance), not the pad */
     int      gone;                       /* answered DIERR_INPUTLOST: the game let it go */
+    int      trig[2];                    /* buttons 10/11 (LT, RT as buttons) are down */
 } Dev;
 static Dev g_dev[4];
 static Dev *dev_of(uint32_t obj, int create){
@@ -375,6 +378,26 @@ static uint32_t stick_pov(Dev *d, float x, float y){
     static const uint32_t P[5] = {0xFFFFFFFFu, 0u, 9000u, 18000u, 27000u};
     return P[dir];
 }
+/* The game's input channel that reads this device (0x874c40 + n*0x370, six
+ * of them: +0x230 the device's slot in [0x86ffb4], +0x234 its type), or 0. */
+static uint32_t dev_channel(const Dev *d){
+    for (uint32_t s = 0; s < 2u; s++){
+        if (!d->obj || MR32(0x86ffb4u + 4u * s) != d->obj) continue;
+        for (uint32_t ch = 0x874c40u; ch < 0x876310u; ch += 0x370u){
+            uint8_t t = MR8(ch + 0x234u);
+            if (MR32(ch + 0x230u) == s && t >= 0x14u && t <= 0x16u) return ch;
+        }
+    }
+    return 0;
+}
+/* whether the channel reads the axis at state offset ofs as the steering or
+ * a pedal (0x5c1fba: +0x364..+0x367 switch the axes +0x344..+0x350 on, and
+ * +0x368 with +0x367 makes one axis both pedals) */
+static int chan_reads_axis(uint32_t ch, uint32_t ofs){
+    if (MR8(ch + 0x364u) && MR32(ch + 0x344u) == ofs) return 1;
+    if (MR8(ch + 0x368u) && MR8(ch + 0x367u)) return MR32(ch + 0x350u) == ofs;
+    return (MR8(ch + 0x365u) && MR32(ch + 0x348u) == ofs) || (MR8(ch + 0x366u) && MR32(ch + 0x34cu) == ofs);
+}
 static void fill_state(uint8_t *buf, uint32_t size, Dev *d, const PadState *s){
     uint8_t st[0x110];
     memset(st, 0, sizeof st);
@@ -395,10 +418,23 @@ static void fill_state(uint8_t *buf, uint32_t size, Dev *d, const PadState *s){
     if (click < 0.f){ const char *e = getenv("NFSU2_PAD_TRIGGER_CLICK");
                       click = e && *e ? (float)atof(e) : 0.97f;
                       if (click < 0.05f || click > 1.f) click = 0.97f; }
+    /* A trigger the game reads as a pedal presses its button at the end of
+     * its travel (the digital top of the pedal, see the default layout).  One
+     * it reads as no axis is a plain button (shifting, in the PS2 layout): it
+     * presses at half travel and lets go below 0.4.  Not while the Joypad
+     * page waits for the steering or a pedal (+0x33c 1..4): a trigger should
+     * bind there as its axis (past 5 % of its travel), and the page looks at
+     * the buttons first (0x5ca720), so a fast pull could bind the button. */
+    uint32_t ch = dev_channel(d);
+    int axis_bind = ch && MR32(ch + 0x33cu) - 1u < 4u;
+    for (int k = 0; k < 2; k++){
+        float v = s->axis[k ? PAD_AXIS_RT : PAD_AXIS_LT];
+        if (!ch || axis_bind || chan_reads_axis(ch, k_axis_ofs[k ? 5 : 2])) d->trig[k] = v >= click;
+        else d->trig[k] = v >= (d->trig[k] ? 0.4f : 0.5f);
+    }
     for (int i = 0; i < NBTNS; i++){
         int src = k_btn_src[i];
-        int on = src == SRC_LT_FULL ? s->axis[PAD_AXIS_LT] >= click
-               : src == SRC_RT_FULL ? s->axis[PAD_AXIS_RT] >= click : !!(b & (1u << src));
+        int on = src == SRC_LT_FULL ? d->trig[0] : src == SRC_RT_FULL ? d->trig[1] : !!(b & (1u << src));
         if (on) st[0x30 + i] = 0x80;
     }
     memcpy(buf, st, size < sizeof st ? size : sizeof st);
@@ -510,6 +546,31 @@ void sub_005b81b0(CPU *c){
     }
     sub_005b81b0_orig(c);
 }
+
+/* ---- binding on the Joypad page -------------------------------------------------------
+ * The page has two columns.  For the steering and the pedals (actions 1..4)
+ * an axis, while one is on, shows in the first column and the action's
+ * button in the second (0x5b8a90).  Binding a button (0x5b8460) or a hat
+ * direction (0x5c1720) replaces the action's other buttons but leaves its
+ * axis on, and nothing on the page turns an axis off: with the gas and brake
+ * moved to buttons and the triggers to shifting (the PS2 layout), a trigger
+ * still accelerated or braked as it shifted.  Here a button or hat direction
+ * bound to the throttle or the brake in the first column takes the axis's
+ * place, as the column shows: the axis goes off (and pulling a trigger there
+ * binds it again).  The steering keeps its axis (left and right are the one
+ * stick axis), and so does one axis bound to both pedals (+0x368).  Channel
+ * (thiscall ecx): +0x33c the action being bound, +0x340 the column (0 the
+ * first), +0x365/+0x366 the throttle/brake axis on; saved with the profile. */
+static void bind_takes_axis(uint32_t ch){
+    uint32_t act = MR32(ch + 0x33cu);
+    if ((act != 1u && act != 2u) || MR32(ch + 0x340u) != 0u || MR8(ch + 0x368u) || !MR8(ch + 0x364u + act)) return;
+    MR8(ch + 0x364u + act) = 0;
+    if (pad_log()) fprintf(stderr, "[pad] %s bound to a button: its axis is off\n", act == 1u ? "throttle" : "brake");
+}
+void sub_005b8460_orig(CPU *c);
+void sub_005b8460(CPU *c){ bind_takes_axis(c->ecx); sub_005b8460_orig(c); }
+void sub_005c1720_orig(CPU *c);
+void sub_005c1720(CPU *c){ bind_takes_axis(c->ecx); sub_005c1720_orig(c); }
 
 /* ---- IDirectInputDevice8 methods for the pad --------------------------------------- */
 static void write_objinst(uint32_t p, uint32_t size, int i, int fam, int wheel){

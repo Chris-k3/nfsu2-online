@@ -11,7 +11,8 @@
 //!   its car is), a BYE when it stops.
 //! - hub -> player: twice a second (`tick_ms`) a PEERS message: the players linked to it, { virtual address, port, id }, at most
 //!   `degree` (32: roam_core's group of 33 with itself), or 7 for a player whose HELLO says core version 1 (its group
-//!   was 8, and it drops a longer list); an empty one says the hub is there.
+//!   was 8, and it drops a longer list); an empty one says the hub is there.  To a player in a crew whose HELLO says
+//!   it reads them (core 8), the list ends in crew marks: its own crews, then which of them each listed player is in.
 //! - player -> hub -> player: when its world map opens, a MAPREQ; the hub answers with MAP datagrams (at most three
 //!   of 230): the other players of its room in free roam, past its links, nearest first, map_max (512) of them at
 //!   most, each its place (x, y in whole metres) and heading (a byte), which the game marks on the map.
@@ -52,7 +53,10 @@
 //! distance alone a friend 300 m off in a crowd was never linked (32 nearer players were, 8 under the busy cap): his
 //! car, name and map arrow never showed.  A crew of more than 64 players in one room gets no links first (its pairs
 //! grow as the square of its players): they link by distance as everyone does.  /players counts each crew's players
-//! for the start page (`in_crews()`).
+//! for the start page (`in_crews()`).  A player learns which of its peers share a crew from the hub's marks on its
+//! list, never from the peers: a crew's hash in a stranger's hands is all it takes to be linked with that player
+//! anywhere on the map, and a short crew name is quickly found from its hash (a core before 8 still sends its crews to
+//! the peers that read them, and colours a crew-mate of core 8 no more).
 //!
 //! A busy server gives every player fewer links: each link is two players' snapshots to each other, 20 a second each
 //! way (fewer for far ones), so a crowd costs its players times their links, all through the switch; a switch that
@@ -65,9 +69,20 @@
 //! cars; it asks at a later Play once the cap is back.  /players also says how many drive in free roam, or are paused
 //! there (`in_roam()`, counted at each tick).
 //!
+//! The hub also watches how each player's car moves (watch.rs): a teleport, a car faster than any of the game's, or a
+//! game whose clock runs fast (a speed hack) is a `[cheat]` line with the player's address and name, and who was
+//! next to where its car came to.  And it judges each race lobby's race by its racers' results (results.rs): a win
+//! no car makes is a `[cheat]` line too.  Lines only: the operator decides (`nfsu2-server ctl kick|ban`).
+//!
+//! A claimed name (nfsu2-claims) is its keyphrase's only: a player whose HELLO names one that another keyphrase
+//! claimed (its page's hello to the switch named the keyphrase it plays with: `FrameCtx::owner`) gets no links, is on
+//! nobody's map and counts nowhere, and the console says so once.  The page plays under the name with four digits
+//! then (as the Online lobby gives it), so only a page that ignores that plays alone.  A player's own claim hears that
+//! it plays (it holds 180 days from its last game).
+//!
 //! What the hub keeps, in memory only: per player endpoint its virtual address, port, id, room hash, crews' hashes,
-//! status, name and last position; gone `gone_ms` after its last message, when it says BYE, or when it leaves the
-//! switch.  Reading positions is what choosing by distance costs: the switch itself never looks inside a frame.  At
+//! status, name and last position (and what its watch counted); gone `gone_ms` after its last message, when it says
+//! BYE, or when it leaves the switch.  Reading positions is what choosing by distance costs: the switch itself never looks inside a frame.  At
 //! most `max_per_vip` endpoints per virtual address (a browser has one), and `max_players` in all.
 //!
 //! - [`Hub`]: the hub's logic, single-threaded, with the clock, the busy measure and the sending given to it (the
@@ -81,7 +96,10 @@
 //!   pays for every snapshot too, so a slice near its limit gets fewer links before its players get them late.
 
 mod hub;
+mod jumps;
 mod links;
+mod results;
+mod watch;
 mod wire;
 
 use std::collections::{HashMap, HashSet};
@@ -97,7 +115,7 @@ use nfsu2_util::{FrameCtx, Host, SwitchSend};
 use tokio::sync::oneshot;
 
 pub use hub::Hub;
-pub use wire::{decode_roam, encode_peers};
+pub use wire::{decode_roam, encode_peers, encode_peers_crews};
 
 /// 10.77.0.253, runtime/web/net_proto.h NET_ROAM_HUB
 pub const ROAM_HUB_VIP: u32 = 0x0A4D_00FD;
@@ -199,7 +217,8 @@ pub struct PeerEntry {
 
 /// What the switch posts to the hub's thread, in order.
 enum Cmd {
-    Frame(u32, Bytes),
+    /// a frame from a browser, and the keyphrase its page plays with
+    Frame(u32, Bytes, Option<Arc<str>>),
     Gone(u32),
     Attach(SwitchSend),
     Info(oneshot::Sender<serde_json::Value>),
@@ -233,6 +252,11 @@ impl RoamHub {
     /// measure is the runtime's workers' (the switch's) or a CPU quota's, the higher; outside one (tests), the
     /// process's over every core.
     pub fn spawn(o: RoamOptions, log: Arc<dyn Fn(&str) + Send + Sync>) -> Arc<RoamHub> {
+        RoamHub::spawn_with(o, log, None)
+    }
+
+    /// `spawn`, with the claimed names (nfsu2-claims): a player under a name another keyphrase claimed plays alone
+    pub fn spawn_with(o: RoamOptions, log: Arc<dyn Fn(&str) + Send + Sync>, claims: Option<Arc<nfsu2_claims::Claims>>) -> Arc<RoamHub> {
         let (tx, rx) = mpsc::channel();
         let pending = Arc::new(AtomicUsize::new(0));
         let busy: Box<dyn FnMut() -> f64 + Send> = match tokio::runtime::Handle::try_current() {
@@ -249,7 +273,8 @@ impl RoamHub {
         let waiting = pending.clone();
         // random and never 0 (roam_core.c's decoder, as `wire::decode`, drops a datagram from sender 0)
         let id = nfsu2_util::rand::int(1, 0xFFFF_FFFF) as u32;
-        let hub = Hub::new(o, Box::new(|| nfsu2_util::now_ms() as f64), busy, Box::new(move |l| log(l)), Box::new(|_, _| false), id);
+        let mut hub = Hub::new(o, Box::new(|| nfsu2_util::now_ms() as f64), busy, Box::new(move |l| log(l)), Box::new(|_, _| false), id);
+        hub.set_claims(claims);
         // (made here, not on its thread: until its first tick crowded() is what the hub begins with)
         let crowded = Arc::new(AtomicBool::new(hub.crowded()));
         let in_roam = Arc::new(AtomicUsize::new(0));
@@ -344,9 +369,9 @@ fn run(
             },
         };
         match cmd {
-            Cmd::Frame(from, data) => {
+            Cmd::Frame(from, data, owner) => {
                 pending.fetch_sub(1, Ordering::Relaxed);
-                guard(|| hub.frame(from, &data));
+                guard(|| hub.frame_from(from, &data, owner.as_ref()));
             }
             Cmd::Gone(vip) => guard(|| hub.peer_gone(vip)),
             Cmd::Attach(send) => hub.attach_switch(Box::new(move |vip, f| send(vip, f, None).sent())),
@@ -378,13 +403,13 @@ impl Host for RoamHub {
         false
     }
     fn frame(&self, from: u32, data: Bytes, ctx: FrameCtx) {
-        // the hub's lists are charged to nobody
-        drop(ctx);
+        // the hub's lists are charged to nobody; the owner is for the claimed names
+        let owner = ctx.owner;
         if self.pending.fetch_add(1, Ordering::Relaxed) >= MAX_PENDING {
             self.pending.fetch_sub(1, Ordering::Relaxed);
             return;
         }
-        if self.tx.send(Cmd::Frame(from, data)).is_err() {
+        if self.tx.send(Cmd::Frame(from, data, owner)).is_err() {
             self.pending.fetch_sub(1, Ordering::Relaxed);
         }
     }
@@ -426,7 +451,7 @@ mod tests {
             in_rooms: Arc::new(Mutex::new(HashMap::new())),
             in_crews: Arc::new(Mutex::new(Vec::new())),
         };
-        let ctx = FrameCtx { group: Arc::from("client"), site: None, cause: None, slot: None };
+        let ctx = FrameCtx { group: Arc::from("client"), site: None, cause: None, slot: None, owner: None };
         for _ in 0..100_000 {
             hub.frame(0x0A4D_0005, Bytes::from_static(b"a frame"), ctx.clone());
         }

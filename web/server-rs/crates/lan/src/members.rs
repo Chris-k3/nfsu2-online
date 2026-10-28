@@ -67,10 +67,8 @@ impl Members {
     }
 
     /// a free address that is nobody's reservation, or 0: a reservation is never given to anyone but its token (the
-    /// review of the audit's F1, in the crate doc)
+    /// review of the audit's F1, in the crate doc).  (The expired ones went just before: `LanSwitch::expire`.)
     pub(crate) fn allocate(&mut self) -> u32 {
-        let now = now_ms();
-        self.reserved.retain(|_, r| r.until > now);
         for i in 0..ADDRS {
             let k = (self.next + i) % ADDRS;
             let c = vip_at(k);
@@ -141,6 +139,7 @@ impl LanSwitch {
     /// none for it now: the switch full, or (unless `first`, the line's first) others waiting before it.  A resumed
     /// address leaves its reservation here.
     pub(crate) fn place(&self, m: &mut Members, held: (u32, Option<Arc<Peer>>), first: bool) -> Option<(u32, Option<Arc<Peer>>, bool)> {
+        self.expire(m);
         let (vip, old) = held;
         if vip != 0 {
             // (more players than places only after a restart with fewer: the store's reservations)
@@ -349,6 +348,36 @@ impl LanSwitch {
             m.lan.swap_remove(&vip);
         }
         self.publish_lan(m);
+    }
+
+    /// The reservations past their time go.  The hosts hear of each one from the store that goes so (`Host::peer_gone`):
+    /// a player of before a restart who did not come back for its address, whose leaving they never saw (the Online
+    /// host keeps the races going on over a restart, and their players' names, until it hears they left).  The ones
+    /// a departure made, they heard of at the departure.  Whether any went.
+    pub(crate) fn expire(&self, m: &mut Members) -> bool {
+        let now = now_ms();
+        let before = m.reserved.len();
+        let mut lapsed = Vec::new();
+        m.reserved.retain(|v, r| {
+            if r.until > now {
+                return true;
+            }
+            if r.group.is_none() {
+                lapsed.push(*v);
+            }
+            false
+        });
+        // (under the lock: a page that takes the address later can only be admitted after, so its frames never reach
+        // a host before this; posting only queues)
+        for vip in lapsed {
+            if let Some(h) = &self.online {
+                h.peer_gone(vip);
+            }
+            if let Some(h) = &self.roam {
+                h.peer_gone(vip);
+            }
+        }
+        m.reserved.len() != before
     }
 
     /// vip is kept for its token for `reserve_ms`; past its client's (and site's) share of reservations

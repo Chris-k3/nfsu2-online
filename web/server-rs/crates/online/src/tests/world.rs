@@ -70,6 +70,8 @@ impl Conn {
 pub struct Client {
     pub group: Arc<str>,
     pub conns: HashMap<u16, Conn>,
+    /// the keyphrase its page's hello named (FrameCtx::owner)
+    pub owner: Option<Arc<str>>,
 }
 
 /// a stream: its browser and its port
@@ -107,11 +109,15 @@ pub struct Opts {
     pub limits: Limits,
     pub buddy: BuddyLimits,
     pub state_dir: Option<std::path::PathBuf>,
+    /// the lobby's clock at the start (ms; None: 1,000,000)
+    pub t0: Option<f64>,
+    /// the claimed names (nfsu2-claims)
+    pub claims: Option<Arc<nfsu2_claims::Claims>>,
 }
 
 impl World {
     pub fn new(o: Opts) -> World {
-        let t = Rc::new(Cell::new(1_000_000.0));
+        let t = Rc::new(Cell::new(o.t0.unwrap_or(1_000_000.0)));
         let tt = Rc::new(Cell::new(0.0));
         let lines = Rc::new(RefCell::new(Vec::new()));
         let (t2, tt2, l2) = (t.clone(), tt.clone(), lines.clone());
@@ -119,6 +125,7 @@ impl World {
             state_dir: o.state_dir,
             log: Rc::new(move |s: &str, k: Option<&str>| l2.borrow_mut().push((s.to_string(), k.map(str::to_string)))),
             tap: None,
+            claims: o.claims,
             clocks: Rc::new(Clocks { now: Box::new(move || t2.get()), timer: Box::new(move || tt2.get()) }),
             limits: o.limits,
             buddy_limits: o.buddy,
@@ -210,7 +217,7 @@ impl World {
     /// a browser at `vip` of client `group` (the lobby tests: the browser's own address stands for its client)
     pub fn client_of(&mut self, vip: &str, group: &str) -> u32 {
         let v = ip(vip);
-        if let Some(old) = self.clients.insert(v, Client { group: group.into(), conns: HashMap::new() }) {
+        if let Some(old) = self.clients.insert(v, Client { group: group.into(), conns: HashMap::new(), owner: None }) {
             for (port, c) in old.conns {
                 self.orphans.insert((v, port), c);
             }
@@ -222,9 +229,14 @@ impl World {
         self.client_of(vip, &format!("vip {v}"))
     }
 
+    /// the browser's page plays with this keyphrase's token (its hello's "claim") from its next connection on
+    pub fn set_owner(&mut self, vip: u32, token: &str) {
+        self.clients.get_mut(&vip).expect("a client").owner = nfsu2_claims::owner_of_token(token);
+    }
+
     pub fn raw(&mut self, vip: u32, frame: &[u8]) {
-        let group = self.clients[&vip].group.clone();
-        self.core.frame(vip, frame, &FrameCtx { group, site: None, cause: None, slot: None });
+        let (group, owner) = (self.clients[&vip].group.clone(), self.clients[&vip].owner.clone());
+        self.core.frame(vip, frame, &FrameCtx { group, site: None, cause: None, slot: None, owner });
         self.deliver();
     }
 

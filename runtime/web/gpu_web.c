@@ -733,15 +733,22 @@ int metal_draw_ix(unsigned vbo, unsigned stride, unsigned ibo, unsigned isz, uns
 }
 void metal_raw_overflow(unsigned *rv, unsigned *kb){ if (rv) *rv = g_ov_rv; if (kb) *kb = g_ov_kb; }
 
-/* StretchRect: an ordered record (whole source to whole destination). */
-void metal_blit(unsigned src, unsigned dst){
+/* StretchRect: an ordered record, the whole source (or r: left, top, right,
+ * bottom in source pixels) to the whole destination. */
+void metal_blit_rect(unsigned src, unsigned dst, const int *r){
     if (!g_on) return;
     Buf *B = &g_b[g_cur];
     if (B->dn >= MAXD){ g_ov_d++; return; }
     GwDraw *D = &B->d[B->dn++];
     memset(D, 0, sizeof *D);
     D->kind = GW_BLIT; D->target = dst; D->blit_src = src;
+    if (r){
+        uint32_t q[4];
+        for (int i = 0; i < 4; i++) q[i] = r[i] < 0 ? 0u : r[i] > 0xFFFF ? 0xFFFFu : (uint32_t)r[i];
+        if (q[2] > q[0] && q[3] > q[1]){ D->first = q[0] | q[1] << 16; D->count = q[2] | q[3] << 16; }
+    }
 }
+void metal_blit(unsigned src, unsigned dst){ metal_blit_rect(src, dst, NULL); }
 void metal_clear_target_ex(unsigned argb, unsigned flags, float z){
     if (!g_on) return;
     Buf *B = &g_b[g_cur];
@@ -844,12 +851,12 @@ static void vsync_feed(void){
 }
 
 /* ---- present --------------------------------------------------------------
- * Hand the buffer just recorded to the page and switch to the other one.
- * As on the Mac: wait (guest lock released) while the previous frame has not
- * been taken; a frame the page has not started to encode is replaced in
- * mailbox mode, or after 60 ms when the page is not encoding at all (a hidden
- * tab).  A frame being encoded is always waited for: its buffer is the one
- * the game would write next. */
+ * handoff(): the buffer just recorded goes to the page, and recording moves
+ * to the other one.  As on the Mac: wait (guest lock released) while the
+ * previous frame has not been taken; a frame the page has not started to
+ * encode is replaced in mailbox mode, or after 60 ms when the page is not
+ * encoding at all (a hidden tab).  A frame being encoded is always waited
+ * for: its buffer is the one the game would write next. */
 /* runtime/headlights.c: the other cars' headlights for the frame being recorded */
 void gw_headlights(const GwHL *blk){
     if (!g_on || !blk) return;
@@ -868,11 +875,9 @@ void metal_request_dump(long guest_frame, const char *label){
     for (char *q = g_dump_label; *q; q++) if (*q == '/' || *q == ' ' || *q == '\\') *q = '_';
     g_dump_req = guest_frame;
 }
-void metal_present(void){
-    gw_init();
-    g_presents++;
-    if (g_on) gw_attached();          /* the first present waits for the page; a detach ends recording */
-    if (!g_on){ g_gframe++; tex_free_due(0); return; }
+static uint32_t g_rb_n = 0;       /* textures read back (metal_read_texture) */
+static int      g_handed = 0;     /* the frame being recorded went to the page early, with a readback */
+static void handoff(uint32_t rb_id, uint32_t rb_tex, uint32_t rb_dst, uint32_t rb_pitch, uint32_t rb_rows){
     Buf *B = &g_b[g_cur];
     GwFrame *F = &g_ctl->frame[g_cur];
     F->seq = g_gframe; F->dn = B->dn; F->vn = B->vn; F->rvn = B->rvn; F->kn = B->kn; F->pscn = B->pscn;
@@ -889,6 +894,7 @@ void metal_present(void){
         memcpy(F->dump_label, g_dump_label, sizeof F->dump_label);
         g_dump_req = -1;
     }
+    F->rb_id = rb_id; F->rb_tex = rb_tex; F->rb_dst = rb_dst; F->rb_pitch = rb_pitch; F->rb_rows = rb_rows;
     int mailbox = hfr_mailbox();
     int32_t mine = g_cur + 1;
     double t0 = now_ms();
@@ -928,10 +934,63 @@ void metal_present(void){
     ((GwHL *)(N->kb + GW_K_HL))->n = 0;           /* no other cars' headlights until headlights.c sets them */
     ((GwMarks *)(N->kb + GW_K_MARKS))->n = 0;     /* nor quick chat's places until roam_game.c does */
     g_frame_clear = g_clear_argb;
+}
+void metal_present(void){
+    gw_init();
+    g_presents++;
+    if (g_on) gw_attached();          /* the first present waits for the page; a detach ends recording */
+    if (!g_on){ g_gframe++; tex_free_due(0); g_handed = 0; return; }
+    /* a readback handed the frame over already: only what was drawn since */
+    if (!g_handed || g_b[g_cur].dn) handoff(0, 0, 0, 0, 0);
+    g_handed = 0;
     g_gframe++;
     tex_free_due(0);
     vsync_feed();
     view_follow();
+}
+
+/* LockRect on a render target the game made lockable (com.c, CreateRenderTarget):
+ * the pixels the GPU drew there, level 0, rows x pitch bytes at dst.  The game
+ * takes the picture of a DVD or magazine cover this way (0x5C3120: the middle
+ * of the screen StretchRect'ed into a 512x512 target, locked, copied into the
+ * cover's save and its texture), after EndScene and just before Present.
+ * Records the page has not seen yet drew it, so the frame recorded so far goes
+ * to the page now with the request: the page shows it as any frame (it is the
+ * whole frame), copies the texture out and writes dst, and the game waits for
+ * that with the guest lock released, at most 3 s (a hidden tab may not draw).
+ * Present then hands off only what was drawn in between.  1: dst holds the
+ * pixels; 0: no renderer, or the page did not answer (dst as it was). */
+int metal_read_texture(unsigned id, void *dst, unsigned pitch, unsigned rows){
+    gw_init();
+    if (!g_on || !dst || !id || id >= MAXTEX || !g_tex[id].live || !g_tex[id].rt || g_tex[id].cube) return 0;
+    if (!gw_attached()) return 0;
+    uint32_t rid = ++g_rb_n & ~GW_RB_FLAG;
+    if (!rid) rid = g_rb_n = 1;
+    ast(&g_ctl->rb_want, (int32_t)rid);
+    double t0 = now_ms();
+    handoff(rid, id, (uint32_t)(uintptr_t)dst, pitch, rows);
+    g_handed = 1;
+    double lim = 3000.0;
+    int got = -1;
+    guest_wait_begin();
+    for (;;){
+        int32_t d = ald(&g_ctl->rb_done);
+        if (((uint32_t)d & ~GW_RB_FLAG) == rid){ got = !((uint32_t)d & GW_RB_FLAG); break; }
+        double left = lim - (now_ms() - t0);
+        if (left <= 0 || ald(&g_ctl->attached) != GW_ATTACHED){
+            /* no answer: cancel, unless the page is writing dst right now (it
+             * claims and writes in one go: a moment) */
+            int32_t w = (int32_t)rid;
+            if (__atomic_compare_exchange_n(&g_ctl->rb_want, &w, 0, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) break;
+            if (lim >= 5000.0) break;
+            lim = 5000.0; continue;
+        }
+        wait32(&g_ctl->rb_done, d, left < 50.0 ? (left > 1.0 ? left : 1.0) : 50.0);
+    }
+    guest_wait_end();
+    fprintf(stderr, "[gpu] texture %u (%ux%u) read back for the game: %s after %.0f ms\n", id, g_tex[id].w, g_tex[id].h,
+            got > 0 ? "done" : got == 0 ? "the page could not read it" : "no answer", now_ms() - t0);
+    return got > 0;
 }
 
 long metal_frames(void){ return g_on && g_ctl ? (long)g_ctl->frames_done : g_presents; }

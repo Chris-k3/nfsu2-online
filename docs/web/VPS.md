@@ -93,8 +93,9 @@ web/deploy/release.sh root@<vps> --undo                # back to the module and 
 It checks that the registry has the image (CI cancels a commit's image when a newer push comes), pulls it on the VPS
 before anything changes there (a pull that fails leaves the site as it was), copies the module into place by
 renames, sets `NFSU2_IMAGE` in `.env`, restarts only the server and waits until it is healthy; `-n` first only says
-what it would do. Run again after a failure, it keeps the module and image of before for `--undo`. `NFSU2_DIR` names
-another folder than `/srv/nfsu2`.
+what it would do. Run again after a failure, it keeps the module and image of before for `--undo`. Last it writes
+`module/release.json`, the module's and the image's commits, for the forum bot (`discord-bot/`): after a release of
+only the page or the server, the image's commit is what is live. `NFSU2_DIR` names another folder than `/srv/nfsu2`.
 
 **When something is wrong:**
 
@@ -171,6 +172,24 @@ sees a keyphrase, a key or a save, and its files name no player.
 - **Backups:** copy `vault/` while the server runs: each file is replaced whole, by a rename. Without the folder the
   players' copies on the server are gone; their browsers keep their own.
 
+## Claimed names
+
+With keyphrase saves on, a player's keyphrase can claim their name (PLAYING.md, Online: "Your name is yours"): while
+the claim holds (180 days after they last played under it) nobody else plays under it in the Online menu or free
+roam, and EA Messenger keeps its lists for it. The server keeps `names.json` in the state folder: each name, a code
+made from its keyphrase's token (never the keyphrase), when it was claimed and last played. Written whole within a
+minute of a change. A keyphrase deleted from the cloud frees its name.
+
+- **Cloudflare Turnstile** (a check that a person, not a script, claims a name): create a widget in the Cloudflare
+  dashboard (Turnstile, Add widget: the site's hostname, mode Managed), then put its two keys in `.env`:
+  `NFSU2_TURNSTILE_SITE=<site key>` and `NFSU2_TURNSTILE_SECRET=<secret key>`, and `docker compose up -d server`.
+  The start-up line says `[names] N names claimed; Cloudflare's check on`. With the keys the page's
+  Content-Security-Policy lets in Cloudflare's script and frame (`challenges.cloudflare.com`), and the server asks
+  Cloudflare (HTTPS out to challenges.cloudflare.com) once per claim. Without them claims need no check.
+- **What one client may do:** 10 claims, then 10 a day (one per keyphrase, a change once a week), and 120 checks of
+  a name, then 2 a second.
+- **The operator:** `nfsu2-server ctl unclaim <name>` frees a name (the console says which).
+
 ## Sizing
 
 For up to 6000 players at once (the image's limit; the Node server's was 2000, [From the Node
@@ -202,7 +221,12 @@ compose file's limit), 40 GB of disk and a 1 Gbit/s port with a few TB of traffi
   in 1.28 GB instead of the 1.39 GB of compressing as it is sent (the tracks 41 -> 33 % of their size, SPEED2.EXE
   50 -> 41 %, the voices 84 -> 79 %, the music 86 -> 84 %; the movies not at all), at no CPU per player. Two threads
   at the lowest priority make them after each start and each change of the game files (a manifest `?refresh`), the
-  blocks players ask for first: about half an hour for the whole folder (5600 blocks, 3100 that compress). Until a block is kept it goes out as before, compressed as it is sent, and
+  blocks players ask for first: about half an hour for the whole folder (5600 blocks, 3100 that compress). Their two
+  cores count against `nfsu2.slice`'s quota all the same, so they wait while the slice is 70 % used and go on below
+  55 % (`kept blocks: waiting while /nfsu2.slice uses ...`, then `going on`): on a busy evening the folder takes
+  longer, and free roam's busy cap never sees them. Without room (16 GB in `blocks/`, or less than 2 GB free on its
+  disk) they wait too, the room looked at again every minute. Until a block is kept it goes out as before, compressed
+  as it is sent, and
   Cloudflare keeps that answer 10 minutes only. The page asks at `/data-blocks/v2/` since, so Cloudflare's copies of
   the answers from before are not served for them (the Cache Rule covers both). `NFSU2_COMPRESS_THREADS` in the
   server's environment sets the threads (0: none, every block as before). The `[blocks]` line every 5 minutes counts
@@ -359,8 +383,9 @@ players the evening before.
 Every player picks the game's language in Settings. The North American game folder has the text of thirteen,
 but English voices and movies only, and short early versions of the Chinese, Japanese and Thai text. The rest comes
 from KyoriAsh's "Multi 13 languages" mod ([nfsmods.xyz/mod/5749](https://nfsmods.xyz/mod/5749)), for Brazilian
-Portuguese TraduMix's and MixMods' translation, for Polish PLProjekt's and for the English subtitles VileStuff's
-"English Subtitles Fixed" ([nfsmods.xyz/mod/5286](https://nfsmods.xyz/mod/5286)), as language packs: a `LANGPACKS` folder in
+Portuguese TraduMix's and MixMods' translation, for Polish PLProjekt's, for Turkish muntazam's and for the English
+subtitles VileStuff's "English Subtitles Fixed" ([nfsmods.xyz/mod/5286](https://nfsmods.xyz/mod/5286)), as language
+packs: a `LANGPACKS` folder in
 the game folder, one folder per language, whose files a game in that language reads in place of the game folder's
 (`runtime/language.c`). The game folder itself stays as it is.
 
@@ -376,19 +401,26 @@ the game folder, one folder per language, whose files a game in that language re
 4. Download the English subtitles (`English Subtitles Fixed (v1.0).7z`) and extract it into a fourth empty folder
    (`7z x`; `bsdtar` and Windows' `tar` read it too). The tool reads its Binary script; neither Binary nor the
    Extra Options mod it asks for is needed.
-5. `tools/langpacks.py "<your game folder>" --multi13 "<the mod's folder>" --ptbr "<the translation's folder>"
-   --pl "<the Polish folder>" --subs "<the subtitles' folder>"` builds `LANGPACKS` (1.6 GB) and prints what each
-   language got: the dubbed voices and movies of French, German, Italian, Spanish, Japanese and Russian, the full
-   Chinese, Japanese and Thai text with their fonts, Russian, Portuguese and Polish in English's place (Polish with
-   its fonts), the Danish, Dutch and Swedish EA logos, and English's text with the movies' lines whole (0.3 MB).
-   Korean needs nothing. Any source can be left out: the others' packs stay as they are.
-6. Copy it like the rest, from inside the game folder:
+5. Download the Turkish translation (`need_for_speed_underground_2_turkish_translation_patch_v1.1.zip`, muntazam's
+   "Need for Speed Underground 2 Turkish Translation Patch" v1.1 at
+   [moddb.com](https://www.moddb.com/mods/need-for-speed-underground-2-turkish-translation-patch)) and extract it into
+   a fifth empty folder. It holds a Windows installer, `nfsu2tr11.exe` (Inno Setup): unpack it there with
+   [innoextract](https://constexpr.org/innoextract/) (`innoextract nfsu2tr11.exe`, into `app/`), never run. The
+   Extra Options mod it asks for is not needed either.
+6. `tools/langpacks.py "<your game folder>" --multi13 "<the mod's folder>" --ptbr "<the translation's folder>"
+   --pl "<the Polish folder>" --subs "<the subtitles' folder>" --tr "<the Turkish folder>"` builds `LANGPACKS`
+   (1.6 GB) and prints what each language got: the dubbed voices and movies of French, German, Italian, Spanish,
+   Japanese and Russian, the full Chinese, Japanese and Thai text with their fonts, Russian, Portuguese, Polish and
+   Turkish in English's place (Polish and Turkish with their fonts), the Danish, Dutch and Swedish EA logos, and
+   English's text with the movies' lines whole (0.3 MB). Korean needs nothing. Any source can be left out: the
+   others' packs stay as they are.
+7. Copy it like the rest, from inside the game folder:
    `rsync -rlt LANGPACKS root@<vps>:/srv/nfsu2/game/`, then the same `chmod`.
 
 A player's browser fetches only their own language's pack: "Preload the game data" adds about 50 MB of dubbed
 voices (Russian 94 MB), and the dubbed movies (206 MB in all) stream in place of the English ones (725 MB). Without
-`LANGPACKS` every language but Russian, Portuguese and Polish still plays its text, with English voices and movies;
-those three play in English. All but French, German, Italian and Spanish (whose texts leave the lines their dubs
+`LANGPACKS` every language but Russian, Portuguese, Polish and Turkish still plays its text, with English voices and
+movies; those four play in English. All but French, German, Italian and Spanish (whose texts leave the lines their dubs
 speak empty) show the movies' subtitles (Settings, Game, Subtitles, on by default), English only with its pack: the
 game folder's English lines stop at their first apostrophe ("But if you"). The North American game shows none.
 
@@ -440,10 +472,11 @@ have (the cache names a file by its size and time) until the player deletes the 
 ## Movies in AV1
 
 The game's movies are VP6 at 5 to 12 Mbit/s, the most a player downloads after the game data. Browsers that decode
-AV1 themselves (Chrome, Edge and Firefox, on computers and phones) can play them as AV1 instead, at about a fifth of
-the size and looking the same: a copy of each movie in an `AV1` folder next to it (`MOVIES/AV1`,
-`LANGPACKS/<language>/MOVIES/AV1`), which the page opens in its place (`runtime/movie.c`). Safari, and any browser
-without it, keeps playing the VP6 movies, so the game folder keeps them too.
+AV1 (Chrome, Edge and Firefox, on computers and phones; Safari on the Macs and iPhones that decode it in hardware, M3
+and iPhone 15 Pro on) can play them as AV1 instead, at about a fifth of the size and looking the same: a copy of each
+movie in an `AV1` folder next to it (`MOVIES/AV1`, `LANGPACKS/<language>/MOVIES/AV1`), which the page opens in its
+place (`runtime/movie.c`). Safari on older Macs and iPhones, and any browser without AV1, keeps playing the VP6
+movies, so the game folder keeps them too.
 
 1. `sudo apt install ffmpeg` (the encoder is its libaom), then from the repository:
    `tools/movies_av1.py "<your game folder>" <out>`. The AV1 files land in `<out>`, at their places in the game
@@ -545,7 +578,34 @@ After each multiplayer race from free roam, every player's game reports it once 
 `[race]` line for each: the race (its lobby, which every player's line of that race shares, the race type, track,
 laps and cars), the player's nickname, place (or "did not finish", "quit") and the car as the game rated it (its
 type, the game's class and rating, the race's average rating, power, weight, top speed, and the factor its engine
-power had in the race). For evening out the cars: `docker compose logs -t server --since 24h | grep '\[race\]'`.
+power had in the race) and its time. For evening out the cars:
+`docker compose logs -t server --since 24h | grep '\[race\]'`.
+
+Cheats are `[cheat]` lines, each with the player's virtual address and nickname, as [kick and ban](#kick-and-ban)
+take them. The lines are for you to read: nobody is kicked or banned by them.
+
+- **In races**: every racer's game reports the race's results too (each racer's time, how far it came, the way it
+  drove), and once all of them came, or 90 s after the first, the server judges the race: its winner is the one most
+  reports had first, at the slowest time any report gave it, and the race's length is what the other racers drove. A
+  line (`won the race of lobby …`) when the winner averaged 350 km/h or more over it, which no car does (a free-roam
+  sprint's average: 107 km/h), or finished in under 40 % of another finisher's time; a cheat that ends the race at
+  once says how little of the way it drove ("having driven 0.6 % of the way"). One player's report cannot make a
+  winner or a time, and the line says how many of the race's reports saw it. In Online mode each report is looked at
+  as it comes (`won the online race …`): a time under the shortest its race type takes (the result is not taken
+  either), 350 km/h or more on average, the way a finisher drove under half another racer's, or a race won in under
+  40 % of the next finisher's time; the line says whose game saw it. A drift race is won by points and is left out.
+- **In free roam**: a teleport (the car went 300 m or more farther than any car drives, in one jump or in short hops),
+  a car over 450 km/h for 2 s, or a game whose clock runs 1.3 times as fast as the server's or more for a minute (a
+  speed hack); a teleport's or a fast car's line names the players within 40 m of where it came to, and a race lobby
+  that starts there. A player gets 5 of these lines, then one every 2 minutes; the rest are counted, and summed up
+  every 10 minutes and when it leaves free roam.
+- **None**: the game's own jumps (Respawn, the World Map's jump to an event or a shop, the garage, shops and races),
+  a bad connection (delays, stalls, a backlog that comes at once), a car that flies (an edited save) unless it does
+  one of those, an honest winner over racers who stood still. The World Map's jump stays in free roam, so a
+  teleport that lands within 25 m of an event's start or a shop's door is taken for one, whoever made it.
+
+The races won by cheating: `docker compose logs -t server --since 24h | grep '\[cheat\]' | grep 'race'`; and the
+cheats that bother others in free roam: `... | grep -e 'next to' -e 'race lobby'`.
 
 - **No player's real IP address** is written, and the page sends the server nothing about the player but the
   nickname, a random id the browser keeps for [bans](#kick-and-ban), and after a multiplayer race its car and place.
@@ -903,10 +963,14 @@ paths to the VPS, so pick a VPS location between you.
   to 15 letters, digits, `-` and `_` logs in; there are no accounts. One player per name, while online and while
   racing: a name in use is given with four digits in place of its end (on a busy server many players come as
   `NAME`), and the game plays under that.
-  - **Kept in the state volume:** `online/stats.json` (race results and best times per persona) and
+  - **Kept in the state volume:** `online/stats.json` (race results, best times and records per persona) and
     `online/buddies.json` (EA Messenger: each persona's friends and blocked by name, its friend requests waiting for
     an answer, and the messages from friends waiting for it while it is away, text included, 7 days at most), each
-    with the month a persona was last seen, written atomically (0600). No passwords, CD keys, addresses, and no chat
+    with the month a persona was last seen, written atomically (0600). When the server stops, `online/races.json`
+    keeps the races going on (each one's players by persona and virtual address, and the reports so far), read back
+    at the next start and removed once it is up: the players race on through a restart (the switch gives their
+    addresses back) and their reports afterwards still count, as long as their pages are back within about 10 s (the
+    game ends a race whose network was gone that long). No passwords, CD keys, addresses, and no chat
     but those waiting messages. The server never reads an account's
     password; a game's password it checks against an HMAC kept in memory with that game, under a key of the game's
     own.
@@ -932,7 +996,7 @@ paths to the VPS, so pick a VPS location between you.
     from one persona (30 days), 20 messages waiting for one (the oldest goes) and 20,000 in all (7 days), 5000
     persona lists (the least recently seen go), 20 new ones an hour per client address. Results: 100,000 personas
     (the least recently seen go), a
-    race counts once two of its players in different browsers sent the same result.
+    race counts once two of its players who finished it, in different browsers, sent the same result.
   - **What one client costs the others:** what the online host sends because of a client's message (its answer,
     and what the others hear of it: room chat, a game's players) comes out of that client's switch budget; over
     it, the connection that message came on closes, and the client must pay the overspend back before its next
