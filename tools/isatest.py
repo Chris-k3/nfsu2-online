@@ -9,10 +9,14 @@ os.environ.setdefault('X87PC', '1')
 from lift import RawLifter, Unsupported
 
 TESTS = []
-def T(name, code, setup=None, mem=None, expect=None, fmem=None, memf=None, fmemf=None):
+# calls: offsets in code of further functions the test calls (each is lifted as a
+# function of its own); retpast: offsets of callees that may return past their
+# caller (the lifter's tools/retpast.txt list); env: lifter options set while
+# the test is lifted (e.g. RETEIP=0)
+def T(name, code, setup=None, mem=None, expect=None, fmem=None, memf=None, fmemf=None, calls=(), retpast=(), env=None):
     TESTS.append(dict(name=name, code=bytes(code), setup=setup or {},
                       mem=mem or {}, expect=expect or {}, fmem=fmem or {},
-                      memf=memf or {}, fmemf=fmemf or {}))
+                      memf=memf or {}, fmemf=fmemf or {}, calls=calls, retpast=retpast, env=env or {}))
 
 def imm32(v): return list(struct.pack('<I', v & 0xffffffff))
 MOV_EAX = lambda v: [0xB8]+imm32(v)
@@ -402,6 +406,28 @@ _x2("psrlw xmm0,xmm0 (count 4)", [0x66,0x0F,0xD1,0xC0], [4, 0, 0xF00FABCD, 0x800
     [0x00000000, 0x00000000, 0x0F000ABC, 0x08000FFF])
 # all 64 bits of the count: 2^32+4 is more than 15 (each word becomes its sign), not 4
 _x2("psraw xmm0,xmm1 (count 2^32+4)", [0x66,0x0F,0xE1,0xC1], _S1, [4, 1, 0x55, 0x66], [0x0000FFFF, 0x00000000, 0xFFFFFFFF, 0x0000FFFF])
+# A callee that returns past its caller (tools/retpast.txt), in the shape of the
+# CRT's x87 2^x core (0x7653de): a range check (fcompp, fnstsw into the frame at
+# ebp, test 0x41, jne) and, out of range, 'pop eax' -- its own return address --
+# and a ret that goes to its caller's caller.  The test calls F (+0x12), F calls
+# H (+0x21) and adds 1 and sets ebx only when H comes back to it.  ZF, CF and
+# SF start at 1; out of range H's test leaves them 0, which the early return
+# hands on (CF and SF check the FLAGABI lift: H's own jne reads only ZF).  With
+# RETEIP=0 (a ret only pops) H still writes c->eip: F compares it.
+RP = 0x00C90000
+def _rp(name, x, rp, res, expect, env=None):
+    T(name, [0xD9,0x05]+a32(rp) + [0xE8,0x07,0,0,0] + [0xD9,0x1D]+a32(rp+8) + [0xC3]   # fld [rp]; call F; fstp [rp+8]
+      + [0xE8,0x0A,0,0,0, 0xD9,0xE8, 0xDE,0xC1, 0xBB,1,0,0,0, 0xC3]                     # F: call H; fld1; faddp; mov ebx,1
+      + [0xD9,0xC0, 0xD9,0xE1, 0xD9,0x05]+a32(rp+4) + [0xDE,0xD9]                       # H: fld st0; fabs; fld [limit]; fcompp
+      + [0x9B, 0xDD,0xBD,0x60,0xFF,0xFF,0xFF, 0xF6,0x85,0x61,0xFF,0xFF,0xFF,0x41]       # fnstsw [ebp-0xa0]; test [ebp-0x9f],0x41
+      + [0x75,0x01, 0xC3, 0x58, 0xDD,0xD8, 0xD9,0x05]+a32(rp+12) + [0xC3],              # jne; ret | pop eax; fstp st0; fld [rp+12]
+      {'ebp':rp+0x200, 'ebx':0, 'zf':1, 'cf':1, 'sf':1}, memf={rp:x, rp+4:100.0, rp+12:7.0}, expect=expect, fmemf={rp+8:res},
+      calls=(0x12, 0x21), retpast=(0x21,), env=env)
+_rp("call returning past its caller: in range", 3.0, RP, 4.0, {'ebx':1})
+_rp("call returning past its caller: out of range", 1000.0, RP+0x400, 7.0, {'ebx':0, 'zf':0, 'cf':0, 'sf':0, 'eax':0x00401017})
+_rp("call returning past its caller: in range, RETEIP=0", 3.0, RP+0x800, 4.0, {'ebx':1}, env={'RETEIP':'0'})
+_rp("call returning past its caller: out of range, RETEIP=0", 1000.0, RP+0xC00, 7.0, {'ebx':0, 'zf':0, 'cf':0, 'sf':0, 'eax':0x00401017},
+    env={'RETEIP':'0'})
 T("pushal/popal", [0x60, 0xB8,0x99,0,0,0, 0x61],   # pushad; mov eax,0x99; popad
   {'eax':0x11223344,'ecx':0x55667788}, expect={'eax':0x11223344,'ecx':0x55667788})
 FC = 0x00C60000
@@ -486,12 +512,22 @@ def build():
     fns=[]; body=[]
     for i,t in enumerate(TESTS):
         L = RawLifter(t['code'] + b'\xc3', base=BASE, comments=False)
+        L.retpast = {BASE + x for x in t['retpast']}
+        keep = {k: os.environ.get(k) for k in t['env']}; os.environ.update(t['env'])
         try:
             code,_ = L.lift(BASE)
+            more = [L.lift(BASE + x)[0] for x in t['calls']]
         except Unsupported as e:
             print(f"  !! {t['name']}: could not be lifted ({e})"); fns.append(None); continue
-        code = code.replace(f"sub_{BASE:08x}", f"test_{i}")
-        body.append(code); fns.append(f"test_{i}")
+        finally:
+            for k, v in keep.items():
+                if v is None: os.environ.pop(k, None)
+                else: os.environ[k] = v
+        names = {f"sub_{BASE:08x}": f"test_{i}", **{f"sub_{BASE + x:08x}": f"test_{i}_{x:x}" for x in t['calls']}}
+        for a, b in names.items():
+            code = code.replace(a, b); more = [s.replace(a, b) for s in more]
+        body += [f"void test_{i}_{x:x}(CPU *c);" for x in t['calls']] + more + [code]
+        fns.append(f"test_{i}")
     return fns, body
 
 REGS = ['eax','ecx','edx','ebx','esp','ebp','esi','edi']

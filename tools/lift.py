@@ -216,6 +216,11 @@ def abi_liveness(g, ent, callee_in, returns_flags):
     return live_in.get(ent, F_ALL), after, call_after
 
 _FTOL2INL = __import__('os').environ.get('FTOL2INL', '') == '1'
+def _retpast():
+    """tools/retpast.txt, next to this file: callees that can return past their caller"""
+    import os as _os
+    p = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'retpast.txt')
+    return {int(x, 16) for ln in open(p) for x in ln.split('#')[0].replace(',', ' ').split()}
 _LREGS = None
 def _lregs():
     """tools/lregs.py (LREGS=1), next to this file"""
@@ -366,7 +371,7 @@ class RawLifter:
     def __init__(self, data, base=0x00401000, comments=True):
         self.comments=comments; self.trap=False; self.traps=0
         self.trap_kinds=collections.Counter(); self.hooks=set(); self.watch=False
-        self.cov=False
+        self.cov=False; self.retpast=set()
         self.secs=[('.text', base, len(data), bytes(data))]
         self.TVA=base; self.TSZ=len(data); self.TDATA=bytes(data)
         self.md=Cs(CS_ARCH_X86,CS_MODE_32); self.md.detail=True
@@ -384,6 +389,8 @@ class Lifter:
             self.secs.append((nm,self.IB+s.VirtualAddress,s.Misc_VirtualSize,s.get_data()))
         self.TVA,self.TSZ,self.TDATA = next((va,vs,d) for nm,va,vs,d in self.secs if nm=='.text')
         self.md=Cs(CS_ARCH_X86,CS_MODE_32); self.md.detail=True
+        # this module's callees from tools/retpast.txt (a call to one may not come back to the next instruction)
+        self.retpast={a for a in _retpast() if self.in_text(a)}
     def in_text(self,a): return self.TVA<=a<self.TVA+self.TSZ
 
     # ---------- operand -> C expression ----------
@@ -682,6 +689,12 @@ class Lifter:
                 if t == 0x0075bed4 and _FTOL2INL:
                     # FTOL2INL=1: the CRT's _ftol2 in place (cpu.h FTOL2_INL), not a call
                     return [f"PUSH32(0x{i.address+i.size:x}u); FTOL2_INL(c);"]
+                if t in self.retpast:
+                    # a callee that may return past this function (tools/retpast.txt):
+                    # when the address it returned to is not this call's, this
+                    # function's own return address is gone too; return as well
+                    return [f"PUSH32(0x{i.address+i.size:x}u); sub_{t:08x}(c);",
+                            f"if (c->eip != 0x{i.address+i.size:x}u) return;"]
                 return [f"PUSH32(0x{i.address+i.size:x}u); sub_{t:08x}(c);"]
             # x86: the call target is read BEFORE the return address is pushed (call [esp+N]!)
             return [f"{{ uint32_t _ct = {E(0)}; PUSH32(0x{i.address+i.size:x}u); DISPATCH_CALL(c, _ct); }}"]
@@ -689,9 +702,10 @@ class Lifter:
             n = o[0].imm if o else 0
             # RETEIP=0: the return address is not written to c->eip (only popped off the stack).
             # A lifted caller always continues right after the call; the only place
-            # that reads c->eip (genexec) now uses the address it pushed.
+            # that reads c->eip (genexec) now uses the address it pushed.  The
+            # callees of tools/retpast.txt always write it: their callers compare it.
             import os as _os
-            if _os.environ.get('RETEIP','1') == '0':
+            if _os.environ.get('RETEIP','1') == '0' and self.entry not in self.retpast:
                 return [f"c->esp += {4 + n}u; return;"]
             return [f"POP32(c->eip);" + (f" c->esp += {n}u;" if n else "") + " return;"]
 
@@ -1751,10 +1765,12 @@ class Lifter:
     # ---------- function -> C ----------
     def lift(self, entry):
         blocks, calls = self.discover(entry)
-        self.last_blocks = blocks
+        self.last_blocks = blocks; self.entry = entry
         addrs = sorted(blocks)
         # Flag liveness: for every instruction the mask "which flags are read
         # after this one".  FLAGOPT=0 turns it off (for A/B comparisons).
+        # A callee of tools/retpast.txt counts as returning flags: when it
+        # returns past its caller, the caller's early return hands them on.
         import os as _os
         if _os.environ.get('FLAGOPT','1') == '0':
             self.fafter = {}
@@ -1762,7 +1778,8 @@ class Lifter:
             abi = abi_table()
             try:
                 if abi:
-                    _, self.fafter, _ = abi_liveness(abi_cfg(blocks, self.in_text, self.jtab), entry, abi[0], entry in abi[1])
+                    _, self.fafter, _ = abi_liveness(abi_cfg(blocks, self.in_text, self.jtab), entry, abi[0],
+                                                     entry in abi[1] or entry in self.retpast)
                 else:
                     self.fafter = flag_liveness(blocks, addrs, self.in_text)
             except Exception: self.fafter = {}
@@ -1909,8 +1926,11 @@ class Lifter:
         code = "\n".join(out)
         if _os.environ.get('LREGS', '') == '1':
             # registers and flags as locals, stored only where others look (tools/lregs.py)
+            # (the early 'if (c->eip != ...) return;' after a call to a callee of
+            # tools/retpast.txt is a return site like any other: the call has just
+            # brought the locals in step, so it stores nothing)
             abi = abi_table()
-            code = _lregs().transform(code, abi[0] if abi else None, abi[1] if abi else None)
+            code = _lregs().transform(code, abi[0] if abi else None, (abi[1] | self.retpast) if abi else None)
         return code, targets|calls
 
 if __name__=='__main__':

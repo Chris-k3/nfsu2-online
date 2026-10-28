@@ -65,8 +65,8 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
   - No Emscripten: the host is our own TypeScript (`web/src/host`).
   - `web/gen.sh <SPEED2.EXE>` lifts the game and `server.dll` into `gen/all` and `gen/server` (`./gen.sh` with the
     web's lift options FLAGABI, X87OPT, JTSWITCH, LREGS, FTOL2INL and INLINE_LIST). `gen.sh` stamps both
-    (`stamp.txt`, `tools/genstamp.sh`: the override list, the hook list, the lifter with its inline list, the exe, the
-    options).
+    (`stamp.txt`, `tools/genstamp.sh`: the override list, the hook list, the lifter with its inline and retpast lists,
+    the exe, the options).
   - JTSWITCH: an MSVC switch (`cmp r, n; ja`, then `jmp [r*4+table]`, also through a byte table) becomes a C
     `switch` inside its function. Each case checks the table entry in guest memory and anything else still takes the
     dispatcher, so the semantics stay the same. Without it every table target was entered as a function of its own,
@@ -96,6 +96,11 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
     the wasm load offset (+9 % instructions: V8 then zero-extends and adds in 64 bits per access), leaf-only
     inlining (INLINE=8: nothing), a fast path or a split of `com_call` (nothing), and the x87 rounding at PC=24 is
     not a bottleneck (`NFSU2_FPU_PRESERVE=1` keeps PC=53: the same time).
+  - A lifted call continues after the call. The CRT's x87 2^x core (`0x7653de`, under exp, sinh, cosh and tanh) does
+    not come back there when its argument is out of range (|x·log2 e| ≥ 32767.5): it pops its own return address and
+    its ret goes to its caller's caller. After a direct call to a function in `tools/retpast.txt` the caller compares
+    `c->eip` with its own return address and returns as well when they differ. A static scan of the lifted functions'
+    returns found no other such function with direct callers, but it could not follow the stack in every function.
   - `web/build.sh` refuses a `gen/all` made from another override list, hook list or lifter than the checkout's,
     then does an incremental shard build through a shared content-addressed object cache
     (`~/.cache/nsfu2-web/obj`), links `out/web/nfsu2.wasm` (35 MB) and writes `nfsu2.json`.
@@ -362,9 +367,9 @@ struct VOut { @builtin(position) pos: vec4f; @location(0) col0: vec4f; @location
 ## 4. Testing
 
 - Without a browser:
-  - `web/tools/isatest.sh` (`WEB_LIFT=opt` for the web's lift options): the x86 ISA suite (`tools/isatest.py`, 479
-    tests) lifted and compiled like the game's shards, run in V8 under node:wasi. The first gate after a lifter or
-    `cpu.h` change.
+  - `web/tools/isatest.sh` (`WEB_LIFT=opt` for the web's lift options): the x86 ISA suite (`tools/isatest.py`, 610
+    tests, 646 with `WEB_LIFT=opt`) lifted and compiled like the game's shards, run in V8 under node:wasi. The first
+    gate after a lifter or `cpu.h` change.
   - `web/tools/aliastest.sh`: guest memory type punning (`tests/web/aliastest.c`). It runs
     `web/tools/aliasguard.sh` first, a structural check that every guest access macro of `runtime/cpu.h`'s wasm
     branches keeps its `may_alias` type; `web/build.sh` runs the guard before it compiles anything.
