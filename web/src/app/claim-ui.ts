@@ -248,12 +248,21 @@ export async function settleName(d: PlayNameDeps, typed: string, saveDir: string
   }
 }
 
+/** after a claim at Play that did not go through (the check failed, Not now, a refusal), Play tries again only this
+ *  much later: a check that hangs costs its 15 s once, a player who said Not now is not asked at every Play; Claim
+ *  under Your name works any time */
+const RETRY_MS = 7 * 86_400_000;
+
 /** a free name claimed at Play, Cloudflare's check quiet unless it wants a click */
 async function claimQuietly(d: PlayNameDeps, name: string, info: NameInfo, quiet: (name: string, site: string) => Promise<string | null>): Promise<Mine | null> {
+  const k = `nfsu2-claim-tried:${name.toLowerCase()}`;
+  try { if (Date.now() - Number(localStorage.getItem(k) ?? 0) < RETRY_MS) return null; } catch { /* storage off: tried */ }
+  const later = () => { try { localStorage.setItem(k, String(Date.now())); } catch { /* storage off */ } };
   const captcha = info.captcha ? await quiet(name, info.captcha) : null;
-  if (info.captcha && !captcha) { d.log('[app] claim at Play: Cloudflare\'s check did not pass (not claimed)'); return null; }
+  if (info.captcha && !captcha) { d.log('[app] claim at Play: Cloudflare\'s check did not pass (not claimed; Play tries again in a week)'); later(); return null; }
   const r = await d.claims.claim(name, captcha);
-  d.log(r.ok ? '[app] claim at Play: your name claimed with this browser\'s keyphrase' : `[app] claim at Play: not claimed (${r.error})`);
+  d.log(r.ok ? '[app] claim at Play: your name claimed with this browser\'s keyphrase' : `[app] claim at Play: not claimed (${r.error}; Play tries again in a week)`);
+  if (!r.ok) later();
   return r.ok ? r.mine : null;
 }
 
