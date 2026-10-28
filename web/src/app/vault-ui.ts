@@ -35,8 +35,13 @@ export interface VaultPanelDeps {
   choose(title: string, body: Node | string, ok: string, cancel: string): Promise<string>;
   /** the saves here were replaced: the Saves list and the settings again */
   onRestored(): void;
+  /** the passphrase linked here changed (made, loaded, stopped, deleted): what the claimed names say of this player */
+  onLink?(): void;
   log(s: string): void;
 }
+
+/** how long `token()` waits for the section to know whether this server keeps cloud saves (`start`) */
+const READY_WAIT_MS = 5000;
 
 /** where a save folder's link is kept (localStorage) */
 const linkKey = (saveDir: string) => `nfsu2-keyphrase:${saveDir}`;
@@ -123,7 +128,14 @@ export class VaultPanel {
   private readonly key: string;
   private readonly input: HTMLInputElement;
 
+  /** `start` has found whether this server keeps cloud saves (and set up the sync, with the link kept here) */
+  private ready: Promise<void>;
+  private readyNow: () => void = () => {};
+  /** the phrase linked when the section last showed (undefined: not shown yet): `onLink` when it changes */
+  private shownLink: string | null | undefined = undefined;
+
   constructor(private root: HTMLElement, private d: VaultPanelDeps) {
+    this.ready = new Promise<void>(r => { this.readyNow = r; });
     this.key = linkKey(d.saveDir);
     this.input = this.$<HTMLInputElement>('#vault-input');
     const on = (id: string, f: () => unknown) => { this.$<HTMLButtonElement>(id).onclick = () => void f(); };
@@ -188,8 +200,9 @@ export class VaultPanel {
 
   /** Shows the section when this server keeps keyphrase saves. */
   async start() {
-    if (!await vaultAvailable()) return;
+    if (!await vaultAvailable().finally(() => setTimeout(() => this.readyNow(), 0))) return;
     this.makeSync();
+    this.readyNow();
     this.root.hidden = false;
     await this.loadReplaced();
     this.show();
@@ -356,7 +369,12 @@ export class VaultPanel {
     return l ? { phrase: l.phrase } : { why: st?.s === 'error' ? tvars(st.why.t, st.why.v) : '' };
   }
   /** the linked keyphrase's token (claim.ts: the claimed names), null without one */
-  token(): Promise<string | null> { return this.sync?.token() ?? Promise.resolve(null); }
+  // (it waits for `start`: asked before the section knew its link, it answered none, and the line under Your name
+  // said the player's own claimed name was another player's: a player's report, 2026-10-29)
+  async token(): Promise<string | null> {
+    await Promise.race([this.ready, new Promise(r => setTimeout(r, READY_WAIT_MS))]);
+    return this.sync ? this.sync.token() : null;
+  }
   /** a keyphrase is linked here */
   linked(): boolean { return !!this.sync?.link; }
   /** the line about the name this keyphrase claims (null: none) */
@@ -518,6 +536,12 @@ export class VaultPanel {
     const s = this.sync;
     if (!s) return;
     const l = s.link, st = s.state, owner = this.d.owner(), busy = this.d.busy();
+    const phrase = l?.phrase ?? null;
+    if (phrase !== this.shownLink) {
+      const first = this.shownLink === undefined;
+      this.shownLink = phrase;
+      if (!first) this.d.onLink?.();
+    }
     const working = st.s === 'working';
     // beside the heading: Enable cloud saving, or what it is doing, or when it last synced
     this.$('#vault-make').hidden = !!l || working;

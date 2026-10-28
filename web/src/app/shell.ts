@@ -1534,6 +1534,8 @@ export async function boot() {
     saveDir: SAVE, owner: () => instance.owner, playing: () => !!session, busy: () => !!session || starting || !instance.owner,
     confirm: confirmBox, choose: (title, body, ok, cancel) => choiceBox(title, body, ok, cancel),
     onRestored: () => { void loadSettings(); void settings.refresh(); void saves.refresh(); }, log: logLine,
+    // another passphrase here (or none): the line under Your name asks again with it
+    onLink: () => void nameRow.ask(),
   });
   $<HTMLButtonElement>('#play').onclick = () => void play();
   $<HTMLButtonElement>('#retry').onclick = () => void loadModule();
