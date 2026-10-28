@@ -14,6 +14,7 @@ use nfsu2_util::json::num;
 use serde_json::{Value, json};
 
 use crate::links::{Cand, Found, Grid, Heap, Near, WALK_AHEAD, WALK_SOON, WALK_VIEW, before, distance, order_key, sort_stable};
+use crate::results::{self, Results};
 use crate::watch::{self, Seen, Watch};
 use crate::wire::{self, F_DATA, KIND_UDP, Msg};
 use crate::{PeerEntry, ROAM_HUB_VIP, RoamOptions};
@@ -85,8 +86,7 @@ const CREW_GROUP_MAX: usize = 64;
 /// A player's race report as a log line (one each player of a race, back in free roam: the lines of one race share
 /// its lobby), for evening out the cars: the race, how the player did, the car as its game rated it.  Grep `[race]`.
 fn race_line(player: &str, r: &wire::RaceRep) -> String {
-    const MODES: [&str; 5] = ["circuit", "sprint", "drag", "drift", "URL"];
-    let mode = MODES.get(r.mode as usize).copied().unwrap_or(if r.mode == 10 { "Street X" } else { "race" });
+    let mode = results::mode_name(r.mode);
     let how = match r.place {
         0 if r.quit => "quit".to_string(),
         0 => "did not finish".to_string(),
@@ -378,6 +378,8 @@ pub struct Hub {
     crewed: usize,
     /// the cheat watches of players gone without a BYE, by endpoint, for WATCH_KEEP_MS (at most max_players of them)
     kept: HashMap<u64, KeptWatch>,
+    /// the races' results as the players' games showed them, until each race is judged (results.rs)
+    results: Results,
     /// each virtual address's last world map answered (map_gap_ms), kept past its players: a BYE and a HELLO (or
     /// another port) make a new player, and when a player's own time was the limit, a new player's first answer came
     /// at once (the second security audit, 2026-10-22: a map walks every player on the hub's one thread, and a few
@@ -420,6 +422,7 @@ impl Hub {
             per_vip: HashMap::new(),
             crewed: 0,
             kept: HashMap::new(),
+            results: Results::default(),
             map_at: HashMap::new(),
             s: Scratch::default(),
         }
@@ -614,6 +617,7 @@ impl Hub {
         let mut ask = None;
         let mut report = None;
         let mut seen = [None, None];
+        let mut res = None;
         // (in a crew before this HELLO, and after it)
         let mut crewed = None;
         match m {
@@ -664,6 +668,7 @@ impl Hub {
                 p.reported = Some((r.lobby, now));
                 report = Some(race_line(&p.name, &r));
             }
+            Msg::RaceRes(r) if sender == p.id => res = Some((p.id, r)),
             _ => {}
         }
         if let Some((was, is)) = crewed {
@@ -675,6 +680,11 @@ impl Hub {
         }
         for s in seen.into_iter().flatten() {
             self.cheat(slot, s, now);
+        }
+        if let Some((by, r)) = res {
+            let mut results = std::mem::take(&mut self.results);
+            results.add(now, by, r, &|id| self.who(id));
+            self.results = results;
         }
         if let Some(req) = ask {
             self.map(slot, req, now);
@@ -721,6 +731,15 @@ impl Hub {
         let line = watch::line(p.vip, &p.name, &seen, &near, p.watch.jumps, last);
         self.st.cheat_lines += 1;
         (self.log)(&line);
+    }
+
+    /// a player by its game's id, as a line names it: its address and name (one gone a while ago by its kept watch)
+    fn who(&self, id: u32) -> Option<String> {
+        if let Some(p) = self.players().find(|p| p.id == id) {
+            return Some(format!("{} \"{}\"", nfsu2_util::vip_str(p.vip), p.name));
+        }
+        let (k, w) = self.kept.iter().find(|(_, w)| w.id == id)?;
+        Some(format!("{} \"{}\"", nfsu2_util::vip_str((k >> 16) as u32), w.name))
     }
 
     /// The world map's answer to the player in `slot` (roam_core.h RC_MSG_MAP): the players of its room in free roam
@@ -832,6 +851,13 @@ impl Hub {
             false
         });
         for line in gone_for_good {
+            self.st.cheat_lines += 1;
+            (self.log)(&line);
+        }
+        // the races whose results all came (or a while ago): the ones won by cheating
+        for v in self.results.due(now) {
+            let who = |id: u32| v.names.get(&id).cloned().or_else(|| self.who(id)).unwrap_or_else(|| format!("player {id:08x}"));
+            let line = results::line(&v, &who);
             self.st.cheat_lines += 1;
             (self.log)(&line);
         }

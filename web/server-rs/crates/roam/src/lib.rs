@@ -71,7 +71,8 @@
 //!
 //! The hub also watches how each player's car moves (watch.rs): a teleport, a car faster than any of the game's, or a
 //! game whose clock runs fast (a speed hack) is a `[cheat]` line with the player's address and name, and who was
-//! next to where its car came to.  Lines only: the operator decides (`nfsu2-server ctl kick|ban`).
+//! next to where its car came to.  And it judges each race lobby's race by its racers' results (results.rs): a win
+//! no car makes is a `[cheat]` line too.  Lines only: the operator decides (`nfsu2-server ctl kick|ban`).
 //!
 //! What the hub keeps, in memory only: per player endpoint its virtual address, port, id, room hash, crews' hashes,
 //! status, name and last position (and what its watch counted); gone `gone_ms` after its last message, when it says
@@ -90,6 +91,7 @@
 
 mod hub;
 mod links;
+mod results;
 mod watch;
 mod wire;
 

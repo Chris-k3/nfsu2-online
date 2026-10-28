@@ -244,6 +244,10 @@ const MIN_RACE_S: [f64; 7] = [20.0, 20.0, 5.0, 20.0, 20.0, 20.0, 20.0];
 /// it finishes); a drift race is won by points, and is left out.
 const FAR_AHEAD: f64 = 0.4;
 const KIND_DRIFT: u8 = 3;
+/// no car of the game averages this over a race (m/s: 350 km/h; the fastest tuned cars make 350 at the most)
+const RACE_MPS: f64 = 350.0 / 3.6;
+/// a finisher who drove less than this share of what another racer drove (`race_cheats`)
+const DROVE_SHARE: f64 = 0.5;
 /// the Rankings screens' six boards in their order (Circuit, Sprint, Drift, Drag, Street X, URL: SPEED2.EXE 0x58ce30,
 /// 0x582530) as race types (RACE_TYPES: drag 2, drift 3)
 const SLOT_TYPES: [u32; 6] = [0, 1, 3, 2, 4, 5];
@@ -699,6 +703,52 @@ fn fit(fields: Fields, max: usize, drop: &[&str]) -> Fields {
         }
     }
     f
+}
+
+/// The `[cheat]` lines of one report (`reporter`'s game's view of the race), one a finisher that did what no racer
+/// does: a time under its race type's shortest (MIN_RACE_S: the report is not taken either), RACE_MPS or more on
+/// average, or the way it drove (its average times its time) under DROVE_SHARE of another racer's, finished or not (a
+/// cheat that ends its race at once: a test's racewin won a sprint in 4.77 s having driven 65 m, the other racer 1021
+/// m by the race's end 30 s later; an honest finisher drives the whole way, and nobody twice as much before the race
+/// ends).  A drift race is won by points and is left out.
+fn race_cheats(game: &str, r: &RaceReport, names: &[String], players: &[Player], reporter: &str) -> Vec<String> {
+    if r.kind == KIND_DRIFT {
+        return Vec::new();
+    }
+    let ty = REPORT_TYPES.get(r.kind as usize).copied().unwrap_or("race");
+    let name_of = |p: &crate::stats::ReportPlayer| names.get(p.index as usize).map(|n| n.as_str()).unwrap_or("?");
+    let mut lines = Vec::new();
+    for p in r.players.iter().filter(|p| !p.dropped && p.place >= 1 && p.time > 0.0) {
+        let drove = p.avg * p.time;
+        let mut why = Vec::new();
+        if let Some(&min) = MIN_RACE_S.get(r.kind as usize)
+            && p.time < min
+        {
+            why.push(format!("under the {} s a {ty} race takes at least", js::number_to_string(min)));
+        }
+        if p.avg >= RACE_MPS {
+            why.push(format!("{:.0} km/h on average, which no car does", p.avg * 3.6));
+        }
+        let most = r.players.iter().filter(|o| o.index != p.index).map(|o| (o.avg * o.time, name_of(o))).max_by(|a, b| a.0.total_cmp(&b.0));
+        if let Some((d, other)) = most
+            && drove < DROVE_SHARE * d
+        {
+            why.push(format!("having driven {drove:.0} m, under half the {d:.0} m \"{other}\" drove"));
+        }
+        if why.is_empty() {
+            continue;
+        }
+        let me = name_of(p);
+        let vip = players.iter().find(|x| lower(&x.name) == lower(me)).map_or(0, |x| x.vip);
+        let place = if p.place == 1 { "won".to_string() } else { format!("finished {} in", p.place) };
+        lines.push(format!(
+            "[cheat] {} \"{me}\": {place} the online race \"{game}\" ({ty}) in {}, {}: as {reporter}'s game saw it",
+            vip_str(vip),
+            fmt_time(p.time),
+            why.join(", ")
+        ));
+    }
+    lines
 }
 
 /// The `[cheat]` line of a race whose winner (the quickest finisher) took under FAR_AHEAD of the next finisher's time,
@@ -1494,6 +1544,15 @@ impl Core {
         let why = self.check_result(g, r.as_ref(), &names);
         let spers = tpl(&self.lobby.s(s).persona).to_string();
         let gname = self.lobby.game(g).expect("held").name.clone();
+        // what this player's game saw of the others (and of itself) that no racer does, whether its report is taken
+        // or not (a time too short for the race is not)
+        if let Some(r) = &r
+            && r.players.len() == names.len()
+        {
+            for line in race_cheats(&gname, r, &names, &self.lobby.game(g).expect("held").players, &spers) {
+                self.llog(&line, s);
+            }
+        }
         if !why.is_empty() {
             self.llog(&format!("[online] \"{gname}\": {spers}'s race report not taken: {why}"), s);
             reply(self);
