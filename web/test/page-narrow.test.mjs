@@ -8,6 +8,9 @@
 // <details> open, on each Controls tab: the page as it is, and again with every button and line the page hides until it
 // needs one shown (Retry, the bug report's line, a cloud conflict's buttons, …).  The page is never wider than the
 // screen, and no box or text reaches past the screen's edges or into its panel's padding.
+// The widths are those of the fonts the page names (style.css --font: Helvetica Neue on a Mac, Arial on Windows): a
+// machine with none of them draws its text in a wider fallback (Linux without fonts-liberation, Arial's widths: DejaVu
+// Sans), and the test fails at once saying so, as it cannot measure the page players see.
 // Port: NFSU2_TEST_PAGE_PORT (8534).
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -108,6 +111,16 @@ function measure() {
   return { wider: document.documentElement.scrollWidth - vw, past, intoPadding };
 }
 
+/** In the page: the families its font (--font) names, and those the browser has (one it lacks draws a line of text as
+ *  wide as the generic family after it) */
+function fontsHad() {
+  const named = getComputedStyle(document.documentElement).getPropertyValue('--font').split(',').map(f => f.trim())
+    .filter(f => f && !/^(serif|sans-serif|monospace|cursive|fantasy|system-ui|ui-[a-z-]+)$/.test(f));
+  const g = document.createElement('canvas').getContext('2d');
+  const w = font => { g.font = `16px ${font}`; return g.measureText('The quick brown fox jumps over the lazy dog 0123').width; };
+  return { named, had: named.filter(f => ['monospace', 'serif'].some(b => w(`${f}, ${b}`) !== w(b))) };
+}
+
 /** One browser's pass over every language (touch: as a phone): what is too wide, by look; how many looks; the page's
  *  phase; its errors */
 async function look(browser, kind, touch) {
@@ -119,6 +132,10 @@ async function look(browser, kind, touch) {
     page.on('pageerror', e => errors.push(String(e)));
     await page.goto(`http://localhost:${PORT}/`);
     const phase = await page.waitForFunction(() => ['ready', 'error'].includes(window.__nfsu2?.phase) && window.__nfsu2.phase, null, { timeout: 120_000, polling: 250 }).then(h => h.jsonValue());
+    const fonts = await page.evaluate(fontsHad);
+    if (!fonts.had.length) throw new Error(`none of the page's fonts (${fonts.named.join(', ')}) is on this machine: the browser ` +
+      'draws its text in a fallback with other widths, so what it measures is not the page players see' +
+      (process.platform === 'linux' ? ' (install fonts-liberation: Arial\'s widths)' : ''));
     // the language is a setting: the tab owns the saves and has read its settings
     await page.waitForFunction(() => !!document.querySelector('#settings .set') && !document.querySelector('#settings').hasAttribute('data-readonly'), null, { timeout: 30_000 });
     await page.click('#vault-make');
