@@ -125,9 +125,28 @@ const note = (s: string) => (self as unknown as Worker).postMessage({ t: 'log', 
 // leaves every Nth unanswered until its stall timer, stall:MS sets that timer, deny:N loses every try at the
 // compressed address of each file's every Nth block (only its byte range comes), full:N fills this PC's cache
 // at the Nth block this game keeps.
+// Blocks waiting for a turn go by priority: the track's stream file first (a section the game waits for in the world
+// is a "Loading" screen in the middle of a drive), then the game's other reads (a friend's car, music, speech), then
+// the reading ahead of the track (readAhead).  That one starts only while the game fetches nothing (on a slow line a
+// block read ahead would share it with the game's), FILL_FETCHES at most.
 const FETCHES = 8, STALL_MS = 20000, SLOW_MS = 5000;
-let fetching = 0, tries = 0, fault: { fail: number; hang: number; stall: number; deny: number; full: number } | null = null;
-const fetchWait: (() => void)[] = [];
+const P_AHEAD = 0, P_GAME = 1, P_TRACK = 2, FILL_FETCHES = 2;
+interface Ticket { pri: number; ahead?: boolean }
+let fetching = 0, aheadFetching = 0, tries = 0, fault: { fail: number; hang: number; stall: number; deny: number; full: number } | null = null;
+const fetchWait: { t: Ticket; go: () => void }[] = [];
+const mayFetch = (t: Ticket) => fetching < FETCHES &&
+  (t.pri > P_AHEAD || fetching === aheadFetching && aheadFetching < FILL_FETCHES);
+function fetchStart(t: Ticket) { fetching++; if ((t.ahead = t.pri === P_AHEAD)) aheadFetching++; }
+// the waiting blocks that may go now, the most urgent (the earliest of those) first
+function fetchNext() {
+  for (;;) {
+    let best = -1;
+    for (let i = 0; i < fetchWait.length; i++) if (best < 0 || fetchWait[i].t.pri > fetchWait[best].t.pri) best = i;
+    if (best < 0 || !mayFetch(fetchWait[best].t)) return;
+    const w = fetchWait.splice(best, 1)[0];
+    fetchStart(w.t); w.go();
+  }
+}
 function faults() {
   if (!fault) {
     const kv = new Map((cfg.env?.NFSU2_DATA_FAULT ?? '').split(',').map(p => p.split(':') as [string, string]));
@@ -173,20 +192,20 @@ async function fetchOnce(url: string, start: number, len: number, ranged: boolea
 // A line a minute for the log while blocks come from the server (a first game, a new area): how many, how fast, how
 // many had to be asked again, and what this device's cache read meanwhile.  A game the cache has wholly says nothing.
 const SUM_MS = 60_000;
-let sum = { t: 0, fetched: 0, bytes: 0, ms: 0, maxMs: 0, again: 0, local: 0 };
+let sum = { t: 0, fetched: 0, bytes: 0, ms: 0, maxMs: 0, again: 0, local: 0, ahead: 0 };
 function dataSummary(now: number) {
   if (!sum.t) { sum.t = now; return; }
   if (now - sum.t < SUM_MS) return;
   if (sum.fetched || sum.again)
     note(`[data] ${((now - sum.t) / 1000).toFixed(0)} s: ${sum.fetched} blocks from the server (${(sum.bytes / 1048576).toFixed(1)} MB, ` +
-         `${sum.fetched ? (sum.ms / sum.fetched).toFixed(0) : 0} ms on average, the slowest ${sum.maxMs.toFixed(0)} ms${sum.again ? `, ${sum.again} tries again` : ''}), ` +
+         `${sum.fetched ? (sum.ms / sum.fetched).toFixed(0) : 0} ms on average, the slowest ${sum.maxMs.toFixed(0)} ms${sum.again ? `, ${sum.again} tries again` : ''}${sum.ahead ? `, ${sum.ahead} read ahead` : ''}), ` +
          `${sum.local} from this device's cache, ${cacheFiles.size} cache files open, ${(memBytes / 1048576).toFixed(0)} MB in memory${keeping ? '' : ', no longer kept on this device'}`);
-  sum = { t: now, fetched: 0, bytes: 0, ms: 0, maxMs: 0, again: 0, local: 0 };
+  sum = { t: now, fetched: 0, bytes: 0, ms: 0, maxMs: 0, again: 0, local: 0, ahead: 0 };
 }
-async function fetchBlock(n: DNode, bi: number, start: number, len: number): Promise<Uint8Array> {
-  while (fetching >= FETCHES) await new Promise<void>(r => fetchWait.push(r));
-  fetching++;
-  const what = `${n.path} block ${bi}`, t0 = performance.now();
+async function fetchBlock(n: DNode, bi: number, start: number, len: number, t: Ticket): Promise<Uint8Array> {
+  if (!mayFetch(t) || fetchWait.some(w => w.t.pri >= t.pri)) await new Promise<void>(go => fetchWait.push({ t, go }));
+  else fetchStart(t);
+  const what = `${n.path} block ${bi}${t.ahead ? ' (read ahead)' : ''}`, t0 = performance.now();
   const slow = setTimeout(() => note(`[data] ${what}: waiting for the server for ${SLOW_MS / 1000} s`), SLOW_MS);
   try {
     const run = runs ? runUrl(runs.url, n.path, bi, 1, n) : null, range = dataUrl(cfg.dataBase, n.path), f = faults();
@@ -195,7 +214,7 @@ async function fetchBlock(n: DNode, bi: number, start: number, len: number): Pro
       const r = await fetchOnce(ranged ? range : run, start, len, ranged, !ranged && f.deny > 0 && (bi + 1) % f.deny === 0);
       if (r instanceof Uint8Array) {
         const s = (performance.now() - t0) / 1000;
-        sum.fetched++; sum.bytes += r.length; sum.ms += s * 1000; if (s * 1000 > sum.maxMs) sum.maxMs = s * 1000;
+        sum.fetched++; if (t.ahead) sum.ahead++; sum.bytes += r.length; sum.ms += s * 1000; if (s * 1000 > sum.maxMs) sum.maxMs = s * 1000;
         if (k > 1 || s >= SLOW_MS / 1000) note(`[data] ${what}: in after ${s.toFixed(1)} s${k > 1 ? `, ${k} tries` : ''}${by}`);
         return r;
       }
@@ -205,7 +224,7 @@ async function fetchBlock(n: DNode, bi: number, start: number, len: number): Pro
       if (k <= 3 || k % 10 === 0) note(`[data] ${what}: ${r.why}${by}; again in ${wait / 1000} s (try ${k + 1})`);
       await new Promise(res => setTimeout(res, wait));
     }
-  } finally { clearTimeout(slow); fetching--; fetchWait.shift()?.(); }
+  } finally { clearTimeout(slow); fetching--; if (t.ahead) aheadFetching--; fetchNext(); }
 }
 // A block this PC has no room to keep (a full disk, or the browser's share of it used up: "No space available for
 // this operation") ends the keeping for this game, not the read: the game has the bytes either way.  (Thrown into
@@ -221,13 +240,21 @@ function keepBlock(cf: CacheFile, n: DNode, bi: number, b: Uint8Array) {
     note(`[data] no room on this PC to keep more of the game data (${n.path} block ${bi}: ${(e as Error)?.message ?? e}); the rest comes from the server`);
   }
 }
-async function getBlock(n: DNode, bi: number): Promise<Uint8Array> {
+// the blocks being read: who waits for each (a read of the game asking for a block the reading ahead asked for first
+// raises its priority to its own)
+const tickets = new Map<string, Ticket>();
+async function getBlock(n: DNode, bi: number, pri: number): Promise<Uint8Array> {
   const key = n.path + '#' + bi;
   dataSummary(performance.now());
   const hit = memBlocks.get(key);
   if (hit) { memBlocks.delete(key); memBlocks.set(key, hit); return hit; }
   let p = inflight.get(key);
-  if (p) return p;
+  if (p) {
+    const t = tickets.get(key);
+    if (t && t.pri < pri) { t.pri = pri; fetchNext(); }
+    return p;
+  }
+  const t: Ticket = { pri };
   p = (async () => {
     const start = bi * BLOCK, len = Math.min(BLOCK, n.size - start);
     const cf = await cacheFile(n);
@@ -236,22 +263,69 @@ async function getBlock(n: DNode, bi: number): Promise<Uint8Array> {
         const b = new Uint8Array(len); cf.h.read(b, { at: start }); memPut(key, b); sum.local++; return b;
       } catch (e) { note(`[data] ${n.path} block ${bi}: the cache file did not read (${e}); from the server`); }
     }
-    const b = await fetchBlock(n, bi, start, len);
+    const b = await fetchBlock(n, bi, start, len, t);
     // the file again: the one from before the fetch may have been closed meanwhile (CACHE_OPEN)
     const cf2 = await cacheFile(n);
     if (cf2) keepBlock(cf2, n, bi, b);
-    memPut(key, b);
+    // a block read ahead stays out of the memory while this PC keeps it: the blocks being read stay there
+    if (t.pri > P_AHEAD || !cf2 || !keeping) memPut(key, b);
     return b;
   })();
-  inflight.set(key, p);
-  try { return await p; } finally { inflight.delete(key); }
+  inflight.set(key, p); tickets.set(key, t);
+  try { return await p; } finally { inflight.delete(key); tickets.delete(key); }
 }
+
+// ------------------------------------------------------- reading ahead ----
+// The world streams in sections of its track's stream file (TRACKS\STREAML4RA.BUN, 113 MB, for the city), read as the
+// car comes near.  From a disc a section takes milliseconds; from the server each of its blocks is a request, and a
+// car on the freeway could reach a section before it came in: a "Loading" screen in the middle of the drive.  So once
+// the game reads a track's stream file, the blocks of it this PC does not have yet come in at the lowest priority
+// (above), the nearest ones to the game's latest read first, until this PC has all of it (40 MB on the network for
+// the city's), and its sections then read from here.  Only while this PC keeps the game data: the memory alone has no
+// room for a whole track.  NFSU2_TRACK_AHEAD=0 turns it off.
+const isTrackStream = (n: DNode) => /^TRACKS\/STREAM[^/]*\.BUN$/i.test(n.path);
+let ahead: { n: DNode; near: number; t0: number; got: number } | null = null, aheadLoops = 0;
+const aheadDone = new Set<DNode>();
+function readAhead(n: DNode, bi: number) {
+  if (cfg.env?.NFSU2_TRACK_AHEAD === '0' || !cacheDir || !keeping || aheadDone.has(n)) return;
+  if (ahead?.n === n) ahead.near = bi;
+  else ahead = { n, near: bi, t0: performance.now(), got: 0 };
+  while (aheadLoops < FILL_FETCHES) { aheadLoops++; void aheadLoop(); }
+}
+async function aheadLoop() {
+  let a = ahead;
+  try {
+    while ((a = ahead) && keeping) {
+      const cf = await cacheFile(a.n);
+      if (!cf) { aheadDone.add(a.n); if (ahead === a) ahead = null; return; }
+      let bi = -1, missing = 0;
+      for (let i = 0; i < cf.have.length; i++) {
+        if (cf.have[i]) continue;
+        missing++;
+        if (!inflight.has(a.n.path + '#' + i) && (bi < 0 || Math.abs(i - a.near) < Math.abs(bi - a.near))) bi = i;
+      }
+      if (!missing) {
+        if (ahead === a) {
+          ahead = null; aheadDone.add(a.n);
+          if (a.got) note(`[data] ${a.n.path}: all of it on this device now, ${a.got} blocks read ahead in ${((performance.now() - a.t0) / 1000).toFixed(0)} s`);
+        }
+        return;
+      }
+      if (bi < 0) return;                        // the rest is on its way already
+      await getBlock(a.n, bi, P_AHEAD); a.got++;
+    }
+  } catch (e) {
+    if (a) { note(`[data] reading ${a.n.path} ahead stopped: ${(e as Error)?.message ?? e}`); aheadDone.add(a.n); if (ahead === a) ahead = null; }
+  } finally { aheadLoops--; }
+}
+
 async function dataRead(n: DNode, pos: number, dst: { ptr: number; len: number }[]): Promise<number> {
   const total = dst.reduce((a, d) => a + d.len, 0);
   const end = Math.min(n.size, pos + total);
   if (end <= pos) return 0;
-  const first = Math.floor(pos / BLOCK), last = Math.floor((end - 1) / BLOCK);
-  const blocks = await Promise.all(Array.from({ length: last - first + 1 }, (_, i) => getBlock(n, first + i)));
+  const first = Math.floor(pos / BLOCK), last = Math.floor((end - 1) / BLOCK), track = isTrackStream(n);
+  if (track) readAhead(n, first);
+  const blocks = await Promise.all(Array.from({ length: last - first + 1 }, (_, i) => getBlock(n, first + i, track ? P_TRACK : P_GAME)));
   const mem = u8();
   let off = pos, di = 0, dOff = 0;
   while (off < end) {

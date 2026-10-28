@@ -157,7 +157,14 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
     tries with no answer at all, every other try asks for the block as a byte range of `/data/` (another address, not
     in Cloudflare's cache, uncompressed). A block the OPFS cache has no room for (a full disk) ends the keeping for
     that game, not the read. The log's `[data]` lines name each block that waited 5 s or needed another try, and a
-    cache that filled up (`NFSU2_DATA_FAULT` tests it, the web suite's `datafault`). The data but the movies crosses
+    cache that filled up (`NFSU2_DATA_FAULT` tests it, the web suite's `datafault`). At most 8 blocks are fetched at
+    once, and a block waiting for a turn goes by priority: the track's stream file (`TRACKS/STREAM*.BUN`) first, as a
+    section the world waits for is a "Loading" screen in the middle of a drive, then the game's other reads, then
+    the reading ahead of the track. Once the game reads a track's stream file, the blocks of it this PC lacks come in
+    at that lowest priority, the nearest to the game's latest read first (two at once, and only while the game fetches
+    nothing: on a slow line a block read ahead would share it with the game's), until the cache has all of it (the city's 113 MB,
+    about 40 MB on the network); its sections then read from this PC. Only while OPFS keeps the blocks;
+    `NFSU2_TRACK_AHEAD=0` turns it off. The data but the movies crosses
     the network in 61 % of its size (1.28 of 2.09 GB, kept; 1.39 GB compressed as it is sent; tracks about a third).
     "Preload the game data" (Game data on this PC, at the bottom of the start page) fills the cache with all but the
     movies ahead of play from its own worker (`predownload-worker.ts`, 4 blocks at once, each at the address the game's
