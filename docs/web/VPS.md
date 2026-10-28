@@ -581,9 +581,10 @@ take them. The lines are for you to read: nobody is kicked or banned by them.
   speed hack); a teleport's or a fast car's line names the players within 40 m of where it came to, and a race lobby
   that starts there. A player gets 5 of these lines, then one every 2 minutes; the rest are counted, and summed up
   every 10 minutes and when it leaves free roam.
-- **None**: the game's own jumps (Respawn, Jump to Garage, shops, events and races), a bad connection (delays,
-  stalls, a backlog that comes at once), a car that flies (an edited save) unless it does one of those, an honest
-  winner over racers who stood still.
+- **None**: the game's own jumps (Respawn, the World Map's jump to an event or a shop, the garage, shops and races),
+  a bad connection (delays, stalls, a backlog that comes at once), a car that flies (an edited save) unless it does
+  one of those, an honest winner over racers who stood still. The World Map's jump stays in free roam, so a
+  teleport that lands within 25 m of an event's start or a shop's door is taken for one, whoever made it.
 
 The races won by cheating: `docker compose logs -t server --since 24h | grep '\[cheat\]' | grep 'race'`; and the
 cheats that bother others in free roam: `... | grep -e 'next to' -e 'race lobby'`.

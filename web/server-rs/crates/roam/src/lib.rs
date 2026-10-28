@@ -90,6 +90,7 @@
 //!   pays for every snapshot too, so a slice near its limit gets fewer links before its players get them late.
 
 mod hub;
+mod jumps;
 mod links;
 mod results;
 mod watch;
