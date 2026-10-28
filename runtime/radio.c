@@ -234,8 +234,8 @@ static void stop_game_song(CPU *c){
     g_radio.stopping = 0;
 }
 
-/* the radio was switched on (1), or cannot be: there is no room for the rings (0) */
-static int switch_on(HostStatusRadio *r){
+/* the radio was switched on (1), or cannot be: there is no room for the rings (0); stop: the song playing is the game's and is stopped */
+static int switch_on(HostStatusRadio *r, int stop){
     g_radio.on_seen = __atomic_load_n(&r->on, __ATOMIC_ACQUIRE);
     if (!g_radio.ring) g_radio.ring = malloc(RING_BYTES);
     if (!g_radio.ring){
@@ -247,7 +247,7 @@ static int switch_on(HostStatusRadio *r){
     g_music.paused = 0;
     __atomic_store_n(&r->rings.ring_frames, RING_FRAMES, __ATOMIC_RELAXED);
     __atomic_store_n(&r->rings.ring, (uint32_t)(uintptr_t)g_radio.ring, __ATOMIC_RELEASE);
-    g_radio.stop = "radio on";
+    g_radio.stop = stop ? "radio on" : NULL;
     return 1;
 }
 
@@ -341,7 +341,7 @@ void sub_007292bc(CPU *c){
         sub_007292bc_orig(c);
         return;
     }
-    if (on && __atomic_load_n(&r->on, __ATOMIC_ACQUIRE) != g_radio.on_seen) on = switch_on(r);
+    if (on && __atomic_load_n(&r->on, __ATOMIC_ACQUIRE) != g_radio.on_seen) on = switch_on(r, 1);
     if (!on) switch_off();
     g_radio.was_on = on;
     if (on && g_song.who == SONG_SILENT && page_has_track_for(r, g_song.place)) g_radio.stop = "a track fits this place now";
@@ -364,7 +364,10 @@ void sub_004580e0(CPU *c){
     unsigned index = MR32(c->esp + TRAX_START_INDEX) & 0xffffu;
     return_tags();
     g_song.again = 0;
-    if (radio_on(r) && index < RADIO_TRACKS) start_radio_song(r, index);
+    /* the page switched the radio on and the game starts a song before the mixer step has seen it: the switch is taken here, or
+     * the step would later drop this song's request and stop it, and the game's own song would play under the folder's tags */
+    if (radio_on(r) && __atomic_load_n(&r->on, __ATOMIC_ACQUIRE) != g_radio.on_seen && !switch_on(r, 0)) g_song.who = SONG_GAME;
+    else if (radio_on(r) && index < RADIO_TRACKS) start_radio_song(r, index);
     else g_song.who = SONG_GAME;
     g_radio.stop = NULL;
     sub_004580e0_orig(c);

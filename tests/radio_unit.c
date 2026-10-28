@@ -97,6 +97,7 @@ static void in_main_menu(void){ MR32(FLOW + FLOW_MODE) = 1u; MR32(GAME_STATE) = 
 static void in_race(void){ MR32(FLOW + FLOW_MODE) = 2u; MR32(GAME_STATE) = 6u; }
 static void radio_switched_on(void){ g_page.on = 1; steps(1); }
 static void radio_switched_off(void){ g_page.on++; }
+static void radio_switched_on_unseen(void){ g_page.on++; }
 static void page_offers(unsigned places){ g_page.offer.places = places; }
 static void page_never_answers(void){ pg.silent = 1; }
 static void folder_song_lasts(int steps_long){ pg.track_steps = (uint32_t)steps_long; }
@@ -423,6 +424,24 @@ TEST(radio_on_in_main_menu__game_song_replaced_at_once){
     radio_switched_on();
     steps(SETTLED);
     expect_folder_song(1);
+}
+TEST(radio_switched_on__song_starts_before_the_mixer_sees_it){
+    g_page.on = 1;
+    in_main_menu();
+    game_song_starts(3);
+    steps(SETTLED);
+    expect_folder_song(1);
+    expect_plaques(1, 1);
+}
+TEST(radio_off_and_on__song_starts_before_the_mixer_sees_it){
+    folder_song_plays_in_main_menu();
+    radio_switched_off();
+    radio_switched_on_unseen();
+    game_stops_song();
+    game_song_starts(4);
+    steps(SETTLED);
+    expect_folder_song(2);
+    expect_plaques(2, 2);
 }
 TEST(radio_off__game_song_comes_back){
     folder_song_plays_in_main_menu();
