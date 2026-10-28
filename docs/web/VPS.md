@@ -172,6 +172,24 @@ sees a keyphrase, a key or a save, and its files name no player.
 - **Backups:** copy `vault/` while the server runs: each file is replaced whole, by a rename. Without the folder the
   players' copies on the server are gone; their browsers keep their own.
 
+## Claimed names
+
+With keyphrase saves on, a player's keyphrase can claim their name (PLAYING.md, Online: "Your name is yours"): while
+the claim holds (180 days after they last played under it) nobody else plays under it in the Online menu or free
+roam, and EA Messenger keeps its lists for it. The server keeps `names.json` in the state folder: each name, a code
+made from its keyphrase's token (never the keyphrase), when it was claimed and last played. Written whole within a
+minute of a change. A keyphrase deleted from the cloud frees its name.
+
+- **Cloudflare Turnstile** (a check that a person, not a script, claims a name): create a widget in the Cloudflare
+  dashboard (Turnstile, Add widget: the site's hostname, mode Managed), then put its two keys in `.env`:
+  `NFSU2_TURNSTILE_SITE=<site key>` and `NFSU2_TURNSTILE_SECRET=<secret key>`, and `docker compose up -d server`.
+  The start-up line says `[names] N names claimed; Cloudflare's check on`. With the keys the page's
+  Content-Security-Policy lets in Cloudflare's script and frame (`challenges.cloudflare.com`), and the server asks
+  Cloudflare (HTTPS out to challenges.cloudflare.com) once per claim. Without them claims need no check.
+- **What one client may do:** 10 claims, then 10 a day (one per keyphrase, a change once a week), and 120 checks of
+  a name, then 2 a second.
+- **The operator:** `nfsu2-server ctl unclaim <name>` frees a name (the console says which).
+
 ## Sizing
 
 For up to 6000 players at once (the image's limit; the Node server's was 2000, [From the Node

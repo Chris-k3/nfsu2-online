@@ -355,6 +355,16 @@ export class VaultPanel {
     const l = await this.make() ? this.sync?.link : null, st = this.sync?.state;
     return l ? { phrase: l.phrase } : { why: st?.s === 'error' ? tvars(st.why.t, st.why.v) : '' };
   }
+  /** the linked keyphrase's token (claim.ts: the claimed names), null without one */
+  token(): Promise<string | null> { return this.sync?.token() ?? Promise.resolve(null); }
+  /** a keyphrase is linked here */
+  linked(): boolean { return !!this.sync?.link; }
+  /** the line about the name this keyphrase claims (null: none) */
+  showClaim(name: string | null) {
+    const p = this.$<HTMLElement>('#vault-claim');
+    p.hidden = !name || !this.sync?.link;
+    p.textContent = name ? t('This keyphrase also holds your claim on {name}.', { name }) : '';
+  }
   /** the linked keyphrase as a file */
   download() { if (this.sync?.link) downloadBlob(`${this.sync.link.phrase}\n`, 'nfsu2-keyphrase.txt', 'text/plain'); }
 

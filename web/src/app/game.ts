@@ -41,6 +41,8 @@ export interface SessionOptions {
   netQueue?(q: NetQueue | null): void;
   /** this browser's own id on the server's LAN (page-id.ts) */
   netId?: string;
+  /** the token of the keyphrase this page plays with (claim.ts: whose claimed names it may play under) */
+  netClaim?: string;
   /** the server's operator removed the player from playing with others (a kick or a ban) */
   netRemoved?(r: NetRemoved): void;
   /** the game finished writing a file of the save overlay (path relative to /save) */
@@ -129,7 +131,7 @@ export class GameSession {
     })).then(i => { s.input = i; });
     if (o.netName !== null)
       void attach('network', () => attachNet(s.proc, {
-        ...common, name: o.netName!, id: o.netId, notice: o.notice, lobby: o.lobby, say: o.say, back: o.netBack, queue: o.netQueue, removed: o.netRemoved,
+        ...common, name: o.netName!, id: o.netId, claim: o.netClaim, notice: o.notice, lobby: o.lobby, say: o.say, back: o.netBack, queue: o.netQueue, removed: o.netRemoved,
       })).then(n => { s.net = n; });
     return s;
   }

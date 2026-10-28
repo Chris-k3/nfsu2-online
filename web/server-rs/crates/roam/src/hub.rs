@@ -13,6 +13,8 @@ use nfsu2_util::js;
 use nfsu2_util::json::num;
 use serde_json::{Value, json};
 
+use std::sync::Arc;
+
 use crate::links::{Cand, Found, Grid, Heap, Near, WALK_AHEAD, WALK_SOON, WALK_VIEW, before, distance, order_key, sort_stable};
 use crate::results::{self, Results};
 use crate::watch::{self, Seen, Watch};
@@ -124,6 +126,9 @@ fn race_line(player: &str, r: &wire::RaceRep) -> String {
     )
 }
 
+/// how often a player's claim hears that it plays (the claim holds 180 days from its last game: an hour is plenty)
+const SEEN_EVERY_MS: f64 = 600_000.0;
+
 /// a link: the player it is to, and since when
 #[derive(Clone, Copy, Debug)]
 struct Link {
@@ -170,6 +175,14 @@ struct Player {
     watch: Watch,
     /// its place in `order`
     at: u32,
+    /// the keyphrase its page plays with (nfsu2-claims' owner: its hello to the switch named it), if any
+    owner: Option<Arc<str>>,
+    /// its name is claimed by another keyphrase (nfsu2-claims): it gets no links, shows on no map and counts nowhere,
+    /// as of the claims' `generation` in `checked` (0: not looked at yet)
+    impostor: bool,
+    checked: u64,
+    /// when its owner's claim last heard it played (`Claims::seen`, at most every SEEN_EVERY_MS)
+    seen_claim: f64,
 }
 
 impl Player {
@@ -344,10 +357,7 @@ struct Weigh {
 /// one's view point to the other soon_ms on
 #[inline]
 fn apart(soon: &[[f64; 3]], ahead: &[[f64; 3]], view: &[[f64; 3]], i: usize, j: usize) -> f64 {
-    distance(&soon[i], &soon[j])
-        .min(distance(&ahead[i], &ahead[j]))
-        .min(distance(&view[i], &soon[j]))
-        .min(distance(&view[j], &soon[i]))
+    distance(&soon[i], &soon[j]).min(distance(&ahead[i], &ahead[j])).min(distance(&view[i], &soon[j])).min(distance(&view[j], &soon[i]))
 }
 
 /// The hub's logic, without its timer (`RoamHub` gives it one).
@@ -386,6 +396,8 @@ pub struct Hub {
     /// clients asking that way kept it busy); dropped at each tick once older than map_gap_ms
     map_at: HashMap<u32, f64>,
     s: Scratch,
+    /// the claimed names (nfsu2-claims): a player under another keyphrase's name plays alone; None: any name is anyone's
+    claims: Option<Arc<nfsu2_claims::Claims>>,
 }
 
 impl Hub {
@@ -425,6 +437,36 @@ impl Hub {
             results: Results::default(),
             map_at: HashMap::new(),
             s: Scratch::default(),
+            claims: None,
+        }
+    }
+
+    /// the claimed names its players' names are checked against (the player's page's keyphrase: `frame_from`)
+    pub fn set_claims(&mut self, claims: Option<Arc<nfsu2_claims::Claims>>) {
+        self.claims = claims;
+    }
+
+    /// a player's name against the claims, when its name, its owner or the claims changed since it was last looked
+    /// at: another keyphrase's name makes it an impostor (the console says so once); its own claim hears it plays
+    fn check_claim(&mut self, slot: u32, now: f64) {
+        let Some(c) = &self.claims else { return };
+        let g = c.generation();
+        let Some(Some(p)) = self.slots.get_mut(slot as usize) else { return };
+        if p.checked != g {
+            p.checked = g;
+            let was = p.impostor;
+            p.impostor = !c.may_use(&p.name, p.owner.as_deref(), now as i64);
+            if p.impostor && !was {
+                (self.log)(&format!(
+                    "[roam] {} plays as \"{}\", a name another keyphrase claimed: no links",
+                    nfsu2_util::vip_str(p.vip),
+                    js::printable(&p.name, 32)
+                ));
+            }
+        }
+        if let Some(o) = p.owner.as_deref().filter(|_| !p.impostor && now - p.seen_claim >= SEEN_EVERY_MS) {
+            p.seen_claim = now;
+            c.seen(&p.name, o, now as i64);
         }
     }
 
@@ -555,6 +597,11 @@ impl Hub {
 
     /// a frame from browser `from` to the hub's address (the switch has written the true source vip)
     pub fn frame(&mut self, from: u32, data: &[u8]) {
+        self.frame_from(from, data, None);
+    }
+
+    /// a frame from the browser at `from`, whose page plays with keyphrase `owner` (`FrameCtx::owner`)
+    pub fn frame_from(&mut self, from: u32, data: &[u8], owner: Option<&Arc<str>>) {
         self.st.frames += 1;
         if data.len() < F_DATA + wire::HDR + wire::CRC || data[0] != KIND_UDP {
             self.st.bad += 1;
@@ -606,6 +653,10 @@ impl Hub {
                     links: Vec::new(),
                     watch: Watch::new((self.now)()),
                     at: 0,
+                    owner: owner.cloned(),
+                    impostor: false,
+                    checked: 0,
+                    seen_claim: f64::NEG_INFINITY,
                 })
             }
         };
@@ -620,6 +671,8 @@ impl Hub {
         let mut res = None;
         // (in a crew before this HELLO, and after it)
         let mut crewed = None;
+        // (a HELLO: its name against the claims)
+        let mut check = false;
         match m {
             Msg::Hello { sender, core, status, room, name, lobbies, marks, crews } => {
                 // another start of the game on the same endpoint (where its car was, and its clock's epochs, start again)
@@ -636,7 +689,13 @@ impl Hub {
                 if p.name.as_bytes() != name {
                     p.name.clear();
                     p.name.extend(name.iter().map(|&c| c as char));
+                    p.checked = 0;
                 }
+                if p.owner.as_ref() != owner {
+                    p.owner = owner.cloned();
+                    p.checked = 0;
+                }
+                check = true;
                 p.degree = if core >= 2 { degree } else { degree.min(DEGREE_V1) };
                 p.lobbies = lobbies;
                 p.marks = marks;
@@ -673,6 +732,9 @@ impl Hub {
         }
         if let Some((was, is)) = crewed {
             self.crewed = self.crewed + is as usize - was as usize;
+        }
+        if check {
+            self.check_claim(slot, now);
         }
         if let Some(line) = report {
             self.st.race_reports += 1;
@@ -753,12 +815,21 @@ impl Hub {
         if self.map_at.get(&p.vip).is_some_and(|&t| now - t < gap) {
             return;
         }
+        if p.impostor {
+            return;
+        }
         let (room, at) = (p.room, p.p.unwrap_or_default());
         let mut near: Vec<(u64, (i16, i16, u8))> = Vec::new();
         for &q in &self.order {
             let Some(o) = self.player(q) else { continue };
             let Some(pos) = o.p else { continue };
-            if q == slot || o.room != room || now - o.pos_at > fresh || !matches!(o.status, 2 | 5) || p.links.iter().any(|l| l.slot == q) {
+            if q == slot
+                || o.impostor
+                || o.room != room
+                || now - o.pos_at > fresh
+                || !matches!(o.status, 2 | 5)
+                || p.links.iter().any(|l| l.slot == q)
+            {
                 continue;
             }
             let c = |x: f64| (x + 0.5).floor().clamp(-32767.0, 32767.0) as i16;
@@ -790,7 +861,7 @@ impl Hub {
     /// its own too, an advert younger than LOBBY_STALE_MS), nearest first, LOBBIES_MAX at most, in one datagram
     fn lobbies(&mut self, slot: u32, req: u16, now: f64) {
         let Some(p) = self.player(slot) else { return };
-        if !p.lobbies {
+        if !p.lobbies || p.impostor {
             return;
         }
         let (room, at) = (p.room, p.p.unwrap_or_default());
@@ -798,7 +869,7 @@ impl Hub {
         for &q in &self.order {
             let Some(o) = self.player(q) else { continue };
             let Some((l, t)) = o.lobby else { continue };
-            if o.room != room || now - t > LOBBY_STALE_MS {
+            if o.impostor || o.room != room || now - t > LOBBY_STALE_MS {
                 continue;
             }
             let d = distance(&at, &[l.x as f64, l.y as f64, at[2]]);
@@ -876,7 +947,7 @@ impl Hub {
         let mut rooms = 0;
         for &slot in &self.order {
             let Some(Some(p)) = self.slots.get(slot as usize) else { continue };
-            if p.p.is_none() || now - p.pos_at > self.o.stale_ms {
+            if p.p.is_none() || now - p.pos_at > self.o.stale_ms || p.impostor {
                 continue;
             }
             let r = *s.room_of.entry(p.room).or_insert_with(|| {
@@ -1024,7 +1095,7 @@ impl Hub {
     pub fn in_rooms(&self) -> HashMap<u32, usize> {
         let mut seen = HashSet::new();
         let mut n = HashMap::new();
-        for p in self.players().filter(|p| p.room != 0 && matches!(p.status, 2 | 5)) {
+        for p in self.players().filter(|p| p.room != 0 && matches!(p.status, 2 | 5) && !p.impostor) {
             if seen.insert((p.room, p.vip)) {
                 *n.entry(p.room).or_insert(0) += 1;
             }
@@ -1040,7 +1111,7 @@ impl Hub {
         if self.crewed == 0 {
             return;
         }
-        for p in self.players().filter(|p| matches!(p.status, 2 | 5)) {
+        for p in self.players().filter(|p| matches!(p.status, 2 | 5) && !p.impostor) {
             out.extend(crews_of(p).map(|c| (c, p.vip)));
         }
         // each (crew, browser) once, then each crew's run counted, in place
@@ -1120,9 +1191,8 @@ fn prepare(slots: &[Option<Player>], list: &[u32], cap: usize, o: &RoamOptions, 
     s.deg.clear();
     for (i, &slot) in list.iter().enumerate() {
         let p = player(slots, slot);
-        let (at, v, status, heading, age) = p.map_or(([0.0; 3], [0.0; 3], 0, 0, 0.0), |p| {
-            (p.p.unwrap_or_default(), p.v, p.status, p.heading, (now - p.pos_at) / 1000.0)
-        });
+        let (at, v, status, heading, age) =
+            p.map_or(([0.0; 3], [0.0; 3], 0, 0, 0.0), |p| (p.p.unwrap_or_default(), p.v, p.status, p.heading, (now - p.pos_at) / 1000.0));
         let (v, view) = if status == 2 { (v, o.view_m) } else { ([0.0; 3], 0.0) };
         let up = if matches!(status, 2 | 5) { 0.0 } else { o.away_m };
         let age = age.clamp(0.0, AGE_MAX_S);

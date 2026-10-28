@@ -276,8 +276,11 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
     Menus and HUD, the frame rate and its counter, the output latency, the controller's settings and how many
     players' cars free roam shows. A phone keeps its own and a PC its own.
   - The server keeps the copy of an earlier day too: "Go back to ..." brings it back when a day went wrong.
+  - Your keyphrase can also claim your name (**Online, Your name**: no one else plays under it; see "Your name is
+    yours" under Online), so in another browser your name comes back with your saves.
   - Stop syncing leaves the saves where they are, and the keyphrase in the box; Delete from cloud deletes them on the
-    server (your browsers keep theirs). A keyphrase nobody used for two years is deleted from the server. A browser
+    server (your browsers keep theirs), and frees the name it claimed. A keyphrase nobody used for two years is
+    deleted from the server. A browser
     whose keyphrase the server no longer has keeps it and sends nothing; Sync now looks again and offers to send its
     saves there.
 - **Autosave:** the game saves your progress by itself after races, purchases and changed options. The game starts
@@ -529,8 +532,8 @@ from the same server address can meet there.
 
 Good to know:
 
-- **Your name online** keeps letters, digits, `-` and `_` (at most 15): `Thom K.` plays as `Thom_K`. A changed name
-  applies the next time you press Play.
+- **Your name** keeps letters, digits, `-` and `_` (3 to 15), online and in free roam alike: `Alex K.` plays as
+  `Alex_K`. A changed name applies the next time you press Play.
 - **A name that reads as a slur** is not taken: Settings does not save it as **Your name**, the Online mode
   refuses it, and in free roam the other players see `Player` over your car. Digits or signs for letters (`1` for
   `i`), gaps and repeated letters read as the word they spell; a number (a year, two digits at the end) is a number
@@ -542,22 +545,36 @@ Good to know:
 - **Submit Complaint** (choose a player in a game room) tells the server's operator about that player, with their
   last few chat lines (of the last ten minutes) that you could see; the operator decides what happens. Without a
   complaint no chat is written down anywhere, only the word that kept a line from the others.
-- **Your name is yours while you are online**, and while you race. Someone else can use it when you are not; the
-  rankings and your EA Messenger lists follow the name, so whoever plays under it while you are away sees your
-  friends, the players you block, your friend requests and the messages waiting for you, and can change them. If
-  another player is online under it, you play under it with four digits added
-  (`NAME` becomes `NAME4821`; a name longer than 11 characters loses its end to them), usually the same digits when
-  you come back. Set **Online, Your name** to
-  keep your own.
+- **Your name is yours once you claim it.** **Online, Your name** says what your name is: free, claimed by you,
+  or another player's. **Claim** there claims it with your keyphrase (the one of your cloud saves: Claim turns them
+  on when you have none), after a check from Cloudflare that a person, not a script, claims it (usually it passes by
+  itself). With a keyphrase, Play claims a free name by itself; Cloudflare's check shows only when it wants a click.
+  - While it is yours nobody else plays under it: in the Online menu and in free roam they get your name with four
+    digits added (`Alex` becomes `Alex4821`; a name longer than 11 characters loses its end to them), the same
+    digits each time for their browser. If someone was online under it before you came, the lobby gives it back to
+    you.
+  - It stays yours while you play (free roam or Online) at least once every 180 days. In another browser, load your
+    keyphrase under Cloud saves and the name is yours there too.
+  - One name a keyphrase. **Change name** (type another name) changes it once a week; the old name stays yours for
+    14 more days, and your EA Messenger friends move to the new one (their lists show it).
+  - `NAME`, the game's default profile name, and `Player` can't be claimed: Play asks once for a name of your own,
+    and until you pick one you play as `NAME` with your four digits. A name another player claimed: Play asks once
+    for another, and you play as it with your digits until then. Neither applies offline or with the network off.
+  - A name that reads as a slur can't be claimed (the rules below).
+  - Without a claim your name is anyone's: whoever is online under it first keeps it (the others get digits), and
+    EA Messenger keeps no lists for it: your friends, blocked players and requests last until you leave Online.
 - **No name and no profile:** the game's own EA Login screens come instead. **Use Existing EA Account**, any name
   (3 to 15 letters, digits, `-` or `_`) and any password, **Continue**; **No** to "create a profile"; your persona.
   Nothing is checked and nothing is kept: there are no accounts. Type a password you use nowhere else: the game
   sends it to the server only lightly scrambled (the server never reads it).
-- **Kept on the server:** only race results per name (Rankings; a name not seen for a year is forgotten) and your EA
-  Messenger lists: your friends and the players you block (names), the friend requests you sent until they are
-  answered (30 days at most), and your friends' messages that came while you were away until you are back (7 days at
-  most). Of chat, only your last five lines, for ten minutes and in memory, for a complaint. Never your password: the
-  server does not read it.
+- **Kept on the server:** only race results per name (Rankings; a name not seen for a year is forgotten), the claimed
+  names (each with a code made from its keyphrase, never the keyphrase, and when it was claimed and last played: 180
+  days after that), and the EA Messenger lists of claimed names, with their keyphrase's code: your friends and the
+  players you block (names), the friend requests you sent until they are answered (30 days at most), and your
+  friends' messages that came while you were away until you are back (7 days at most). Lists of names nobody claimed
+  are kept only while their player is online; the lists kept before names could be claimed went to the first
+  keyphrase that claims each name (the ones of `NAME` and `Player`, which hundreds of players shared, were deleted).
+  Of chat, only your last five lines, for ten minutes and in memory, for a complaint. Never your password: the server does not read it.
 - **Game passwords:** the game asks for the password of a game created with one, and only the same password joins
   it. The server keeps no copy of it, only a check value for that game while it is open, and never shows or logs it.
 - **Others see** your name, your game, your chat and your results, never your real address.

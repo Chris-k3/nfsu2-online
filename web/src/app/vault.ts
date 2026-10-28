@@ -354,6 +354,8 @@ export class VaultSync {
     return this.keys.k;
   }
   private api(k: Keys, timeoutMs?: number) { return new VaultApi(k.token, this.d.fetch, timeoutMs); }
+  /** the linked keyphrase's token (what claims a name: claim.ts), null without one */
+  async token(): Promise<string | null> { return this.link ? (await this.keysFor(this.link.phrase)).token : null; }
   private set(state: SyncState) { this.state = state; this.onChange(); }
   /** the state when no job runs and nothing waits for the player */
   private rest(): SyncState { return !this.link ? { s: 'off' } : this.link.gone ? { s: 'gone' } : { s: 'synced' }; }

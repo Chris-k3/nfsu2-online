@@ -59,6 +59,8 @@ import { GameSession } from './game';
 import { AwayCheck, AWAY_LIMITS, type AwayLimits } from './away';
 import { PlayTime, SMS_AFTER_MS } from './playtime';
 import { pageId } from './page-id';
+import { NameClaims, onlineName } from './claim';
+import { NameRow, quietCheck, settleName } from './claim-ui';
 import { RenderCheck, RENDER_CHECK_TIMES, type RenderCheckTimes } from './rendercheck';
 import { moviesKept, Predownload } from './predownload';
 import { movieCodec } from '../host/movie';
@@ -138,6 +140,9 @@ let settings: SettingsPanel;
 let players: { now(): void; last(): PlayerCounts | null; fresh(ms: number): Promise<PlayerCounts | null> } | null = null;
 let saves: SavesPanel;
 let vault: VaultPanel;
+/** the claimed names (claim.ts), and the line under Your name (claim-ui.ts) */
+let claims: NameClaims;
+let nameRow: NameRow;
 let download: Predownload;
 /** the server does not answer: the page and the module came from this browser's copies (sw.ts), and a game
  *  runs from the game data on this PC */
@@ -348,18 +353,29 @@ async function askCloud() {
   const p = (text: string) => Object.assign(document.createElement('p'), { textContent: text });
   const body = document.createElement('div');
   body.append(p(t('Your career is saved only in this browser. Browsers sometimes clear a website\'s data, for example when the device runs low on space or when browsing data is cleared, and your saves go with it.')),
-    p(t('Cloud saves keep a copy on this server under a keyphrase that only you have. With it you get your saves back, here or in another browser.')),
-    p(t('You can change this any time under Cloud saves on the start page.')));
+    p(t('Cloud saves keep a copy on this server under a keyphrase that only you have. With it you get your saves back, here or in another browser.')));
+  // the name, when it is free to claim: the keyphrase claims it as the game starts (settleName)
+  const name = onlineName(await typedName());
+  const info = name ? await claims.check(name) : null;
+  if (name && info?.state === 'free' && !info.mine) body.append(p(t('It also claims your name {name}, so no one else can play under it.', { name })));
+  body.append(p(t('You can change this any time under Cloud saves on the start page.')));
   const answer = confirmBox(t('Turn on cloud saves?'), body, t('Turn on'), false, '', t('Not now'));
   $<HTMLButtonElement>('#confirm-ok').focus();
   const on = await answer;
   log.add(`[app] cloud saves: ${on ? 'turned on' : 'not now'} (asked at Play)`);
   if (!on) return;
+  await enableCloud();
+}
+
+/** Cloud saves turned on (Play's question, or Claim under Your name without a keyphrase): the keyphrase made and
+ *  shown to keep, or why not.  True: they are on. */
+async function enableCloud(): Promise<boolean> {
+  const p = (text: string) => Object.assign(document.createElement('p'), { textContent: text });
   const got = await vault.enable();
   if ('why' in got) {
     await confirmBox(t('Cloud saves are not on'), got.why ? t('They could not be turned on: {error}. Try again under Cloud saves on the start page.', { error: got.why })
       : t('They could not be turned on. Try again under Cloud saves on the start page.'), t('Continue'), false, '', '');
-    return;
+    return false;
   }
   const box = Object.assign(document.createElement('p'), { className: 'keyphrase', textContent: got.phrase });
   const copy = Object.assign(document.createElement('button'), { type: 'button', className: 'text-btn', textContent: t('Copy') });
@@ -377,6 +393,32 @@ async function askCloud() {
   const shown = confirmBox(t('Your keyphrase'), kept, t('Continue'), false, '', '');
   $<HTMLButtonElement>('#confirm-ok').focus();
   await shown;
+  return true;
+}
+
+/** Your name as settings.ini has it, else the newest profile's (what the game goes by) */
+async function typedName(): Promise<string> {
+  const r = resolved();
+  return (r.source.NFSU2_ROAM_NAME === 'settings.ini' ? r.env.NFSU2_ROAM_NAME?.trim() : '') || (await newestProfile())?.name || '';
+}
+
+/**
+ * The name this game plays under, by the claims (claim-ui.ts settleName): NAME and another player's claimed name get
+ * this browser's digits (asked about once), a free name with a keyphrase here is claimed.  null: as it is.  Only
+ * where the game meets other players (the network on, free roam or Online mode), and not offline or on a test page.
+ */
+async function playName(): Promise<string | null> {
+  const r = resolved();
+  if (testPage() || offline || /^(off|0|none)$/i.test(r.env.NFSU2_NET?.trim() ?? '')) return null;
+  if (r.env.NFSU2_ROAM !== '1' && r.env.NFSU2_ONLINE === '0') return null;
+  const typed = await typedName();
+  const name = await settleName({
+    claims, seed: pageId, linked: () => vault.linked(), log: logLine,
+    choose: (title, body, ok, cancel) => choiceBox(title, body, ok, cancel),
+    save: n => settings.putName(n),
+  }, typed, SAVE, quietCheck);
+  if (name && name !== onlineName(typed)) log.add('[app] your name: this game plays under another (digits, or one picked)');
+  return name;
 }
 
 /**
@@ -441,6 +483,8 @@ async function startGame() {
   const roamAsked = await askRoam();
   if (!roamAsked) await askCloud();
   const alone = !roamAsked && await askFull(counts);
+  // the name this game plays under, by the claims: before full screen, for its questions
+  const playAs = alone ? null : await playName();
   const pre = resolved();
   // inside the click: things that need a user gesture.  The context runs at the
   // mixer's own rate (44.1 kHz), so the worklet does not resample.
@@ -482,6 +526,7 @@ async function startGame() {
     NFSU2_WIDTH: String(size.w & ~1), NFSU2_HEIGHT: String(size.h & ~1), NFSU2_DISPLAY_HZ: String(displayHz),
   };
   const r = resolved(host);
+  if (playAs) r.env.NFSU2_ROAM_NAME = playAs;
   // the names this game goes by, for the log as it leaves the browser (privacy.ts)
   privacy.name(r.env.NFSU2_ROAM_NAME, 'you');
   for (const c of crewList(r.env.NFSU2_ROAM_CREW ?? '')) privacy.name(c, 'crew');
@@ -569,7 +614,7 @@ async function startGame() {
     session = await GameSession.start({
       module: loaded!.module, info: loaded!.info, saveDir: SAVE, env: r.env, canvas, stage, audio, displayHz, netName, notice, lobby, say, marks,
       netBack, netQueue, onSaved,
-      netId: net ? pageId() : undefined, netRemoved,
+      netId: net ? pageId() : undefined, netClaim: net ? await vault.token().catch(() => null) ?? undefined : undefined, netRemoved,
       artifacts: q.get('artifacts') ?? undefined, dumpScale: q.get('dumpscale') ? +q.get('dumpscale')! : undefined,
       toggleFullscreen, padPage: PAD_PAGE, log: logLine, onFatal: stopFatal, onOtherBuild: otherBuild,
     });
@@ -1437,6 +1482,7 @@ export async function boot() {
     onLoaded: applyLanguage,
     // the tab that owns the saves is the one whose Play reads the file: another tab only looks
     readOnly: () => !instance.owner, say: pageToast, confirm: confirmBox,
+    nameRow: (row, input, ctl) => nameRow.attach(row, input, ctl),
   }, $('#online'));
   // the language picker at the top: the same setting as Settings, Game, Language
   const pick = $<HTMLSelectElement>('#lang-pick');
@@ -1456,6 +1502,14 @@ export async function boot() {
     onRestored: () => { void loadSettings(); void settings.refresh(); }, download, onChanged: () => vault.changed(),
   });
   // keyphrase saves (on a server that keeps them): synced by the tab that owns the saves, once its settings are loaded
+  // the claimed names: asked with the keyphrase's token (claim.ts); the line under Your name (claim-ui.ts)
+  claims = new NameClaims(() => vault ? vault.token() : Promise.resolve(null));
+  nameRow = new NameRow({
+    claims, seed: pageId, linked: () => !!vault?.linked(), enable: enableCloud,
+    profileName: async () => (await newestProfile())?.name ?? null,
+    save: n => settings.putName(n), writable: () => instance.owner,
+    kept: n => vault?.showClaim(n), say: pageToast, log: logLine,
+  });
   vault = new VaultPanel($('#vault'), {
     saveDir: SAVE, owner: () => instance.owner, playing: () => !!session, busy: () => !!session || starting || !instance.owner,
     confirm: confirmBox, choose: (title, body, ok, cancel) => choiceBox(title, body, ok, cancel),

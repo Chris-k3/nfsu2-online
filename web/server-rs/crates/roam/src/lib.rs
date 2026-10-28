@@ -74,6 +74,12 @@
 //! next to where its car came to.  And it judges each race lobby's race by its racers' results (results.rs): a win
 //! no car makes is a `[cheat]` line too.  Lines only: the operator decides (`nfsu2-server ctl kick|ban`).
 //!
+//! A claimed name (nfsu2-claims) is its keyphrase's only: a player whose HELLO names one that another keyphrase
+//! claimed (its page's hello to the switch named the keyphrase it plays with: `FrameCtx::owner`) gets no links, is on
+//! nobody's map and counts nowhere, and the console says so once.  The page plays under the name with four digits
+//! then (as the Online lobby gives it), so only a page that ignores that plays alone.  A player's own claim hears that
+//! it plays (it holds 180 days from its last game).
+//!
 //! What the hub keeps, in memory only: per player endpoint its virtual address, port, id, room hash, crews' hashes,
 //! status, name and last position (and what its watch counted); gone `gone_ms` after its last message, when it says
 //! BYE, or when it leaves the switch.  Reading positions is what choosing by distance costs: the switch itself never looks inside a frame.  At
@@ -211,7 +217,8 @@ pub struct PeerEntry {
 
 /// What the switch posts to the hub's thread, in order.
 enum Cmd {
-    Frame(u32, Bytes),
+    /// a frame from a browser, and the keyphrase its page plays with
+    Frame(u32, Bytes, Option<Arc<str>>),
     Gone(u32),
     Attach(SwitchSend),
     Info(oneshot::Sender<serde_json::Value>),
@@ -244,6 +251,11 @@ impl RoamHub {
     /// measure is the runtime's workers' (the switch's) or a CPU quota's, the higher; outside one (tests), the
     /// process's over every core.
     pub fn spawn(o: RoamOptions, log: Arc<dyn Fn(&str) + Send + Sync>) -> Arc<RoamHub> {
+        RoamHub::spawn_with(o, log, None)
+    }
+
+    /// `spawn`, with the claimed names (nfsu2-claims): a player under a name another keyphrase claimed plays alone
+    pub fn spawn_with(o: RoamOptions, log: Arc<dyn Fn(&str) + Send + Sync>, claims: Option<Arc<nfsu2_claims::Claims>>) -> Arc<RoamHub> {
         let (tx, rx) = mpsc::channel();
         let pending = Arc::new(AtomicUsize::new(0));
         let busy: Box<dyn FnMut() -> f64 + Send> = match tokio::runtime::Handle::try_current() {
@@ -260,7 +272,8 @@ impl RoamHub {
         let waiting = pending.clone();
         // random and never 0 (roam_core.c's decoder, as `wire::decode`, drops a datagram from sender 0)
         let id = nfsu2_util::rand::int(1, 0xFFFF_FFFF) as u32;
-        let hub = Hub::new(o, Box::new(|| nfsu2_util::now_ms() as f64), busy, Box::new(move |l| log(l)), Box::new(|_, _| false), id);
+        let mut hub = Hub::new(o, Box::new(|| nfsu2_util::now_ms() as f64), busy, Box::new(move |l| log(l)), Box::new(|_, _| false), id);
+        hub.set_claims(claims);
         // (made here, not on its thread: until its first tick crowded() is what the hub begins with)
         let crowded = Arc::new(AtomicBool::new(hub.crowded()));
         let in_roam = Arc::new(AtomicUsize::new(0));
@@ -355,9 +368,9 @@ fn run(
             },
         };
         match cmd {
-            Cmd::Frame(from, data) => {
+            Cmd::Frame(from, data, owner) => {
                 pending.fetch_sub(1, Ordering::Relaxed);
-                guard(|| hub.frame(from, &data));
+                guard(|| hub.frame_from(from, &data, owner.as_ref()));
             }
             Cmd::Gone(vip) => guard(|| hub.peer_gone(vip)),
             Cmd::Attach(send) => hub.attach_switch(Box::new(move |vip, f| send(vip, f, None).sent())),
@@ -388,13 +401,13 @@ impl Host for RoamHub {
         false
     }
     fn frame(&self, from: u32, data: Bytes, ctx: FrameCtx) {
-        // the hub's lists are charged to nobody
-        drop(ctx);
+        // the hub's lists are charged to nobody; the owner is for the claimed names
+        let owner = ctx.owner;
         if self.pending.fetch_add(1, Ordering::Relaxed) >= MAX_PENDING {
             self.pending.fetch_sub(1, Ordering::Relaxed);
             return;
         }
-        if self.tx.send(Cmd::Frame(from, data)).is_err() {
+        if self.tx.send(Cmd::Frame(from, data, owner)).is_err() {
             self.pending.fetch_sub(1, Ordering::Relaxed);
         }
     }
@@ -433,7 +446,7 @@ mod tests {
             in_rooms: Arc::new(Mutex::new(HashMap::new())),
             in_crews: Arc::new(Mutex::new(Vec::new())),
         };
-        let ctx = FrameCtx { group: Arc::from("client"), site: None, cause: None, slot: None };
+        let ctx = FrameCtx { group: Arc::from("client"), site: None, cause: None, slot: None, owner: None };
         for _ in 0..100_000 {
             hub.frame(0x0A4D_0005, Bytes::from_static(b"a frame"), ctx.clone());
         }

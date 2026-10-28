@@ -196,6 +196,7 @@
           <button type="submit" class="btn" id="vault-load" data-i18n>Load</button>
         </form>
         <p class="hint" id="vault-about" data-i18n>Make a keyphrase, or enter yours to load your saves.</p>
+        <p class="hint" id="vault-claim" hidden></p>
         <p class="hint warn" id="vault-status" role="status"></p>
         <div id="vault-sides"></div>
         <div class="row" id="vault-conflict" hidden>
@@ -332,6 +333,13 @@
     <button type="button" class="btn" data-act="download" data-i18n>Download</button>
     <button type="button" class="btn danger" data-act="delete" data-i18n>Delete</button>
   </div>
+</dialog>
+
+<dialog class="dlg confirm" id="claim-check" aria-labelledby="claim-check-title">
+  <h2 id="claim-check-title"></h2>
+  <p class="claim-about"></p>
+  <div class="claim-check"></div>
+  <div class="row end"><button type="button" class="btn claim-no"></button></div>
 </dialog>
 
 <dialog class="dlg confirm" id="confirm" aria-labelledby="confirm-title">
