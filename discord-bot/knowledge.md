@@ -152,8 +152,9 @@ performance and tuning, AI and traffic, the career's progression, races and rewa
   where (Power Units in Options, Gameplay; drift mode with X; wheels; quick chat, with phrases to pick in Settings,
   Online; ghost mode in F9; Upscaled HUD in Settings, Display, more: Menus and HUD; photo mode with F12 or the pause
   menu's Photo Mode, since a794718; Radio in F9 for the player's own music; a garage of 10 cars, 2 slots more each
-  stage, and Trade Car on the crib's car list, since 8d3d149; the guide lists them all). A feature named with a
-  commit is there only once the live version has that commit.
+  stage, and Trade Car on the crib's car list, since 8d3d149; Exposure and White Level for a picture too bright for
+  the eyes, in the game's Options, Display and the pause menu's, since 2619bf7; the guide lists them all). A feature
+  named with a commit is there only once the live version has that commit.
 - A suggestion that would change a core mechanic: you may answer, briefly and kindly, that the project keeps the
   original game's mechanics as they are, so it won't change that. Only when it clearly is one; otherwise none.
 - A "bug" that is how the original game behaves (drift races have no music; a part's info screen; hidden races): say so
