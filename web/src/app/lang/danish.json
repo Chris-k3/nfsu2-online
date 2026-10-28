@@ -1098,7 +1098,6 @@
   "Another player claimed {name}, so you play as {alt}. Type another name. Is it yours? Enter your keyphrase under Cloud saves.": "En anden spiller har reserveret {name}, så du spiller som {alt}. Skriv et andet navn. Er det dit? Indtast din nøglefrase under Gemte spil i skyen.",
   "{name} is free. You can change your name again on {date}.": "{name} er ledigt. Du kan skifte navn igen den {date}.",
   "{name} is free. {old} stays yours for {n} days after the change, and your EA Messenger friends move with you. One change a week.": "{name} er ledigt. {old} forbliver dit i {n} dage efter skiftet, og dine venner i EA Messenger flytter med dig. Ét skift om ugen.",
-  "Not claimed: anyone can play as {name}. Claiming turns on cloud saves, and your keyphrase holds the claim.": "Ikke reserveret: alle kan spille som {name}. Når du reserverer, slås gemning i skyen til, og din nøglefrase holder reservationen.",
   "Claim": "Reservér",
   "Not claimed yet. Your keyphrase claims it the next time you play with free roam or Online on.": "Ikke reserveret endnu. Din nøglefrase reserverer det, næste gang du spiller med udforskning med andre eller Online slået til.",
   "Claimed: {name}.": "Reserveret: {name}.",
@@ -1114,5 +1113,9 @@
   "Claiming {name}": "Reserverer {name}",
   "What other players see over your car in free roam and in the Online menu: 3 to 15 letters, digits, - or _. Empty uses your profile name.": "Det, andre spillere ser over din bil i udforsknings-mode og i Online-menuen: 3 til 15 bogstaver, cifre, - eller _. Står det tomt, bruges dit profilnavn.",
   "It also claims your name {name}, so no one else can play under it.": "Gemning i skyen reserverer også dit navn {name}, så ingen andre kan spille under det.",
-  "This keyphrase also holds your claim on {name}.": "Denne nøglefrase holder også din reservation af {name}."
+  "This keyphrase also holds your claim on {name}.": "Denne nøglefrase holder også din reservation af {name}.",
+  "Not claimed: anyone can play as {name}. Claim makes you a keyphrase, 8 words that hold the name and also keep your cloud saves.": "Ikke reserveret: alle kan spille som {name}. Med Reservér får du en nøglefrase: 8 ord, der holder navnet for dig og også bevarer dine gemte spil i skyen.",
+  "{name} is yours, held by this keyphrase. Cloud saves are on too.": "{name} er dit, og denne nøglefrase holder det for dig. Gemning i skyen er også slået til.",
+  "Keep it safe: it is the only way to play as {name} again, in another browser or here after this browser's data is cleared, and the only way back to your saves.": "Opbevar den sikkert: den er den eneste måde at spille som {name} igen på, i en anden browser eller her, når denne browsers data er ryddet, og den eneste vej tilbage til dine gemte spil.",
+  "To use it in another browser, enter it under Cloud saves on the start page.": "For at bruge nøglefrasen i en anden browser skal du indtaste den der under Gemte spil i skyen på startsiden."
 }

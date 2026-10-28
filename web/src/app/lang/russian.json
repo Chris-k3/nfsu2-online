@@ -1144,7 +1144,6 @@
   "Another player claimed {name}, so you play as {alt}. Type another name. Is it yours? Enter your keyphrase under Cloud saves.": "Имя {name} закрепил за собой другой игрок, поэтому вы играете как {alt}. Введите другое имя. Это ваше имя? Введите ключевую фразу в разделе «Облачные сохранения».",
   "{name} is free. You can change your name again on {date}.": "Имя {name} свободно. Снова сменить имя можно будет {date}.",
   "{name} is free. {old} stays yours for {n} days after the change, and your EA Messenger friends move with you. One change a week.": "Имя {name} свободно. {old} останется за вами ещё {n} дней после смены, а ваши друзья в EA Messenger перейдут вместе с вами. Сменить имя можно раз в неделю.",
-  "Not claimed: anyone can play as {name}. Claiming turns on cloud saves, and your keyphrase holds the claim.": "Не закреплено: под именем {name} может играть кто угодно. Закрепление включает облачные сохранения, а ваша ключевая фраза держит имя за вами.",
   "Claim": "Закрепить",
   "Not claimed yet. Your keyphrase claims it the next time you play with free roam or Online on.": "Пока не закреплено. Ваша ключевая фраза закрепит имя, когда вы в следующий раз будете играть с включённой свободной ездой или игрой через Интернет.",
   "Claimed: {name}.": "Закреплено: {name}.",
@@ -1160,5 +1159,9 @@
   "Claiming {name}": "Закрепление имени {name}",
   "What other players see over your car in free roam and in the Online menu: 3 to 15 letters, digits, - or _. Empty uses your profile name.": "Что видят другие игроки над вашей машиной в свободной езде и в меню «Игра через Интернет»: от 3 до 15 букв, цифр, - или _. Если пусто, используется имя профиля.",
   "It also claims your name {name}, so no one else can play under it.": "Это также закрепит за вами имя {name}, и больше никто не сможет под ним играть.",
-  "This keyphrase also holds your claim on {name}.": "Эта ключевая фраза также держит за вами имя {name}."
+  "This keyphrase also holds your claim on {name}.": "Эта ключевая фраза также держит за вами имя {name}.",
+  "Not claimed: anyone can play as {name}. Claim makes you a keyphrase, 8 words that hold the name and also keep your cloud saves.": "Не закреплено: под именем {name} может играть кто угодно. Закрепление создаст для вас ключевую фразу: 8 слов, которые держат имя за вами и также хранят ваши облачные сохранения.",
+  "{name} is yours, held by this keyphrase. Cloud saves are on too.": "Имя {name} — ваше: его держит за вами эта ключевая фраза. Облачные сохранения тоже включены.",
+  "Keep it safe: it is the only way to play as {name} again, in another browser or here after this browser's data is cleared, and the only way back to your saves.": "Храните её надёжно: это единственный способ снова играть под именем {name} — в другом браузере или здесь после очистки данных этого браузера — и единственный способ вернуть свои сохранения.",
+  "To use it in another browser, enter it under Cloud saves on the start page.": "Чтобы использовать эту ключевую фразу в другом браузере, введите её там в разделе «Облачные сохранения» на стартовой странице."
 }

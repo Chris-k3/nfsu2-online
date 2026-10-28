@@ -1098,7 +1098,6 @@
   "Another player claimed {name}, so you play as {alt}. Type another name. Is it yours? Enter your keyphrase under Cloud saves.": "En annan spelare har reserverat {name}, så du spelar som {alt}. Skriv ett annat namn. Är det ditt? Ange din nyckelfras under Sparfiler i molnet.",
   "{name} is free. You can change your name again on {date}.": "{name} är ledigt. Du kan byta namn igen den {date}.",
   "{name} is free. {old} stays yours for {n} days after the change, and your EA Messenger friends move with you. One change a week.": "{name} är ledigt. {old} förblir ditt i {n} dagar efter bytet, och dina vänner i EA Messenger följer med dig. Ett byte per vecka.",
-  "Not claimed: anyone can play as {name}. Claiming turns on cloud saves, and your keyphrase holds the claim.": "Inte reserverat: vem som helst kan spela som {name}. Om du reserverar slås sparning i molnet på, och din nyckelfras håller reservationen.",
   "Claim": "Reservera",
   "Not claimed yet. Your keyphrase claims it the next time you play with free roam or Online on.": "Inte reserverat än. Din nyckelfras reserverar det nästa gång du spelar med Utforska med andra eller Online påslaget.",
   "Claimed: {name}.": "Reserverat: {name}.",
@@ -1114,5 +1113,9 @@
   "Claiming {name}": "Reserverar {name}",
   "What other players see over your car in free roam and in the Online menu: 3 to 15 letters, digits, - or _. Empty uses your profile name.": "Det som andra spelare ser ovanför din bil i läget Utforska och i Online-menyn: 3 till 15 bokstäver, siffror, - eller _. Lämnas det tomt används ditt profilnamn.",
   "It also claims your name {name}, so no one else can play under it.": "Sparning i molnet reserverar också ditt namn {name}, så att ingen annan kan spela under det.",
-  "This keyphrase also holds your claim on {name}.": "Den här nyckelfrasen håller också din reservation av {name}."
+  "This keyphrase also holds your claim on {name}.": "Den här nyckelfrasen håller också din reservation av {name}.",
+  "Not claimed: anyone can play as {name}. Claim makes you a keyphrase, 8 words that hold the name and also keep your cloud saves.": "Inte reserverat: vem som helst kan spela som {name}. Med Reservera får du en nyckelfras: 8 ord som håller namnet åt dig och också bevarar dina sparfiler i molnet.",
+  "{name} is yours, held by this keyphrase. Cloud saves are on too.": "{name} är ditt, och den här nyckelfrasen håller det åt dig. Sparning i molnet är också påslagen.",
+  "Keep it safe: it is the only way to play as {name} again, in another browser or here after this browser's data is cleared, and the only way back to your saves.": "Förvara den säkert: den är det enda sättet att spela som {name} igen, i en annan webbläsare eller här efter att den här webbläsarens data har rensats, och det enda sättet att komma tillbaka till dina sparfiler.",
+  "To use it in another browser, enter it under Cloud saves on the start page.": "För att använda nyckelfrasen i en annan webbläsare anger du den där under Sparfiler i molnet på startsidan."
 }

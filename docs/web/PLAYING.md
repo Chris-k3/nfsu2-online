@@ -546,9 +546,11 @@ Good to know:
   last few chat lines (of the last ten minutes) that you could see; the operator decides what happens. Without a
   complaint no chat is written down anywhere, only the word that kept a line from the others.
 - **Your name is yours once you claim it.** **Online, Your name** says what your name is: free, claimed by you,
-  or another player's. **Claim** there claims it with your keyphrase (the one of your cloud saves: Claim turns them
-  on when you have none), after a check from Cloudflare that a person, not a script, claims it (usually it passes by
-  itself). With a keyphrase, Play claims a free name by itself; Cloudflare's check shows only when it wants a click.
+  or another player's. **Claim** there claims it with your keyphrase (the one of your cloud saves), after a check from
+  Cloudflare that a person, not a script, claims it (usually it passes by itself). Without a keyphrase, Claim makes
+  one and turns cloud saves on, then shows it to keep: it is the only way to play under the name again, in another
+  browser or after this browser's data is cleared, and the only way back to your saves. With a keyphrase, Play
+  claims a free name by itself; Cloudflare's check shows only when it wants a click.
   - While it is yours nobody else plays under it: in the Online menu and in free roam they get your name with four
     digits added (`Alex` becomes `Alex4821`; a name longer than 11 characters loses its end to them), the same
     digits each time for their browser. If someone was online under it before you came, the lobby gives it back to

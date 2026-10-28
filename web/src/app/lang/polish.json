@@ -1144,7 +1144,6 @@
   "Another player claimed {name}, so you play as {alt}. Type another name. Is it yours? Enter your keyphrase under Cloud saves.": "Inny gracz zarezerwował nazwę {name}, więc grasz jako {alt}. Wpisz inną nazwę. To twoja nazwa? Wpisz frazę dostępu w sekcji „Zapisy w chmurze”.",
   "{name} is free. You can change your name again on {date}.": "Nazwa {name} jest wolna. Swoją nazwę możesz ponownie zmienić {date}.",
   "{name} is free. {old} stays yours for {n} days after the change, and your EA Messenger friends move with you. One change a week.": "Nazwa {name} jest wolna. Nazwa {old} pozostanie twoja przez {n} dni po zmianie, a twoi znajomi z EA Messenger przejdą razem z tobą. Jedna zmiana na tydzień.",
-  "Not claimed: anyone can play as {name}. Claiming turns on cloud saves, and your keyphrase holds the claim.": "Niezarezerwowana: każdy może grać jako {name}. Rezerwacja włącza zapisy w chmurze, a utrzymuje ją twoja fraza dostępu.",
   "Claim": "Zarezerwuj",
   "Not claimed yet. Your keyphrase claims it the next time you play with free roam or Online on.": "Jeszcze niezarezerwowana. Twoja fraza dostępu zarezerwuje ją, gdy następnym razem zagrasz z włączoną przejażdżką lub trybem sieciowym.",
   "Claimed: {name}.": "Zarezerwowano: {name}.",
@@ -1160,5 +1159,9 @@
   "Claiming {name}": "Rezerwowanie nazwy {name}",
   "What other players see over your car in free roam and in the Online menu: 3 to 15 letters, digits, - or _. Empty uses your profile name.": "To, co inni gracze widzą nad twoim samochodem na przejażdżce i w menu Sieć. Od 3 do 15 znaków: litery, cyfry, - lub _. Puste – używana jest nazwa profilu.",
   "It also claims your name {name}, so no one else can play under it.": "Zarezerwują też twoją nazwę {name}, więc nikt inny nie będzie mógł pod nią grać.",
-  "This keyphrase also holds your claim on {name}.": "Ta fraza dostępu utrzymuje też twoją rezerwację nazwy {name}."
+  "This keyphrase also holds your claim on {name}.": "Ta fraza dostępu utrzymuje też twoją rezerwację nazwy {name}.",
+  "Not claimed: anyone can play as {name}. Claim makes you a keyphrase, 8 words that hold the name and also keep your cloud saves.": "Niezarezerwowana: każdy może grać jako {name}. Rezerwacja tworzy dla ciebie frazę dostępu: 8 słów, które utrzymują nazwę i przechowują też twoje zapisy w chmurze.",
+  "{name} is yours, held by this keyphrase. Cloud saves are on too.": "Nazwa {name} jest twoja i utrzymuje ją ta fraza dostępu. Zapisy w chmurze też są włączone.",
+  "Keep it safe: it is the only way to play as {name} again, in another browser or here after this browser's data is cleared, and the only way back to your saves.": "Przechowuj ją bezpiecznie: to jedyny sposób, aby znów grać jako {name} w innej przeglądarce lub tutaj po wyczyszczeniu danych tej przeglądarki, i jedyny sposób, aby odzyskać swoje zapisy.",
+  "To use it in another browser, enter it under Cloud saves on the start page.": "Aby użyć tej frazy dostępu w innej przeglądarce, wpisz ją tam w sekcji „Zapisy w chmurze” na stronie startowej."
 }

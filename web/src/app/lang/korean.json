@@ -1029,7 +1029,6 @@
   "Another player claimed {name}, so you play as {alt}. Type another name. Is it yours? Enter your keyphrase under Cloud saves.": "다른 플레이어가 {name} 이름을 등록해서 {alt} 이름으로 플레이해요. 다른 이름을 입력하세요. 내 이름인가요? '클라우드 저장'에서 키 문구를 입력하세요.",
   "{name} is free. You can change your name again on {date}.": "{name} 이름을 쓸 수 있어요. {date}부터 다시 이름을 바꿀 수 있어요.",
   "{name} is free. {old} stays yours for {n} days after the change, and your EA Messenger friends move with you. One change a week.": "{name} 이름을 쓸 수 있어요. 바꾼 뒤에도 {old} 이름은 {n}일 동안 내 것이고, EA Messenger 친구도 함께 옮겨 와요. 이름은 일주일에 한 번 바꿀 수 있어요.",
-  "Not claimed: anyone can play as {name}. Claiming turns on cloud saves, and your keyphrase holds the claim.": "등록되지 않음: 누구나 {name} 이름으로 플레이할 수 있어요. 등록하면 클라우드 저장이 켜지고, 키 문구가 등록을 유지해요.",
   "Claim": "등록",
   "Not claimed yet. Your keyphrase claims it the next time you play with free roam or Online on.": "아직 등록되지 않았어요. 다음에 자유 주행이나 온라인을 켜고 플레이하면 키 문구로 등록돼요.",
   "Claimed: {name}.": "등록 완료: {name}.",
@@ -1045,5 +1044,9 @@
   "Claiming {name}": "{name} 이름 등록 중",
   "What other players see over your car in free roam and in the Online menu: 3 to 15 letters, digits, - or _. Empty uses your profile name.": "자유 주행에서 내 차 위에, 그리고 온라인 메뉴에서 다른 플레이어에게 보이는 이름이에요. 영문자, 숫자, -, _로 3~15자. 비워 두면 프로필 이름을 써요.",
   "It also claims your name {name}, so no one else can play under it.": "내 이름 {name}도 등록돼서 다른 사람은 이 이름으로 플레이할 수 없어요.",
-  "This keyphrase also holds your claim on {name}.": "이 키 문구는 {name} 이름의 등록도 유지해요."
+  "This keyphrase also holds your claim on {name}.": "이 키 문구는 {name} 이름의 등록도 유지해요.",
+  "Not claimed: anyone can play as {name}. Claim makes you a keyphrase, 8 words that hold the name and also keep your cloud saves.": "등록되지 않음: 누구나 {name} 이름으로 플레이할 수 있어요. 등록하면 키 문구가 만들어져요. 이름을 유지하고 클라우드 저장도 보관하는 단어 8개예요.",
+  "{name} is yours, held by this keyphrase. Cloud saves are on too.": "{name} 이름은 내 것이에요. 이 키 문구가 등록을 유지해요. 클라우드 저장도 켜졌어요.",
+  "Keep it safe: it is the only way to play as {name} again, in another browser or here after this browser's data is cleared, and the only way back to your saves.": "안전하게 보관하세요. 다른 브라우저에서, 또는 이 브라우저의 데이터가 지워진 뒤 여기서 다시 {name} 이름으로 플레이할 수 있는 유일한 방법이자, 저장 데이터로 돌아올 수 있는 유일한 방법이에요.",
+  "To use it in another browser, enter it under Cloud saves on the start page.": "다른 브라우저에서 쓰려면 시작 페이지의 '클라우드 저장'에서 이 키 문구를 입력하세요."
 }

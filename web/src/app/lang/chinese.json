@@ -1029,7 +1029,6 @@
   "Another player claimed {name}, so you play as {alt}. Type another name. Is it yours? Enter your keyphrase under Cloud saves.": "另一位玩家已認領 {name}，所以你會以 {alt} 遊玩。請輸入其他名稱。這是你的名稱嗎？請在「雲端存檔」中輸入你的通關密語。",
   "{name} is free. You can change your name again on {date}.": "{name} 可以使用。你從 {date} 起可以再次變更名稱。",
   "{name} is free. {old} stays yours for {n} days after the change, and your EA Messenger friends move with you. One change a week.": "{name} 可以使用。變更後 {old} 仍會保留給你 {n} 天，你的 EA Messenger 好友也會跟著你轉移。每週可變更一次。",
-  "Not claimed: anyone can play as {name}. Claiming turns on cloud saves, and your keyphrase holds the claim.": "未認領：任何人都能以 {name} 遊玩。認領會開啟雲端存檔，並由你的通關密語保有此認領。",
   "Claim": "認領",
   "Not claimed yet. Your keyphrase claims it the next time you play with free roam or Online on.": "尚未認領。下次你在開啟自由漫遊或線上模式時遊玩，你的通關密語就會認領它。",
   "Claimed: {name}.": "已認領：{name}。",
@@ -1045,5 +1044,9 @@
   "Claiming {name}": "正在認領 {name}",
   "What other players see over your car in free roam and in the Online menu: 3 to 15 letters, digits, - or _. Empty uses your profile name.": "其他玩家在自由漫遊中你的車子上方及「線上」選單中看到的名稱：3 到 15 個字元，可用字母、數字、- 或 _。留空則使用你的玩家檔案名稱。",
   "It also claims your name {name}, so no one else can play under it.": "它也會認領你的名稱 {name}，讓其他人無法以這個名稱遊玩。",
-  "This keyphrase also holds your claim on {name}.": "此通關密語也保有你對 {name} 的認領。"
+  "This keyphrase also holds your claim on {name}.": "此通關密語也保有你對 {name} 的認領。",
+  "Not claimed: anyone can play as {name}. Claim makes you a keyphrase, 8 words that hold the name and also keep your cloud saves.": "未認領：任何人都能以 {name} 遊玩。認領會為你建立一組通關密語：8 個字詞，既保有這個名稱，也保管你的雲端存檔。",
+  "{name} is yours, held by this keyphrase. Cloud saves are on too.": "{name} 是你的名稱了，由這組通關密語保有。雲端存檔也已開啟。",
+  "Keep it safe: it is the only way to play as {name} again, in another browser or here after this browser's data is cleared, and the only way back to your saves.": "請妥善保管：無論是在其他瀏覽器，還是這個瀏覽器的資料被清除後在這裡，這都是再次以 {name} 遊玩的唯一方法，也是取回你存檔的唯一方法。",
+  "To use it in another browser, enter it under Cloud saves on the start page.": "要在其他瀏覽器使用，請在開始頁面的「雲端存檔」中輸入這組通關密語。"
 }

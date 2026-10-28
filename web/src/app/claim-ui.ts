@@ -46,8 +46,10 @@ export interface NameRowDeps {
   seed(): string;
   /** a keyphrase is linked here */
   linked(): boolean;
-  /** cloud saves turned on (the keyphrase made, shown to keep): true when they are */
-  enable(): Promise<boolean>;
+  /** cloud saves turned on: the keyphrase made (null: not on, and the player was told why) */
+  enable(): Promise<string | null>;
+  /** a keyphrase just made, shown to keep, for the name it claimed (null: none yet) */
+  showKeyphrase(phrase: string, claimed: string | null): Promise<void>;
   /** the name the game takes when Your name is empty (the newest profile's) */
   profileName(): Promise<string | null>;
   /** Your name written to settings.ini */
@@ -152,30 +154,43 @@ export class NameRow {
       case 'free':
         if (mine && mine.next > Date.now()) return show(t('{name} is free. You can change your name again on {date}.', { name, date: day(mine.next) }));
         if (mine) return show(t('{name} is free. {old} stays yours for {n} days after the change, and your EA Messenger friends move with you. One change a week.', { name, old: mine.name, n: GRACE_DAYS }), 'free', t('Change name'));
-        if (!this.d.linked()) return show(t('Not claimed: anyone can play as {name}. Claiming turns on cloud saves, and your keyphrase holds the claim.', { name }), 'free', t('Claim'));
+        if (!this.d.linked()) return show(t('Not claimed: anyone can play as {name}. Claim makes you a keyphrase, 8 words that hold the name and also keep your cloud saves.', { name }), 'free', t('Claim'));
         return show(t('Not claimed yet. Your keyphrase claims it the next time you play with free roam or Online on.'), 'free', t('Claim'));
       default:
         return show(null);
     }
   }
 
-  /** Claim (or Change name): cloud saves first when there is no keyphrase, Cloudflare's check when the server asks */
+  /** Claim (or Change name): cloud saves first when there is no keyphrase (the keyphrase shown to keep after the
+   *  claim, for the name too), Cloudflare's check when the server asks */
   private async claim() {
     if (!this.els || this.claiming || !this.d.writable()) return;
     const name = onlineName(await this.typed());
     if (!name) return;
-    if (!this.d.linked()) {
-      this.d.log('[app] claim: cloud saves first (no keyphrase here)');
-      if (!await this.d.enable()) return;
-      await this.ask();
-      if (this.info?.state !== 'free') return;
-    }
+    const phrase = this.d.linked() ? null : await this.made();
+    if (phrase === undefined) return;
+    if (phrase && this.info?.state !== 'free') { await this.d.showKeyphrase(phrase, null); return; }
+    const mine = await this.claimNow(name);
+    if (phrase) await this.d.showKeyphrase(phrase, mine);
+  }
+
+  /** a keyphrase made for the claim (cloud saves on), the name asked about again; undefined: none */
+  private async made(): Promise<string | undefined> {
+    this.d.log('[app] claim: cloud saves first (no keyphrase here)');
+    const phrase = await this.d.enable();
+    if (!phrase) return undefined;
+    await this.ask();
+    return phrase;
+  }
+
+  /** the claim itself: the name claimed, or null (the line says why) */
+  private async claimNow(name: string): Promise<string | null> {
     this.claiming = true; this.note = null; this.draw();
     let captcha: string | null = null;
     if (this.info?.captcha) {
       this.check.replaceChildren();
       captcha = await turnstile(this.info.captcha, this.check);
-      if (!captcha) { this.claiming = false; this.note = t('Cloudflare\'s check did not pass. Try again.'); this.draw(); return; }
+      if (!captcha) { this.claiming = false; this.note = t('Cloudflare\'s check did not pass. Try again.'); this.draw(); return null; }
     }
     const r = await this.d.claims.claim(name, captcha);
     this.claiming = false;
@@ -184,11 +199,12 @@ export class NameRow {
       if (this.els?.input.value.trim() !== r.mine.name) await this.d.save(r.mine.name);
       this.d.say(t('Claimed: {name}.', { name: r.mine.name }));
       await this.ask();
-      return;
+      return r.mine.name;
     }
     this.d.log(`[app] claim: your name not claimed (${r.error})`);
     this.note = claimError(r, name);
     this.draw();
+    return null;
   }
 }
 
@@ -254,7 +270,7 @@ export async function settleName(d: PlayNameDeps, typed: string, saveDir: string
 const RETRY_MS = 7 * 86_400_000;
 
 /** a free name claimed at Play, Cloudflare's check quiet unless it wants a click */
-async function claimQuietly(d: PlayNameDeps, name: string, info: NameInfo, quiet: (name: string, site: string) => Promise<string | null>): Promise<Mine | null> {
+export async function claimQuietly(d: PlayNameDeps, name: string, info: NameInfo, quiet: (name: string, site: string) => Promise<string | null>): Promise<Mine | null> {
   const k = `nfsu2-claim-tried:${name.toLowerCase()}`;
   try { if (Date.now() - Number(localStorage.getItem(k) ?? 0) < RETRY_MS) return null; } catch { /* storage off: tried */ }
   const later = () => { try { localStorage.setItem(k, String(Date.now())); } catch { /* storage off */ } };

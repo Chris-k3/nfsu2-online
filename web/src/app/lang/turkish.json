@@ -1038,7 +1038,6 @@
   "Another player claimed {name}, so you play as {alt}. Type another name. Is it yours? Enter your keyphrase under Cloud saves.": "Başka bir oyuncu {name} adını sahiplendi, bu yüzden {alt} olarak oynuyorsun. Başka bir ad yaz. Bu ad senin mi? Anahtar ifadeni Bulut kayıtları altına gir.",
   "{name} is free. You can change your name again on {date}.": "{name} adı müsait. Adını {date} tarihinde yeniden değiştirebilirsin.",
   "{name} is free. {old} stays yours for {n} days after the change, and your EA Messenger friends move with you. One change a week.": "{name} adı müsait. {old} adı değişiklikten sonra {n} gün daha senin kalır ve EA Messenger arkadaşların seninle birlikte taşınır. Haftada bir değişiklik.",
-  "Not claimed: anyone can play as {name}. Claiming turns on cloud saves, and your keyphrase holds the claim.": "Sahiplenilmedi: herkes {name} adıyla oynayabilir. Sahiplenmek bulut kayıtlarını açar ve sahipliği anahtar ifaden tutar.",
   "Claim": "Sahiplen",
   "Not claimed yet. Your keyphrase claims it the next time you play with free roam or Online on.": "Henüz sahiplenilmedi. Serbest sürüş ya da Çevrimiçi açıkken bir sonraki oynayışında anahtar ifaden onu sahiplenir.",
   "Claimed: {name}.": "Sahiplenildi: {name}.",
@@ -1054,5 +1053,9 @@
   "Claiming {name}": "{name} adı sahipleniliyor",
   "What other players see over your car in free roam and in the Online menu: 3 to 15 letters, digits, - or _. Empty uses your profile name.": "Diğer oyuncuların serbest sürüşte arabanın üstünde ve Çevrimiçi menüsünde gördüğü ad: 3 ila 15 harf, rakam, - ya da _. Boş bırakılırsa profil adın kullanılır.",
   "It also claims your name {name}, so no one else can play under it.": "Ayrıca {name} adını da senin için sahiplenir, böylece başka kimse bu adla oynayamaz.",
-  "This keyphrase also holds your claim on {name}.": "{name} adının sahipliğini de bu anahtar ifade tutar."
+  "This keyphrase also holds your claim on {name}.": "{name} adının sahipliğini de bu anahtar ifade tutar.",
+  "Not claimed: anyone can play as {name}. Claim makes you a keyphrase, 8 words that hold the name and also keep your cloud saves.": "Sahiplenilmedi: herkes {name} adıyla oynayabilir. Sahiplenince sana bir anahtar ifade oluşturulur: adı tutan ve bulut kayıtlarını da saklayan 8 sözcük.",
+  "{name} is yours, held by this keyphrase. Cloud saves are on too.": "{name} adı senin; sahipliğini bu anahtar ifade tutar. Bulut kayıtları da açık.",
+  "Keep it safe: it is the only way to play as {name} again, in another browser or here after this browser's data is cleared, and the only way back to your saves.": "Güvende tut: başka bir tarayıcıda ya da bu tarayıcının verileri silindikten sonra burada {name} adıyla yeniden oynamanın tek yolu bu; kayıtlarına dönmenin de tek yolu bu.",
+  "To use it in another browser, enter it under Cloud saves on the start page.": "Başka bir tarayıcıda kullanmak için onu başlangıç sayfasında Bulut kayıtları altına gir."
 }

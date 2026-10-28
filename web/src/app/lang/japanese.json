@@ -1029,7 +1029,6 @@
   "Another player claimed {name}, so you play as {alt}. Type another name. Is it yours? Enter your keyphrase under Cloud saves.": "{name}は他のプレイヤーが登録済みのため、{alt}としてプレイします。別の名前を入力してください。あなたの名前ですか？「クラウドセーブ」でキーフレーズを入力してください。",
   "{name} is free. You can change your name again on {date}.": "{name}は空いています。名前は{date}から再び変更できます。",
   "{name} is free. {old} stays yours for {n} days after the change, and your EA Messenger friends move with you. One change a week.": "{name}は空いています。変更後も{old}は{n}日間あなたのもので、EA Messengerのフレンドも一緒に移ります。変更は週に1回までです。",
-  "Not claimed: anyone can play as {name}. Claiming turns on cloud saves, and your keyphrase holds the claim.": "未登録: 誰でも{name}としてプレイできます。登録するとクラウドセーブがオンになり、登録はキーフレーズで保持されます。",
   "Claim": "登録",
   "Not claimed yet. Your keyphrase claims it the next time you play with free roam or Online on.": "まだ登録されていません。次にフリーロームかオンラインをオンにしてプレイしたときに、キーフレーズで登録されます。",
   "Claimed: {name}.": "登録しました: {name}。",
@@ -1045,5 +1044,9 @@
   "Claiming {name}": "{name}を登録中",
   "What other players see over your car in free roam and in the Online menu: 3 to 15 letters, digits, - or _. Empty uses your profile name.": "フリーロームであなたの車の上に、またオンラインメニューで他のプレイヤーに表示される名前です。英数字、-、_ で3～15文字。空欄ならプロフィール名を使います。",
   "It also claims your name {name}, so no one else can play under it.": "あなたの名前{name}も登録され、他の人はその名前でプレイできなくなります。",
-  "This keyphrase also holds your claim on {name}.": "このキーフレーズは{name}の登録も保持しています。"
+  "This keyphrase also holds your claim on {name}.": "このキーフレーズは{name}の登録も保持しています。",
+  "Not claimed: anyone can play as {name}. Claim makes you a keyphrase, 8 words that hold the name and also keep your cloud saves.": "未登録: 誰でも{name}としてプレイできます。登録するとキーフレーズが作成されます。名前を保持し、クラウドセーブも保管する8語です。",
+  "{name} is yours, held by this keyphrase. Cloud saves are on too.": "{name}はあなたの名前です。このキーフレーズで保持されています。クラウドセーブもオンになっています。",
+  "Keep it safe: it is the only way to play as {name} again, in another browser or here after this browser's data is cleared, and the only way back to your saves.": "大切に保管してください。ほかのブラウザで、またはこのブラウザのデータが消去された後にここで、もう一度{name}としてプレイする唯一の方法であり、セーブデータに戻る唯一の方法でもあります。",
+  "To use it in another browser, enter it under Cloud saves on the start page.": "ほかのブラウザで使うには、スタートページの「クラウドセーブ」でこのキーフレーズを入力してください。"
 }

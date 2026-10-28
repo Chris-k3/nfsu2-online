@@ -1121,7 +1121,6 @@
   "Another player claimed {name}, so you play as {alt}. Type another name. Is it yours? Enter your keyphrase under Cloud saves.": "Outro jogador reservou {name}, então você joga como {alt}. Digite outro nome. É seu? Digite sua frase-chave em Jogos salvos na nuvem.",
   "{name} is free. You can change your name again on {date}.": "{name} está livre. Você poderá mudar seu nome de novo em {date}.",
   "{name} is free. {old} stays yours for {n} days after the change, and your EA Messenger friends move with you. One change a week.": "{name} está livre. {old} continua seu por {n} dias depois da mudança, e seus amigos do EA Messenger vão junto com você. Uma mudança por semana.",
-  "Not claimed: anyone can play as {name}. Claiming turns on cloud saves, and your keyphrase holds the claim.": "Não reservado: qualquer um pode jogar como {name}. Reservar ativa os jogos salvos na nuvem, e sua frase-chave mantém a reserva.",
   "Claim": "Reservar",
   "Not claimed yet. Your keyphrase claims it the next time you play with free roam or Online on.": "Ainda não reservado. Sua frase-chave vai reservá-lo na próxima vez que você jogar com o Modo Livre ou o Online ativado.",
   "Claimed: {name}.": "Reservado: {name}.",
@@ -1137,5 +1136,9 @@
   "Claiming {name}": "Reservando {name}",
   "What other players see over your car in free roam and in the Online menu: 3 to 15 letters, digits, - or _. Empty uses your profile name.": "O que os outros jogadores veem acima do seu carro no Modo Livre e no menu Online: de 3 a 15 letras, dígitos, - ou _. Vazio usa o nome do seu perfil.",
   "It also claims your name {name}, so no one else can play under it.": "Também reserva seu nome {name}, para que ninguém mais possa jogar com ele.",
-  "This keyphrase also holds your claim on {name}.": "Esta frase-chave também mantém sua reserva de {name}."
+  "This keyphrase also holds your claim on {name}.": "Esta frase-chave também mantém sua reserva de {name}.",
+  "Not claimed: anyone can play as {name}. Claim makes you a keyphrase, 8 words that hold the name and also keep your cloud saves.": "Não reservado: qualquer um pode jogar como {name}. Reservar cria uma frase-chave para você, 8 palavras que mantêm o nome e também guardam seus jogos salvos na nuvem.",
+  "{name} is yours, held by this keyphrase. Cloud saves are on too.": "{name} é seu, e esta frase-chave o mantém. Os jogos salvos na nuvem também estão ativados.",
+  "Keep it safe: it is the only way to play as {name} again, in another browser or here after this browser's data is cleared, and the only way back to your saves.": "Guarde-a bem: é o único jeito de jogar como {name} de novo, em outro navegador ou aqui depois que os dados deste navegador forem apagados, e o único jeito de voltar aos seus jogos salvos.",
+  "To use it in another browser, enter it under Cloud saves on the start page.": "Para usá-la em outro navegador, digite-a em Jogos salvos na nuvem, na página inicial."
 }
