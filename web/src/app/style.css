@@ -168,9 +168,13 @@ kbd {
 .tab { height: 36px; padding: 0; border: 0; background: none; color: var(--muted); font-size: 16px; line-height: 24px; }
 .tab:hover { color: var(--text); }
 .tab[aria-selected="true"] { color: var(--lime); box-shadow: inset 0 -3px var(--lime); }
-/* a row as in Settings and the game's Controls menu: what it does, its keys on the right */
-.keys > div { display: flex; align-items: center; gap: 16px; padding: 8px 0; }
-.keys dt { order: 1; flex: none; margin-left: auto; display: flex; align-items: center; gap: 4px; color: var(--muted); }
+/* a row as in Settings and the game's Controls menu: what it does, its keys on the right.  Where the keys do not fit
+ * beside its longest word (another language's words with a key, a phone) they go under it, still on the right, their
+ * words wrapped if they are wider than the row */
+.keys > div { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 8px 0; }
+.keys dd { flex: 1; }
+.keys dt { order: 1; margin-left: auto; display: flex; align-items: center; gap: 4px; color: var(--muted); }
+.keys kbd { flex: none; }
 .tab-panel > .keys + .hint { margin-top: 16px; }
 .tab-panel > .hint + .set { margin-top: 8px; box-shadow: inset 0 1px var(--line); }
 /* the controller (controls.ts): the pad in line art, the buttons the game uses in lime, a dotted line from each
@@ -932,14 +936,24 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.64); }
 }
 @media (max-width: 559px) {
   .top, .panel { padding: 16px; }
+  /* a button's words wrap where they are wider than the screen (another language's); one line stays 40 px tall */
+  .btn { height: auto; min-height: 40px; padding: 4px 16px; white-space: normal; text-align: center; }
+  /* the channel's name still in one piece, unless the whole link is wider than the line (Polish) */
+  #report a { display: inline-block; max-width: 100%; white-space: normal; }
   .set { grid-template-columns: minmax(0, 1fr); grid-template-areas: "label" "help" "ctl"; }
   .set-control { justify-content: flex-start; margin-top: 8px; flex-wrap: wrap; }
-  .set-control > .seg { display: flex; flex: 1; }
+  .set-control > .seg { display: flex; flex: 1; flex-wrap: wrap; }   /* choices that do not fit on one line take two */
   .set-control > .text-btn { order: 1; }            /* Reset after the control here, where the control is aligned left */
   .opt { flex: 1; justify-content: center; padding: 0 8px; }
   /* Reset all settings on a line of its own, under the text editor's line (and the editor, when open) */
   .raw { display: flex; flex-direction: column; }
   .raw > .text-btn { float: none; order: 1; align-self: flex-start; margin: 0 0 8px; padding: 0; }
+}
+/* the Controls tabs' three words on the smallest phones (Swedish, Danish), and with a mouse (a desktop zoomed in) the
+ * Keyboard tab's longer word (Dutch, Swedish) */
+@media (max-width: 359px) {
+  .tabs { gap: 16px; }
+  html:not([data-touch]) .tabs { gap: 8px; }
 }
 /* a phone in landscape: the page menu's buttons in two columns, so Quit game needs no scrolling */
 @media (max-height: 479px) {
