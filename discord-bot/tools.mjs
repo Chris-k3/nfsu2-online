@@ -87,6 +87,11 @@ export class Tools {
       if (real !== realRoot && !real.startsWith(realRoot + path.sep)) throw new Error('that path leaves the repository');
       if (!dir && fs.statSync(abs).isDirectory()) throw new Error(`${p} is a folder: use list`);
     } else if (!dir || rel) {
+      // English is the page's source: looks kept asking for english.json
+      if (!att && back.split(path.sep).join('/').startsWith('web/src/app/lang/')) {
+        throw new Error(`${p}: no such file. English has no file: its texts are the keys of each other language's file ` +
+          "(web/src/app/lang/portuguese.json, ...), and the page's own code holds them");
+      }
       throw new Error(`${p}: no such file`);
     }
     return { abs, att, rel: back === '' ? '' : back.split(path.sep).join('/') };

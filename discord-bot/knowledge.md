@@ -77,6 +77,10 @@ Checked against the guide or the code, and confirmed by players in threads:
   behind Cloudflare: wherever Cloudflare works, the game does. Other players posting in the last hour shows the
   server is up.
 - Stuck behind a barrier or off the map: R respawns.
+- Career, no races left on the map (and nothing on the radar): the races left are the original game's hidden races.
+  They never show on the map or the radar, only on the street: their marker appears when you drive near. Drive
+  around the city, the newer areas too. Someone who still finds none can attach the saves (Saves, Download backup):
+  escalate it, the developer can tell where they are. (The developer answered this on 2026-10-26.)
 - Firefox: when a problem shows only in Firefox (its log has Firefox errors, or Chrome works), Chrome is the browser
   most tested.
 - A phone that stutters or shakes at 60 fps but runs smoothly at 30: its GPU no longer finishes a frame in 16.7 ms,
@@ -88,22 +92,33 @@ Checked against the guide or the code, and confirmed by players in threads:
   row with a size such as 1916x884 (the screen's own at the page's resolution scale), not 1080p or 1440p, which draw
   more pixels than a phone's default 75%.
 
-## Known open problems (as of 2026-10-26)
+## Known open problems (as of 2026-10-28)
 
-The developer updates this list. Check the commits after that date before calling one open: a fix may have come.
+The developer updates this list. Check the commits after that date before calling one open: a fix may have come. The
+context lists every problem the developer has a report on, with its first thread: point posters there, and set
+`duplicate_of` to it, rather than searching for "the main thread".
 
 - iPhone and iPad: the browser closes the game for memory, and the start page comes back (worst on 4 GB iPhones, 12
-  to 14). Several improvements are live; it still happens. No setting fixes it. Ask for the log from the start page
-  right after it happened, and point to the main thread about it; escalate only a log on the live version that adds
-  something.
-- Android with some controllers (GameSir, 8BitDo): buttons or the left stick stopped working on 25 October. Ask for
-  the controller's model and a log after pressing each button in a race.
+  to 14, but newer ones too); some logs end in `GPU-LOST` instead. Several improvements are live; it still happens.
+  No setting fixes it. Ask for the log from the start page right after it happened, and point to the report on it;
+  escalate only a log on the live version that adds something.
+- Huawei phones and tablets with Maleoon graphics: the unsafe-webgpu flag lets the game start, then the graphics
+  stop (`GPU-LOST`) within half a minute to a few minutes; frame rate 30 does not help. No fix.
+- Android phones with 2 to 4 GB of memory: the game does not start, the browser cannot reserve its memory ("could
+  not allocate memory" in the log) on every Play. No fix.
 - Phones with PowerVR BXM graphics (MediaTek Dimensity 7020/7025): the graphics stop within seconds in landscape
   (`VK_ERROR_OUT_OF_DEVICE_MEMORY` in the log); portrait works for some.
+- Black picture with sound on Intel graphics of the 9th generation (HD 510 and similar), in Chrome and Firefox: the
+  log shows the game drawing with no WebGPU errors. No fix.
+- Free roam: the world's loading screen, or roads missing, while driving and while many players' cars load, most
+  in Firefox and with the game data on a slow disk. Car loads got faster on 27 October; a log from after that helps.
 - Back to free roam after a race with other players: endless loading, or a crash (`INVALID FREE` and a `TRAP` after
   the lobby screen in the log).
-- Crews: joining free roam through Quick Race, Free Run marks every player as a crew mate.
-- Sound stutters on some phones (`the AudioWorklet stopped consuming` in the log).
+- Sound on a PC that goes silent after the game was paused or its window inactive (`the AudioWorklet stopped
+  consuming` in the log, on the live version). On phones, sound that chopped up got a fix on 26 October: a report
+  of that after it is new.
+- Radio with a music folder: on some devices the songs play slowed down. Ask for the log after a few songs, and the
+  files' type (mp3, flac, ...).
 
 ## Decided
 

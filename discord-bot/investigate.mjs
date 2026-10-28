@@ -12,6 +12,9 @@ import { TOOL_DEFS, Tools } from './tools.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const MAX_TURNS = 16;                            // a look that needs more is cut short: the long ones cost the most
 const MAX_REPEATS = 2;                           // calls made again word for word: a look going round in circles answers
+// calls in a row that bring nothing (an error, no matches, a line or two): a look that stalls answers.  Looks made
+// calls such as `read x`, `search /^$/ in attachments/none` or `search_threads /zzzznomatch/` to fill a turn
+const MAX_MISSES = 3;
 
 export const VERDICT = {
   type: 'object', additionalProperties: false,
@@ -41,7 +44,7 @@ async function systemBlocks(repo) {
 }
 
 /** the first user message: what is going on (volatile, so after the cached system prompt), the pictures, the thread */
-function opening({ now, recent, threads, thread, images }) {
+function opening({ now, recent, threads, reports, thread, images }) {
   const ctx = [
     `Now: ${now}`,
     `Live version: ${recent.live}`,
@@ -50,6 +53,8 @@ function opening({ now, recent, threads, thread, images }) {
     recent.notLive ? `Commits not live yet (newest first):\n${recent.notLive}` : 'Commits not live yet: none',
     `Commits of the last days up to the live version (newest first; when made, and when they went live):\n${recent.recent || 'none'}`,
     `Recent forum threads (id, category, what the bot did, title: summary):\n${threads || 'none yet'}`,
+    `Problems the developer has a report on in the staff channel, the latest change first (the report's first thread: ` +
+      `id and link; where it stands; its title):\n${reports || 'none yet'}`,
   ].join('\n\n');
   return [
     { type: 'text', text: `<context>\n${ctx}\n</context>` },
@@ -75,6 +80,12 @@ function brief(name, i) {
     default: return name;
   }
 }
+/** a call that brought nothing: an error, nothing found, or a line or two of a file */
+function missed(name, input, out) {
+  if (out?.error) return true;
+  if (/^(no matches|no commits|no threads|no messages|\(empty\))$/.test(String(out))) return true;
+  return name === 'read' && input.max_lines > 0 && input.max_lines <= 2;
+}
 /** a tool's result in a few words: how many lines or matches, or the error */
 function gist(out) {
   if (out?.error) return `error: ${out.error}`;
@@ -86,26 +97,28 @@ function gist(out) {
 
 /**
  * client: Anthropic; repo: Repo; archive: Archive|null; workDir: the thread's attachments;
- * thread: its text as built by the bot; images: [{type, data}]; threads: the recent-threads list as text;
- * threadIndex: () => every known thread, for search_threads; step: (text) => void, told each step as it happens
+ * thread: its text as built by the bot; images: [{type, data}]; threads: the recent-threads list as text; reports:
+ * the developer's reports as text; threadIndex: () => every known thread, for search_threads; step: (text) => void,
+ * told each step as it happens
  * -> { verdict, usage, cost, turns, log }
  */
-export async function investigate({ client, model, effort, maxTurns = MAX_TURNS, repo, archive, workDir, thread, images = [], threads = '', threadIndex, step = () => {} }) {
+export async function investigate({ client, model, effort, maxTurns = MAX_TURNS, repo, archive, workDir, thread, images = [], threads = '', reports = '', threadIndex, step = () => {} }) {
   await repo.sync();
   const tools = new Tools({ repo, workDir, archive, threadIndex });
   const system = await systemBlocks(repo);
   const recent = await repo.recent();
   step(`code at ${recent.head.split(' ')[0]}, live ${recent.live.split(' ')[0]}${recent.notLive ? `, ${recent.notLive.split('\n').length} commit(s) not live yet` : ''}; asking ${model}`);
-  const messages = [{ role: 'user', content: opening({ now: new Date().toISOString().slice(0, 16) + 'Z', recent, threads, thread, images }) }];
+  const messages = [{ role: 'user', content: opening({ now: new Date().toISOString().slice(0, 16) + 'Z', recent, threads, reports, thread, images }) }];
   const usage = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
   let cost = 0;                                  // null once a turn's model has no prices
   const log = [];
   let verdict = null;
   const seen = new Set();
-  let repeats = 0;
+  let repeats = 0, misses = 0;
+  const stalled = () => repeats >= MAX_REPEATS || misses >= MAX_MISSES;
 
   for (let turn = 1; turn <= maxTurns && !verdict; turn++) {
-    const last = turn === maxTurns || repeats >= MAX_REPEATS;
+    const last = turn === maxTurns || stalled();
     const res = await client.beta.messages.create({
       model, max_tokens: 16000, system, messages,
       tools: TOOL_DEFS,
@@ -134,18 +147,20 @@ export async function investigate({ client, model, effort, maxTurns = MAX_TURNS,
           repeats++;
           log.push(`${key} -> repeated, not run`);
           step(`${brief(c.name, c.input)} -> repeated, not run`);
-          return { type: 'tool_result', tool_use_id: c.id,
-            content: 'You made this same call before in this look: its result is above. Read something else, or give your verdict.' };
+          return { missed: true, result: { type: 'tool_result', tool_use_id: c.id,
+            content: 'You made this same call before in this look: its result is above. Read something else, or give your verdict.' } };
         }
         seen.add(key);
         const out = await tools.run(c.name, c.input);
         const text = typeof out === 'string' ? out : JSON.stringify(out);
         log.push(`${c.name} ${JSON.stringify(c.input)} -> ${text.length} chars${out?.error ? ` (error: ${out.error})` : ''}`);
         step(`${brief(c.name, c.input)} -> ${gist(out)}`);
-        return { type: 'tool_result', tool_use_id: c.id, content: text, ...(out?.error ? { is_error: true } : {}) };
+        return { missed: missed(c.name, c.input, out),
+          result: { type: 'tool_result', tool_use_id: c.id, content: text, ...(out?.error ? { is_error: true } : {}) } };
       }));
-      const content = [...results];
-      if (turn + 1 === maxTurns || repeats >= MAX_REPEATS) content.push({ type: 'text', text: 'That was the last tool call: give your verdict now.' });
+      for (const r of results) misses = r.missed ? misses + 1 : 0;
+      const content = results.map(r => r.result);
+      if (turn + 1 === maxTurns || stalled()) content.push({ type: 'text', text: 'That was the last tool call: give your verdict now.' });
       messages.push({ role: 'user', content });
       continue;
     }

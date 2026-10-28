@@ -54,6 +54,9 @@ const hasLog = m => [...m.attachments.values()].some(a => LOG_FILE.test(a.name))
 /** a message that mentions the bot or replies to one of its messages (also with the reply's ping turned off) */
 const toBot = m => m.mentions.repliedUser?.id === client.user.id ||
   m.mentions.has(client.user, { ignoreEveryone: true, ignoreRoles: true, ignoreRepliedUser: true });
+/** a message that only thanks or says okay, in the server's languages: nothing for a look to answer */
+const THANKS = /^(?:[\s!.,:;()\-\p{Extended_Pictographic}\uFE0F]|ok(?:ay)?|thanks?|thank you|thx|ty|tysm|cheers|got it|will do|i'?ll try(?: it)?|a lot|so much|very much|obrigad[oa]|valeu|vlw|mesmo|gracias|merci|beaucoup|danke|спасибо|dzięki|dziękuję|teşekkürler|grazie|bedankt)+$/iu;
+const thanks = m => !m.attachments.size && THANKS.test(m.content);
 const MAX_WAIT_MS = 10 * 60_000;                 // a thread that keeps growing is looked at after 10 minutes anyway
 const STARTUP_MS = 48 * 3600_000;                // at start, the forums' posts of the last 48 hours, nothing older
 const RELEASE_CHECK_MS = 5 * 60_000;             // how often the bot checks whether a new version went live
@@ -69,7 +72,7 @@ fs.mkdirSync(CFG.state, { recursive: true });
 const STATE_FILE = path.join(CFG.state, 'threads.json');
 const VERDICTS = path.join(CFG.state, 'verdicts.jsonl');
 const LIVE_FILE = path.join(CFG.state, 'live.json');      // the live version the bot saw last
-/** per thread: { title, forum, guild, created, active, status: new|seen|none|asked|answered|staff|failed, replies,
+/** per thread: { title, forum, guild, owner, created, active, status: new|seen|none|asked|answered|staff|failed, replies,
  *  summary, category, snippet (its first post, for threads the bot only indexed), closed (archived, locked or deleted:
  *  not one to point people to); for a problem reported to the staff:
  *  staffMsg, staffThread (the report and its thread), report (on the first one: what its post shows, REPORT below),
@@ -117,7 +120,7 @@ const general = new General({
   forumThreads: () => Object.entries(threads)
     .filter(([, t]) => !t.closed && !isSuggestion(t))
     .sort(byActivity).slice(0, 40)
-    .map(([id, t]) => ({ id, line: `${id} | ${t.title} | ${(t.summary || t.snippet || '').slice(0, 120)}` })),
+    .map(([id, t]) => ({ id, owner: t.owner, line: `${id} | ${t.title} | ${(t.summary || t.snippet || '').slice(0, 120)}` })),
 });
 
 // ---------------------------------------------------------------------------------------------- when to look --
@@ -176,10 +179,13 @@ async function look(threadId, why, extra) {
   const fix = why === 'fix live' || why === 'implemented';      // a release's look: a fix, or a suggestion it adds
   if (thread.locked || (thread.archived && !fix)) return say('skipped: closed or locked');
   st.guild ??= thread.guildId;
-  const byStaff = why === 'asked by staff', bumped = why === 'bump', logged = why === 'log', talk = why === 'reply';
+  const byStaff = why === 'asked by staff', bumped = why === 'bump', logged = why === 'log';
+  // someone answering the bot: the poster bringing what it asked for, or anyone replying to it
+  const talk = why === 'reply' || why === 'follow-up';
   // looks that go ahead where staff wrote and past the reply cap; replies to the bot up to their own cap
   const anyway = byStaff || fix || bumped || logged || talk;
   if (fix && st.fixed) return say(`skipped: already told that ${why === 'implemented' ? 'it was added' : 'a fix went live'}`);
+  if (fix && extra?.part && st.partly) return say('skipped: already told it about a step toward it');
   if (why === 'implemented' && Tags.decided(thread)) return say('skipped: the suggestion is Complete or Denied already');
   if (talk && st.replies >= CFG.maxTalk) return say(`skipped: ${st.replies} replies already, the most for answering replies`);
   if (!anyway && st.status === 'staff') return say('skipped: staff are in the thread');
@@ -216,7 +222,7 @@ async function look(threadId, why, extra) {
   try {
     res = await investigate({
       client: anthropic, model: CFG.model, effort: fix ? FIX_EFFORT : CFG.effort, maxTurns: fix ? FIX_TURNS : undefined, repo, archive, workDir,
-      thread: text, images, threads: recentThreads(threadId), threadIndex: () => threadIndex(threadId), step: say,
+      thread: text, images, threads: recentThreads(threadId), reports: reportList(threadId), threadIndex: () => threadIndex(threadId), step: say,
     });
   } catch (e) {
     if (!byStaff) { clearInterval(typing); throw e; }
@@ -257,11 +263,13 @@ async function look(threadId, why, extra) {
   clearInterval(typing);
   if (fix) {                                     // a fix notice changes nothing else about the thread
     st.fixChecked = extra.rev;
-    if (post) st.fixed = extra.rev;
+    // a step toward a suggestion is told once, and leaves it open for the release that carries it out
+    const part = !!extra.part;
+    if (post) st[part ? 'partly' : 'fixed'] = extra.rev;
     if (posted) await thread.fetch(true).catch(() => {});      // the reply took it out of the archive
     const added = why === 'implemented';
-    if (post) await tags.add(thread, added ? 'complete' : 'fixLive').catch(e => console.error(`[tags] ${threadId}: ${e.message}`));
-    if (post && CFG.staffChannel && st.staffMsg) {     // the report: fixed
+    if (post && !part) await tags.add(thread, added ? 'complete' : 'fixLive').catch(e => console.error(`[tags] ${threadId}: ${e.message}`));
+    if (post && !part && CFG.staffChannel && st.staffMsg) {     // the report: fixed
       const staff = await client.channels.fetch(CFG.staffChannel).catch(() => null);
       const told = `${CFG.dryRun ? 'would have told' : 'told'} ${linkOf(thread.guildId, thread.id)}`;
       const that = `that ${added ? 'it was added' : 'it may be fixed'}`;
@@ -304,6 +312,7 @@ async function transcript(thread, msgs, workDir, staffDir, why, extra) {
   const lines = [`Forum: #${thread.parent.name}`, `Title: ${thread.name}`, `Tags: ${applied.join(', ') || 'none'}`,
     ...(topics.length ? [`Tags you may add: ${topics.join(', ')}`] : []),
     `Why the bot looks now: ${WHY[why] ?? why}`, ...(extra?.text ? [extra.text] : []), ''];
+  const head = lines.length - 1, readable = [];  // the files the tools read, named in the header
   const images = [];
   let n = 0;
   const who = m => m.author.id === client.user.id ? 'this bot' : m.author.id === thread.ownerId ? 'the poster'
@@ -336,6 +345,7 @@ async function transcript(thread, msgs, workDir, staffDir, why, extra) {
         if (data && !data.subarray(0, 8192).includes(0)) {
           fs.writeFileSync(path.join(workDir, name), data);
           lines.push(`  [attachment: attachments/${name}, ${kb}]`);
+          readable.push(`attachments/${name} (${kb})`);
           continue;
         }
       }
@@ -343,6 +353,7 @@ async function transcript(thread, msgs, workDir, staffDir, why, extra) {
     }
     lines.push('');
   }
+  lines.splice(head, 0, `Files you can read: ${readable.join(', ') || 'none, this thread has no text attachments'}`);
   return { text: lines.join('\n'), images };
 }
 
@@ -658,7 +669,7 @@ const quote = s => s.split('\n').map(l => `> ${l}`).join('\n');
 const WHY = {
   'new post': 'a new post',
   'follow-up': 'the poster wrote again after the bot asked for information',
-  'reply': 'someone replied to the bot or mentioned it (see "When someone replies to the bot")',
+  'reply': 'someone replied to the bot or mentioned it, or the poster wrote right after its message (see "When someone replies to the bot")',
   'asked by staff': 'staff mentioned the bot and want its reply: answer or ask, never none; with no fix and nothing to ask, answer with a short account of what you found (what the log shows, whether it is known or fixed)',
   'fix live': 'a release just went live, and a commit in it may fix this thread\'s problem (see "When a fix goes live")',
   'implemented': 'a release just went live, and a commit in it may add what this suggestion asks for (see "When a suggestion is carried out")',
@@ -717,15 +728,18 @@ async function checkRelease() {
   const [fixes, features] = await Promise.all([matchFixes({ ...o, candidates }), matchFeatures({ ...o, candidates: wishes })]);
   if (fixes.error || features.error) return console.log(`[release] matching failed, again at the next check: ${fixes.error || features.error}`);
   seen();
-  const list = ms => ms.length ? `: ${ms.map(m => `${m.thread} (${m.commit})`).join(', ')}` : '';
+  const list = ms => ms.length ? `: ${ms.map(m => `${m.thread} (${m.commit}${m.part ? ', a step' : ''})`).join(', ')}` : '';
   console.log(`[release] ${fixes.matches.length} thread(s) may be fixed${list(fixes.matches)}; ` +
-    `${features.matches.length} suggestion(s) may be carried out${list(features.matches)}`);
-  for (const [ms, max, why, what] of [[fixes.matches, FIX_MAX, 'fix live', "this thread's problem"],
-    [features.matches, FEATURE_MAX, 'implemented', 'what this suggestion asks for']]) {
+    `${features.matches.length} suggestion(s) may be carried out or get a step toward them${list(features.matches)}`);
+  // whole suggestions first; a step toward one only where the bot told none before
+  const wished = features.matches.filter(m => !m.part || !threads[m.thread]?.partly).sort((a, b) => a.part - b.part);
+  for (const [ms, max, why] of [[fixes.matches, FIX_MAX, 'fix live'], [wished, FEATURE_MAX, 'implemented']]) {
     for (const m of ms.slice(0, max)) {
+      const what = why === 'fix live' ? "this thread's problem"
+        : m.part ? 'a step toward what this suggestion asks for, not all of it' : 'what this suggestion asks for';
       const body = (await repo.git(['show', '--no-patch', '--format=%h %s%n%n%b', m.commit]).catch(() => '')).trim().slice(0, 1500);
       console.log(`[release] ${m.thread}: ${m.why}`);
-      enqueue(m.thread, why, { rev, commit: m.commit, subject: body.split('\n')[0].replace(/^\S+\s*/, ''),
+      enqueue(m.thread, why, { rev, commit: m.commit, subject: body.split('\n')[0].replace(/^\S+\s*/, ''), ...(m.part ? { part: true } : {}),
         text: `The commit that went live:\n${body || m.commit}\nWhy it may be ${what}: ${m.why}` });
     }
   }
@@ -775,6 +789,17 @@ const byActivity = (a, b) => (b[1].active ?? b[1].created).localeCompare(a[1].ac
 function recentThreads(except) {
   return Object.entries(threads).filter(([id]) => id !== except).sort(byActivity).slice(0, 30).map(threadLine).join('\n');
 }
+/** the problems the developer has a report on (the staff channel), the latest change first: the report's first
+ *  thread, where it stands, how many threads, its title.  What a look points a poster to and joins a thread to */
+function reportList(except) {
+  return Object.entries(threads).filter(([id, t]) => t.staffMsg && !t.reportOf && id !== except).map(([id, t]) => {
+    const r = t.report, at = r?.log.at(-1)?.[0] ?? Date.parse(t.active ?? t.created) / 1000;
+    const where = !r ? 'open' : r.again ? 'reported again after a fix or a "works now"'
+      : r.fix ? `${r.fix.added ? 'added' : 'fixed'} by ${r.fix.commit}, live` : r.confirmed ? 'solved, the poster says' : 'open';
+    return { at, line: `- ${id} https://discord.com/channels/${t.guild}/${id} [${where}, ${r?.threads.length ?? 1} thread(s), ` +
+      `last change ${new Date(at * 1000).toISOString().slice(0, 10)}] ${(r?.title ?? t.summary ?? t.title).slice(0, 200)}` };
+  }).sort((a, b) => b.at - a.at).slice(0, 40).map(x => x.line).join('\n');
+}
 /** every known thread, for the search_threads tool: [{ line, text }] */
 function threadIndex(except) {
   return Object.entries(threads).filter(([id]) => id !== except).sort(byActivity)
@@ -796,7 +821,7 @@ async function indexForums() {
       const fresh = !threads[t.id] && t.createdTimestamp >= since;
       const st = threads[t.id] ??= { title: t.name, forum: t.parent.name, guild: guild.id, created: t.createdAt.toISOString(),
         status: fresh ? 'new' : 'seen', replies: 0 };
-      st.title = t.name;
+      st.title = t.name; st.owner ??= t.ownerId;
       if (fresh) schedule(t.id, 'new post');
       else if (st.status !== 'new') recent.push(t);
       if (!st.snippet && !st.summary) found.push(t);
@@ -842,7 +867,8 @@ const guard = (name, fn) => (...a) => { try { fn(...a); } catch (e) { console.er
 client.on(Events.ThreadCreate, guard('new thread', (thread, created) => {
   if (!created || !watched(thread) || threads[thread.id]) return;
   const now = new Date().toISOString();
-  threads[thread.id] = { title: thread.name, forum: thread.parent.name, guild: thread.guildId, created: now, active: now, status: 'new', replies: 0 };
+  threads[thread.id] = { title: thread.name, forum: thread.parent.name, guild: thread.guildId, owner: thread.ownerId, created: now, active: now,
+    status: 'new', replies: 0 };
   save();
   schedule(thread.id, 'new post');
 }));
@@ -876,6 +902,7 @@ client.on(Events.MessageCreate, guard('message', m => {
   }
   const st = threads[thread.id];
   if (!st) return;
+  st.owner ??= thread.ownerId;
   st.active = m.createdAt.toISOString();
   tags.onMessage(m);                             // the poster saying it works now: Solved
   if (st.staffMsg && CFG.staffChannel && m.attachments.size && !isStaff(m.member, thread)) {
@@ -892,16 +919,20 @@ client.on(Events.MessageCreate, guard('message', m => {
   }
   const op = m.author.id === thread.ownerId;
   if (st.status === 'new') { if (op) schedule(thread.id, 'new post'); return; }
-  if (op && st.status === 'asked') { schedule(thread.id, 'follow-up'); return; }
+  // the poster still writing while a look waits ("here", the log, then a question): it waits for them too
+  if (op && timers.has(thread.id)) { schedule(thread.id, timers.get(thread.id).why); return; }
+  if (op && st.status === 'asked') { if (!thanks(m)) schedule(thread.id, 'follow-up'); return; }
   // a log, from the poster or anyone else: always a look, also past the reply cap and where staff wrote
   if (hasLog(m)) { schedule(thread.id, 'log'); return; }
   // someone talking to the bot: an answer, up to BOT_MAX_TALK replies in the thread, also where staff wrote
-  if (!op) { if (toBot(m)) schedule(thread.id, 'reply'); return; }
-  // the poster after a quiet half day: a bump, also in a thread staff wrote in before and left
+  if (!op) { if (toBot(m) && !thanks(m)) schedule(thread.id, 'reply'); return; }
+  // the poster after a quiet half day: a bump, also in a thread staff wrote in before and left.  Right after the
+  // bot's message, with nobody between, they answer it, with Discord's reply or without ("that didn't work", "where is
+  // that setting?"); a bare thanks gets no look
   thread.messages.fetch({ before: m.id, limit: 1 }).then(before => {
     const prev = before.first();
     if (prev && m.createdTimestamp - prev.createdTimestamp >= BUMP_QUIET_MS) schedule(thread.id, 'bump');
-    else if (toBot(m)) schedule(thread.id, 'reply');
+    else if ((toBot(m) || prev?.author.id === client.user.id) && !thanks(m)) schedule(thread.id, 'reply');
   }).catch(e => console.error(`[bot] ${thread.id}: ${e.message}`));
 }));
 client.on(Events.InteractionCreate, i => {
