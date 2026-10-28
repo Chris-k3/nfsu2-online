@@ -109,6 +109,9 @@ button, .file-btn { cursor: pointer; }
   height: 40px; padding: 0 16px; border: 2px solid var(--edge); border-radius: 12px;
   background: #080808; color: var(--text); font-size: 16px; line-height: 24px; white-space: nowrap; text-decoration: none;
 }
+/* a row's button wider than the row (a long name in another language on a phone) takes two lines, not the screen's
+   edge: 6 + 24 + 6 inside the frame as before, 48 for two lines */
+.row > .btn { max-width: 100%; height: auto; min-height: 40px; padding-block: 6px; white-space: normal; text-align: center; }
 .btn:hover:not(:disabled) { border-color: var(--lime); }
 .btn.selected, .play {
   border: 2px solid var(--lime); background: var(--lime-fill); color: var(--lime); box-shadow: 0 0 12px var(--lime-glow);
