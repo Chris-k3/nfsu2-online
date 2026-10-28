@@ -32,12 +32,14 @@
 // on loopback).
 // Logs: out/web/runs/<run>/<scenario>.log (the game's stdout/stderr, one line
 // per line, without the host's [tid] prefix); summary.txt and summary.json.
+// The module the server sends (/game.json: revision, lift options, hash) is
+// the run's first line, and in both summaries.
 import { chromium } from 'playwright';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { requireDev } from './dev-server.mjs';
+import { requireDev, moduleLine } from './dev-server.mjs';
 import { seedSave } from './save-seed.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -106,6 +108,9 @@ if (opt.list) {
   process.exit(0);
 }
 await requireDev(opt.base);
+// the module the server sends (/game.json): its revision and lift go with the run's results
+const MODULE = await moduleLine(opt.base);
+if (MODULE) console.log(MODULE);
 let scen;
 if (opt.script) scen = [{ name: opt.name || path.basename(opt.script, '.txt'), script: opt.script, marker: opt.marker, extra: '', alarm: 400, net: opt.net,
   seed: !!SEED }];   // NFSU2_SAVE_SEED seeds an ad-hoc scenario too
@@ -195,10 +200,11 @@ async function runOne(browser, s) {
   return { name: s.name, pass: why.length === 0, why, wall, frame, status: st, log: path.relative(ROOT, logPath) };
 }
 
-const browser = await chromium.launch({ channel: 'chrome', headless: true,
-  args: ['--enable-unsafe-webgpu', ...(process.env.CHROME_ARGS ? process.env.CHROME_ARGS.split(' ') : [])] });
 const results = [], skipped = [];
 const queue = scen.filter(s => { if (s.blocked) { skipped.push(s); return false; } return true; });
+// (nothing to run, every scenario named not runnable yet: no browser, only the summaries)
+const browser = queue.length ? await chromium.launch({ channel: 'chrome', headless: true,
+  args: ['--enable-unsafe-webgpu', ...(process.env.CHROME_ARGS ? process.env.CHROME_ARGS.split(' ') : [])] }) : null;
 console.log(`web suite ${run}: ${queue.length} scenario(s), ${opt.jobs} at a time, logs in ${path.relative(ROOT, OUT)}/`);
 async function worker() {
   for (let s; (s = queue.shift());) {
@@ -208,7 +214,7 @@ async function worker() {
   }
 }
 await Promise.all(Array.from({ length: Math.max(1, opt.jobs) }, worker));
-await browser.close();
+await browser?.close();
 
 const order = scen.map(s => s.name);
 results.sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name));
@@ -218,8 +224,9 @@ const rows = [
   ...skipped.map(s => `| ${s.name} | not runnable yet | - | - | ${s.blocked} |`),
 ];
 const pass = results.filter(r => r.pass).length;
-const sum = `web suite ${run}: ${pass} passed, ${results.length - pass} failed, ${skipped.length} not runnable yet\n\n${rows.join('\n')}\n`;
+const sum = `web suite ${run}: ${pass} passed, ${results.length - pass} failed, ${skipped.length} not runnable yet\n` +
+  `${MODULE ? MODULE + '\n' : ''}\n${rows.join('\n')}\n`;
 fs.writeFileSync(path.join(OUT, 'summary.txt'), sum);
-fs.writeFileSync(path.join(OUT, 'summary.json'), JSON.stringify({ run, env: { ...SUITE_ENV, ...extraEnv }, results, skipped: skipped.map(s => ({ name: s.name, why: s.blocked })) }, null, 1));
+fs.writeFileSync(path.join(OUT, 'summary.json'), JSON.stringify({ run, module: MODULE, env: { ...SUITE_ENV, ...extraEnv }, results, skipped: skipped.map(s => ({ name: s.name, why: s.blocked })) }, null, 1));
 console.log('\n' + sum);
 process.exitCode = results.length === pass ? 0 : 1;
