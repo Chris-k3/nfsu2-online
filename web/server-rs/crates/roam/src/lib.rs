@@ -80,9 +80,16 @@
 //! then (as the Online lobby gives it), so only a page that ignores that plays alone.  A player's own claim hears that
 //! it plays (it holds 180 days from its last game).
 //!
+//! A page may block players by the name over their car (its hello to the switch: `Host::blocks`, `Hub::blocks`): the
+//! hub links it with none of them, either way, nor with the host of a race lobby one of them is in, and leaves each
+//! out of the other's world map and lobby list.  Names count as their Online form (any case), and a claimed name's
+//! keyphrase stays blocked under its next name while the old one is still its own.  The console has a line for each
+//! page that blocks (`[roam] <address> blocks "<name>", ...`), so the operator sees who many players block.
+//!
 //! What the hub keeps, in memory only: per player endpoint its virtual address, port, id, room hash, crews' hashes,
-//! status, name and last position (and what its watch counted); gone `gone_ms` after its last message, when it says
-//! BYE, or when it leaves the switch.  Reading positions is what choosing by distance costs: the switch itself never looks inside a frame.  At
+//! status, name and last position (and what its watch counted), and per browser the names it blocks; gone `gone_ms`
+//! after its last message, when it says BYE, or when it leaves the switch.  Reading positions is what choosing by
+//! distance costs: the switch itself never looks inside a frame.  At
 //! most `max_per_vip` endpoints per virtual address (a browser has one), and `max_players` in all.
 //!
 //! - [`Hub`]: the hub's logic, single-threaded, with the clock, the busy measure and the sending given to it (the
