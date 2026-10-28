@@ -70,6 +70,8 @@ export interface NetOptions extends CommonOptions {
   id?: string;
   /** the token of the keyphrase this page plays with (claim.ts): whose claimed names it may play under */
   claim?: string;
+  /** free roam: the names of the players this one blocks: the server's hub links none of them with it */
+  block?: string[];
   /** the operator removed this player from playing with others (a kick or a ban) */
   removed?: (r: NetRemoved) => void;
 }

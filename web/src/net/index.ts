@@ -69,6 +69,8 @@ export interface NetOptions {
   /** the token of the keyphrase the page plays with (app/claim.ts), in the hello: the claimed names it may play under
    *  (the server keeps a hash of it, never the token) */
   claim?: string;
+  /** free roam: the names of the players this one blocks, in the hello: the server's hub links none of them with it */
+  block?: string[];
   /** the switch (default: /lan on this page's origin, wss on https) */
   url?: string;
   /** state changes, one line each */
@@ -524,7 +526,7 @@ class Link implements NetLink {
       // a friend's car state by its fields, rounded (proto.ts fpredTake; `fp`)
       this.lanSent = this.lanOpen();
       ws.send(JSON.stringify({ t: 'hello', name: this.o.name ?? 'player', deltas: 1, lan: this.lanSent ? 1 : 0, bundle: 1, compact: 1, delta: 1, fpred: 1,
-        ...(this.o.id ? { id: this.o.id } : {}), ...(this.o.claim ? { claim: this.o.claim } : {}),
+        ...(this.o.id ? { id: this.o.id } : {}), ...(this.o.claim ? { claim: this.o.claim } : {}), ...(this.o.block?.length ? { block: this.o.block } : {}),
         ...(this.vipNum && this.token ? { vip: P.ipStr(this.vipNum), token: this.token } : {}), ...(this.ticket ? { ticket: this.ticket } : {}) }));
       this.pingTimer = setInterval(() => this.ping(), this.o.pingMs ?? 2000);
     };

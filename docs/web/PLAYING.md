@@ -503,6 +503,15 @@ Good to know:
   privacy: every browser on the server still sees your name ("Your name", or the profile name), whether you are in
   the menus or driving, and the room, and someone with their own tools could join it. Play on a server only with
   people you would show your name and car to.
+- **Blocking:** Settings, Online, More online settings, **Blocked players**: names as they show over cars, separated
+  by commas, up to 32 (capitals don't count). You and they never see each other in free roam, wherever you are: no
+  car, no name, no horn, no quick chat or outrun, no message about them, nobody on the world map. Neither of you sees
+  a race lobby the other hosts or is in, so you don't race each other from free roam (unless you both join one at
+  the same moment). It takes effect the next time you press Play. It goes by name: a player who changes a claimed
+  name stays blocked while the old name is still theirs (14 days); after that, or for a name nobody claimed, block
+  the new name. The game's Online menu has its own: block a player in EA Messenger there. The server's log says whom
+  you block, so its operator sees who many players block (and can ban them). A server of before this version takes
+  no notice.
 - **Who sees what:** with free roam off (the default), nobody in free roam sees you, and the game joins the server's
   network only in its LAN and Online screens. With it on, everyone on the server sees your name and status, and
   players in free roam with you see your car and where it is. The server reads where your car is, to pick the players
