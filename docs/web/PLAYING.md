@@ -213,6 +213,14 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
 - **The European cars:** the Peugeot 106 and the Vauxhall Corsa 1.8, which only the European release sold, are in the
   car lot and on every car select (Quick Race, Customize, LAN and Online), and AI racers drive them too. The North
   American game has their files but hid them.
+- **The garage:** the career keeps up to 10 cars, not 5. A new career opens 2 slots and each stage 2 more (10 from
+  stage 5); a career from before, or from the PC game, gets 2 for each stage it has reached when it loads. Trade Car
+  on the crib's car list (C, or tap it) takes a car away for 80 % of what you spent on it, as the game's own trade-in
+  question says, when you have two cars or more. The car lot's cars are free, so that is 80 % of the parts. Slots 6 to
+  10 are kept in a file beside the profile, which backups, cloud saves and Rename carry along. The PC game loads the
+  profile with its first 5 cars, driving the first one when yours was one of the other 5. A profile changed
+  elsewhere (played in the PC game) loads here with its 5 too: the other 5 are kept aside in the profile's folder,
+  as `GARAGE.OLD`.
 - **Power Units:** the game's Options, Gameplay (also in the pause menu's) has a row after Speedometer Units: the
   engine's power in bhp or kW wherever the game shows it (the dyno, the performance shop's parts), whatever the
   speedometer shows. Until you change it, it follows Speedometer Units, as in the original game (kW with km/h).
