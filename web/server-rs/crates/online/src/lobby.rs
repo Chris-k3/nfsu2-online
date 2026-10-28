@@ -62,7 +62,7 @@ use std::sync::Arc;
 use hmac::{Hmac, Mac};
 use indexmap::{IndexMap, IndexSet};
 use md5::Md5;
-use nfsu2_util::{js, rand};
+use nfsu2_util::{js, rand, vip_str};
 use sha2::{Digest, Sha256};
 
 use crate::aries::{FieldMap, Fields, FrameReader, MAX_FRAME, V, encode_fields, encode_frame, is_secret};
@@ -239,6 +239,11 @@ const REPORT_TYPES: [&str; 7] = ["circuit", "sprint", "drag", "drift", "streetx"
 /// the shortest race of each type (REPORT_TYPES order) a result may come from, in seconds: well under the game's own
 /// shortest (one lap of the shortest track; a quarter-mile drag)
 const MIN_RACE_S: [f64; 7] = [20.0, 20.0, 5.0, 20.0, 20.0, 20.0, 20.0];
+/// A race's winner in under this share of the next finisher's time is a `[cheat]` line (`far_ahead`): a teleport to
+/// the finish, a speed hack.  Real races are far closer (a car twice as slow is lapped in a circuit race long before
+/// it finishes); a drift race is won by points, and is left out.
+const FAR_AHEAD: f64 = 0.4;
+const KIND_DRIFT: u8 = 3;
 /// the Rankings screens' six boards in their order (Circuit, Sprint, Drift, Drag, Street X, URL: SPEED2.EXE 0x58ce30,
 /// 0x582530) as race types (RACE_TYPES: drag 2, drift 3)
 const SLOT_TYPES: [u32; 6] = [0, 1, 3, 2, 4, 5];
@@ -694,6 +699,31 @@ fn fit(fields: Fields, max: usize, drop: &[&str]) -> Fields {
         }
     }
     f
+}
+
+/// The `[cheat]` line of a race whose winner (the quickest finisher) took under FAR_AHEAD of the next finisher's time,
+/// with the winner's address for `nfsu2-server ctl kick|ban`; None for any other race
+fn far_ahead(game: &str, kind: u8, order: &[RacePlayer], players: &[Player]) -> Option<String> {
+    if kind == KIND_DRIFT {
+        return None;
+    }
+    let mut done: Vec<&RacePlayer> = order.iter().filter(|p| p.place != 0 && p.time > 0.0).collect();
+    done.sort_by(|a, b| a.time.total_cmp(&b.time));
+    let [a, b, ..] = done[..] else { return None };
+    if a.time >= FAR_AHEAD * b.time {
+        return None;
+    }
+    let vip = players.iter().find(|p| lower(&p.name) == lower(&a.name)).map_or(0, |p| p.vip);
+    Some(format!(
+        "[cheat] {} \"{}\": won the online race \"{game}\" ({}) in {}, under {:.0} % of the next finisher's {} (\"{}\")",
+        vip_str(vip),
+        a.name,
+        REPORT_TYPES.get(kind as usize).unwrap_or(&"race"),
+        fmt_time(a.time),
+        FAR_AHEAD * 100.0,
+        fmt_time(b.time),
+        b.name
+    ))
 }
 
 /// a race time in a console line: "3:06.82"
@@ -1520,9 +1550,13 @@ impl Core {
             let ranked = gm.ranked && gm.players.len() >= 3;
             let was_ranked = gm.ranked;
             let table = gm.ranked.then(|| self.table_frame(g, &r, &names, ranked && (r.kind as usize) < RACE_TYPES.len()));
+            let far = far_ahead(&gname, r.kind, &order, &self.lobby.game(g).expect("held").players);
             let gm = self.lobby.game_mut(g).expect("held");
             gm.result = Some(key);
             gm.table = table;
+            if let Some(line) = far {
+                self.llog(&line, s);
+            }
             self.stats.add_race(&Race { kind: r.kind as u32, ranked, track: r.track as i64, players: order });
             let tail = if r.kind as usize >= RACE_TYPES.len() {
                 " (no stats for this race type)"
