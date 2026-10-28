@@ -97,6 +97,19 @@ impl Server {
         }
     }
 
+    /// /players until it counts `roam` in free roam (as of the hub's last tick: twice a second; 2 s at most)
+    async fn roam_until(&self, roam: u64) -> String {
+        let t0 = Instant::now();
+        loop {
+            let p = self.players().await;
+            let v: Value = serde_json::from_str(&p).unwrap();
+            if v["roam"] == roam || t0.elapsed() > Duration::from_secs(2) {
+                return p;
+            }
+            sleep(20).await;
+        }
+    }
+
     /// SIGTERM, and its exit code
     async fn stop(&mut self) -> Option<i32> {
         // (kill(1): no unsafe outside nfsu2-util)
@@ -180,7 +193,9 @@ fn untimed(l: String) -> String {
 /// a run with its own paths, port and times taken out
 fn normal(mut r: Run, port: u16, state: &Path) -> Run {
     let st = state.to_string_lossy().to_string();
-    let fix = |l: &String| untimed(l.replace(&st, "<state>").replace(&format!(":{port}/"), ":<port>/"));
+    // (the server names some folders by their real path: on macOS the temp folder is under a link, /var to /private/var)
+    let real = std::fs::canonicalize(state).map_or_else(|_| st.clone(), |p| p.to_string_lossy().to_string());
+    let fix = |l: &String| untimed(l.replace(&real, "<state>").replace(&st, "<state>").replace(&format!(":{port}/"), ":<port>/"));
     r.startup = r.startup.iter().map(fix).collect();
     r.console = r.console.iter().map(fix).collect();
     r
@@ -212,7 +227,9 @@ async fn the_binary_starts_counts_its_players_and_stops() {
     assert_eq!(rust.startup[0], "NFSU2 web server");
     assert!(rust.startup[1].starts_with(&format!("  game data : {data_s} (")), "{}", rust.startup[1]);
     assert_eq!(rust.startup[2], format!("  game.wasm : {}", wasm.to_string_lossy()));
-    assert_eq!(rust.startup[3], "  this host : http://localhost:<port>/");
+    // (run.rs names the machine: "this Mac" on macOS)
+    let here = if cfg!(target_os = "macos") { "this Mac" } else { "this host" };
+    assert_eq!(rust.startup[3], format!("  {here:<10}: http://localhost:<port>/"));
     assert!(rust.startup.iter().any(|l| l.starts_with("  free roam : the hub at 10.77.0.253 on the switch")));
     assert!(rust.startup.iter().any(|l| l.starts_with("  online    : the game's Online mode at 10.77.0.1")
         && l.ends_with("race results per persona in <state>/online)")));
@@ -442,8 +459,9 @@ async fn players_who_leave_leave_nothing_behind() {
             b.binary(to_hub(&roam_hello(1000 + i as u32)));
             b.binary(to_hub(&roam_snap(1000 + i as u32, [i as f32 * 10.0, 0.0, 0.0])));
         }
-        let during = srv.players().await;
-        assert_eq!(during, r#"{"players":40,"online":40,"roam":0,"full":false,"queue":0,"roamBusy":false}"#);
+        // (all 40 in free roam once the hub's tick has counted their HELLOs: until then fewer, or none)
+        let during = srv.roam_until(40).await;
+        assert_eq!(during, r#"{"players":40,"online":40,"roam":40,"full":false,"queue":0,"roamBusy":false}"#);
         let used = proc_use(pid);
         for b in &bs {
             b.close().await;
