@@ -72,6 +72,9 @@ const TABLE = [
   ['photo', 'photo_mode.txt', "the pause menu's Photo Mode", '', 400],
   // the pause menu's Replay (runtime/photo.c leaves it to the game): after some driving it plays the race back
   ['replay', 'replay_pause.txt', 'LOG back_to_pause', '', 400],
+  // ...and at 240 fps to the end, also after skipping back to the start and forward: it checks every frame that
+  // WorldTimer ticks as in the race (framerate.c's timer fix follows the game's own clock, which a replay restores)
+  ['replay240', 'replay_sync.txt', 'LOG back_to_pause', 'NFSU2_FPS=240 NFSU2_HFR_LOCKSTEP=1', 400],
   // ns* commands: without a page input layer, runtime/web/input_web.c translates them into the event ring
   ['keyboard', 'kb_rebind_save.txt', 'waitmem [0x008654a4]==6 satisfied', '', 400],
   ['careerbot', 'career_bot.txt', 'segment done', 'NFSU2_CAREER_BOT_RACES=2', 600],
