@@ -164,7 +164,7 @@ export class VaultPanel {
     m.textContent = masked(this.input.value);
     m.scrollLeft = this.input.scrollLeft;
     eye.setAttribute('aria-pressed', String(!this.hidden));
-    eye.setAttribute('aria-label', this.hidden ? t('Show keyphrase') : t('Hide keyphrase'));
+    eye.setAttribute('aria-label', this.hidden ? t('Show passphrase') : t('Hide passphrase'));
   }
 
   private load(): Link | null {
@@ -363,10 +363,10 @@ export class VaultPanel {
   showClaim(name: string | null) {
     const p = this.$<HTMLElement>('#vault-claim');
     p.hidden = !name || !this.sync?.link;
-    p.textContent = name ? t('This keyphrase also holds your claim on {name}.', { name }) : '';
+    p.textContent = name ? t('This passphrase also holds your claim on {name}.', { name }) : '';
   }
   /** the linked keyphrase as a file */
-  download() { if (this.sync?.link) downloadBlob(`${this.sync.link.phrase}\n`, 'nfsu2-keyphrase.txt', 'text/plain'); }
+  download() { if (this.sync?.link) downloadBlob(`${this.sync.link.phrase}\n`, 'nfsu2-passphrase.txt', 'text/plain'); }
 
   // ---- the buttons ----
 
@@ -377,7 +377,7 @@ export class VaultPanel {
       await this.sync.create();
       this.hidden = false;
       this.show();
-      this.msg(() => t('Keyphrase made. Keep it safe: it is the only way back to these saves.'));
+      this.msg(() => t('Passphrase made. Keep it safe: it is the only way back to these saves.'));
       this.d.log('[app] keyphrase: made one, the saves went to the server');
       return true;
     } catch { return false; /* the state says why */ }
@@ -391,7 +391,7 @@ export class VaultPanel {
     if (this.d.busy()) { this.msg(() => t(QUIT_FIRST), true); return; }
     let got: Awaited<ReturnType<VaultSync['peek']>>;
     try { got = await s.peek(p.phrase); } catch { return; }
-    if (!got) { this.msg(() => t('No cloud saves for this keyphrase. Check it for typos.'), true); return; }
+    if (!got) { this.msg(() => t('No cloud saves for this passphrase. Check it for typos.'), true); return; }
     if (await this.replace(got, t('Load cloud saves?'),
       t('They replace the profiles and settings.ini here with the ones saved {when}. Screenshots stay, and so do this device\'s graphics, frame rate, sound output and controller settings.', { when: when(got.remote.saved) }), t('Load'))) {
       await s.adopt(p.phrase, got.remote).catch(() => {});
@@ -425,7 +425,7 @@ export class VaultPanel {
     try { await s.pull(); await s.push(); } catch { return; /* the state says why */ }
     // the server has no saves for the keyphrase: the ones here go there again, if the player says so
     if (!s.link?.gone || !await this.d.confirm(t('Send these saves to the cloud again?'),
-      t('The cloud has no saves for this keyphrase now. The saves here go there under the same keyphrase, and your other browsers with it sync again.'), t('Send'))) return;
+      t('The cloud has no saves for this passphrase now. The saves here go there under the same passphrase, and your other browsers with it sync again.'), t('Send'))) return;
     try { await s.resend(); this.msg(() => t('Sent. This browser syncs again.')); this.d.log('[app] keyphrase: its saves were gone from the server, sent again'); }
     catch { /* the state says why */ }
   }
@@ -449,7 +449,7 @@ export class VaultPanel {
   private async stop() {
     const s = this.sync;
     if (!s?.link) return;
-    if (!await this.d.confirm(t('Stop syncing here?'), t('Your saves stay here and in the cloud. To sync again, you need the keyphrase.'), t('Stop syncing'))) return;
+    if (!await this.d.confirm(t('Stop syncing here?'), t('Your saves stay here and in the cloud. To sync again, you need the passphrase.'), t('Stop syncing'))) return;
     const phrase = s.link.phrase;
     await s.forget().catch(() => {});
     // the keyphrase stays in the box, to keep or to load again (the job's end showed the box empty)
@@ -477,10 +477,10 @@ export class VaultPanel {
     const s = this.sync, st = s?.state;
     if (!s?.link || st?.s !== 'conflict') return false;
     const n = s.link.profiles, body = document.createElement('div'), cloudAt = st.cloud?.saved;
-    if (st.why === 'empty') body.append(para(tn(n, 'This browser has no profiles. The cloud\'s profile is deleted, here and in every browser that syncs with this keyphrase.',
-      'This browser has no profiles. The cloud\'s {n} profiles are deleted, here and in every browser that syncs with this keyphrase.')));
-    else body.append(para(cloudAt != null ? t('They replace the cloud\'s saves from {when}, here and in every browser that syncs with this keyphrase.', { when: when(cloudAt) })
-      : t('They replace the cloud\'s saves, here and in every browser that syncs with this keyphrase.')));
+    if (st.why === 'empty') body.append(para(tn(n, 'This browser has no profiles. The cloud\'s profile is deleted, here and in every browser that syncs with this passphrase.',
+      'This browser has no profiles. The cloud\'s {n} profiles are deleted, here and in every browser that syncs with this passphrase.')));
+    else body.append(para(cloudAt != null ? t('They replace the cloud\'s saves from {when}, here and in every browser that syncs with this passphrase.', { when: when(cloudAt) })
+      : t('They replace the cloud\'s saves, here and in every browser that syncs with this passphrase.')));
     body.append(sidesOf(st.here, st.cloud));
     const cloudNewer = newer(st.here, st.cloud) === 'cloud';
     if (cloudNewer) body.append(Object.assign(para(t('The cloud\'s saves are newer: what was played on them since is lost.')), { className: 'warn' }));
@@ -550,7 +550,7 @@ export class VaultPanel {
     const status = this.$('#vault-status');
     status.textContent = !owner && l ? t('Another tab is syncing these saves.')
       : st.s === 'error' ? (l ? t('Sync failed: {error}. It tries again at the next save.', { error: failed }) : t('{Error}.', { Error: `${failed[0]?.toUpperCase() ?? ''}${failed.slice(1)}` }))
-      : st.s === 'gone' ? t('The cloud has no saves for this keyphrase now: deleted in another browser, unused for 2 years, or lost on the server. Nothing is sent; Sync now looks again and can send these saves there.')
+      : st.s === 'gone' ? t('The cloud has no saves for this passphrase now: deleted in another browser, unused for 2 years, or lost on the server. Nothing is sent; Sync now looks again and can send these saves there.')
       : conflict && l ? `${this.conflictText()} ${t('Cloud saves are paused until you pick.')}`
       : '';
     if (st.s === 'error' && st.code && (owner || !l)) status.append(codeOf(st.code));

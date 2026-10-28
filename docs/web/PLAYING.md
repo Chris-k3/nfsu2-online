@@ -63,7 +63,7 @@ before gets them once, unless a graphics option was changed there. Held sideways
 touch controls over it; held upright, it shows in a 4:5 picture at the top with the ☰ button and the touch controls
 below it. The screen stays on while the game runs. Chrome's menu, **Add to Home screen** (or **Install app**), puts
 the game on the home screen as an app that opens full screen; on a PC the same makes it an app with its own window. On
-an iPhone it is Safari's Share menu, **Add to Home Screen**. That copy keeps its own saves: a keyphrase (Cloud saves)
+an iPhone it is Safari's Share menu, **Add to Home Screen**. That copy keeps its own saves: a passphrase (Cloud saves)
 brings yours over.
 
 **Touch controls** show on the game while you drive (races and free roam, in a race from the start line so you can
@@ -252,10 +252,11 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
   the server's address). They are not on the server, unless you use cloud saves (below). Each address keeps its own
   save store, so stick to one.
 - **Cloud saves:** Enable cloud saving (in Saves, beside Cloud saves) keeps your saves on the server too, under a
-  keyphrase only you have: `nfsu2-xyz-` and 8 words. In another browser (another PC, a phone), enter it in the box
-  and press Load: any case, with or without `nfsu2-xyz`. There is no account and no email.
-  - The page locks the saves with the keyphrase before they leave the browser: the server keeps bytes it cannot
-    read, under a code made from the keyphrase. Keep the keyphrase safe, in a password manager say: it is the only
+  passphrase only you have (it was called a keyphrase before): `nfsu2-xyz-` and 8 words. In another browser (another
+  PC, a phone), enter it in the box and press Load: any case, with or without `nfsu2-xyz`. There is no account and no
+  email.
+  - The page locks the saves with the passphrase before they leave the browser: the server keeps bytes it cannot
+    read, under a code made from the passphrase. Keep the passphrase safe, in a password manager say: it is the only
     way back to these saves, and nobody can look it up for you. The box shows its first 3 characters; the eye shows
     all of it and copies it, the arrow downloads it as a file.
   - From then on that browser syncs by itself: its saves go to the server after the game saves and when it closes,
@@ -267,7 +268,7 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
     Load, Go back), the page keeps a copy of yours here for 30 days, and Put back brings it back (swapping again is
     possible). A browser with no profiles never sends its
     empty saves by itself: it offers the cloud's instead (keeping the empty ones asks first: every browser on the
-    keyphrase loses its profiles). The page also asks before cloud saves with no profiles, or older than the ones in
+    passphrase loses its profiles). The page also asks before cloud saves with no profiles, or older than the ones in
     this browser (a server gone back), replace yours.
   - The profiles and `settings.ini` go. What belongs to the device stays in each browser: F12 screenshots, DVD and
     magazine covers (a cover is a picture of 1 MB: another browser's crib lists it, but the game says it cannot load
@@ -276,12 +277,12 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
     Menus and HUD, the frame rate and its counter, the output latency, the controller's settings and how many
     players' cars free roam shows. A phone keeps its own and a PC its own.
   - The server keeps the copy of an earlier day too: "Go back to ..." brings it back when a day went wrong.
-  - Your keyphrase can also claim your name (**Online, Your name**: no one else plays under it; see "Your name is
+  - Your passphrase can also claim your name (**Online, Your name**: no one else plays under it; see "Your name is
     yours" under Online), so in another browser your name comes back with your saves.
-  - Stop syncing leaves the saves where they are, and the keyphrase in the box; Delete from cloud deletes them on the
-    server (your browsers keep theirs), and frees the name it claimed. A keyphrase nobody used for two years is
+  - Stop syncing leaves the saves where they are, and the passphrase in the box; Delete from cloud deletes them on the
+    server (your browsers keep theirs), and frees the name it claimed. A passphrase nobody used for two years is
     deleted from the server. A browser
-    whose keyphrase the server no longer has keeps it and sends nothing; Sync now looks again and offers to send its
+    whose passphrase the server no longer has keeps it and sends nothing; Sync now looks again and offers to send its
     saves there.
 - **Autosave:** the game saves your progress by itself after races, purchases and changed options. The game starts
   every profile on Save = Prompt, whose "save?" question opens on No, so Enter through the results skips the save;
@@ -546,18 +547,18 @@ Good to know:
   last few chat lines (of the last ten minutes) that you could see; the operator decides what happens. Without a
   complaint no chat is written down anywhere, only the word that kept a line from the others.
 - **Your name is yours once you claim it.** **Online, Your name** says what your name is: free, claimed by you,
-  or another player's. **Claim** there claims it with your keyphrase (the one of your cloud saves), after a check from
-  Cloudflare that a person, not a script, claims it (usually it passes by itself). Without a keyphrase, Claim makes
+  or another player's. **Claim** there claims it with your passphrase (the one of your cloud saves), after a check from
+  Cloudflare that a person, not a script, claims it (usually it passes by itself). Without a passphrase, Claim makes
   one and turns cloud saves on, then shows it to keep: it is the only way to play under the name again, in another
-  browser or after this browser's data is cleared, and the only way back to your saves. With a keyphrase, Play
+  browser or after this browser's data is cleared, and the only way back to your saves. With a passphrase, Play
   claims a free name by itself; Cloudflare's check shows only when it wants a click.
   - While it is yours nobody else plays under it: in the Online menu and in free roam they get your name with four
     digits added (`Alex` becomes `Alex4821`; a name longer than 11 characters loses its end to them), the same
     digits each time for their browser. If someone was online under it before you came, the lobby gives it back to
     you.
   - It stays yours while you play (free roam or Online) at least once every 180 days. In another browser, load your
-    keyphrase under Cloud saves and the name is yours there too.
-  - One name a keyphrase. **Change name** (type another name) changes it once a week; the old name stays yours for
+    passphrase under Cloud saves and the name is yours there too.
+  - One name a passphrase. **Change name** (type another name) changes it once a week; the old name stays yours for
     14 more days, and your EA Messenger friends move to the new one (their lists show it).
   - `NAME`, the game's default profile name, and `Player` can't be claimed: Play asks once for a name of your own,
     and until you pick one you play as `NAME` with your four digits. A name another player claimed: Play asks once
@@ -570,13 +571,14 @@ Good to know:
   Nothing is checked and nothing is kept: there are no accounts. Type a password you use nowhere else: the game
   sends it to the server only lightly scrambled (the server never reads it).
 - **Kept on the server:** only race results per name (Rankings; a name not seen for a year is forgotten), the claimed
-  names (each with a code made from its keyphrase, never the keyphrase, and when it was claimed and last played: 180
-  days after that), and the EA Messenger lists of claimed names, with their keyphrase's code: your friends and the
+  names (each with a code made from its passphrase, never the passphrase, and when it was claimed and last played: 180
+  days after that), and the EA Messenger lists of claimed names, with their passphrase's code: your friends and the
   players you block (names), the friend requests you sent until they are answered (30 days at most), and your
   friends' messages that came while you were away until you are back (7 days at most). Lists of names nobody claimed
   are kept only while their player is online; the lists kept before names could be claimed went to the first
-  keyphrase that claims each name (the ones of `NAME` and `Player`, which hundreds of players shared, were deleted).
-  Of chat, only your last five lines, for ten minutes and in memory, for a complaint. Never your password: the server does not read it.
+  passphrase that claims each name (the ones of `NAME` and `Player`, which hundreds of players shared, were deleted).
+  Of chat, only your last five lines, for ten minutes and in memory, for a complaint. Never your password: the server
+  does not read it.
 - **Game passwords:** the game asks for the password of a game created with one, and only the same password joins
   it. The server keeps no copy of it, only a check value for that game while it is open, and never shows or logs it.
 - **Others see** your name, your game, your chat and your results, never your real address.
@@ -641,7 +643,7 @@ Good to know:
 | `STORAGE-ASK`: the browser asks whether the site may keep its data | Allow it, so that your saves stay when the disk runs low (section 5). |
 | `BROWSER-CHROME-OLD`, `BROWSER-FIREFOX-OLD` | A warning: the game may still play. Update the browser (Chrome 140 or newer, Firefox 145 or newer). |
 | `BROWSER-CHROMIUM`, `BROWSER-OTHER`, `BROWSER-IPHONE` | A warning: only Google Chrome and Firefox are tested, and this browser may work when every other check passes. On an iPhone, see section 2 for the Home Screen. |
-| `VAULT-…`: a cloud saves problem | The message says what happened: `VAULT-WRONG-KEY` (these saves do not open with this keyphrase: check it), `VAULT-TOO-LARGE` (more than the server keeps), `VAULT-HTTP-429` (too many tries: wait a minute), `VAULT-HTTP-503` and `VAULT-HTTP-507` (the server takes no more saves for now), `VAULT-NO-ANSWER` and `VAULT-TIMEOUT` (the server did not answer: try again), `VAULT-LOAD-HALFWAY` (loading the cloud's saves stopped halfway: load again before playing; the copy the page kept of yours is under Put back). |
+| `VAULT-…`: a cloud saves problem | The message says what happened: `VAULT-WRONG-KEY` (these saves do not open with this passphrase: check it), `VAULT-TOO-LARGE` (more than the server keeps), `VAULT-HTTP-429` (too many tries: wait a minute), `VAULT-HTTP-503` and `VAULT-HTTP-507` (the server takes no more saves for now), `VAULT-NO-ANSWER` and `VAULT-TIMEOUT` (the server did not answer: try again), `VAULT-LOAD-HALFWAY` (loading the cloud's saves stopped halfway: load again before playing; the copy the page kept of yours is under Put back). |
 | No sound | Click the game or press a key. Check the sound setting and the output latency (try "Robust"). |
 | Stuck on a loading screen | F9, Quit game; then "Close the game now"; then "Stop the game". When the log ends in `[data]` lines, the game was waiting for its data from the server: it goes on when the data comes. |
 | Other players' cars stutter, freeze and jump in an Online or LAN race | All updates go through the player who created the game, so let whoever has the steadiest connection (a cable rather than Wi-Fi or mobile) and the fastest computer create it, and keep the game's tab in front. After the race, F9, Download log: its `[racenet]` lines say how each car's updates came (long waits, how many came at once after them) and each player's frame rate. |

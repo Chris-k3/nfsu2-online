@@ -140,7 +140,8 @@ The rest of this guide is reference.
 
 ## Keyphrase saves
 
-A player can keep their saves on the server under a keyphrase (`nfsu2-xyz-` and 8 words), and load them in any
+A player can keep their saves on the server under a keyphrase (`nfsu2-xyz-` and 8 words; the page calls it a
+passphrase, the server's code, console and these notes a keyphrase), and load them in any
 browser by typing it (the page's Cloud saves: PLAYING.md, Saves). The page locks them before they leave the browser (AES-GCM, with a key made
 from the keyphrase); the server keeps those bytes under the SHA-256 of a token also made from the keyphrase. It never
 sees a keyphrase, a key or a save, and its files name no player.

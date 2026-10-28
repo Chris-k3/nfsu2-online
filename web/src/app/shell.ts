@@ -353,7 +353,7 @@ async function askCloud() {
   const p = (text: string) => Object.assign(document.createElement('p'), { textContent: text });
   const body = document.createElement('div');
   body.append(p(t('Your career is saved only in this browser. Browsers sometimes clear a website\'s data, for example when the device runs low on space or when browsing data is cleared, and your saves go with it.')),
-    p(t('Cloud saves keep a copy on this server under a keyphrase that only you have. With it you get your saves back, here or in another browser.')));
+    p(t('Cloud saves keep a copy on this server under a passphrase that only you have. With it you get your saves back, here or in another browser.')));
   // the name, when it is free to claim: the new keyphrase claims it at once, and its popup says so
   const name = onlineName(await typedName());
   const info = name ? await claims.check(name) : null;
@@ -367,11 +367,11 @@ async function askCloud() {
   const phrase = await enableCloud();
   if (!phrase) return;
   const claimed = name && info?.state === 'free' && !info.mine ? await claimQuietly(playDeps(), name, info, quietCheck) : null;
-  await showKeyphrase(phrase, claimed?.name ?? null);
+  await showPassphrase(phrase, claimed?.name ?? null);
 }
 
 /** Cloud saves turned on (Play's question, or Claim under Your name without a keyphrase): the keyphrase made, or
- *  null, after a box that says why not.  `showKeyphrase` then shows it to keep. */
+ *  null, after a box that says why not.  `showPassphrase` then shows it to keep. */
 async function enableCloud(): Promise<string | null> {
   const got = await vault.enable();
   if ('why' in got) {
@@ -384,7 +384,7 @@ async function enableCloud(): Promise<string | null> {
 
 /** A keyphrase just made, shown whole to keep (copy, download): for the saves, and for the name it claimed (null:
  *  none), which it is the only way back to as well */
-async function showKeyphrase(phrase: string, claimed: string | null) {
+async function showPassphrase(phrase: string, claimed: string | null) {
   const p = (text: string) => Object.assign(document.createElement('p'), { textContent: text });
   const box = Object.assign(document.createElement('p'), { className: 'keyphrase', textContent: phrase });
   const copy = Object.assign(document.createElement('button'), { type: 'button', className: 'text-btn', textContent: t('Copy') });
@@ -392,20 +392,20 @@ async function showKeyphrase(phrase: string, claimed: string | null) {
     try { await navigator.clipboard.writeText(phrase); copy.textContent = t('Copied.'); }
     catch { getSelection()?.selectAllChildren(box); }
   };
-  const file = Object.assign(document.createElement('button'), { type: 'button', className: 'text-btn', textContent: t('Download keyphrase') });
+  const file = Object.assign(document.createElement('button'), { type: 'button', className: 'text-btn', textContent: t('Download passphrase') });
   file.onclick = () => vault.download();
   const row = document.createElement('div'); row.className = 'row keyphrase-do';
   row.append(copy, file);
   const kept = document.createElement('div');
   if (claimed) {
-    kept.append(p(t('{name} is yours, held by this keyphrase. Cloud saves are on too.', { name: claimed })),
+    kept.append(p(t('{name} is yours, held by this passphrase. Cloud saves are on too.', { name: claimed })),
       p(t('Keep it safe: it is the only way to play as {name} again, in another browser or here after this browser\'s data is cleared, and the only way back to your saves.', { name: claimed })),
       box, row, p(t('To use it in another browser, enter it under Cloud saves on the start page.')));
   } else {
-    kept.append(p(t('Keyphrase made. Keep it safe: it is the only way back to these saves.')), box, row,
+    kept.append(p(t('Passphrase made. Keep it safe: it is the only way back to these saves.')), box, row,
       p(t('To load your saves, enter it under Cloud saves on the start page.')));
   }
-  const shown = confirmBox(t('Your keyphrase'), kept, t('Continue'), false, '', '');
+  const shown = confirmBox(t('Your passphrase'), kept, t('Continue'), false, '', '');
   $<HTMLButtonElement>('#confirm-ok').focus();
   await shown;
 }
@@ -1524,7 +1524,7 @@ export async function boot() {
   // the claimed names: asked with the keyphrase's token (claim.ts); the line under Your name (claim-ui.ts)
   claims = new NameClaims(() => vault ? vault.token() : Promise.resolve(null));
   nameRow = new NameRow({
-    claims, seed: pageId, linked: () => !!vault?.linked(), enable: enableCloud, showKeyphrase,
+    claims, seed: pageId, linked: () => !!vault?.linked(), enable: enableCloud, showPassphrase,
     profileName: async () => (await newestProfile())?.name ?? null,
     save: n => settings.putName(n), writable: () => instance.owner,
     kept: n => vault?.showClaim(n), say: pageToast, log: logLine,

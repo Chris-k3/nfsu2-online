@@ -49,7 +49,7 @@ export interface NameRowDeps {
   /** cloud saves turned on: the keyphrase made (null: not on, and the player was told why) */
   enable(): Promise<string | null>;
   /** a keyphrase just made, shown to keep, for the name it claimed (null: none yet) */
-  showKeyphrase(phrase: string, claimed: string | null): Promise<void>;
+  showPassphrase(phrase: string, claimed: string | null): Promise<void>;
   /** the name the game takes when Your name is empty (the newest profile's) */
   profileName(): Promise<string | null>;
   /** Your name written to settings.ini */
@@ -145,17 +145,17 @@ export class NameRow {
       case 'default':
         return show(t('{name} is the game\'s default and can\'t be claimed. Type a name of your own.', { name }), 'env', null, this.alt);
       case 'yours':
-        return show(t('Claimed with your keyphrase. Yours while you play at least once every {n} days (now until {date}).', { n: HOLD_DAYS, date: day(i.until ?? 0) }), 'ok');
+        return show(t('Claimed with your passphrase. Yours while you play at least once every {n} days (now until {date}).', { n: HOLD_DAYS, date: day(i.until ?? 0) }), 'ok');
       case 'old':
         if (mine && mine.next <= Date.now()) return show(t('{name} was your name before your change: yours until {date}.', { name, date: day(i.until ?? 0) }), 'ok', t('Change name'));
         return show(t('{name} was your name before your change: yours until {date}.', { name, date: day(i.until ?? 0) }), 'ok');
       case 'taken':
-        return show(t('Another player claimed {name}, so you play as {alt}. Type another name. Is it yours? Enter your keyphrase under Cloud saves.', { name, alt: this.alt }), 'bad', null, this.alt);
+        return show(t('Another player claimed {name}, so you play as {alt}. Type another name. Is it yours? Enter your passphrase under Cloud saves.', { name, alt: this.alt }), 'bad', null, this.alt);
       case 'free':
         if (mine && mine.next > Date.now()) return show(t('{name} is free. You can change your name again on {date}.', { name, date: day(mine.next) }));
         if (mine) return show(t('{name} is free. {old} stays yours for {n} days after the change, and your EA Messenger friends move with you. One change a week.', { name, old: mine.name, n: GRACE_DAYS }), 'free', t('Change name'));
-        if (!this.d.linked()) return show(t('Not claimed: anyone can play as {name}. Claim makes you a keyphrase, 8 words that hold the name and also keep your cloud saves.', { name }), 'free', t('Claim'));
-        return show(t('Not claimed yet. Your keyphrase claims it the next time you play with free roam or Online on.'), 'free', t('Claim'));
+        if (!this.d.linked()) return show(t('Not claimed: anyone can play as {name}. Claim makes you a passphrase, 8 words that hold the name and also keep your cloud saves.', { name }), 'free', t('Claim'));
+        return show(t('Not claimed yet. Your passphrase claims it the next time you play with free roam or Online on.'), 'free', t('Claim'));
       default:
         return show(null);
     }
@@ -169,9 +169,9 @@ export class NameRow {
     if (!name) return;
     const phrase = this.d.linked() ? null : await this.made();
     if (phrase === undefined) return;
-    if (phrase && this.info?.state !== 'free') { await this.d.showKeyphrase(phrase, null); return; }
+    if (phrase && this.info?.state !== 'free') { await this.d.showPassphrase(phrase, null); return; }
     const mine = await this.claimNow(name);
-    if (phrase) await this.d.showKeyphrase(phrase, mine);
+    if (phrase) await this.d.showPassphrase(phrase, mine);
   }
 
   /** a keyphrase made for the claim (cloud saves on), the name asked about again; undefined: none */
@@ -254,7 +254,7 @@ export async function settleName(d: PlayNameDeps, typed: string, saveDir: string
       ask(k);
       return await pick(d, t('{name} is claimed', { name }),
         [para(t('Another player claimed the name {name}. Pick another, or play as {alt} this time.', { name, alt }))], alt, quiet,
-        para(t('Is {name} yours? Enter your keyphrase under Cloud saves to get it back here.', { name }))) ?? alt;
+        para(t('Is {name} yours? Enter your passphrase under Cloud saves to get it back here.', { name }))) ?? alt;
     }
     case 'free':
       if (d.linked() && !info.mine) await claimQuietly(d, name, info, quiet);

@@ -8,7 +8,7 @@ known or decided. The code is public: https://github.com/th0mk/nfsu2-web.
 
 - Players open https://nfsu2.xyz in Chrome or Firefox (Safari on iOS 26 / iPadOS 26 and macOS works too, less tested)
   and press Play. The server has the game files: players need no copy of their own and install nothing. Saves stay in
-  the browser, or also on the server with cloud saves (a keyphrase only the player has).
+  the browser, or also on the server with cloud saves (a passphrase only the player has; the page called it a keyphrase before 2026-10-29, so players may say either).
 - The page updates itself: before a game it loads the new version by itself; during a game it shows "A new version of
   the game is on the server", and Reload or Play loads it. A tab left open runs the old version until then. When a fix
   is live, the answer is when it was fixed, since when it is live, and "reload the page (Ctrl+F5 on a PC)".
@@ -36,7 +36,7 @@ The log is the most useful thing in a bug report. Say exactly how:
 - Attach the .log file to the post (drag it into Discord, or the + button). Not a photo of the screen, not pasted text.
 - What it contains, if they ask: browser and system, graphics chip, the time zone's UTC offset. Names (theirs, other
   players', crews, rooms) and addresses are replaced by stand-ins such as `you` and `player-…` since 26 October (logs
-  from older pages still have them). No passwords, no keyphrase.
+  from older pages still have them). No passwords, no passphrase.
 
 ## What a report needs, by problem
 
@@ -55,7 +55,7 @@ The log is the most useful thing in a bug report. Say exactly how:
 - Phone or tablet: the model, Android or iOS version, browser, Home Screen app or tab.
 - Online or free-roam races: the log after the race (F9, Download log), who created the race, how many players, what
   went wrong (cars jumping, results missing, endless loading, disconnect).
-- Saves and cloud saves: what happened, which browsers, whether cloud saves are on. Never ask for the keyphrase.
+- Saves and cloud saves: what happened, which browsers, whether cloud saves are on. Never ask for the passphrase.
 - Sound: browser and system, the output latency setting (Settings, Game, more), what is wrong (none, late, crackling).
 
 ## Answers that keep coming up
@@ -137,7 +137,7 @@ The developer said these in public; repeat them briefly and kindly when a post a
 - No cloud streaming of the game: too complex and too expensive.
 - No music hosted on the server. Music from the player's own device is there: Radio in the page menu (F9) plays a
   folder of their own songs in place of the game's (the guide's section 4).
-- No account system; cloud saves (a keyphrase) sync saves between browsers.
+- No account system; cloud saves (a passphrase) sync saves between browsers.
 - Free roam stays one world, not split into sessions.
 - The game's own mechanics stay, wall riding in races included (next section).
 
