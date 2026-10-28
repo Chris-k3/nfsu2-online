@@ -62,10 +62,12 @@ html[data-touch] .key-only, html:not([data-touch]) .touch-only { display: none; 
   display: grid; grid-template-columns: 384px minmax(0, 1fr); gap: 24px; align-items: start;
 }
 .top { grid-column: 1 / -1; background: var(--frame); border-radius: 12px; padding: 16px 24px 24px; }
-.top-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 16px; }
-/* the note and the Discord button; the note on a 24 px line, on the grid beside the 40 px title and button */
+/* the title, the note and the language list with the Discord button on one line; a note longer than the room
+   (other languages) takes two balanced lines there, on 24 px lines on the grid beside the 40 px title and buttons */
+.top-row { display: flex; align-items: center; gap: 4px 16px; }
+.top-row h1, .top-end { flex: none; }
+.top-row .hint { margin-left: auto; line-height: 24px; text-wrap: balance; }
 .top-end { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
-.top-end .hint { line-height: 24px; }
 .side, .content { display: grid; gap: 24px; min-width: 0; }
 .panel { background: var(--panel); border-radius: 12px; padding: 24px; min-width: 0; }
 .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
@@ -907,6 +909,18 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.64); }
 .dlg p.set-note { margin: 0; }
 
 /* ---------------------------------------------------------------- narrow */
+/* the title and the buttons stay on the first line, the note goes under the title */
+@media (max-width: 1119px) {
+  .top-row { flex-wrap: wrap; justify-content: space-between; }
+  .top-row .hint { order: 1; flex-basis: 100%; margin-left: 0; }
+}
+/* no room for the buttons beside the title (the longest name is Português (Brasil)): the title (it may wrap), the
+   note, then the buttons (Discord under the list where they do not fit side by side) */
+@media (max-width: 819px) {
+  .top-row h1, .top-end { flex: 0 1 auto; }
+  .top-row .hint { order: 0; }
+  .top-end { margin-top: 4px; }
+}
 @media (max-width: 959px) {
   .app { grid-template-columns: minmax(0, 1fr); padding: 16px 16px 48px; gap: 16px; }
   /* one column of panels: Saves and Online right under Play, then Controls and the rest */
