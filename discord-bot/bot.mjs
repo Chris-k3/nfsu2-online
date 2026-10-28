@@ -850,6 +850,8 @@ client.on(Events.ClientReady, c => {
     `${CFG.staffChannel ? `staff channel ${CFG.staffChannel}` : 'no staff channel'}, model ${CFG.model} (${CFG.effort}), ` +
     `$${spend.month.toFixed(2)} of $${CFG.budget} spent this month, $${spend.today.toFixed(2)} of $${spend.share().toFixed(2)} today`);
   repo.sync(true).catch(e => console.error(`[repo] ${e.message}`));
+  // the staff channel's messages saved before they were marked, by its name
+  if (archive && CFG.staffChannel) c.channels.fetch(CFG.staffChannel).then(ch => { archive.staffName = ch?.name; }).catch(() => {});
   c.application.commands.set([TRANSLATE]).catch(e => console.error(`[translate] the command: ${e.message}`));
   let checking = null;                           // one check at a time: the first one reads every suggestion
   const release = () => checking ??= checkRelease().catch(e => console.error(`[release] ${e.message}`)).finally(() => { checking = null; });
@@ -890,6 +892,8 @@ client.on(Events.MessageCreate, guard('message', m => {
       id: m.id, at: m.createdAt.toISOString(),
       channel: m.channel.isThread() ? m.channel.parent?.name : m.channel.name, thread: m.channel.isThread() ? m.channel.name : '',
       author: m.member?.displayName ?? m.author.username, text: m.content.slice(0, 4000), files: [...m.attachments.values()].map(a => a.name),
+      // the staff channel and its reports' threads: a look may learn from them, never repeat them
+      ...(CFG.staffChannel && (m.channelId === CFG.staffChannel || m.channel.parentId === CFG.staffChannel) ? { staff: true } : {}),
     });
   }
   const thread = m.channel;

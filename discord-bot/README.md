@@ -110,7 +110,8 @@ bot's first log line says what the month and the day spent so far.
   answers and replies that paste code.
 - `tools.mjs`: what Claude can do. It can search and read the code, read the thread's attachments, look at the git
   history (`LIVE` is the live server's commit), search the forums' threads (to point a duplicate to the earlier one)
-  and the archive of recent messages. Everything is read only: no shell, no network, no writing, and nothing outside
+  and the archive of recent messages (the staff channel's marked private: the model may use them, never repeat them).
+  Everything is read only: no shell, no network, no writing, and nothing outside
   the bot's own copy of the code and the attachments.
 - `repo.mjs`: the bot's own clone of the code in `state/repo`, fetched at most every 5 minutes. The rules, the notes
   and the guide are read from that clone, so a pushed change to them applies within minutes, without a new image or a
