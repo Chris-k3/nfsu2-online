@@ -1,7 +1,7 @@
 // The start page 320 px wide, in each of its languages: no sideways scroll.
 //   node --test web/test/page-narrow.test.mjs
-// Chrome (Playwright's channel 'chrome') on this checkout's page (web/dist: node web/build.mjs; a web/dist older than
-// one of the page's sources fails at once, never measures the older page) from the server
+// Chrome (or Playwright's Chromium: web/tools/browser.mjs) on this checkout's page (web/dist: node web/build.mjs; a
+// web/dist older than one of the page's sources fails at once, never measures the older page) from the server
 // (web/tools/server-cmd.mjs), on the game folder (NFSU2_DATA) or, without one, a made-up one: the page's layout needs
 // no game.  As a phone (touch: the touch controls' settings) and as a window with a mouse (a desktop zoomed in: the
 // keys), each with cloud saves turned on first (their buttons).  Then in every language (i18n.ts LANGUAGES), with every
@@ -18,6 +18,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as esbuild from 'esbuild';
 import { chromium } from 'playwright';
+import { pickBrowser } from '../tools/browser.mjs';
 import { serverCommand, SERVER_BIN } from '../tools/server-cmd.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -158,8 +159,8 @@ test(`the start page at ${WIDTH} px: no sideways scroll in any language`, { skip
   const srv = await server();
   let browser;
   try {
-    try { browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu'] }); }
-    catch (e) { t.skip(`no Chrome: ${String(e.message).split('\n')[0]}`); return; }
+    try { browser = await chromium.launch({ ...pickBrowser(), headless: true, args: ['--enable-unsafe-webgpu'] }); }
+    catch (e) { t.skip(`no browser: ${String(e.message).split('\n')[0]}`); return; }
     const found = {}, errors = [];
     let looks = 0;
     for (const [kind, touch] of [['a phone', true], ['a mouse', false]]) {
