@@ -1154,21 +1154,26 @@ class Lifter:
             lo  = -(1 << (dsz*8-1)) if signed else 0
             hi  = (1 << (dsz*8-1)) - 1 if signed else (1 << (dsz*8)) - 1
             dty = {1:'uint8_t',2:'uint16_t'}[dsz]
-            halves = [0,1] if is_xm(0) else [0]
-            out=[]
-            for h in halves:
-                dst = qwords(0,h); src = qwords(1,h)
-                out.append(f"{{ uint64_t _a={dst}, _b=({src}), _r=0;"
-                           f" for(int _k=0;_k<{n};_k++){{"
-                           f" {sty} _x=({sty})(_a>>(_k*{esz*8}));"
-                           f" if(_x<{lo}) _x={lo}; if(_x>{hi}) _x={hi};"
-                           f" _r |= (uint64_t)({dty})_x << (_k*{dsz*8}); }}"
-                           f" for(int _k=0;_k<{n};_k++){{"
-                           f" {sty} _y=({sty})(_b>>(_k*{esz*8}));"
-                           f" if(_y<{lo}) _y={lo}; if(_y>{hi}) _y={hi};"
-                           f" _r |= (uint64_t)({dty})_y << (({n}+_k)*{dsz*8}); }}"
-                           f" {dst}=_r; }}")
-            return out
+            if is_xm(0):
+                # 128-bit: the destination's 2n elements pack into the low
+                # qword, the source's into the high one (not each half alone)
+                return [f"{{ uint64_t _a[4]={{{qwords(0,0)},{qwords(0,1)},({qwords(1,0)}),({qwords(1,1)})}}, _r[2]={{0,0}};"
+                        f" for(int _k=0;_k<{4*n};_k++){{"
+                        f" {sty} _x=({sty})(_a[_k/{n}]>>((_k%{n})*{esz*8}));"
+                        f" if(_x<{lo}) _x={lo}; if(_x>{hi}) _x={hi};"
+                        f" _r[_k/{2*n}] |= (uint64_t)({dty})_x << ((_k%{2*n})*{dsz*8}); }}"
+                        f" {qwords(0,0)}=_r[0]; {qwords(0,1)}=_r[1]; }}"]
+            dst = qwords(0,0); src = qwords(1,0)
+            return [f"{{ uint64_t _a={dst}, _b=({src}), _r=0;"
+                    f" for(int _k=0;_k<{n};_k++){{"
+                    f" {sty} _x=({sty})(_a>>(_k*{esz*8}));"
+                    f" if(_x<{lo}) _x={lo}; if(_x>{hi}) _x={hi};"
+                    f" _r |= (uint64_t)({dty})_x << (_k*{dsz*8}); }}"
+                    f" for(int _k=0;_k<{n};_k++){{"
+                    f" {sty} _y=({sty})(_b>>(_k*{esz*8}));"
+                    f" if(_y<{lo}) _y={lo}; if(_y>{hi}) _y={hi};"
+                    f" _r |= (uint64_t)({dty})_y << (({n}+_k)*{dsz*8}); }}"
+                    f" {dst}=_r; }}"]
         if m == 'pextrw' and o[0].type==X86_OP_REG and (is_mm(1) or is_xm(1)):
             sel = o[2].imm & (7 if is_xm(1) else 3)
             if is_mm(1):
@@ -1292,6 +1297,10 @@ class Lifter:
                 body = (f"int32_t _v = (int32_t)({ut})(_a>>(_k*{bits2})) {opx} (int32_t)({ut})(_b>>(_k*{bits2}));"
                         f" if(_v<0) _v=0; if(_v>{hi}) _v={hi};"
                         f" _r |= ((uint64_t)(uint{bits2}_t)_v) << (_k*{bits2});")
+            if kind == 'xmm':
+                # 128-bit: both 64-bit halves (the elements stay in their half)
+                return [f"{{ uint64_t _a={qwords(0,h)}, _b=({qwords(1,h)}), _r=0;"
+                        f" for(int _k=0;_k<{n};_k++){{ {body} }} {qwords(0,h)}=_r; }}" for h in (0, 1)]
             return [f"{{ uint64_t _a={dst}, _b=({src}), _r=0;"
                     f" for(int _k=0;_k<{n};_k++){{ {body} }} {dst}=_r; }}"]
 
@@ -1304,9 +1313,16 @@ class Lifter:
             kind, di = mm_dst_idx()
             dst = f"c->mm[{di}]" if kind=='mm' else f"c->xmm[{di}].u64[0]"
             cnt2 = (f"{o[1].imm & 0xff}u" if o[1].type==X86_OP_IMM else mm_src(1, False))
+            # a register or memory count: all 64 bits of it (2^32+4 empties the
+            # destination, not a shift by 4), read once (it may be the destination's
+            # own low qword); an XMM destination: both 64-bit halves by that count
+            xcnt = f"uint64_t _c=(uint64_t)({cnt2}); uint32_t _s=_c>63?64u:(uint32_t)_c;"
+            mcnt = f"uint32_t _s=(uint32_t)({cnt2});" if o[1].type==X86_OP_IMM else xcnt
+            halves = (f"c->xmm[{di}].u64[0]", f"c->xmm[{di}].u64[1]") if kind=='xmm' else ()
             if esz==8:
-                if kindop=='<<': return [f"{{ uint32_t _s=(uint32_t)({cnt2}); {dst} = _s>63?0:({dst} << _s); }}"]
-                return [f"{{ uint32_t _s=(uint32_t)({cnt2}); {dst} = _s>63?0:({dst} >> _s); }}"]
+                if halves:
+                    return [f"{{ {xcnt}" + "".join(f" {d} = _s>63?0:({d} {kindop} _s);" for d in halves) + " }"]
+                return [f"{{ {mcnt} {dst} = _s>63?0:({dst} {kindop} _s); }}"]
             n = 8 // esz; bits2 = esz*8
             ut = {2:'uint16_t',4:'uint32_t'}[esz]
             st = {2:'int16_t',4:'int32_t'}[esz]
@@ -1319,23 +1335,26 @@ class Lifter:
             else:
                 body=(f"{ut} _x=({ut})(_a>>(_k*{bits2})); {ut} _z = _s>={bits2} ? 0 : ({ut})(_x >> _s);"
                       f" _r |= ((uint64_t)_z) << (_k*{bits2});")
-            return [f"{{ uint64_t _a={dst}, _r=0; uint32_t _s=(uint32_t)({cnt2});"
+            if halves:
+                return [f"{{ {xcnt}" + "".join(f" {{ uint64_t _a={d}, _r=0; for(int _k=0;_k<{n};_k++){{ {body} }} {d}=_r; }}"
+                                               for d in halves) + " }"]
+            return [f"{{ uint64_t _a={dst}, _r=0; {mcnt}"
                     f" for(int _k=0;_k<{n};_k++){{ {body} }} {dst}=_r; }}"]
 
         # punpck / packuswb
         UNP = {'punpcklbw':(1,0),'punpcklwd':(2,0),'punpckldq':(4,0),
                'punpckhbw':(1,1),'punpckhwd':(2,1),'punpckhdq':(4,1)}
         if m in UNP and is_xm(0):
+            # 128-bit: the low (punpckl*) or high (punpckh*) qwords of both
+            # operands interleave into the whole register
             esz, hi = UNP[m]
             di = XM[o[0].reg]
-            src = (f"c->xmm[{XM[o[1].reg]}].u64[0]" if is_xm(1) else "MR64"+self.ea(o[1].mem))
-            n = 4 // esz; bits2 = esz*8
-            return [f"{{ uint64_t _a=c->xmm[{di}].u64[0], _b=({src}), _r=0; int _o={4//esz} * {1 if hi else 0};"
-                    f" for(int _k=0;_k<{n};_k++){{"
-                    f" uint64_t _x=(_a>>((_o+_k)*{bits2})) & ((1ull<<{bits2})-1);"
-                    f" uint64_t _y=(_b>>((_o+_k)*{bits2})) & ((1ull<<{bits2})-1);"
-                    f" _r |= _x << ((2*_k)*{bits2}); _r |= _y << ((2*_k+1)*{bits2}); }}"
-                    f" c->xmm[{di}].u64[0]=_r; }}"]
+            n = 8 // esz; bits2 = esz*8; mask = (1 << bits2) - 1
+            return [f"{{ uint64_t _a=c->xmm[{di}].u64[{hi}], _b=({qwords(1, hi)}), _r[2]={{0,0}};"
+                    f" for(int _k=0;_k<{n};_k++){{ int _p=2*_k*{bits2};"
+                    f" _r[_p>>6] |= ((_a>>(_k*{bits2})) & 0x{mask:x}ull) << (_p&63);"
+                    f" _r[(_p+{bits2})>>6] |= ((_b>>(_k*{bits2})) & 0x{mask:x}ull) << ((_p+{bits2})&63); }}"
+                    f" c->xmm[{di}].u64[0]=_r[0]; c->xmm[{di}].u64[1]=_r[1]; }}"]
         if m in UNP and is_mm(0):
             esz, hi = UNP[m]
             di = MM[o[0].reg]; src = mm_src(1, False)
