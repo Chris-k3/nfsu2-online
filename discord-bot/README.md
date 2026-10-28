@@ -103,7 +103,9 @@ bot's first log line says what the month and the day spent so far.
 - `investigate.mjs`: one look. It sends Claude the rules (`system.md`), the maintainer's notes (`knowledge.md`),
   `docs/web/PLAYING.md`, the live version, recent commits, recent threads and the problems the developer has a report
   on (each report's first thread, where it stands; what it points posters to and joins duplicates to), and the
-  thread with the files it can read named at its top. Claude reads what it needs through the
+  thread with the files it can read named at its top. The rules, the notes, the guide and the code's history (the
+  same for every look until the next commit or release) are kept an hour in the prompt cache, so a look reads them
+  for a tenth of the price instead of sending them again. Claude reads what it needs through the
   tools, then returns a verdict as JSON: none, ask or answer, and whether to tell the developer. `vet()` drops weak
   answers and replies that paste code.
 - `tools.mjs`: what Claude can do. It can search and read the code, read the thread's attachments, look at the git

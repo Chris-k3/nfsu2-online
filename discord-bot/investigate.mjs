@@ -33,25 +33,30 @@ export const VERDICT = {
   },
 };
 
-async function systemBlocks(repo) {
+async function systemBlocks(repo, recent) {
   const own = async f => (await repo.file(`discord-bot/${f}`)) || fs.readFileSync(path.join(HERE, f), 'utf8');
   const [rules, notes, playing] = [await own('system.md'), await own('knowledge.md'), await repo.file('docs/web/PLAYING.md')];
-  return [
-    { type: 'text', text: `${rules}\n\n${notes}` },
-    // kept an hour: looks are often more than 5 minutes apart, and this part (~20k tokens) is the same for all of them
-    { type: 'text', text: `# The player's guide (docs/web/PLAYING.md)\n\n${playing}`, cache_control: { type: 'ephemeral', ttl: '1h' } },
-  ];
-}
-
-/** the first user message: what is going on (volatile, so after the cached system prompt), the pictures, the thread */
-function opening({ now, recent, threads, reports, thread, images }) {
-  const ctx = [
-    `Now: ${now}`,
+  const history = [
     `Live version: ${recent.live}`,
     `Newest commit: ${recent.head}`,
     `Releases the bot saw (newest first):\n${recent.releases || 'none yet'}`,
     recent.notLive ? `Commits not live yet (newest first):\n${recent.notLive}` : 'Commits not live yet: none',
     `Commits of the last days up to the live version (newest first; when made, and when they went live):\n${recent.recent || 'none'}`,
+  ].join('\n\n');
+  return [
+    { type: 'text', text: `${rules}\n\n${notes}` },
+    // kept an hour: looks are often more than 5 minutes apart, and this part (~20k tokens) is the same for all of them
+    { type: 'text', text: `# The player's guide (docs/web/PLAYING.md)\n\n${playing}`, cache_control: { type: 'ephemeral', ttl: '1h' } },
+    // the same for every look until the next commit or release (~5k tokens): kept an hour too, so a look reads it from
+    // the cache instead of writing it again
+    { type: 'text', text: `# The code's history, as of this look\n\n${history}`, cache_control: { type: 'ephemeral', ttl: '1h' } },
+  ];
+}
+
+/** the first user message: what is going on (volatile, so after the cached system prompt), the pictures, the thread */
+function opening({ now, threads, reports, thread, images }) {
+  const ctx = [
+    `Now: ${now}`,
     `Recent forum threads (id, category, what the bot did, title: summary):\n${threads || 'none yet'}`,
     `Problems the developer has a report on in the staff channel, the latest change first (the report's first thread: ` +
       `id and link; where it stands; its title):\n${reports || 'none yet'}`,
@@ -105,10 +110,10 @@ function gist(out) {
 export async function investigate({ client, model, effort, maxTurns = MAX_TURNS, repo, archive, workDir, thread, images = [], threads = '', reports = '', threadIndex, step = () => {} }) {
   await repo.sync();
   const tools = new Tools({ repo, workDir, archive, threadIndex });
-  const system = await systemBlocks(repo);
   const recent = await repo.recent();
+  const system = await systemBlocks(repo, recent);
   step(`code at ${recent.head.split(' ')[0]}, live ${recent.live.split(' ')[0]}${recent.notLive ? `, ${recent.notLive.split('\n').length} commit(s) not live yet` : ''}; asking ${model}`);
-  const messages = [{ role: 'user', content: opening({ now: new Date().toISOString().slice(0, 16) + 'Z', recent, threads, reports, thread, images }) }];
+  const messages = [{ role: 'user', content: opening({ now: new Date().toISOString().slice(0, 16) + 'Z', threads, reports, thread, images }) }];
   const usage = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
   let cost = 0;                                  // null once a turn's model has no prices
   const log = [];

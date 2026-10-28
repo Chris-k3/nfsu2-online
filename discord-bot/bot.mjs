@@ -778,16 +778,16 @@ async function download(url) {
   } catch { return null; }
 }
 
-/** one known thread as the model sees it */
-function threadLine([id, t]) {
-  const what = t.summary || (t.snippet ? `first post: ${t.snippet}` : '');
+/** one known thread as the model sees it; its summary cut to `max` characters */
+function threadLine([id, t], max = Infinity) {
+  const what = (t.summary || (t.snippet ? `first post: ${t.snippet}` : '')).slice(0, max);
   return `- ${id} https://discord.com/channels/${t.guild}/${id} #${t.forum}, ${(t.active ?? t.created).slice(0, 10)} ` +
     `[${[t.category, t.status, t.staffMsg && 'developer told'].filter(Boolean).join(', ')}] ${t.title}${what ? `: ${what}` : ''}`;
 }
 const byActivity = (a, b) => (b[1].active ?? b[1].created).localeCompare(a[1].active ?? a[1].created);
 /** the threads active last, for the context */
 function recentThreads(except) {
-  return Object.entries(threads).filter(([id]) => id !== except).sort(byActivity).slice(0, 30).map(threadLine).join('\n');
+  return Object.entries(threads).filter(([id]) => id !== except).sort(byActivity).slice(0, 30).map(e => threadLine(e, 160)).join('\n');
 }
 /** the problems the developer has a report on (the staff channel), the latest change first: the report's first
  *  thread, where it stands, how many threads, its title.  What a look points a poster to and joins a thread to */
@@ -797,8 +797,8 @@ function reportList(except) {
     const where = !r ? 'open' : r.again ? 'reported again after a fix or a "works now"'
       : r.fix ? `${r.fix.added ? 'added' : 'fixed'} by ${r.fix.commit}, live` : r.confirmed ? 'solved, the poster says' : 'open';
     return { at, line: `- ${id} https://discord.com/channels/${t.guild}/${id} [${where}, ${r?.threads.length ?? 1} thread(s), ` +
-      `last change ${new Date(at * 1000).toISOString().slice(0, 10)}] ${(r?.title ?? t.summary ?? t.title).slice(0, 200)}` };
-  }).sort((a, b) => b.at - a.at).slice(0, 40).map(x => x.line).join('\n');
+      `last change ${new Date(at * 1000).toISOString().slice(0, 10)}] ${(r?.title ?? t.summary ?? t.title).slice(0, 150)}` };
+  }).sort((a, b) => b.at - a.at).slice(0, 25).map(x => x.line).join('\n');
 }
 /** every known thread, for the search_threads tool: [{ line, text }] */
 function threadIndex(except) {
