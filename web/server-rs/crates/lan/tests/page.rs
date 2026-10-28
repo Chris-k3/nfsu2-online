@@ -120,7 +120,7 @@ async fn the_page_says_whom_it_blocks() {
     let got = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let sw = start_full(opts(), "", None, Some(std::sync::Arc::new(BlockHub(got.clone()))), None).await;
     page("block", &[sw.port]).await;
-    let names: Vec<Vec<String>> = got.lock().unwrap().iter().map(|(_, n)| n.clone()).collect();
+    let names: Vec<Vec<String>> = got.lock().unwrap().iter().filter(|(_, n)| !n.is_empty()).map(|(_, n)| n.clone()).collect();
     assert_eq!(names, vec![vec!["Bob".to_string(), "carl".to_string()]]);
     sw.close().await;
 }

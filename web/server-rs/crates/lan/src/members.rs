@@ -202,6 +202,7 @@ impl LanSwitch {
         if let Some(h) = &hello {
             peer.ctl.lock().texts.take_at(now, 1.0);
             greet(&peer, h, self.o.fpred);
+            self.hand_blocks(vip, h);
         }
         m.peers.insert(vip, peer.clone());
         // (a replaced holder's place on it goes with it)
@@ -537,17 +538,24 @@ impl LanSwitch {
         }
         let was = peer.name().to_string();
         greet(peer, msg, self.o.fpred);
-        if let Some(h) = &self.roam {
-            let names = block_names(msg);
-            if !names.is_empty() {
-                h.blocks(peer.vip, names);
-            }
-        }
+        self.hand_blocks(peer.vip, msg);
         self.lan_changed(&mut m, peer);
         let list = self.list_for(&m, peer);
         self.send(peer, Out::Text(list));
         if peer.name() != was {
             self.peers_changed(&mut m, peer.vip, false);
+        }
+    }
+
+    /// A hello's "block" to the free-roam hub, with the page's address: every connection's hello, a new one's
+    /// (`hello`), a resumed one's or one let in from the line (`seat`), as the hub forgets a page's blocks when its
+    /// connection goes (`Host::peer_gone`, posted before a resume can take the address).
+    fn hand_blocks(&self, vip: u32, hello: &Map<String, Value>) {
+        if let Some(h) = &self.roam {
+            let names = block_names(hello);
+            if !names.is_empty() {
+                h.blocks(vip, names);
+            }
         }
     }
 
@@ -654,9 +662,7 @@ pub(crate) fn lan_full() -> Bytes {
     Bytes::from(p)
 }
 
-/// a connection's first hello: its player's name, and whether it takes the changes to the peer list, bundles, and has
-/// LAN play open (a page of before says nothing: it gets every broadcast)
-/// A hello's "block": the names (as the game shows them over cars: printable ASCII, at most 24) of the players the page
+/// a hello's "block": the names (as the game shows them over cars: printable ASCII, at most 24) of the players the page
 /// blocks, at most BLOCK_MAX of them, each trimmed; what is not a string, an empty one and those past the cap are left
 /// out, a longer one is cut
 const BLOCK_MAX: usize = 32;
@@ -670,6 +676,8 @@ fn block_names(m: &Map<String, Value>) -> Vec<String> {
         .collect()
 }
 
+/// a connection's first hello: its player's name, and whether it takes the changes to the peer list, bundles, and has
+/// LAN play open (a page of before says nothing: it gets every broadcast)
 fn greet(peer: &Peer, m: &Map<String, Value>, fpred: bool) {
     use nfsu2_util::json::is_num;
     peer.hello.store(true, Relaxed);

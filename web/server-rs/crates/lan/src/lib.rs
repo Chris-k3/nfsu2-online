@@ -44,7 +44,7 @@
 //!   Never routed from a client (it could name any source), as a bundle in a bundle never is.
 //!
 //! Text frames are JSON control messages: {"t":"hello","name":...,"deltas":1,"lan":0|1,"bundle":1,"compact":1}
-//! (and "id", "claim": below; "block":[names]: the free-roam hub's `Host::blocks`),
+//! (and "id", "claim", "block": below),
 //! {"t":"lan","on":0|1} and {"t":"ping","id":n} from a client; {"t":"welcome","vip":...,"vipStr":...,"mask":...,
 //! "token":...,"bundle":1}, {"t":"peers",...}, {"t":"delta",...} and {"t":"pong","id":n} from the switch.
 //!
@@ -142,6 +142,12 @@
 //! `AttachOpts::on_claim` makes of it the owner the hosts are told of with each frame (`FrameCtx::owner`, a hash:
 //! nfsu2-claims), so the Online lobby and the free-roam hub let a claimed name be played by its keyphrase only.  The
 //! token itself is neither kept nor shown, nor ever sent to a peer.
+//!
+//! ## Blocks
+//!
+//! A hello may name the players its page blocks in free roam ("block": names as the game shows them over cars, at
+//! most 32, each cut to 24 printable characters: members.rs `block_names`): the switch hands them to the free-roam hub
+//! with the page's address (`Host::blocks`), which links the two with none of them.  They go with the connection.
 //!
 //! ## Test aids
 //!
