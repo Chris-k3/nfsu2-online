@@ -794,6 +794,7 @@ static void roam_frame(CPU *c){
 void roam_game_frame(CPU *c);                 /* roam_game.c: the multiplayer feature */
 void racehorn_frame(CPU *c);                  /* racehorn.c: horns in races between players */
 void racenet_frame(CPU *c);                   /* racenet.c: how the other players' cars came in, at a race's end */
+void racenet_prestep(CPU *c);                 /*   and the cars' own places back before the world's step */
 void mprace_frame(CPU *c);                    /* mprace.c: a multiplayer race's trip from free roam and back */
 void optslider_frame(CPU *c);                 /* optslider.c: our option sliders' copied parts (the pause menu's Horn Volume) */
 void drift_frame(CPU *c);                     /* drift.c: drift mode in free roam (F2) */
@@ -815,6 +816,8 @@ int roam_hook(CPU *c, uint32_t ip){
     /* Player::Update's HUD step (0x600590), behind its call of the HUD
      * update (0x4EC5A0), where the game places its own LAN race labels */
     case HOOK_SITE(0x006005e0): roam_game_hud(c); return 1;
+    /* the main loop's call of World::DoTimestep (0x609CE0), its only one */
+    case HOOK_SITE(0x00581407): racenet_prestep(c); return 1;
     }
     return 0;
 }

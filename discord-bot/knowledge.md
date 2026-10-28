@@ -176,8 +176,10 @@ performance and tuning, AI and traffic, the career's progression, races and rewa
   browser's bars. That copy has its own saves: cloud saves bring them over. Only controllers iOS knows (Xbox,
   PlayStation, Switch, MFi) reach the page.
 - Wheels: no force feedback in any browser; the clutch does nothing (the game has none).
-- Stuttering cars in races with other players: all updates go through the player who created the race, so the one with
-  the steadiest connection should create it, and keep the game's tab in front.
+- Stuttering cars in races with other players: the game's updates go through the player who created the race (the
+  other players' cars also come straight from their games, small corrections smoothed), so the one with the steadiest
+  connection should create it, and keep the game's tab in front. A connection that stops for a second or more still
+  makes cars jump when it comes back.
 - One game per browser: a second tab shows "Open elsewhere".
 
 ## Don't
