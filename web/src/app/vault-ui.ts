@@ -176,7 +176,8 @@ export class VaultPanel {
 
   /** a VaultSync on the link kept now (another tab may have changed it while this one only looked) */
   private makeSync() {
-    const s = new VaultSync({ files: o => this.files(o), restore: zip => this.restore(zip), load: () => this.load(), save: l => this.save(l) });
+    const s = new VaultSync({ files: o => this.files(o), restore: zip => this.restore(zip), load: () => this.load(), save: l => this.save(l),
+      log: line => this.d.log(line) });
     s.onChange = () => this.show();
     s.onTaken = r => {
       this.msg(() => t('Saves from your other browser came in ({when}).', { when: short(r.saved) }));
@@ -222,7 +223,7 @@ export class VaultPanel {
     const out: SaveFile[] = [], want = o.was ? keptBy(o.was) : keeps;
     for (const f of await listFiles(this.d.saveDir))
       if (want(f.path)) out.push({ path: f.path, data: await readBytes(this.d.saveDir, f.path), mtime: f.mtime });
-    return o.was ? out : kept(out);
+    return kept(out, o.was);
   }
 
   /** a version of the keyphrase's (its zip) in place of the saves here, when no game uses them */

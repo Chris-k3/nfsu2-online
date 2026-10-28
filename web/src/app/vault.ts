@@ -7,13 +7,15 @@
 // - PBKDF2-SHA-256 of it (100,000 rounds, a fixed salt: the keyphrase is all there is) gives 64 bytes: an AES-GCM key
 //   and a token.  The server keeps the keyphrase under the token's SHA-256 and never sees the key;
 // - what is sent (kept()): the save folder but the F12 screenshots, the DVD and magazine covers, the game's graphics
-//   options (registry.txt), a test's input script and the device's own lines of settings.ini, as a stored zip
-//   (zip.ts), deflated, then sealed: a version byte (1), a 12-byte IV, the AES-256-GCM ciphertext and its tag.  A
-//   player's folder is 6-14 KB so; the server takes 256 KB.  A cover is a picture of 1 MB that packs into about 500 KB
-//   (2026-10-25: since the covers are read back from the GPU, no longer all zeros), so the covers stay in the browser
-//   that took them: taking another browser's version keeps the ones of its profiles here.  The graphics options and
-//   settings.ini's resolution scale, frame rate, controller and the like (settings.ts KeyDef.device) are the device's,
-//   not the player's: a phone's would slow a PC down and a PC's a phone, so each browser keeps its own of those too;
+//   options (registry.txt), the LAN server's file (gamefile.bin), a test's input script and the device's own lines of
+//   settings.ini, as a stored zip (zip.ts), deflated, then sealed: a version byte (1), a 12-byte IV, the AES-256-GCM
+//   ciphertext and its tag.  A player's folder is 6-14 KB so; the server takes 256 KB.  A cover is a picture of 1 MB
+//   that packs into about 500 KB (2026-10-25: since the covers are read back from the GPU, no longer all zeros), so the
+//   covers stay in the browser that took them: taking another browser's version keeps the ones of its profiles here.
+//   The graphics options and settings.ini's resolution scale, frame rate, controller and the like (settings.ts
+//   KeyDef.device) are the device's, not the player's: a phone's would slow a PC down and a PC's a phone, so each
+//   browser keeps its own of those too, and of the record of the LAN games and free-roam races it hosted (2026-10-28:
+//   on the server, 151 keyphrases had versions of 33-235 KB, where a profile packs into 2-4 KB);
 // - VaultSync: this browser's link (the keyphrase, the version it has, a hash of the files it sent or took) and the
 //   two ways of syncing.  Sending: after the game saves and when it closes, if the files changed since; taking: when
 //   the page opens and before Play, if another browser sent a newer version and the files here did not change.  Both
@@ -107,18 +109,26 @@ export function isCover(path: string): boolean {
   const p = path.split('/');
   return p.length >= 3 && p[0] === PROFILES_DIR && !!coverOf(p[1]);
 }
-/** A file of the save folder a keyphrase keeps: all but the F12 screenshots, the covers, the game's graphics options
- *  and a test's input script. */
-export const keeps = (path: string) => !isScreenshot(path) && !isCover(path) && path !== 'registry.txt' && path !== 'autotest-script.txt';
-/** A file a keyphrase kept, settings.ini whole, when a link of version v was made (Link.v; none: 1): 1, all but the
- *  screenshots and a test's input script; 2 (2026-10-25), the covers left out too.  The version now (LINK_V) is kept(). */
-export const keptBy = (v: number) => (path: string) => !isScreenshot(path) && path !== 'autotest-script.txt' && (v < 2 || !isCover(path));
+/** The LAN server's file (server.dll, when this browser hosts a LAN game or a free-roam race): its ranking lists and
+ *  the races it held, read back at its next start and written whole at its end. */
+export const GAMEFILE = 'gamefile.bin';
+/** the link's version now: its hash counts kept() (Link.v) */
+const LINK_V = 4;
+/** A file a keyphrase keeps, settings.ini whole, under a link of version v (Link.v; none: 1): 1, all but the
+ *  screenshots and a test's input script; 2 (2026-10-25), the covers left out too; 3 (2026-10-25), the game's graphics
+ *  options (registry.txt) too, and settings.ini without the device's own settings (kept()); 4 (2026-10-28), the LAN
+ *  server's file too (GAMEFILE: the host's, not the career's). */
+export const keptBy = (v: number) => (path: string) => !isScreenshot(path) && path !== 'autotest-script.txt' &&
+  (v < 2 || !isCover(path)) && (v < 3 || path !== 'registry.txt') && (v < 4 || path !== GAMEFILE);
+/** A file of the save folder a keyphrase keeps: all but the F12 screenshots, the covers, the game's graphics options,
+ *  the LAN server's file and a test's input script. */
+export const keeps = keptBy(LINK_V);
 
-/** The files of the save folder as a keyphrase keeps them: keeps()'s, settings.ini without the device's own settings
- *  (settings.ts withoutDevice). */
-export function kept<F extends { path: string; data: Uint8Array }>(files: F[]): F[] {
-  return files.filter(f => keeps(f.path)).map(f => {
-    if (f.path !== 'settings.ini') return f;
+/** The files of the save folder as a keyphrase keeps them (as a link of version v counted them): keptBy(v)'s, from
+ *  version 3 settings.ini without the device's own settings (settings.ts withoutDevice). */
+export function kept<F extends { path: string; data: Uint8Array }>(files: F[], v = LINK_V): F[] {
+  return files.filter(f => keptBy(v)(f.path)).map(f => {
+    if (v < 3 || f.path !== 'settings.ini') return f;
     const text = dec.decode(f.data), own = withoutDevice(text);
     return own === text ? f : { ...f, data: enc.encode(own) };
   });
@@ -265,7 +275,7 @@ export interface Link {
   profiles: number;
   /** the server did not have the keyphrase at the last sync: nothing is sent by itself */
   gone?: boolean;
-  /** what hash counts: LINK_V, kept(); an older one, keptBy(v) (none: 1; VaultSync.upgraded) */
+  /** what hash counts: LINK_V, kept(); an older one, kept(files, v) (none: 1; VaultSync.upgraded) */
   v?: number;
   /** the hashes of files sent under this link whose answer never came (a timeout, a frozen or closed page): a version
    *  of the server's with one of them is this browser's own, not another's (none: every send was answered) */
@@ -278,7 +288,7 @@ export interface Side { saved: number | null; profiles: { name: string; money: n
 
 export interface VaultDeps {
   /** the files of the save folder as a keyphrase keeps them (kept()); was: as a link of that version counted them
-   *  (keptBy(was), the files as they are) */
+   *  (kept(files, was)) */
   files(o?: { was?: number }): Promise<SaveFile[]>;
   /** a keyphrase's version in place of the saves here (its zip): throws when it may not be written now */
   restore(zip: Uint8Array): Promise<void>;
@@ -286,6 +296,8 @@ export interface VaultDeps {
   load(): Link | null;
   save(l: Link | null): void;
   fetch?: Fetch;
+  /** a line for the game's log */
+  log?(s: string): void;
 }
 
 export type SyncState =
@@ -313,8 +325,6 @@ export function failureOf(e: unknown): { msg: string; why: { t: string; v?: Vars
     : of(String(e instanceof Error ? e.message : e), 'VAULT-ERROR');
 }
 
-/** the link's version now: its hash counts kept() (Link.v) */
-const LINK_V = 3;
 /** the unanswered sends a link remembers */
 const SENT_MAX = 8;
 
@@ -363,7 +373,14 @@ export class VaultSync {
 
   private async boxOf(k: Keys, files: SaveFile[]): Promise<Uint8Array> {
     const box = await seal(k.key, await pack(files));
-    if (box.length > MAX_BOX) throw new VaultError(N('these saves pack into {kb} KB, more than the server takes ({max} KB)'), 'VAULT-TOO-LARGE', { kb: Math.ceil(box.length / 1024), max: MAX_BOX >> 10 });
+    if (box.length > MAX_BOX) {
+      // what takes the room, for the log: each file packed on its own, the largest first
+      const sized = await Promise.all(files.map(async f => ({ path: f.path, kb: (await pack([f])).length / 1024 })));
+      sized.sort((a, b) => b.kb - a.kb);
+      this.d.log?.(`[app] keyphrase: the saves pack into ${Math.ceil(box.length / 1024)} KB (${files.length} files, ` +
+        `${profilesIn(files).length} profiles); the largest packed: ${sized.slice(0, 5).map(s => `${s.path} ${s.kb.toFixed(1)} KB`).join(', ')}`);
+      throw new VaultError(N('these saves pack into {kb} KB, more than the server takes ({max} KB)'), 'VAULT-TOO-LARGE', { kb: Math.ceil(box.length / 1024), max: MAX_BOX >> 10 });
+    }
     return box;
   }
 
@@ -373,7 +390,7 @@ export class VaultSync {
   }
 
   /** The link, its hash of kept().  An older one counted more (2026-10-25: the covers, the graphics options and the
-   *  device's settings stayed out): when the files here are still the ones it counted, it takes their hash as kept now
+   *  device's settings stayed out; 2026-10-28: the LAN server's file): when the files here are still the ones it counted, it takes their hash as kept now
    *  (hash), so they still count as unchanged since; when not, they changed. */
   private async upgraded(hash: string): Promise<Link> {
     const l = this.link!;

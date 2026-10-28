@@ -246,7 +246,8 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
     this browser (a server gone back), replace yours.
   - The profiles and `settings.ini` go. What belongs to the device stays in each browser: F12 screenshots, DVD and
     magazine covers (a cover is a picture of 1 MB: another browser's crib lists it, but the game says it cannot load
-    it), the game's graphics options, and in Settings full screen, the resolution scale, render size and pixel limit,
+    it), the game's graphics options, the record of the LAN games and free-roam races this browser hosted
+    (`gamefile.bin`), and in Settings full screen, the resolution scale, render size and pixel limit,
     Menus and HUD, the frame rate and its counter, the output latency, the controller's settings and how many
     players' cars free roam shows. A phone keeps its own and a PC its own.
   - The server keeps the copy of an earlier day too: "Go back to ..." brings it back when a day went wrong.
