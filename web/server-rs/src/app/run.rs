@@ -341,7 +341,9 @@ pub async fn run(o: Options, cores: usize) {
         });
     }
 
-    // SIGTERM, SIGINT: the switch saves its addresses, the hosts stop, then the process ends
+    // SIGTERM, SIGINT: the switch saves its addresses, the hosts stop, the control socket's file goes, then the process
+    // ends
+    let control_up = control.is_some();
     {
         let (lan, trace) = (lan.clone(), trace.clone());
         let mut term = signal(SignalKind::terminate()).unwrap_or_else(|e| die(&format!("SIGTERM: {e}")));
@@ -355,6 +357,9 @@ pub async fn run(o: Options, cores: usize) {
                 lan.stop();
                 if let Some(t) = &trace {
                     t.close();
+                }
+                if let Some(c) = &control {
+                    c.remove();
                 }
                 for s in &servers {
                     s.abort();
@@ -466,7 +471,7 @@ pub async fn run(o: Options, cores: usize) {
         app.kept.as_ref().map_or_else(|| "compressed as they are sent (NFSU2_COMPRESS_THREADS=0)".into(), |k| k.summary())
     ));
     let bans = app.bans.list(nfsu2_util::now_ms()).len();
-    lines.push(if control {
+    lines.push(if control_up {
         format!("  bans      : {bans}; nfsu2-server ctl who, kick, ban, unban, bans (through {})", paths::join(&o.state, super::control::SOCKET))
     } else {
         format!("  bans      : {bans}; no kick or ban (the control socket could not be made: above)")

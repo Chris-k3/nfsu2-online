@@ -2,7 +2,7 @@
 //! web/test/module.test.mjs makes one: its start-up lines, /players counting a /lan client and an Online login, what
 //! the console says of them, and SIGTERM (exit code 0, the addresses saved); its state folder over restarts; other
 //! options; the lobby trace; players who leave nothing behind; a page's first messages and its replaced connection;
-//! kicks and bans through `nfsu2-server ctl`.
+//! kicks and bans through `nfsu2-server ctl`, and the control socket's file.
 //!   cargo test --test binary
 
 mod common;
@@ -826,4 +826,39 @@ async fn kicks_and_bans_through_the_control_socket() {
     assert!(lines.iter().any(|l| l == "[ban] turned away a client of ban #1 \"Ann\" (its page)"), "{lines:?}");
     assert!(lines.iter().any(|l| l == "[ban] lifted #1 \"Ann\""), "{lines:?}");
     assert!(!lines.iter().any(|l| l.contains("192.0.2")), "no client address in the log: {lines:?}");
+}
+
+// The control socket's file (app/control.rs): a stale one, as a server that died without its stop leaves it, is
+// replaced at the start; a SIGTERM takes it away.  Of two servers on one state folder (the next one started before
+// the one before stops), the later one's socket stays when the earlier one stops.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_control_socket_goes_with_its_server() {
+    use std::os::unix::fs::FileTypeExt;
+    let tmp = tempfile::tempdir().unwrap();
+    let (data, wasm) = game_folder(tmp.path());
+    let state = tmp.path().join("state");
+    let sock = state.join("control.sock");
+    let socket_there = || std::fs::symlink_metadata(&sock).is_ok_and(|m| m.file_type().is_socket());
+    // a socket nobody listens on any more
+    std::fs::create_dir_all(&state).unwrap();
+    drop(std::os::unix::net::UnixListener::bind(&sock).unwrap());
+    assert!(socket_there());
+    let port = free_port();
+    let mut srv = Server::spawn(command(&data, &wasm, port, &state, &[]), port);
+    srv.ready().await;
+    assert_eq!(ctl(&state, &["bans"]), (0, "no bans".into()), "the stale socket replaced: {:?}", srv.lines());
+    assert_eq!(srv.stop().await, Some(0));
+    assert!(std::fs::symlink_metadata(&sock).is_err(), "SIGTERM: no control.sock left behind");
+    assert_eq!(ctl(&state, &["bans"]).0, 1, "nobody there");
+
+    let (pa, pb) = (free_port(), free_port());
+    let mut a = Server::spawn(command(&data, &wasm, pa, &state, &[]), pa);
+    a.ready().await;
+    let mut b = Server::spawn(command(&data, &wasm, pb, &state, &[]), pb);
+    b.ready().await;
+    assert_eq!(a.stop().await, Some(0));
+    assert!(socket_there(), "the later server's socket stays");
+    assert_eq!(ctl(&state, &["bans"]), (0, "no bans".into()), "and answers");
+    assert_eq!(b.stop().await, Some(0));
+    assert!(std::fs::symlink_metadata(&sock).is_err(), "gone with the later server");
 }
