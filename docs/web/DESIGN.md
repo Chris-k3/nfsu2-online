@@ -142,9 +142,12 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
   written straight into wasm memory. Mounts:
   - `/data`: the install folder. Manifest from the server, case-insensitive lookup, 1 MiB blocks, memory LRU,
     persistent OPFS block cache (`web/src/host/datacache.ts`). The memory holds 64 MB while OPFS keeps the blocks (a
-    block reads from OPFS in 0.14 ms in WebKit), 768 MB without it. At most 64 cache files are open at once: each
-    holds two sync access handles, and WebKit gives a page 251 in all (then "Invalid platform file handle", for the
-    save folder's files too); kept open for good, a long free roam used them up in 13 min. Blocks come from the
+    block reads from OPFS in 0.14 ms in WebKit), 768 MB without it. At most 64 cache files are open at once (512 in
+    Chrome and Firefox on Windows): each holds two sync access handles, and WebKit gives a page 251 in all (then
+    "Invalid platform file handle", for the save folder's files too); kept open for good, a long free roam used them
+    up in 13 min. A file opened again is not cheap where there is no such limit: ~25 ms to open its handles, and
+    closing them holds up the worker (~8 ms in Firefox, ~2 in Chrome on an NVMe disk); a free-roam crowd's cars
+    closed and opened some 230 files a minute at 64. Blocks come from the
     server's `/data-blocks/` (named by the manifest: `/data-blocks/v2/`): runs of up to 8 blocks as one answer,
     compressed with zstd, br or gzip as Content-Encoding, which the browser undoes itself; a run whose first 64 KB
     does not compress goes as it is. One block (all the page asks for) goes to a client that takes br as the server
@@ -257,7 +260,8 @@ renderer, AudioWorklet sound, keyboard, mouse and pad input, and free roam over 
   cores, touch, Home Screen app or tab, a 30 Hz display before Play), and a line a minute each from the renderer
   (`[gpu] 60 s to t=…`: frames, rAF rate, frames drawn over, the GPU's time to finish a frame p50/p90/max, frames
   that waited for the GPU, the textures' memory on the GPU) and, while blocks come from the server, from the I/O worker
-  (`[data] 60 s: …`: blocks, MB, average and slowest fetch, tries again, reads from the cache, cache files open). How
+  (`[data] 60 s: …`: blocks, MB, average and slowest fetch, tries again, reads from the cache, cache files open,
+  opened, opened again and closed, with their times; also while files are opened again with no block from the server). How
   long the page was hidden and an AudioContext interruption lasted are in the log too. Safari stops a page whose memory
   it needs without any event, and the log went with it: `web/src/app/lastgame.ts` keeps a copy of the running game's log
   (`LogRing.snapshot`, 160 KB at most: the opening lines, the game's session lines, the newest lines) in localStorage
