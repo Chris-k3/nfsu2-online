@@ -503,6 +503,12 @@ Good to know:
   `i`), gaps and repeated letters read as the word they spell; a number (a year, two digits at the end) is a number
   (`Hakan1995` and `Dani99` are names). The same goes for Nazi names (and `1488` in a name), hate aimed at a group,
   terror and sexual violence. Swear words are fine.
+- **Chat in the Lobby and in a game room** is read the same way, word by word: a line with a slur in it reaches no
+  one but you, and after three of them in ten minutes you cannot chat for ten minutes. Swear words are fine. A player
+  you block in EA Messenger is not heard there either.
+- **Submit Complaint** (choose a player in a game room) tells the server's operator about that player, with their
+  last few chat lines (of the last ten minutes) that you could see; the operator decides what happens. Without a
+  complaint no chat is written down anywhere.
 - **Your name is yours while you are online**, and while you race. Someone else can use it when you are not; the
   rankings and your EA Messenger lists follow the name, so whoever plays under it while you are away sees your
   friends, the players you block, your friend requests and the messages waiting for you, and can change them. If
@@ -515,8 +521,8 @@ Good to know:
   sends it to the server only lightly scrambled (the server never reads it).
 - **Kept on the server:** only race results per name (Rankings) and your EA Messenger lists: your friends and the
   players you block (names), the friend requests you sent until they are answered (30 days at most), and your friends'
-  messages that came while you were away until you are back (7 days at most). Never your password: the server does
-  not read it.
+  messages that came while you were away until you are back (7 days at most). Of chat, only your last five lines, for
+  ten minutes and in memory, for a complaint. Never your password: the server does not read it.
 - **Game passwords:** the game asks for the password of a game created with one, and only the same password joins
   it. The server keeps no copy of it, only a check value for that game while it is open, and never shows or logs it.
 - **Others see** your name, your game, your chat and your results, never your real address.

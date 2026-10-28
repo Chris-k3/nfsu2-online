@@ -359,8 +359,10 @@ fn onl6_blocked_list_follows_the_name() {
     let b2 = w.buddy(g2, &k2);
     w.send(b2, "RGET", fields![("LIST", "I"), ("PRES", "Y"), ("PEND", "Y"), ("ID", 2)]);
     assert_eq!([w.c(b2).l("RGET").g("SIZE"), w.c(b2).l("ROST").g("USER"), w.c(b2).l("ROST").g("ID")], ["1", "Mallory", "2"]);
+    assert!(w.core.buddies.blocked("mallory"), "the lobby's chat knows Mallory is blocked");
     // unblocked: gone from the file
     w.send(b2, "RDEL", fields![("LIST", "I"), ("USER", "Mallory")]);
+    assert!(!w.core.buddies.blocked("mallory"));
     w.core.buddy_save();
     assert!(!std::fs::read_to_string(dir.join("buddies.json")).unwrap().contains(r#""I""#));
 }
