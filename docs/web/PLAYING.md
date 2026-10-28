@@ -243,6 +243,12 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
   speedometer shows. Until you change it, it follows Speedometer Units, as in the original game (kW with km/h).
   Torque still follows the speedometer (Nm with km/h, ft-lbs with mph), and the dyno results' 0-60 and 0-100 are
   mph times either way.
+- **Exposure and White Level:** for eyes that a bright picture tires. The game's Options, Display (also the pause
+  menu's) has two sliders after Level Of Detail. Exposure makes the whole picture darker or brighter, from half to
+  twice as bright (the middle, the default, is the game's own). White Level is the brightest the picture gets, from
+  40 % to 100 % (the default): only the brightest parts come down, so dark streets stay as they are. Both change the
+  picture as you move them, the menus and the HUD too, and stay with the game's options on this device (backups
+  carry them, cloud saves do not). F12 screenshots keep the game's own colours.
 - **Two tabs:** one browser runs one game at a time. A second tab shows "Open elsewhere" and its Settings are
   read only. It takes over when the first tab closes.
 

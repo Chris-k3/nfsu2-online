@@ -61,6 +61,9 @@ const TABLE = [
   // the Horn Volume slider (runtime/hornmenu.c): Options > Audio, and the pause menu's, whose bar is made of copies
   ['hornvolume', 'options_horn.txt', '[horn] volume 85 %', '', 400],
   ['hornpause', 'pause_horn.txt', 'parts as SLIDER_BASE_8 SLIDER_KNOB_8 SLIDER_HANDLE_8 SLIDER_BEG_8 SLIDER_END_8', '', 400],
+  // Exposure and White Level (runtime/tonemenu.c): Options > Display after Level Of Detail, and the pause menu's
+  ['tone', 'options_tone.txt', '[tone] white level 70 %', '', 400],
+  ['tonepause', 'pause_tone.txt', '[tone] white level 90 %', '', 400],
   // Power Units (runtime/powerunits.c): a row of Options > Gameplay after Speedometer Units
   ['powerunits', 'options_units.txt', '[units] power in bhp', '', 400],
   // the European game's Corsa and 106 (runtime/regional.c): Quick Race in the Corsa
