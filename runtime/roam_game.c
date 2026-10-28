@@ -5179,8 +5179,7 @@ void roam_game_frame(CPU *c){
     /* the player's name: the profile's, unless NFSU2_ROAM_NAME */
     if (!O.name[0] && ok(G_PROFILE_NAME, 16) && MR8(G_PROFILE_NAME) >= 0x20){
         char pn[17]; cstr(G_PROFILE_NAME, pn, sizeof pn);
-        int language_no_profile(const char *name);           /* runtime/language.c: in the game's language */
-        if (pn[0] && !language_no_profile(pn)){
+        if (pn[0] && !rh_no_profile(pn)){
             rc_name_clean(O.name, pn, 16);
             roam_plat_lock(); snprintf(g_s.conf.name, sizeof g_s.conf.name, "%s", O.name); roam_plat_unlock();
             rlog("[roam] my name: %s (the profile's; NFSU2_ROAM_NAME changes it)\n", O.name);
