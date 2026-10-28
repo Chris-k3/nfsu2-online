@@ -413,6 +413,7 @@
   "all, or a list of world, signs, cars, garage, sky, effects, frontend, hud, other": "all，或由 world、signs、cars、garage、sky、effects、frontend、hud、other 組成的清單",
   "on, off or a folder": "on、off 或資料夾",
   "a list of crew names (at most 24 characters each, separated by commas)": "以逗號分隔的車隊名稱清單（每個最多 24 個字元）",
+  "a list of up to 32 player names, separated by commas": "以逗號分隔的玩家名稱清單（最多 32 個）",
   "a list of up to 4 colours of 6 hex digits (rrggbb), separated by commas": "以逗號分隔、最多 4 個的 6 位十六進位顏色（rrggbb）",
   "\"{value}\" is not on/off": "「{value}」不是 on/off",
   "\"{value}\" is not one of {vals}": "「{value}」不是 {vals} 其中之一",

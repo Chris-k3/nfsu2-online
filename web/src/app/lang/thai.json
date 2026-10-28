@@ -413,6 +413,7 @@
   "all, or a list of world, signs, cars, garage, sky, effects, frontend, hud, other": "all หรือรายการของ world, signs, cars, garage, sky, effects, frontend, hud, other",
   "on, off or a folder": "on, off หรือโฟลเดอร์",
   "a list of crew names (at most 24 characters each, separated by commas)": "รายชื่อทีมที่คั่นด้วยจุลภาค (ชื่อละไม่เกิน 24 ตัวอักษร)",
+  "a list of up to 32 player names, separated by commas": "รายชื่อผู้เล่นที่คั่นด้วยจุลภาค (ไม่เกิน 32 ชื่อ)",
   "a list of up to 4 colours of 6 hex digits (rrggbb), separated by commas": "รายการสีเลขฐานสิบหก 6 หลัก (rrggbb) ไม่เกิน 4 สี คั่นด้วยจุลภาค",
   "\"{value}\" is not on/off": "“{value}” ไม่ใช่ on/off",
   "\"{value}\" is not one of {vals}": "“{value}” ไม่ใช่ค่าใดค่าหนึ่งใน {vals}",

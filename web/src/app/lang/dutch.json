@@ -458,6 +458,7 @@
   "all, or a list of world, signs, cars, garage, sky, effects, frontend, hud, other": "all of een lijst van world, signs, cars, garage, sky, effects, frontend, hud, other",
   "on, off or a folder": "on, off of een map",
   "a list of crew names (at most 24 characters each, separated by commas)": "lijst van crewnamen (elk maximaal 24 tekens, gescheiden door komma's)",
+  "a list of up to 32 player names, separated by commas": "lijst van maximaal 32 spelersnamen, gescheiden door komma's",
   "a list of up to 4 colours of 6 hex digits (rrggbb), separated by commas": "lijst van maximaal 4 kleuren van 6 hexcijfers (rrggbb), gescheiden door komma's",
   "\"{value}\" is not on/off": "“{value}” is niet on/off",
   "\"{value}\" is not one of {vals}": "“{value}” is niet een van {vals}",

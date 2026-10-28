@@ -488,6 +488,7 @@
   "all, or a list of world, signs, cars, garage, sky, effects, frontend, hud, other": "all lub lista z world, signs, cars, garage, sky, effects, frontend, hud, other",
   "on, off or a folder": "on, off lub folder",
   "a list of crew names (at most 24 characters each, separated by commas)": "lista nazw ekip (każda do 24 znaków, oddzielone przecinkami)",
+  "a list of up to 32 player names, separated by commas": "lista do 32 nazw graczy, oddzielonych przecinkami",
   "a list of up to 4 colours of 6 hex digits (rrggbb), separated by commas": "lista do 4 kolorów po 6 cyfr szesnastkowych (rrggbb), oddzielonych przecinkami",
   "\"{value}\" is not on/off": "„{value}” to nie on/off",
   "\"{value}\" is not one of {vals}": "„{value}” to nie jedna z wartości {vals}",

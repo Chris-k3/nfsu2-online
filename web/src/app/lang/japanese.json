@@ -413,6 +413,7 @@
   "all, or a list of world, signs, cars, garage, sky, effects, frontend, hud, other": "all、または world、signs、cars、garage、sky、effects、frontend、hud、other のリスト",
   "on, off or a folder": "on、off、またはフォルダー",
   "a list of crew names (at most 24 characters each, separated by commas)": "コンマ区切りのクルー名のリスト（各24文字以内）",
+  "a list of up to 32 player names, separated by commas": "コンマ区切りのプレイヤー名のリスト（最大32人）",
   "a list of up to 4 colours of 6 hex digits (rrggbb), separated by commas": "コンマ区切りの6桁の16進数の色（rrggbb、最大4つ）",
   "\"{value}\" is not on/off": "「{value}」はon/offではありません",
   "\"{value}\" is not one of {vals}": "「{value}」は{vals}のいずれでもありません",

@@ -413,6 +413,7 @@
   "all, or a list of world, signs, cars, garage, sky, effects, frontend, hud, other": "all 또는 world, signs, cars, garage, sky, effects, frontend, hud, other 목록",
   "on, off or a folder": "on, off 또는 폴더",
   "a list of crew names (at most 24 characters each, separated by commas)": "쉼표로 구분한 크루 이름 목록(각 24자 이하)",
+  "a list of up to 32 player names, separated by commas": "쉼표로 구분한 플레이어 이름 목록(최대 32개)",
   "a list of up to 4 colours of 6 hex digits (rrggbb), separated by commas": "쉼표로 구분한 6자리 16진수 색(rrggbb) 최대 4개",
   "\"{value}\" is not on/off": "'{value}': on/off가 아님",
   "\"{value}\" is not one of {vals}": "'{value}': {vals} 중 하나가 아님",
