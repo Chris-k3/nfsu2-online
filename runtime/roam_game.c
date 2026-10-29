@@ -5479,6 +5479,17 @@ void roam_game_hud(CPU *c){
     g_cost_hud += rh_ns() - t0;
 }
 
+/* photo mode (photo.c): whether friends' names can show here, and the names over their cars placed for photo mode's
+ * camera (its frame of the front end, which draws them alone): the FE objects shown */
+int roam_game_names_here(void){ return O.on && g_net_ok && O.labels && g_in_roam && MR8(G_SHOW_NAMES); }
+int roam_game_names(CPU *c, uint32_t *obj, int max){
+    if (!roam_game_names_here()) return 0;
+    tags_update(c);
+    int n = 0;
+    for (int i = 0; i < TAG_N && n < max; i++) if (g_tag.shown[i] && g_tag.obj[i]) obj[n++] = g_tag.obj[i];
+    return n;
+}
+
 /* ---- report at exit ----------------------------------------------------------------------------- */
 void roam_game_report(void){
     if (!O.on || !g_net_ok) return;

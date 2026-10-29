@@ -765,6 +765,8 @@ html:has(> body > .stage:not([hidden])) { overflow: hidden; }
 .ph-mode button.on { background: var(--lime-fill); color: var(--lime); }
 .ph-slider { display: flex; flex-direction: column; gap: 2px; color: var(--muted); }
 .ph-slider input { width: 100%; margin: 0; accent-color: var(--lime); }
+.ph-check { display: flex; align-items: center; gap: 8px; color: var(--muted); cursor: pointer; }
+.ph-check input { margin: 0; accent-color: var(--lime); }
 .ph-buttons { display: flex; flex-direction: column; gap: 8px; }
 .ph-buttons button {
   padding: 6px 16px; border: 1px solid var(--edge); border-radius: 6px; background: var(--field);

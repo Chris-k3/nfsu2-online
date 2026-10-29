@@ -125,15 +125,16 @@ The start page shows these keys under **Controls**, and F9, Controls shows them 
   turns it off and gives your camera back. It is off in races and outruns and comes back in free roam after them.
 - **Photo mode (F12, or Photo Mode in the pause menu):** while you drive (a race, free roam, an outrun) the world
   stands still, the HUD goes and the camera comes loose from the car. Orbit (the first) turns around a point at your
-  car, which you can move up to 10 m from it; Free flies up to 20 m from the car. Drag with the mouse (or the arrow
-  keys) to turn, W A S D to move, Q and E for down and up, the wheel to come closer or go farther, Z and X to zoom,
-  C and V to tilt, Shift to go faster, Tab for orbit or free, R to start over, H to hide the panel. F12, Enter or
-  Space takes the photo, Esc leaves. On a controller: the right stick turns, the left stick moves, LB and RB are down
-  and up, the triggers closer and farther, the D-pad zooms and tilts, Y is orbit or free, X starts over, A takes the
-  photo, B leaves, View hides the panel. On a touch screen: drag to turn, two fingers to move, pinch for closer or
-  farther, the panel's buttons for the rest. The sound effects pause, the music plays on. In free roam with other
-  players your world stands still for you only: they see you as paused and drive through you. Not in races over the
-  network (Online, LAN, free roam's races with other players). Nothing keeps the camera out of walls.
+  car, which you can move up to 25 m from it, from up to 30 m away; Free flies up to 50 m from the car. Drag with the
+  mouse (or the arrow keys) to turn, W A S D to move, Q and E for down and up, the wheel to come closer or go farther,
+  Z and X to zoom, C and V to tilt, Shift to go faster, Tab for orbit or free, R to start over, N for the names over
+  other players' cars (free roam only; off at first), H to hide the panel. F12, Enter or Space takes the photo, Esc
+  leaves. On a controller: the right stick turns, the left stick moves, LB and RB are down and up, the triggers closer
+  and farther, the D-pad zooms and tilts, Y is orbit or free, X starts over, a click of the right stick is the names,
+  A takes the photo, B leaves, View hides the panel. On a touch screen: drag to turn, two fingers to move, pinch for
+  closer or farther, the panel's buttons for the rest. The sound effects pause, the music plays on. In free roam with
+  other players your world stands still for you only: they see you as paused and drive through you. Not in races over
+  the network (Online, LAN, free roam's races with other players). Nothing keeps the camera out of walls.
 - **Mouse:** works in the menus; in the garage, drag with the middle button (the wheel) held to turn the car, as in
   the PC game. On the ECU and Turbo tuning graphs the wheel moves the dot of the column under the pointer, as in the
   PC game, and so does a drag up or down on that column. **Touch:** a tap is a click there; drag two fingers to turn
