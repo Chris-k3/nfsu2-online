@@ -1054,5 +1054,22 @@
   "Not claimed: anyone can play as {name}. Claim makes you a passphrase, 8 words that hold the name and also keep your cloud saves.": "등록되지 않음: 누구나 {name} 이름으로 플레이할 수 있어요. 등록하면 암호 문구가 만들어져요. 이름을 유지하고 클라우드 저장도 보관하는 단어 8개예요.",
   "{name} is yours, held by this passphrase. Cloud saves are on too.": "{name} 이름은 내 것이에요. 이 암호 문구가 등록을 유지해요. 클라우드 저장도 켜졌어요.",
   "Keep it safe: it is the only way to play as {name} again, in another browser or here after this browser's data is cleared, and the only way back to your saves.": "안전하게 보관하세요. 다른 브라우저에서, 또는 이 브라우저의 데이터가 지워진 뒤 여기서 다시 {name} 이름으로 플레이할 수 있는 유일한 방법이자, 저장 데이터로 돌아올 수 있는 유일한 방법이에요.",
-  "To use it in another browser, enter it under Cloud saves on the start page.": "다른 브라우저에서 쓰려면 시작 페이지의 '클라우드 저장'에서 이 암호 문구를 입력하세요."
+  "To use it in another browser, enter it under Cloud saves on the start page.": "다른 브라우저에서 쓰려면 시작 페이지의 '클라우드 저장'에서 이 암호 문구를 입력하세요.",
+  "Centre the sticks, pull the throttle all the way down, and put the switches where they sit while you drive.": "스틱을 가운데로 맞추고 스로틀을 끝까지 내린 뒤, 스위치를 주행할 때의 위치에 두세요.",
+  "Push the stick that steers all the way right, and hold it there.": "조향에 쓸 스틱을 오른쪽 끝까지 밀고 그대로 유지하세요.",
+  "Let go of it. Push the throttle stick all the way up (or another stick, for the gas) and hold it.": "스틱에서 손을 떼세요. 스로틀 스틱(또는 가속에 쓸 다른 스틱)을 위쪽 끝까지 밀고 그대로 유지하세요.",
+  "Pull the throttle back down. Pull the right stick all the way back (or another stick, for the brake) and hold it.": "스로틀을 다시 내리세요. 오른쪽 스틱(또는 브레이크에 쓸 다른 스틱)을 아래쪽 끝까지 당기고 그대로 유지하세요.",
+  "Flip the switch or hold the button for nitrous. None? Skip.": "니트로용 스위치를 젖히거나 버튼을 길게 누르세요. 없으면 건너뛰기.",
+  "Flip the switch or hold the button for the handbrake. None? Skip.": "핸드브레이크용 스위치를 젖히거나 버튼을 길게 누르세요. 없으면 건너뛰기.",
+  "Flip the switch or hold the button to respawn the car. None? Skip.": "리스폰용 스위치를 젖히거나 버튼을 길게 누르세요. 없으면 건너뛰기.",
+  "Done: the radio is set up in this browser. Put its switches back where they sit while you drive.": "완료: 이 브라우저에서 조종기 설정을 마쳤어요. 스위치를 주행할 때의 위치로 되돌리세요.",
+  "Sticks": "스틱",
+  "Switches you set up": "설정한 스위치",
+  "Nitrous, handbrake and respawn": "니트로, 핸드브레이크, 리스폰",
+  "Everything else": "나머지 전부",
+  "With a controller connected too, the game uses whichever you last used: a button, or the radio's sticks or switches.": "컨트롤러도 연결되어 있으면 마지막으로 조작한 쪽(버튼, 또는 조종기의 스틱이나 스위치)을 게임이 사용해요.",
+  "Skip": "건너뛰기",
+  "Steering, gas and brake are a guess, and the switches do nothing until you set it up.": "조향, 가속, 브레이크는 추정값이고, 조종기를 설정하기 전에는 스위치가 아무 일도 하지 않아요.",
+  "Set up the radio": "조종기 설정",
+  "The radio went away before its set-up was done.": "설정이 끝나기 전에 조종기 연결이 끊어졌어요."
 }

@@ -1123,5 +1123,22 @@
   "Not claimed: anyone can play as {name}. Claim makes you a passphrase, 8 words that hold the name and also keep your cloud saves.": "Ikke reserveret: alle kan spille som {name}. Med Reservér får du en adgangssætning: 8 ord, der holder navnet for dig og også bevarer dine gemte spil i skyen.",
   "{name} is yours, held by this passphrase. Cloud saves are on too.": "{name} er dit, og denne adgangssætning holder det for dig. Gemning i skyen er også slået til.",
   "Keep it safe: it is the only way to play as {name} again, in another browser or here after this browser's data is cleared, and the only way back to your saves.": "Opbevar den sikkert: den er den eneste måde at spille som {name} igen på, i en anden browser eller her, når denne browsers data er ryddet, og den eneste vej tilbage til dine gemte spil.",
-  "To use it in another browser, enter it under Cloud saves on the start page.": "For at bruge adgangssætningen i en anden browser skal du indtaste den der under Gemte spil i skyen på startsiden."
+  "To use it in another browser, enter it under Cloud saves on the start page.": "For at bruge adgangssætningen i en anden browser skal du indtaste den der under Gemte spil i skyen på startsiden.",
+  "Centre the sticks, pull the throttle all the way down, and put the switches where they sit while you drive.": "Centrer begge sticks, træk gassen helt ned, og sæt kontakterne, som de står under kørsel.",
+  "Push the stick that steers all the way right, and hold it there.": "Skub den stick, der styrer, helt til højre, og hold den der.",
+  "Let go of it. Push the throttle stick all the way up (or another stick, for the gas) and hold it.": "Slip den. Skub gas-sticken helt op (eller en anden stick, til gassen), og hold den der.",
+  "Pull the throttle back down. Pull the right stick all the way back (or another stick, for the brake) and hold it.": "Træk gassen ned igen. Træk højre stick helt tilbage (eller en anden stick, til bremsen), og hold den der.",
+  "Flip the switch or hold the button for nitrous. None? Skip.": "Slå kontakten om, eller hold knappen nede for nitro. Ingen? Spring over.",
+  "Flip the switch or hold the button for the handbrake. None? Skip.": "Slå kontakten om, eller hold knappen nede for håndbremsen. Ingen? Spring over.",
+  "Flip the switch or hold the button to respawn the car. None? Skip.": "Slå kontakten om, eller hold knappen nede for at gendanne bilen. Ingen? Spring over.",
+  "Done: the radio is set up in this browser. Put its switches back where they sit while you drive.": "Færdig: senderen er indstillet i denne browser. Sæt dens kontakter tilbage, som de står under kørsel.",
+  "Sticks": "Sticks",
+  "Switches you set up": "Indstillede kontakter",
+  "Nitrous, handbrake and respawn": "Nitro, håndbremse og gendan bil",
+  "Everything else": "Alt andet",
+  "With a controller connected too, the game uses whichever you last used: a button, or the radio's sticks or switches.": "Er en controller også tilsluttet, bruger spillet den, du sidst brugte: en knap eller senderens sticks eller kontakter.",
+  "Skip": "Spring over",
+  "Steering, gas and brake are a guess, and the switches do nothing until you set it up.": "Styring, gas og bremse er et gæt, og kontakterne gør intet, før du indstiller senderen.",
+  "Set up the radio": "Indstil senderen",
+  "The radio went away before its set-up was done.": "Senderen forsvandt, før indstillingen var færdig."
 }

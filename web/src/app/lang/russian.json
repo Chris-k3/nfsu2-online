@@ -1169,5 +1169,22 @@
   "Not claimed: anyone can play as {name}. Claim makes you a passphrase, 8 words that hold the name and also keep your cloud saves.": "Не закреплено: под именем {name} может играть кто угодно. Закрепление создаст для вас парольную фразу: 8 слов, которые держат имя за вами и также хранят ваши облачные сохранения.",
   "{name} is yours, held by this passphrase. Cloud saves are on too.": "Имя {name} — ваше: его держит за вами эта парольная фраза. Облачные сохранения тоже включены.",
   "Keep it safe: it is the only way to play as {name} again, in another browser or here after this browser's data is cleared, and the only way back to your saves.": "Храните её надёжно: это единственный способ снова играть под именем {name} — в другом браузере или здесь после очистки данных этого браузера — и единственный способ вернуть свои сохранения.",
-  "To use it in another browser, enter it under Cloud saves on the start page.": "Чтобы использовать эту парольную фразу в другом браузере, введите её там в разделе «Облачные сохранения» на стартовой странице."
+  "To use it in another browser, enter it under Cloud saves on the start page.": "Чтобы использовать эту парольную фразу в другом браузере, введите её там в разделе «Облачные сохранения» на стартовой странице.",
+  "Centre the sticks, pull the throttle all the way down, and put the switches where they sit while you drive.": "Поставьте стики по центру, опустите газ до упора вниз и поставьте тумблеры так, как они стоят во время езды.",
+  "Push the stick that steers all the way right, and hold it there.": "Отклоните стик, которым рулите, до упора вправо и держите его там.",
+  "Let go of it. Push the throttle stick all the way up (or another stick, for the gas) and hold it.": "Отпустите его. Отклоните стик газа до упора вверх (или другой стик — для газа) и держите его.",
+  "Pull the throttle back down. Pull the right stick all the way back (or another stick, for the brake) and hold it.": "Опустите газ обратно. Потяните правый стик до упора на себя (или другой стик — для тормоза) и держите его.",
+  "Flip the switch or hold the button for nitrous. None? Skip.": "Переключите тумблер или зажмите кнопку для нитро. Нет? Пропустить.",
+  "Flip the switch or hold the button for the handbrake. None? Skip.": "Переключите тумблер или зажмите кнопку для ручника. Нет? Пропустить.",
+  "Flip the switch or hold the button to respawn the car. None? Skip.": "Переключите тумблер или зажмите кнопку для восстановления машины. Нет? Пропустить.",
+  "Done: the radio is set up in this browser. Put its switches back where they sit while you drive.": "Готово: пульт настроен в этом браузере. Верните тумблеры в положение, в котором они стоят во время езды.",
+  "Sticks": "Стики",
+  "Switches you set up": "Настроенные тумблеры",
+  "Nitrous, handbrake and respawn": "Нитро, ручник и восстановление",
+  "Everything else": "Всё остальное",
+  "With a controller connected too, the game uses whichever you last used: a button, or the radio's sticks or switches.": "Если подключён ещё и геймпад, игра использует то, чем вы пользовались последним: кнопки или стики и тумблеры пульта.",
+  "Skip": "Пропустить",
+  "Steering, gas and brake are a guess, and the switches do nothing until you set it up.": "Руление, газ и тормоз определены автоматически, а тумблеры ничего не делают, пока вы не настроите пульт.",
+  "Set up the radio": "Настроить пульт",
+  "The radio went away before its set-up was done.": "Пульт отключился до завершения настройки."
 }

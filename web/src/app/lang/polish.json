@@ -1169,5 +1169,22 @@
   "Not claimed: anyone can play as {name}. Claim makes you a passphrase, 8 words that hold the name and also keep your cloud saves.": "Niezarezerwowana: każdy może grać jako {name}. Rezerwacja tworzy dla ciebie frazę dostępu: 8 słów, które utrzymują nazwę i przechowują też twoje zapisy w chmurze.",
   "{name} is yours, held by this passphrase. Cloud saves are on too.": "Nazwa {name} jest twoja i utrzymuje ją ta fraza dostępu. Zapisy w chmurze też są włączone.",
   "Keep it safe: it is the only way to play as {name} again, in another browser or here after this browser's data is cleared, and the only way back to your saves.": "Przechowuj ją bezpiecznie: to jedyny sposób, aby znów grać jako {name} w innej przeglądarce lub tutaj po wyczyszczeniu danych tej przeglądarki, i jedyny sposób, aby odzyskać swoje zapisy.",
-  "To use it in another browser, enter it under Cloud saves on the start page.": "Aby użyć tej frazy dostępu w innej przeglądarce, wpisz ją tam w sekcji „Zapisy w chmurze” na stronie startowej."
+  "To use it in another browser, enter it under Cloud saves on the start page.": "Aby użyć tej frazy dostępu w innej przeglądarce, wpisz ją tam w sekcji „Zapisy w chmurze” na stronie startowej.",
+  "Centre the sticks, pull the throttle all the way down, and put the switches where they sit while you drive.": "Ustaw drążki na środku, opuść gaz do końca i ustaw przełączniki tak, jak są ustawione podczas jazdy.",
+  "Push the stick that steers all the way right, and hold it there.": "Wychyl drążek, którym skręcasz, do końca w prawo i przytrzymaj go tam.",
+  "Let go of it. Push the throttle stick all the way up (or another stick, for the gas) and hold it.": "Puść go. Wychyl drążek gazu do końca w górę (albo inny drążek, do gazu) i przytrzymaj.",
+  "Pull the throttle back down. Pull the right stick all the way back (or another stick, for the brake) and hold it.": "Opuść gaz z powrotem. Pociągnij prawy drążek do końca do siebie (albo inny drążek, do hamulca) i przytrzymaj.",
+  "Flip the switch or hold the button for nitrous. None? Skip.": "Przestaw przełącznik lub przytrzymaj przycisk do nitro. Brak? Pomiń.",
+  "Flip the switch or hold the button for the handbrake. None? Skip.": "Przestaw przełącznik lub przytrzymaj przycisk do hamulca ręcznego. Brak? Pomiń.",
+  "Flip the switch or hold the button to respawn the car. None? Skip.": "Przestaw przełącznik lub przytrzymaj przycisk, aby zresetować samochód. Brak? Pomiń.",
+  "Done: the radio is set up in this browser. Put its switches back where they sit while you drive.": "Gotowe: aparatura jest skonfigurowana w tej przeglądarce. Przestaw przełączniki z powrotem tak, jak są ustawione podczas jazdy.",
+  "Sticks": "Drążki",
+  "Switches you set up": "Skonfigurowane przełączniki",
+  "Nitrous, handbrake and respawn": "Nitro, ręczny i reset samochodu",
+  "Everything else": "Cała reszta",
+  "With a controller connected too, the game uses whichever you last used: a button, or the radio's sticks or switches.": "Gdy podłączony jest też kontroler, gra używa tego urządzenia, którego ostatnio użyto: przycisku albo drążków lub przełączników aparatury.",
+  "Skip": "Pomiń",
+  "Steering, gas and brake are a guess, and the switches do nothing until you set it up.": "Skręt, gaz i hamulec ustawiono automatycznie, a przełączniki nic nie robią, dopóki nie skonfigurujesz aparatury.",
+  "Set up the radio": "Skonfiguruj aparaturę",
+  "The radio went away before its set-up was done.": "Aparatura odłączyła się przed końcem konfiguracji."
 }

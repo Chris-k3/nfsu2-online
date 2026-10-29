@@ -211,6 +211,7 @@ kbd .glyph { display: inline-block; width: 14px; height: 14px; vertical-align: -
 .wheel-learn .bar { margin: 8px 0 4px; }
 .wheel-learn .bar-fill { transition: none; }
 .wheel-learn .text-btn { padding: 0; }
+.wheel-learn [data-wheel="skip"] { margin-right: 24px; }
 
 /* ------------------------------------- changes from the original, about */
 .prose { display: grid; gap: 12px; font-size: 14px; line-height: 20px; }

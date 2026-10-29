@@ -166,6 +166,13 @@ The start page shows these keys under **Controls**, and F9, Controls shows them 
   it holds the handbrake. The paddles still shift. Controls, Controller, Shifter can turn it round (pull to shift
   up), make every gear the handbrake, or turn it off; that is kept in this browser per wheel model. The Driving Force
   GT's own shifter shifts up when pulled back, down when pushed.
+- **RC radio:** a drone or model transmitter running EdgeTX or OpenTX (a RadioMaster, FrSky or Jumper, for example),
+  plugged in by USB in its joystick mode, drives as a wheel: the right stick across steers (full stick is full
+  lock), the throttle stick is the gas and the right stick pulled back brakes and reverses. That assumes mode 2 and
+  the usual channel order (AETR); Controls, Controller, Set up the radio takes any other: push the stick that steers
+  right, the gas stick up, the brake stick back, then flip a switch (or hold a button) for nitrous, the handbrake and
+  a respawn, or skip each. Its switches do nothing until then. The keyboard does the rest (menus, camera, pause).
+  With a controller connected too, a stick or switch on the radio moved half way takes the game back from it.
 - **The page menu on a controller:** Home, or both sticks pressed in, opens it (where the browser passes Home on; on
   Windows the Game Bar may take it). The D-pad or left stick moves in it, A picks, B closes it; meanwhile the game
   gets no controller input. A stick pressed in alone reaches the game a moment later (0.12 s), so the shortcut never
