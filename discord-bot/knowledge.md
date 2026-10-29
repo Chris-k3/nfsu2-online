@@ -83,8 +83,10 @@ Checked against the guide or the code, and confirmed by players in threads:
 - Stuck behind a barrier or off the map: R respawns.
 - Career, no races left on the map (and nothing on the radar): the races left are the original game's hidden races.
   They never show on the map or the radar, only on the street: their marker appears when you drive near. Drive
-  around the city, the newer areas too. Someone who still finds none can attach the saves (Saves, Download backup):
-  escalate it, the developer can tell where they are. (The developer answered this on 2026-10-26.)
+  around the city, the newer areas too. Since dec0e11 there is a setting for it: Settings, Game, More game settings,
+  Show hidden races (off by default, MaxHwoy's Show Hidden Races Mod) puts them on the map and the radar like the
+  others, from the next Play. Someone who still finds none can attach the saves (Saves, Download backup): escalate
+  it, the developer can tell where they are. (The developer answered this on 2026-10-26.)
 - Firefox: when a problem shows only in Firefox (its log has Firefox errors, or Chrome works), Chrome is the browser
   most tested.
 - A phone that stutters or shakes at 60 fps but runs smoothly at 30: its GPU no longer finishes a frame in 16.7 ms,
@@ -156,7 +158,8 @@ performance and tuning, AI and traffic, the career's progression, races and rewa
   Online; ghost mode in F9; Upscaled HUD in Settings, Display, more: Menus and HUD; photo mode with F12 or the pause
   menu's Photo Mode, since a794718; Radio in F9 for the player's own music; a garage of 10 cars, 2 slots more each
   stage, and Trade Car on the crib's car list, since 8d3d149; Exposure and White Level for a picture too bright for
-  the eyes, in the game's Options, Display and the pause menu's, since 2619bf7; the guide lists them all). A feature
+  the eyes, in the game's Options, Display and the pause menu's, since 2619bf7; hidden races on the map, in Settings,
+  Game, more: Show hidden races, since dec0e11; the guide lists them all). A feature
   named with a commit is there only once the live version has that commit.
 - A suggestion that would change a core mechanic: you may answer, briefly and kindly, that the project keeps the
   original game's mechanics as they are, so it won't change that. Only when it clearly is one; otherwise none.
