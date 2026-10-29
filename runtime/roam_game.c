@@ -14,14 +14,16 @@
  *  - the local car's state goes to the session (roam_core), which sends a
  *    snapshot 20 times a second; its car look (type and part hashes) goes
  *    out when it changes;
- *  - remote players get "slots": the 3 parked free-roam opponent cars (the
- *    outrun challengers' cars; the RandomEncounterManager is held off while
- *    we use them) and up to 29 cars of our own (CreateCar), the nearest
- *    players first.  World::IndexCars' array holds 22 cars and the world has
- *    20, so the first 2 of ours are indexed as AI racers and the others stay
- *    out of it, on the World's list only, which is what the renderer walks
- *    (finish_create); those get their minimap arrows and world map markers here
- *    (arrows_update, map_update).  The game has 6 paint slots
+ *  - remote players get "slots": up to 32 cars of our own (CreateCar), the
+ *    nearest players first, out of World::IndexCars' array (22 cars), on the
+ *    World's list only, which is what the renderer walks (finish_create), so
+ *    the game's outrun challengers, which take the index's AI range, never
+ *    meet one and come as in the game (em_update); our cars get their
+ *    minimap arrows and world map markers here (arrows_update, map_update).
+ *    The Windows plugin (LEND_OPP) has the game's index and paint slots only:
+ *    the 3 parked free-roam opponent cars (the challengers' cars; the
+ *    RandomEncounterManager is held off while we use them) and 2 cars of our
+ *    own, indexed as AI racers.  The game has 6 paint slots
  *    (DUMMY_SKIN1-6: the player, the 3 opponent cars, the first 2 of ours);
  *    the others composite into textures of our own (skin_textures,
  *    roam_game_texture).  A slot's car gets the player's ride (streamed
@@ -188,8 +190,21 @@
 #define PARK_Z          (-123456.f)   /* Car::Deactivate's parking spot (0, 0, -123456) */
 #define RIDE_SZ         0x900u
 #define REC_SZ          0x940u
-#define NSLOT           32            /* 3 opponent cars + 29 of our own */
+/* Friends' cars and the outrun challengers.  The Windows plugin has the
+ * game's paint slots and car index only: friends get the 3 parked opponent
+ * cars first (slots 0-2) and the challengers' manager is held off while they
+ * are about (LEND_OPP).  The port makes every friend's car one of our own,
+ * outside the car index, which the manager never reads: the challengers
+ * come as in the game, held off only around an outrun between players and
+ * the race lobbies (em_update) */
+#ifdef ROAM_HOST_WIN
+#define LEND_OPP        1
 #define NOPP            3             /* slots 0-2: the parked free-roam opponent cars */
+#else
+#define LEND_OPP        0
+#define NOPP            0
+#endif
+#define NSLOT           32            /* NOPP opponent cars + the rest of our own */
 #define WORLD_INDEX     22            /* World::IndexCars' cars[] (World +0x1C; other fields follow) */
 #define KIND_OUT        4             /* a racer record kind IndexCars skips (1 human, 2 AI racer, 3 traffic) */
 #define SKIN_GAME       6             /* the game's paint slots, DUMMY_SKIN1-6 */
@@ -241,8 +256,10 @@ static uint32_t gcall1(CPU *c, uint32_t fn, uint32_t ecx, uint32_t a){ return rh
 static uint32_t player_car(void){ uint32_t p = rd32(G_PLAYER1); return p ? rd32(p + 4u) : 0; }
 static uint32_t world(void){ uint32_t w = rd32(G_WORLD); return ok(w, 0x80) ? w : 0; }
 static int du_racing(uint32_t race);
+static int em_racing(uint32_t race);
 /* free roam: the career's world with no race but free roam's own one-racer
- * one, or an outrun with a friend (du_racing): that is still free roam.  On
+ * one, or an outrun with a friend (du_racing) or with one of the game's
+ * challengers (em_racing): that is still free roam.  On
  * free roam's own track: Performance Tuning / Dyno is one racer and no
  * career race too, but on tracks of its own (the Dyno Shop 4706, a circuit
  * test run on URL track 4705), whose places are not the city's -- friends
@@ -250,7 +267,7 @@ static int du_racing(uint32_t race);
 static int roaming(void){
     uint32_t race = rd32(G_RACE);
     return rd32(G_FLOW) == 6u && rd32(G_TRACK) % 1000u == 0 && ok(race, 0xc44) && MR32(race) == 4u &&
-           (MR32(race + 0x24u) == 1u || du_racing(race)) &&
+           (MR32(race + 0x24u) == 1u || du_racing(race) || em_racing(race)) &&
            !rd32(G_CAREER_RACE) && !(rd32(G_GAMEMODE) & 0x200u) && world() && player_car();
 }
 static uint32_t encounter_mgr(void){ uint32_t r = rd32(G_RACE); return ok(r, 0xc44) ? r + RC_ENCOUNTERS : 0; }
@@ -330,7 +347,7 @@ static int env_int(const char *k, int def, int lo, int hi){
 }
 static struct {
     int on, test, collide, max_cars, rate, delay_ms, extrap_ms, carpool_kb, labels, spawn_m;
-    int test_owncars;                         /* NFSU2_ROAM_TEST_OWNCARS (test aid): friends only in cars of our own (slots 3 and up) */
+    int test_owncars;                         /* NFSU2_ROAM_TEST_OWNCARS (test aid): friends only in cars of our own (slots NOPP and up) */
     int test_outside;                         /* NFSU2_ROAM_TEST_OUTSIDE (test aid): every car of our own outside the car index */
     int hit_share;                            /* NFSU2_ROAM_HIT_SHARE: % of a hit with a friend's car the player's car keeps (roam_game_contact);
                                                  -1: by the two cars' weights (car_mass, their square roots), 100: the game's own (the whole hit) */
@@ -1117,25 +1134,29 @@ static void unblink(Slot *s){
 /* The RandomEncounterManager (race coordinator +0xC40; Update 0x42EDF0):
  * state 0 resets it (0x412F90: its three rides unloaded, World cars[first ..
  * first+2] taken as its cars), 1 asks the career whether an outrun is due,
- * 3 cruises its cars near the player and tries to engage, 4 races, 5 parks
- * its cars -- 0x40BF60, and 0x40BFB0 for every car of the AI range that is
- * out, not engaged and 250 m away, friends' cars included -- tells the
- * career (0x500CA0) and goes to 0; at 6 and above Update does nothing.  It
- * drove a friend's car it had taken as its own into a fault (0x41C100 on a
- * null brain), so it never sees one:
- *  - while any friend has (or is about to get) a car in this world it is
- *    held in 6;
+ * 3 cruises its cars near the player and tries to engage, 4 races (the
+ * outrun's start 0x607180 sets it, 0x40BE80, an outrun between players'
+ * too), 5 parks its cars -- 0x40BF60, and 0x40BFB0 for every car of the AI
+ * range that is out, not engaged and 250 m away -- tells the career
+ * (0x500CA0) and goes to 0; at 6 and above Update does nothing.  It drove a
+ * friend's car it had taken as its own into a fault (0x41C100 on a null
+ * brain), so it never sees one: in the port no friend's car is in the car
+ * index (LEND_OPP), in the Windows plugin ours are kept out of its window
+ * (keep_out_of_window).  It is held off (why: the reason) while the
+ * Windows plugin's friends have (or are about to get) a car in this world,
+ * and in the port around an outrun between players (its state 4 would race
+ * the friend's car) and in or by a race lobby (Engage is the lobby's):
+ *  - from 0, 1 or 2 it is held in 6;
  *  - from 3 or 5 it is stood down the way its own state 5 does it, but for
  *    its three cars only: each is parked once an outrun's end blinked it
  *    out (unblink) or 250 m from the player, or after 20 s anyway; then the
- *    career is told and it goes to 0, which re-reads its cars (the game's
- *    three opponent cars: ours are kept out of that window,
- *    keep_out_of_window) and then to 1, where it is held;
- *  - during an outrun (4) it is left alone (the race has two racers, so
- *    this is not free roam for roaming(): friends' cars are hidden, as in
- *    any race); its 5 afterwards is taken over as above;
- *  - a minute after the last friend left it is let go (6 -> 0). */
-static void em_update(CPU *c, int want, int64_t host){
+ *    career is told and it goes to 0, which re-reads its cars, and then to
+ *    1, where it is held;
+ *  - during an outrun of its own (4) it is left alone: its 5 afterwards is
+ *    taken over as above;
+ *  - it is let go (6 -> 0) when the reason is gone (em_let_go): in the
+ *    Windows plugin a minute after the last friend left. */
+static void em_update(CPU *c, const char *why, int64_t host){
     uint32_t em = encounter_mgr();
     if (!em) return;
     uint32_t st = MR32(em);
@@ -1161,20 +1182,36 @@ static void em_update(CPU *c, int want, int64_t host){
         }
         return;
     }
-    if (!want) return;
+    if (!why) return;
     if (st == 4u){                              /* an outrun is being raced: not interrupted */
         if (!g_em_racing_noted){ g_em_racing_noted = 1;
-            rlog("[roam] f=%ld an outrun is on: the outrun challengers are stood down when it is over\n", rh_frame()); }
+            rlog("[roam] f=%ld an outrun is on: the outrun challengers are stood down when it is over (%s)\n", rh_frame(), why); }
         return;
     }
     g_em_racing_noted = 0;
     if (st == 3u || st == 5u){
         MR32(em) = 6u; g_em = EM_STANDDOWN; g_em_sd_t0 = host;
-        rlog("[roam] f=%ld outrun challengers off while friends are here: standing down (state %u)\n", rh_frame(), st);
+        rlog("[roam] f=%ld outrun challengers off (%s): standing down (state %u)\n", rh_frame(), why, st);
         return;
     }
     MR32(em) = 6u; g_em = EM_HELD;              /* 0, 1, 2: its cars are parked */
-    rlog("[roam] f=%ld outrun challengers off while friends are here (state %u)\n", rh_frame(), st);
+    rlog("[roam] f=%ld outrun challengers off (%s, state %u)\n", rh_frame(), why, st);
+}
+/* one of the manager's cars is out: a challenger cruises near the player
+ * (its outrun can be offered: Engage is the game's), races or is about to
+ * be parked */
+static int em_about(void){
+    uint32_t em = encounter_mgr();
+    if (!em) return 0;
+    for (uint32_t k = 0; k < 3; k++){ uint32_t car = rd32(em + EM_TABLE + 0xcu + 0x10u * k); if (ok(car, 0x9e0) && car_out(car)) return 1; }
+    return 0;
+}
+/* the game's own outrun against a challenger, the manager not held: in the
+ * port that is still free roam (roaming): friends' cars stay, as in an
+ * outrun between players, and the outrun's racers are the game's cars only */
+static int em_racing(uint32_t race){
+    uint32_t em = race + RC_ENCOUNTERS;
+    return !LEND_OPP && g_em == EM_GAME && MR32(G_RACETYPE) == 7u && MR32(race + 0x24u) >= 2u && MR32(em) == 4u && !du_racing(race);
 }
 /* a car of ours in the manager's window, World cars[first .. first+2] */
 static int ours_in_window(uint32_t w){
@@ -1192,7 +1229,7 @@ static void em_let_go(void){
     if (MR32(em) == 6u){ MR32(em) = 0; rlog("[roam] f=%ld outrun challengers back on\n", rh_frame()); }
     g_em = EM_GAME;
 }
-/* a game opponent car that no slot uses (slots 0-2) */
+/* a game opponent car that no slot uses (slots 0 to NOPP - 1) */
 static uint32_t free_opponent_car(uint32_t w){
     int n = (int)MR32(w + 0x18u) - (int)MR32(w + 0x14u);
     for (int i = 0; i < n && i < 22; i++){
@@ -1204,7 +1241,9 @@ static uint32_t free_opponent_car(uint32_t w){
     }
     return 0;
 }
+#if LEND_OPP
 static int opp_slots_used(void){ int n = 0; for (int k = 0; k < NOPP; k++) if (g_sl[k].st != SL_FREE) n++; return n; }
+#endif
 
 /* the manager's state 0 takes World cars[first .. first+2] as its three
  * cars; IndexCars puts the AI racers in the order of the World's list, and
@@ -1403,7 +1442,7 @@ static int racer_number(uint32_t w){
     for (int n = 99; n >= 66; n--) if (!racer_number_used(w, n)) return n;
     return 127;
 }
-/* a car of our own (slots 3 and up): a copy of the first opponent's racer
+/* a car of our own (slots NOPP and up): a copy of the first opponent's racer
  * record (a racer number of its own, paint slot 5 and up), its ride loaded
  * through the CarLoader, then CreateCar (finish_create); the friend's ride
  * follows as for an opponent car */
@@ -1445,9 +1484,11 @@ static int finish_create(CPU *c, int k){
     /* World::IndexCars writes cars[] without a bound, and the World's
      * fields follow its 22 entries: a car past them is of a kind IndexCars
      * skips, on the World's list only (the renderer walks the list; nothing
-     * reads the debug arrays its index 0 writes, 0x89CCF8) */
+     * reads the debug arrays its index 0 writes, 0x89CCF8).  In the port
+     * every car of ours is such a car: the outrun challengers' manager and
+     * the game's outruns take the index's AI range (LEND_OPP) */
     uint32_t n0 = MR32(w + 0x10u), a2[2] = { 0, 0 };
-    int out = n0 >= WORLD_INDEX || O.test_outside;
+    int out = !LEND_OPP || n0 >= WORLD_INDEX || O.test_outside;
     if (out) MR32(s->rec + 4u) = KIND_OUT;
     rh_call(c, FN_CREATECAR, grid, s->rec, 2, a2);
     if (!out) gcall0(c, FN_INDEXCARS, w);
@@ -3098,7 +3139,7 @@ static void du_recv(CPU *c, int64_t host, uint32_t from, uint8_t op, uint8_t arg
             du_send(host, RC_DUEL_ACCEPT, 0); du_to(DU_ACCEPTED, host);
             return;
         }
-        if (g_du.st != DU_IDLE || k < 0 || !du_able(k) || !du_free(in_roam, world_runs) || du_dist(g_sl[k].car) > DU_KEEP_M){
+        if (g_du.st != DU_IDLE || k < 0 || !du_able(k) || !du_free(in_roam, world_runs) || em_about() || du_dist(g_sl[k].car) > DU_KEEP_M){
             roam_plat_lock(); rc_send_duel(&g_s, from, RC_DUEL_CANCEL, RC_DC_BUSY, duel); roam_plat_unlock();
             return;
         }
@@ -3149,11 +3190,12 @@ static void du_frame(CPU *c, int64_t host, int in_roam, int world_runs, const ui
     int press = eng && !g_du.engage;
     g_du.engage = eng;
     int free = du_free(in_roam, world_runs);
-    g_du.busy = !free;
+    int offer = free && !em_about();                /* (a challenger of the game's out: its outrun takes Engage) */
+    g_du.busy = !offer;
     /* who has been near for the time it takes */
     for (int k = 0; k < NSLOT; k++){
         Slot *s = &g_sl[k];
-        int near = free && me && s->st == SL_ACTIVE && !s->hidden && ok(s->car, 0x9e0) && du_able(k) && !(s->soft & SOFT_DOOR) &&
+        int near = offer && me && s->st == SL_ACTIVE && !s->hidden && ok(s->car, 0x9e0) && du_able(k) && !(s->soft & SOFT_DOOR) &&
                    !du_busy(k) && du_dist(s->car) < (g_du.st == DU_IDLE && g_du.icon == s->car ? DU_PROMPT_M : DU_NEAR_M);
         if (!near) s->near_since = 0;
         else if (!s->near_since) s->near_since = host;
@@ -5247,7 +5289,7 @@ void roam_game_frame(CPU *c){
     roam_plat_lock();
     uint8_t st = local_status(in_roam);
     rc_set_status(&g_s, st);
-    g_racing = st == RC_ST_EVENT || (in_roam && du_racing(rd32(G_RACE)));
+    g_racing = st == RC_ST_EVENT || (in_roam && (du_racing(rd32(G_RACE)) || em_racing(rd32(G_RACE))));
 #ifndef ROAM_HOST_WIN
     room_alone(host, st);
 #endif
@@ -5345,11 +5387,16 @@ void roam_game_frame(CPU *c){
         g_pass.stay_since = g_pass.blocking = 0;
     } else {
         /* the outrun challengers' manager first: whether opponent cars are
-         * free this frame depends on it */
-        int want = 0;
-        for (int k = 0; k < NSLOT; k++) if (g_sl[k].st != SL_FREE && g_sl[k].st != SL_PARKED) want = 1;
-        for (int i = 0; i < g_npv; i++) if (g_pv[i].visible && g_pv[i].has_cfg && g_pv[i].have_pose) want = 1;
-        em_update(c, want, host);
+         * free this frame depends on it (LEND_OPP) */
+        const char *em_why = 0;
+#if LEND_OPP
+        for (int k = 0; k < NSLOT; k++) if (g_sl[k].st != SL_FREE && g_sl[k].st != SL_PARKED) em_why = "friends are here";
+        for (int i = 0; i < g_npv; i++) if (g_pv[i].visible && g_pv[i].has_cfg && g_pv[i].have_pose) em_why = "friends are here";
+#else
+        if (g_du.st != DU_IDLE) em_why = "an outrun between players";
+        else if (mp_busy()) em_why = "a race lobby";
+#endif
+        em_update(c, em_why, host);
         soft_me(c, host, st);
         if (DUELS) kr_frame();
 #if MPRACES
@@ -5428,6 +5475,7 @@ void roam_game_frame(CPU *c){
          * on it where the cars had been on the screen */
         uint32_t pl = rd32(G_PLAYER1), hud = pl && ok(pl, PL_HUD + 4u) ? rd32(pl + PL_HUD) : 0;
         if (hud && hud == g_tag.hud && ok(hud, 0x14) && !hud_on_top(rd32(hud + 0x10u))) for (int i = 0; i <= TAG_N; i++) tag_hide(c, i);
+#if LEND_OPP
         int busy = 0;
         for (int k = 0; k < NSLOT; k++) if (g_sl[k].st != SL_FREE && g_sl[k].st != SL_PARKED) busy = 1;
         if (busy) g_em_release_at = 0;
@@ -5441,6 +5489,9 @@ void roam_game_frame(CPU *c){
                 g_em_release_at = 0;
             }
         }
+#else
+        if (!em_why && g_em == EM_HELD) em_let_go();   /* the outrun between players or the lobby is over */
+#endif
     }
     du_frame(c, host, in_roam, world_runs, duin, nduin);
 #if MPRACES

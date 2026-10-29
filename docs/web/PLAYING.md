@@ -441,6 +441,11 @@ Good to know:
   1,000 feet (300 m) ahead of the other wins, and the bank pays or charges as in an outrun against a tuner. Leaving it
   (back to the menus, quitting, losing the connection) loses it. The other players' cars stay, and they see the two
   drive. Players on the Windows plugin are not offered outruns.
+- **The game's own tuners** come out to challenge you in free roam with other players around, as they do offline, so
+  their outruns and what winning them opens up (the unique parts) are there online too. The other players' cars stay
+  while you race a tuner; they see your car, not the tuner, which is in your game only. No tuner comes during an
+  outrun with another player or while you are in or by a race lobby, and no outrun with another player is offered
+  while a tuner of yours is out. On the Windows plugin the tuners stay away while other players are about.
 - **Races with other players:** a race of your career can be raced with the players around you, as the game's own LAN
   race on its track, in your career car. That takes a car of your own: in a new career's prologue (the 350Z you
   start in) you cannot join or open a lobby, and the panel says so; from your first car on you can.
