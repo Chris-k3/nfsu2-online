@@ -459,7 +459,8 @@ Good to know:
   while you race a tuner; they see your car, not the tuner, which is in your game only. Both are offered: a tuner
   within 30 m of you (the game's own reach for its challenge) comes first, and no outrun with another player is
   offered or taken until it is farther off; while another player's outrun is offered, the tuners keep driving but
-  none challenges you. No tuner comes during an outrun with another player (from the challenge on) or while you are
+  none challenges you. Within 20 m of a shop's or the garage's door, or of an event, Enter is for the door: no tuner
+  challenges you there, and a challenge already on the screen goes when you get there. No tuner comes during an outrun with another player (from the challenge on) or while you are
   in or by a race lobby. On the Windows plugin the tuners stay away while other players are about.
 - **Races with other players:** a race of your career can be raced with the players around you, as the game's own LAN
   race on its track, in your career car. That takes a car of your own: in a new career's prologue (the 350Z you

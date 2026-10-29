@@ -3354,11 +3354,28 @@ static int em_near(void){
  * friend's challenge offered) the manager is paused, 6 from where it was (0
  * to 3), its cars driving on, and it goes on from there once ours is gone
  * (em_resume) -- or is held off or stood down from there (em_update) */
-static void em_pause(void){
+static void em_pause(const char *why){
     uint32_t em = encounter_mgr();
     if (!em || g_em != EM_GAME || MR32(em) > 3u) return;
     g_em_paused = em; g_em_paused_st = MR32(em); MR32(em) = 6u; g_em = EM_PAUSED;
-    if (g_em_pauses++ < 20) rlog("[roam] f=%ld outrun challengers paused (state %u): the outrun icon is a friend's\n", rh_frame(), g_em_paused_st);
+    if (g_em_pauses++ < 20) rlog("[roam] f=%ld outrun challengers paused (state %u): %s\n", rh_frame(), g_em_paused_st, why);
+}
+/* At a shop's or garage's door, or an event's (DOOR_M), Enter is for the
+ * door: no outrun between players is offered there (du_free), and the
+ * challengers' manager is paused too, an outrun it offered taken back (the
+ * icon off, its state 3 as with no car in reach: Engage takes an outrun
+ * only at 2) */
+static int em_at_door(void){
+    uint32_t pl = rd32(G_PLAYER1);
+    return (pl && rd32(pl + PL_MARKER)) || (g_pass.me & (SOFT_DOOR | SOFT_EVENT));
+}
+static void em_door(CPU *c){
+    em_pause("Enter is for the door");
+    if (g_em != EM_PAUSED || MR32(G_OUTRUN_STATE) != 2u) return;
+    uint32_t pl = rd32(G_PLAYER1), hud = pl ? rd32(pl + PL_HUD) : 0;
+    if (hud) gcall1(c, FN_HUD_OUTRUN, hud, 0);
+    MR32(G_OUTRUN_STATE) = 3u;
+    rlog("[roam] f=%ld outrun challengers: their outrun taken back, Enter is for the door\n", rh_frame());
 }
 static void em_resume(void){
     if (g_em != EM_PAUSED) return;
@@ -3534,9 +3551,11 @@ static void du_frame(CPU *c, int64_t host, int in_roam, int world_runs, const ui
             float d = du_dist(g_sl[j].car);
             if (best < 0 || d < bd){ best = j; bd = d; }
         }
-        if (best >= 0) em_pause();                  /* before the icon (em_pause) */
+        int door = in_roam && world_runs && em_at_door();
+        if (best >= 0) em_pause("the outrun icon is a friend's");   /* before the icon (em_pause) */
+        else if (door) em_door(c);
         du_icon(c, best >= 0 ? g_sl[best].car : 0);
-        if (best < 0) em_resume();
+        if (best < 0 && !door) em_resume();
         if (best < 0 || !press) break;
         roam_plat_lock(); do g_du.duel = roam_plat_random(); while (!g_du.duel); roam_plat_unlock();
         g_du.id = g_sl[best].peer_id; g_du.mine = 1; g_du.heard = host; g_du.offers++;
@@ -3547,7 +3566,7 @@ static void du_frame(CPU *c, int64_t host, int in_roam, int world_runs, const ui
     case DU_SENT:
     case DU_GOT:
     case DU_ACCEPTED:
-        if (k >= 0 && g_du.st == DU_GOT) em_pause();
+        if (k >= 0 && g_du.st == DU_GOT) em_pause("the outrun icon is a friend's");
         du_icon(c, k >= 0 && g_du.st == DU_GOT ? g_sl[k].car : 0);
         if (k < 0 || !du_able(k) || !free || du_dist(g_sl[k].car) > DU_KEEP_M){
             if (g_du.st != DU_GOT) du_send(host, RC_DUEL_CANCEL, RC_DC_WITHDRAWN);
