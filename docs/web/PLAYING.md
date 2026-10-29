@@ -195,7 +195,7 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
 | Group | Settings |
 |---|---|
 | Online | its own section under Saves: how many play on this server now, free roam with others, your name (in free roam and online), crews (with their colours), your horn, room, ghost mode, quick chat and your phrases; more: the game's Online mode (on by default), players' cars shown (16 to 32; phones start at 16, tablets at 24) |
-| Game | language, movies, subtitles, autosave; more: startup movies (skippable, original or off), sound, pause or keep running in the background, sound output latency, highest graphics for a new save |
+| Game | language, movies, subtitles, autosave; more: show hidden races, startup movies (skippable, original or off), sound, pause or keep running in the background, sound output latency, highest graphics for a new save |
 | Display | full screen on Play (off: the game plays in the browser window; on by default on phones), resolution scale (phones start at 75%, 100% once one shows it has the room), frame rate (auto follows the screen: 120 on a 120 Hz display, 240 on a 240 Hz one; 30, 60, 120 or 240, where 30 keeps a phone that cannot hold 60 steady; Online and LAN races at most 120); more: menus and HUD (original or upscaled), HUD layout (wide, or 4:3 as phones start), movie framing, cutscene bars, other cars' headlights (players, all cars, off), frame-rate counter, fixed render size, pixel limit |
 | Controller | rumble; more: controller (on, hotplug or off), menu buttons, dead zones, trigger full press |
 
@@ -214,6 +214,12 @@ keys as the Mac app. Each change is saved at once and applies the next time you 
   [English Subtitles Fixed](https://nfsmods.xyz/mod/5286), with who says each line, where the server has its
   [language pack](VPS.md#languages) (without it English has none: the game's own English lines stop at their first
   apostrophe).
+- **Show hidden races:** off by default. The career has 33 hidden races (one in the prologue, then 4, 8, 10 and 10
+  in the later stages) that are not on the map or the radar: in the original game one shows only when you drive near it,
+  and once all the others are won the map looks empty. On, as MaxHwoy's
+  [Show Hidden Races Mod](https://nfsmods.xyz/mod/1583) has them, they are on the map and the radar like the others
+  (the GPS takes you there), and the map offers up to 8 races of each kind at once instead of 1 to 4, so they take no
+  others off it. Turned off again, a career is as it was: the races open stay open.
 - **Menus and HUD:** Original (the default) is the game's own. Upscaled shows LunicAura106's [Upscaled
   HUD](https://nfsmods.xyz/mod/4319) where the server has its [texture pack](VPS.md#texture-packs): the menus, the
   race HUD, the fonts and the car and brand logos redrawn at four times their size, sharp on a large screen. The
