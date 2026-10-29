@@ -449,6 +449,7 @@ static int64_t g_cost_win_t0;
 /* statistics */
 static int g_joins, g_leaves;                 /* changed with the session lock held */
 static uint32_t g_teleports, g_clock_snaps, g_acquires, g_releases, g_load_fail, g_creates, g_reuses, g_restores;
+static int64_t g_ready_at;                    /* the last friend's car in (roam_plat_now_us) */
 /* test aid: per-frame pose log */
 static rh_file *g_poselog;
 /* a script command that calls guest code waits for the main-loop hook */
@@ -1754,6 +1755,7 @@ static int finish_load(CPU *c, int k){
             rh_frame(), k, s->name, s->carname, rh_frame() - s->load_f0, (roam_plat_now_us() - s->load_t0) / 1000.0, s->car, tn,
             (double)s->com[0], (double)s->com[1], (double)s->com[2]);
     pool_log("after load");
+    g_ready_at = roam_plat_now_us();
     return 1;
 }
 /* sin and cos of a in [-pi, pi] (Taylor to the x^15 / x^14 term, < 1e-5),
@@ -4912,6 +4914,75 @@ static void init_once(CPU *c){
     for (int i = 0; i < O.ncrew; i++) rlog("[roam] crew %d: \"%s\" (%08x), colour %06x\n", i + 1, O.crew[i], cf.crews[i], O.crew_rgb[i]);
 }
 
+/* Friends' cars wait while the city's sections load.  The track streamer's
+ * step (0x5E6A70, each frame from its service 0x5E86E0) does nothing while
+ * the car loader is busy (+0x14, 0x8A329C): no section read starts, no
+ * phase of its work ends.  The loader serves its loads one after another,
+ * each step's callback going straight on to the next, so with friends
+ * coming and going it was busy nearly all the time and the streamer moved
+ * only when its queue ran dry: the player drove into sections that were not
+ * in, the world stopped on its Loading screen (HUD_World_Loading), and that
+ * lasted until the last car queued was in, with more queued meanwhile
+ * (players' logs of 2026-10-29: screens of 1.7 to 3.3 s, each over 3 frames
+ * after the last friend's car, 7 to 15 cars loading during it; and one for
+ * good, the loader stuck on a car).  So no friend's car is asked for while
+ * the streamer has work (its phase +0x168 not 0), and the loader holds at
+ * most LOADS_AHEAD of them at once: the streamer waits for those at the
+ * most.  A car held STREAM_HOLD_US goes anyway, should the streamer never
+ * get done.  NFSU2_ROAM_STREAM_FIRST=0 (test aid): the cars as before. */
+#define G_TRACKSTREAMER 0x0088eb00u   /* +0x168 its phase: 0 nothing to do, 1-6 room made and sections read */
+#define LOADS_AHEAD     2
+#define STREAM_HOLD_US  5000000
+static struct { int64_t t0, us, max; int n, gone; } g_shold;    /* cars held for the streamer: since, in all, the longest, times, let go */
+static int loads_in_loader(CPU *c){
+    int n = 0;
+    for (int k = 0; k < NSLOT; k++){
+        uint32_t h = g_sl[k].st == SL_CREATING ? g_sl[k].h_orig : g_sl[k].h_new, e = h ? loader_entry(h) : 0;
+        if (e && !(gcall1(c, FN_LOADER_LOADED, G_CARLOADER, e) & 0xffu)) n++;
+    }
+    return n;
+}
+/* a hold ends when the streamer is done (each frame), or when a car goes anyway */
+static void stream_hold_end(int64_t now){
+    if (!g_shold.t0) return;
+    int64_t d = now - g_shold.t0;
+    g_shold.us += d; if (d > g_shold.max) g_shold.max = d;
+    g_shold.t0 = 0;
+}
+static int load_may_start(CPU *c){
+    static int off = -1;
+    if (off < 0){ const char *e = rh_opt("NFSU2_ROAM_STREAM_FIRST"); off = e && *e == '0'; }
+    if (off) return 1;
+    int64_t now = roam_plat_now_us();
+    if (rd32(G_TRACKSTREAMER + 0x168u)){
+        if (!g_shold.t0){ g_shold.t0 = now; g_shold.n++; }
+        if (now - g_shold.t0 < STREAM_HOLD_US) return 0;
+        g_shold.gone++;
+    }
+    stream_hold_end(now);
+    return loads_in_loader(c) < LOADS_AHEAD;
+}
+/* The loader busy with no friend's car in for 20 s: which friends' cars it
+ * holds, and how far each got (the model pack +0x954 byte +0xC, the record
+ * +0x958 byte +8: 2 in), for the log of a world that waits for good */
+static void loader_watch(CPU *c, int64_t host){
+    static int64_t since, said_at;
+    if (!rd32(G_CARLOADER + LOADER_BUSY)){ since = 0; return; }
+    if (!since) since = host;
+    int64_t from = since > g_ready_at ? since : g_ready_at;
+    if (host - from < 20000000 || said_at >= from) return;
+    said_at = host;
+    rlog("[roam] f=%ld the car loader has been busy for %.0f s, no friend's car in for 20 s\n", rh_frame(), (host - since) / 1e6);
+    for (int k = 0; k < NSLOT; k++){
+        Slot *s = &g_sl[k];
+        uint32_t h = s->st == SL_CREATING ? s->h_orig : s->h_new, e = h ? loader_entry(h) : 0;
+        if (!e) continue;
+        uint32_t m = rd32(e + 0x954u), r = rd32(e + 0x958u), t = rd32(e + 0x95cu);
+        rlog("[roam]   slot %d: %s's %s, handle 0x%x, entry state %u, model %d, record %d, textures 0x%x, %s, asked for %.1f s ago\n", k,
+             s->name, s->carname, h, rd32(e + 0xcu), m ? (int)MR8(m + 0xcu) : -1, r ? (int)MR8(r + 8u) : -1, t,
+             gcall1(c, FN_LOADER_LOADED, G_CARLOADER, e) & 0xffu ? "in" : "not in", (host - s->load_t0) / 1e6);
+    }
+}
 static void cost_add(uint64_t t0){
     uint64_t ns = rh_ns() - t0 + g_cost_hud;
     g_cost_hud = 0;
@@ -4933,6 +5004,11 @@ static void periodic_log(int64_t host){
         rlog("[roam]   the server's hub: %s, %u lists, %u HELLOs of players it did not list ignored\n",
                 g_s.hub_was == 2 ? "answering (it picks the players near us)" : g_s.hub_was == 1 ? "no answer yet" : "silent (broadcast discovery)",
                 g_s.hub_lists, g_s.rx_unlisted);
+    if (g_shold.n){
+        rlog("[roam]   friends' cars waited for the city's sections %d time(s), %.1f s in all, the longest %.0f ms%s\n", g_shold.n,
+             g_shold.us / 1e6, g_shold.max / 1e3, g_shold.gone ? " (some went after 5 s)" : "");
+        g_shold.n = g_shold.gone = 0; g_shold.us = g_shold.max = 0;
+    }
     for (int i = 0; i < RC_TABLE; i++){
         const rc_peer *p = &g_s.peer[i];
         if (p->state != RC_PS_EST) continue;
@@ -5084,7 +5160,7 @@ static void assign(CPU *c, int64_t host){
                     s->name, (double)v->dist, s->carname);
             continue;
         }
-        if (g_heavy >= HEAVY_PER_FRAME){                                        /* the next frame */
+        if (g_heavy >= HEAVY_PER_FRAME || !load_may_start(c)){                 /* the next frame */
             s->peer = -1; s->peer_id = 0; s->name[0] = 0;
             if (was == SL_FREE && k < NOPP){ s->car = 0; s->world = 0; }
             return;
@@ -5404,6 +5480,8 @@ void roam_game_frame(CPU *c){
 #endif
         g_heavy = 0;
         rides_tidy(c);
+        loader_watch(c, host);
+        if (!rd32(G_TRACKSTREAMER + 0x168u)) stream_hold_end(host);
         assign(c, host);
         for (int k = 0; k < NSLOT; k++){
             Slot *s = &g_sl[k];
@@ -5416,7 +5494,7 @@ void roam_game_frame(CPU *c){
             else if (!s->paused_since) s->paused_since = host;
             s->paused = s->paused_since && host - s->paused_since >= 1000000;
             if (s->st == SL_CREATING){
-                if (g_heavy >= HEAVY_PER_FRAME) continue;                          /* CreateCar: the next frame */
+                if (g_heavy >= HEAVY_PER_FRAME || !load_may_start(c)) continue;   /* CreateCar (and the ride after): the next frame */
                 int r = finish_create(c, k);
                 if (r > 0) g_heavy++;
                 if (r < 0){ release(c, k, "could not create a car"); continue; }
@@ -5434,7 +5512,8 @@ void roam_game_frame(CPU *c){
             }
             if (!ok(s->car, 0x9e0)) continue;
             /* a new look: load it while the old one stays on */
-            if (!s->h_new && v->cfg_len > 0 && v->cfg_gen != s->cfg_gen && g_heavy < HEAVY_PER_FRAME && begin_load(c, k, v->cfg, v->cfg_len, v->cfg_gen))
+            if (!s->h_new && v->cfg_len > 0 && v->cfg_gen != s->cfg_gen && g_heavy < HEAVY_PER_FRAME && load_may_start(c)
+                && begin_load(c, k, v->cfg, v->cfg_len, v->cfg_gen))
                 g_heavy++;
             if (s->h_new){
                 int r = finish_load(c, k);

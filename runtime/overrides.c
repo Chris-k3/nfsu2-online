@@ -963,11 +963,13 @@ void sub_0061c600(CPU *c){
  * that is not in): 20 s and more in a player's log of 2026-10-28 (every
  * block from the device's cache, 22 frames a second, twenty friends' cars
  * coming and going, 6-7 s each).  The sections go first now, 4 ahead of the
- * 5 of every other read.  Not shown to be the whole story: on a fast PC the
- * sections waited about as long either way (tests/scripts/
- * roam_crowd_stream.txt); the "[stream]" lines below tell, in a slow PC's
- * log, how long they wait.  NFSU2_TEST_STREAM_FIFO=1 (test aid): the game's
- * way. */
+ * 5 of every other read.  That was not the story: on a fast PC the sections
+ * waited about as long either way (tests/scripts/roam_crowd_stream.txt).
+ * The streamer starts no section at all while the car loader is busy, and
+ * the friends' cars wait for it now (roam_game.c, load_may_start); the
+ * "[stream]" lines below tell how long sections waited and how long the
+ * loader held the streamer up.  NFSU2_TEST_STREAM_FIFO=1 (test aid): the
+ * game's way. */
 #define STREAM_READ_PRIORITY 4u
 void sub_00579810_orig(CPU *c);
 void sub_00579810(CPU *c){
@@ -981,20 +983,46 @@ void sub_00579810(CPU *c){
  * queue to their read's end, how many reads the queue held, and the world's
  * Loading screens.  A line a minute while sections are read
  * ("[stream] 60 s: ..."), and one at the end of each Loading screen (its
- * frames too: a game in the background runs almost none). */
-#define READS_QUEUE      0x00865220u   /* reads waiting (list head): +0x5C callback, +0x6C id */
+ * frames too: a game in the background runs almost none).  Also how long
+ * the car loader held the streamer up: the streamer's step (0x5E6A70, its
+ * phase +0x168 not 0) does nothing at all while the loader is busy, and a
+ * Loading screen 20 s long says what the game waits for. */
+#define READS_QUEUE      0x00865220u   /* reads waiting (list head): +0xC file name, +0x58 priority, +0x5C callback, +0x6C id */
 #define READS_STARTED    0x00865550u   /* reads under way (list head), the oldest first */
 #define GAME_FLOW        0x008900d8u   /* -> the game's state machine: +0 state (1 loading), +8 its mode (2 in the world) */
+#define TRACK_STREAMER   0x0088eb00u   /* +0x168 its phase: 0 nothing to do, 1-6 room made and sections read */
 static double ms_now(void){ struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec * 1e3 + t.tv_nsec / 1e6; }
+static void reads_note(void){
+    for (int l = 0; l < 2; l++){
+        uint32_t head = l ? READS_STARTED : READS_QUEUE, r = MR32(head);
+        int k = 0;
+        for (; r != head && r && k < 512; k++, r = MR32(r)){
+            if (k >= 8) continue;
+            char nm[61];
+            int i = 0;
+            for (; i < 60 && MR8(r + 0xcu + (uint32_t)i); i++) nm[i] = (char)MR8(r + 0xcu + (uint32_t)i);
+            nm[i] = 0;
+            fprintf(stderr, "[stream]   %s: %s (priority %u, callback 0x%x)\n", l ? "under way" : "waiting", nm, MR32(r + 0x58u), MR32(r + 0x5cu));
+        }
+        fprintf(stderr, "[stream]   %d read(s) %s\n", k, l ? "under way" : "waiting");
+    }
+}
 void reads_frame(CPU *c){
     (void)c;
     /* the streamer's reads (callbacks 0x5DF110, a section, and 0x5E4F10, several) by id: seen this frame or done */
     static struct { uint32_t id; double t0; int seen; } sec[32];
-    static int nsec, qmax, n, ld_n, ld_q, ld_sec;
+    static int nsec, qmax, n, ld_n, ld_q, ld_sec, ld_said, hd_n;
     static long ld_f0;
-    static double t_min, wsum, wmax, ld_t0, ld_s, ld_w;
-    double now = ms_now();
+    static double t_min, wsum, wmax, ld_t0, ld_s, ld_w, ld_h, last, hd_t0, hd_s, hd_max, busy_t0;
+    double now = ms_now(), dt = last ? now - last : 0;
+    last = now;
     if (!t_min) t_min = now;
+    int held = MR32(TRACK_STREAMER + 0x168u) && MR32(CARLOADER_BUSY);
+    if (held && !hd_t0){ hd_t0 = now; hd_n++; }
+    if (held) hd_s += dt;
+    if (!held && hd_t0){ if (now - hd_t0 > hd_max) hd_max = now - hd_t0; hd_t0 = 0; }
+    if (!MR32(CARLOADER_BUSY)) busy_t0 = 0;
+    else if (!busy_t0) busy_t0 = now;
     for (int i = 0; i < nsec; i++) sec[i].seen = 0;
     int q = 0;
     for (int l = 0; l < 2; l++){
@@ -1020,19 +1048,29 @@ void reads_frame(CPU *c){
     }
     uint32_t fl = MR32(GAME_FLOW);
     int loading = fl && MR32(fl) == 1u && MR32(fl + 8u) == 2u;
-    if (loading && !ld_t0){ ld_t0 = now; ld_f0 = autotest_frame(); ld_sec = 0; ld_q = q; ld_w = 0; }
+    if (loading && !ld_t0){ ld_t0 = now; ld_f0 = autotest_frame(); ld_sec = 0; ld_q = q; ld_w = 0; ld_h = 0; ld_said = 0; }
+    if (loading && held) ld_h += dt;
+    if (loading && !ld_said && now - ld_t0 >= 20e3){
+        ld_said = 1;
+        fprintf(stderr, "[stream] f=%ld the world has waited 20 s on its Loading screen: the streamer's phase %u, %d section read(s) meanwhile; "
+                "the car loader busy for %.0f s\n", autotest_frame(), MR32(TRACK_STREAMER + 0x168u), ld_sec,
+                busy_t0 ? (now - busy_t0) / 1e3 : 0.0);
+        reads_note();
+    }
     if (!loading && ld_t0){
         double s = (now - ld_t0) / 1e3;
         ld_n++; ld_s += s; ld_t0 = 0;
         fprintf(stderr, "[stream] f=%ld the world waited %.1f s (%ld frames) on its Loading screen: %d section read(s) meanwhile, "
-                "the longest wait %.0f ms, the game's queue up to %d reads\n", autotest_frame(), s, autotest_frame() - ld_f0, ld_sec, ld_w, ld_q);
+                "the longest wait %.0f ms, the game's queue up to %d reads; the car loader held the streamer up %.1f s of it\n",
+                autotest_frame(), s, autotest_frame() - ld_f0, ld_sec, ld_w, ld_q, ld_h / 1e3);
     }
     if (now - t_min >= 60e3){
-        if (n || ld_n)
+        if (n || ld_n || hd_n)
             fprintf(stderr, "[stream] %.0f s: %d section read(s), each waited %.0f ms on average, the longest %.0f ms; "
-                    "the game's queue up to %d reads; %d Loading screen(s), %.1f s\n",
-                    (now - t_min) / 1e3, n, n ? wsum / n : 0.0, wmax, qmax, ld_n, ld_s);
-        t_min = now; n = 0; wsum = wmax = 0; qmax = 0; ld_n = 0; ld_s = 0;
+                    "the game's queue up to %d reads; %d Loading screen(s), %.1f s; the car loader held the streamer up %d time(s), "
+                    "%.1f s in all, the longest %.0f ms\n",
+                    (now - t_min) / 1e3, n, n ? wsum / n : 0.0, wmax, qmax, ld_n, ld_s, hd_n, hd_s / 1e3, hd_max);
+        t_min = now; n = 0; wsum = wmax = 0; qmax = 0; ld_n = 0; ld_s = 0; hd_n = 0; hd_s = 0; hd_max = 0;
     }
 }
 

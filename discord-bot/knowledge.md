@@ -114,9 +114,11 @@ context lists every problem the developer has a report on, with its first thread
   (`VK_ERROR_OUT_OF_DEVICE_MEMORY` in the log); portrait works for some.
 - Black picture with sound on Intel graphics of the 9th generation (HD 510 and similar), in Chrome and Firefox: the
   log shows the game drawing with no WebGPU errors. No fix.
-- Free roam: the world's loading screen, or roads missing, while driving and while many players' cars load, most
-  in Firefox and with the game data on a slow disk. Car loads got faster on 27 October, and on 28 October (20cf653)
-  the city's sections load first and the rest of the city is read ahead while driving; a log from after that helps.
+- Free roam: the world's loading screen, or roads missing, while driving among many players (seconds on a PC, half a
+  minute on a phone; once it never ended). Cause found on 29 October: the game loads no part of the city while it
+  loads a player's car, and with players coming and going their cars load one after another, so the city waited for
+  all of them. Fixed on 29 October: players' cars now wait while the city loads. Until that version is live, Players'
+  cars shown at 16 (More online settings) shortens the wait; a screen that never ends needs a reload of the page.
 - Back to free roam after a race with other players: endless loading. Two causes are fixed: the crash on the way back
   (`INVALID FREE` and a `TRAP` after the lobby screen, 39f2ca8, 26 October) and the trip stopping after the crib's
   save went to the main menu (db3f8b5, 27 October). A report on a version with both is new: escalate it with the log.
