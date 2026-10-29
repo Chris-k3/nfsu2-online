@@ -366,8 +366,11 @@ Good to know:
   nearest to them (fewer while it is busy, 8 at the least), and your game shows up to 32 of their cars at once: phones
   start at 16 and tablets at 24 (Settings, Online, more: Players' cars shown: 16, 20, 24, 28 or 32). Their names show
   over the cars within 100 m, and each gets an arrow on the minimap when it is near and a marker on the world map (M),
-  as the game's own opponents do; the world map shows where they were when you opened it. A player in a race, a shop
-  or the menus is not in your free roam: no car, no arrow, no marker until they are back. A player farther than 300 m
+  as the game's own opponents do; the world map shows where they were when you opened it. Its legend (the list on the
+  map's left) has two rows of ours after the game's: **Players** and **Players' races**. Pick one with Up or Down and
+  Enter crosses it out, as with the game's own rows: the map then leaves out the other players' markers (a crew-mate's
+  stays) or the players' race lobbies (yours stays) until you tick it again, and the game remembers it. A player in a
+  race, a shop or the menus is not in your free roam: no car, no arrow, no marker until they are back. A player farther than 300 m
   sends you their car 5 times a second instead of 20 (past 1 km, twice), which saves traffic and doesn't show at that
   distance. When many players arrive at once, their cars load one after another, about one a second, so the last of 32
   can take half a minute to appear.
@@ -470,7 +473,8 @@ Good to know:
   - **Multiplayer opens a lobby** at the start: the panel shows it, its race, career stage, track and laps and its six
     places (drag 4, 3 on the three-lane track) with the players in them, the host first and yours marked. The players
     near see "Thom's circuit (1/6)" over the start (from about 250 m); everyone in free roam sees its race's icon on
-    the world map (M), and the nearest four lobbies their words beside it ("Circuit 1/6"). They join at the start:
+    the world map (M), and the nearest four lobbies their words beside it ("Circuit 1/6") where these cover no other
+    icon (the legend's Players' races row hides them). They join at the start:
     within 15 m of it the panel shows the lobby and Enter joins (at an open race: its card's Accept, then **Join**).
     Up to 6 players; at a full one the panel says so, and Enter starts another. Drive more than 40 m from the start to
     leave a lobby; the host leaving calls it off, and a lobby nobody joins closes after 5 minutes. A host who seems
