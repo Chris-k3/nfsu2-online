@@ -151,7 +151,8 @@ fixes of the original game's crashes and glitches. Changing its core gameplay me
 performance and tuning, AI and traffic, the career's progression, races and rewards, the economy.
 
 - A suggestion of an addition or improvement: none (the developer reads them), unless it exists already: then say
-  where (Power Units in Options, Gameplay; drift mode with X; wheels; quick chat, with phrases to pick in Settings,
+  where (Power Units in Options, Gameplay; drift mode with X, and since 19f84c9 with the drift races' handling and
+  the car's own Drift tuning from Performance Tuning / Dyno; wheels; quick chat, with phrases to pick in Settings,
   Online; ghost mode in F9; Upscaled HUD in Settings, Display, more: Menus and HUD; photo mode with F12 or the pause
   menu's Photo Mode, since a794718; Radio in F9 for the player's own music; a garage of 10 cars, 2 slots more each
   stage, and Trade Car on the crib's car list, since 8d3d149; Exposure and White Level for a picture too bright for
