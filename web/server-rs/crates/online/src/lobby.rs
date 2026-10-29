@@ -1576,8 +1576,8 @@ impl Core {
         let spers = tpl(&self.lobby.s(s).persona).to_string();
         let gname = self.lobby.game(g).expect("held").name.clone();
         // what this player's game saw of the others (and of itself) that no racer does, whether its report is taken
-        // or not (a time too short for the race is not); a report of the wrong shape says nothing of anyone (a game
-        // that named one racer twice gave it two times of 0.2 s, 2026-10-29)
+        // or not (a time too short for the race is not); a report of the wrong shape says nothing of anyone (one read
+        // out of line named one racer twice, with times of 0.2 s, 2026-10-29)
         if let Some(r) = &r
             && why.is_empty()
         {

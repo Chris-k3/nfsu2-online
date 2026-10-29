@@ -503,8 +503,8 @@ fn a_race_no_racer_drives_is_a_cheat_line() {
     assert!(l.len() == 4 && l[2].contains("\"Tele\": won the online race \"tele\" (sprint) in 0:25.00, 763 km/h on average"), "{l:?}");
 }
 
-// a report of the wrong shape is no [cheat] line: a game that named one racer twice, with times of 0.25 s and 0.23 s
-// (a live race's, 2026-10-29), is not taken and says nothing of that racer
+// a report of the wrong shape is no [cheat] line: one that names a racer twice, with times of 0.25 s and 0.23 s (a
+// live race's report read out of line, 2026-10-29), is not taken and says nothing of that racer
 #[test]
 fn a_report_naming_a_racer_twice_is_no_cheat_line() {
     let mut w = world();
