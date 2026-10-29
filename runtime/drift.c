@@ -80,6 +80,18 @@
  * (drift_kept_tuning, roam_game.c's car look): another look would have the
  * car loaded again in each.
  *
+ * The nitrous stays as it was: a drift event has none (set 3's 0x5A7750 sets
+ * the shot's length, the physics' [car +0x20] +0x2A0 in seconds, to 0), and
+ * 0x5F6C20 fills the car's nitrous (+0x40, 0x591CD0) again from that length
+ * whenever the shot it has (+0x414 in 1/4000 s, times 0.00025f) does not
+ * compare equal to it, which it hardly ever does (0.00025f is a little under
+ * 1/4000).
+ * Made again for X, the car had no nitrous in drift mode, and a full shot
+ * back after it (X twice, a pause: free nitrous).  Players asked for it in
+ * drift mode, where it went with the drifts ("Bring back nitro in drift
+ * mode"), so the shot's length goes back after the car is made again for X,
+ * and the nitrous's state (+0x414 .. +0x420) after each time.
+ *
  * The camera: on, the drift camera (view 4) as the camera key reaches it
  * (Player 0x5F2FA0: PlayerSettings view, [0x83AA64 + 0x28 n] +0x10, then
  * the camera for it); off, the view the player had, if it is still the
@@ -164,6 +176,9 @@ __attribute__((weak)) void host_status_set_n(const int *slot, const double *valu
 #define PL_HUD         0x9a4u
 #define VIEW_DRIFT     4u
 #define CAR_RIDE       0x10u         /* car: its ride (RideInfo) */
+#define CAR_PHYS       0x20u         /* car: its physics' values (+0x2A0 the nitrous shot's length, s) */
+#define PH_NOS_LEN     0x2a0u
+#define CAR_NOS_STATE  0x454u        /* car: its nitrous's state (+0x40 +0x414: the shot, +0x418, left, on since), 4 dwords */
 #define RIDE_TUNING    0x398u        /* ride: the dyno setup it drives with */
 #define REC_SETUPS     0x360u        /* a car record: its 5 dyno setups, SETUP_SZ bytes each */
 #define SETUP_SZ       0x29u
@@ -314,6 +329,19 @@ static void camera_off(CPU *c, int live){
 
 uint32_t garage_find(uint32_t db, uint32_t h);   /* garage.c: a front-end car record by handle (slots 6-10 too) */
 
+/* The car made again (0x5F6C20) with its nitrous as it was: the shot's length (a drift event's is 0) and what is left
+ * of it (see the top) */
+static void car_tuned(CPU *c, uint32_t car){
+    uint32_t ph = rd32(car + CAR_PHYS), nos[4], one = 1;
+    int keep = ok(ph, PH_NOS_LEN + 3u) && ok(car + CAR_NOS_STATE, 15u);
+    float len = keep ? MRF32(ph + PH_NOS_LEN) : 0.f;
+    for (uint32_t i = 0; keep && i < 4u; i++) nos[i] = MR32(car + CAR_NOS_STATE + 4u * i);
+    gcall(c, FN_CAR_TUNED, car, 1, &one);
+    if (!keep || rd32(car + CAR_PHYS) != ph) return;
+    MRF32(ph + PH_NOS_LEN) = len;
+    for (uint32_t i = 0; i < 4u; i++) MR32(car + CAR_NOS_STATE + 4u * i) = nos[i];
+}
+
 /* The car's physics made again with the switch on: a drift event's handling (parameter set 3) and the car's Drift
  * setup from the dyno in its ride (see the top) */
 static void physics_in(CPU *c){
@@ -328,9 +356,8 @@ static void physics_in(CPU *c){
         D.swapped = 1;
     }
     D.tuned = car;
-    uint32_t one = 1;
-    gcall(c, FN_CAR_TUNED, car, 1, &one);
-    fprintf(stderr, "[drift] f=%ld the car's physics for a drift event%s (%d of %u values from the dyno's Drift setup)\n",
+    car_tuned(c, car);
+    fprintf(stderr, "[drift] f=%ld the car's physics for a drift event%s (%d of %u values from the dyno's Drift setup), its nitrous kept\n",
             autotest_frame(), !setup ? ", no Drift setup of its own" : "", differ, SETUP_SZ);
 }
 /* ... and as they were, while the car is still the one (out of the world: the next car is made new) */
@@ -341,8 +368,7 @@ static void physics_out(CPU *c){
     D.tuned = 0; D.swapped = 0;
     if (!car) return;
     if (!same || rd32(G_FLOW) != 6u){ fprintf(stderr, "[drift] f=%ld the car is gone: no physics to give back\n", autotest_frame()); return; }
-    uint32_t one = 1;
-    gcall(c, FN_CAR_TUNED, car, 1, &one);
+    car_tuned(c, car);
     fprintf(stderr, "[drift] f=%ld the car's own physics back\n", autotest_frame());
 }
 /* the dyno setup friends' games show the car with (roam_game.c): the ride's own while the Drift setup is in, so X is

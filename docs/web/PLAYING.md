@@ -119,9 +119,10 @@ The start page shows these keys under **Controls**, and F9, Controls shows them 
   game has no horn of its own).
 - **Drift mode (X):** in free roam, the car handles as in the game's drift races (their handling and drift assist,
   with your car's Drift tuning from Performance Tuning / Dyno in the crib; the other modes' tuning is back when drift
-  mode is off), the camera is the drift races' (C still goes through all of them), and drifts score as there: the drift
-  races' panel (Best, the multiplier with the points its next level needs, Total) shows under Bank, and DRIFT counts
-  a drift's points up while you drift, as in the races: lime when it banks, red when a wall loses it. Free roam's
+  mode is off), but your nitrous stays (the drift races have none; X neither empties nor fills it). The camera is the
+  drift races' (C still goes through all of them), and drifts score as there: the drift races' panel (Best, the
+  multiplier with the points its next level needs, Total) shows under Bank, and DRIFT counts a drift's points up
+  while you drift, as in the races: lime when it banks, red when a wall loses it. Free roam's
   music plays on (the drift races have none). Just for fun: the points never go into the bank or the career. X again
   turns it off and gives your camera back. It is off in races and outruns and comes back in free roam after them.
 - **Photo mode (F12, or Photo Mode in the pause menu):** while you drive (a race, free roam, an outrun) the world
