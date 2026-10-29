@@ -263,6 +263,11 @@ kbd .glyph { display: inline-block; width: 14px; height: 14px; vertical-align: -
   background: var(--field); color: var(--lime); font: italic 700 16px/24px var(--font);
 }
 .set input::placeholder { color: var(--edge); font-weight: 400; }
+/* the Room's value box (settings-ui.ts): its invite link button in it at the right, as the passphrase's eye is in its
+ * .keybox; the box is the frame, the field inside it has none */
+.set .linkbox { flex: none; }
+.set .linkbox input[type="text"] { height: 100%; border: 0; background: none; outline: none; box-shadow: none; }
+.set .linkbox:has(.room-link:not([hidden])) input[type="text"] { padding-right: 4px; }
 /* a choice of many: the same value box, with a chevron */
 .set select {
   appearance: none; width: 240px; height: 40px; padding: 0 36px 0 12px; border: 2px solid var(--edge); border-radius: 8px;

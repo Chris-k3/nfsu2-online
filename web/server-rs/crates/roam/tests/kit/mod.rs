@@ -27,7 +27,8 @@ pub fn fnv1a(s: &str) -> u32 {
     if h == 0 { 1 } else { h }
 }
 
-/// roam_core.c's rc_room_hash, a Room's or a crew's (the page's players.ts roomHash is the same): FNV-1a of the name's
+/// roam_core.c's rc_room_hash of an ASCII name, a Room's or a crew's (the page's players.ts roomHash is the same; both also fold
+/// capitals past A to Z and Unicode's blanks, which these tests' names never have): FNV-1a of the name's
 /// UTF-8 without its blanks (space, \t to \r), A to Z made small; 0 for a name of blanks only, never 0 for another
 /// (`fnv1a` is the same for a name of small letters without blanks)
 pub fn room_hash(s: &str) -> u32 {

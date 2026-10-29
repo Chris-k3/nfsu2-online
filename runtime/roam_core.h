@@ -222,7 +222,7 @@ float    rc_getf(rc_r *r);
 void     rc_getb(rc_r *r, void *dst, uint32_t n);
 uint32_t rc_crc32(const uint8_t *p, uint32_t n);
 uint32_t rc_fnv1a(const char *s);           /* 0 for "" */
-uint32_t rc_room_hash(const char *s);       /* room names -> room hash: capitals and spaces do not count (0: none) */
+uint32_t rc_room_hash(const char *s);       /* room names -> room hash: capitals, blanks and invisible characters do not count (0: none) */
 uint32_t rc_fnv1a_bytes(const uint8_t *p, uint32_t n);
 uint32_t rc_fbits(float f);
 float    rc_bitsf(uint32_t u);
@@ -590,6 +590,11 @@ int  rc_peer_crew(const rc_session *s, int i);
  * repeats left out; the hub (or without one, the peers) hears them at the
  * next tick */
 void rc_set_crews(rc_session *s, const uint32_t *crews, int n);
+/* our room changed while the session runs (rc_room_hash, 0: none): every
+ * peer of the old one goes, with the world map's markers and lobbies, and the
+ * hub (or the peers) hears the new one at the next tick.  The number of
+ * established peers that went (0 also for the same room: nothing changes) */
+int  rc_set_room(rc_session *s, uint32_t room);
 /* a DUEL message to the established peer with id `to`, if its HELLO said it
  * takes them; 1 when sent */
 int  rc_send_duel(rc_session *s, uint32_t to, uint8_t op, uint8_t arg, uint32_t duel);

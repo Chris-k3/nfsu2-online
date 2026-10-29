@@ -67,7 +67,8 @@ execFileSync(path.join(WASI, 'bin/clang'), ['--target=wasm32-wasip1', '-O2', '-f
   '-Iruntime', '-Wl,--no-entry', '-Wl,--export-dynamic', '-o', WASM, 'tests/roam_crowd.c', 'runtime/roam_core.c'], { cwd: REPO, stdio: 'inherit' });
 const mod = await WebAssembly.compile(fs.readFileSync(WASM));
 
-// a room's hash as roam_core.c rc_room_hash makes it (capitals and spaces do not count)
+// a room's hash as roam_core.c rc_room_hash makes it of an ASCII name (capitals and spaces do not count; the core also
+// folds capitals past A to Z and Unicode's blanks, which a crowd's names here never have)
 const roomHash = s => {
   let h = 0x811C9DC5, kept = 0;
   for (let c of Buffer.from(s, 'utf8')) {

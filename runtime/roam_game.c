@@ -5200,9 +5200,9 @@ static void init_once(CPU *c){
     if (pl && *pl){ g_poselog = rh_fopen(pl); if (g_poselog) rh_fprintf(g_poselog, "kind,host_us,sync_us,id,x,y,z,speed,mode,err,fx,fy,fz,uz,rx,ry,rz\n"); }
     g_frame0 = rh_frame();
     char ids[16];
-    rlog("[roam] free-roam multiplayer ON: id %08x, port %d, %d configured peer(s), room \"%s\", up to %d players, "
+    rlog("[roam] free-roam multiplayer ON: id %08x, port %d, %d configured peer(s), room \"%s\" (%08x), up to %d players, "
                     "%d remote cars, %d Hz, %s, none shown within %d m of the new career's start, quick chat %s%s\n", cf.self_id, port, np,
-            O.room, maxp, O.max_cars, O.rate, O.collide ? "solid cars" : "ghost cars", O.spawn_m, cf.say ? "on" : "off",
+            O.room, cf.room, maxp, O.max_cars, O.rate, O.collide ? "solid cars" : "ghost cars", O.spawn_m, cf.say ? "on" : "off",
             O.test ? ", test harness (loopback only)" : "");
     (void)ids;
     for (int i = 0; i < O.ncrew; i++) rlog("[roam] crew %d: \"%s\" (%08x), colour %06x\n", i + 1, O.crew[i], cf.crews[i], O.crew_rgb[i]);
@@ -5536,6 +5536,32 @@ static void crews_follow(void){
     rlog("[roam] f=%ld crews changed (the page's menu): %d: %08x %08x %08x %08x, colours %06x %06x %06x %06x\n", rh_frame(), n,
          c[0], c[1], c[2], c[3], O.crew_rgb[0], O.crew_rgb[1], O.crew_rgb[2], O.crew_rgb[3]);
 }
+/* The room changed while the game runs (an invite link on the page: roam_plat_room): the session leaves the old one
+ * (its friends' cars go as when they leave) and the hub links it in the new one at its next HELLO.  Not during an
+ * outrun, a race lobby or a race: the change waits until the player is back to driving alone in free roam, where
+ * leaving everyone breaks nothing.  A name that reads as a slur is no room, as at the start. */
+static uint32_t g_room_gen;
+static void room_follow(void){
+    char name[64];
+    uint32_t gen = roam_plat_room(name);
+    if (!gen || gen == g_room_gen || g_racing) return;
+#if DUELS
+    if (g_du.st != DU_IDLE) return;
+#endif
+#if MPRACES
+    if (g_mp.st != MP_IDLE) return;
+#endif
+    g_room_gen = gen;
+    if (name_blocked(name)){ rlog("[roam] f=%ld the room from the page reads as a slur: no room\n", rh_frame()); name[0] = 0; }
+    uint32_t h = rc_room_hash(name);
+    roam_plat_lock();
+    uint32_t was = g_s.conf.room;
+    int left = rc_set_room(&g_s, h);
+    g_alone_since = 0; g_alone_told = 0;
+    roam_plat_unlock();
+    snprintf(O.room, sizeof O.room, "%s", name);
+    rlog("[roam] f=%ld room changed (the page): %08x -> %08x, %d friend(s) left with the old one\n", rh_frame(), was, h, left);
+}
 #endif
 /* Engage does something of ours now (roam_game_engage: the touch controls' Start, beside the game's own markers and
  * outruns): a friend's outrun on the HUD to challenge or to take, a multiplayer-only race spot (an open race's
@@ -5559,6 +5585,7 @@ void roam_game_frame(CPU *c){
 #ifndef ROAM_HOST_WIN
     solid_follow();
     crews_follow();
+    room_follow();
 #endif
     g_step++;
     uint64_t t0 = rh_ns();
