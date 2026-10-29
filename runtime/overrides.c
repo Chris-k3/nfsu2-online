@@ -812,10 +812,12 @@ void sub_004e8b70(CPU *c){
  * own packages fit in that; free roam's world map does not (a marker for
  * each player in free roam besides the map's own 235 objects, roam_game.c),
  * and lost its shop and event icons to the markers.  Every
- * package gets 1024 nodes instead, as many as its list holds (roam_host.h
- * RH_FE_NODES); the packages are drawn one after another, and
- * sub_0050b430 lets go of the nodes after each. */
-#define FE_NODES 1024u
+ * package gets FE_LIST_BIG nodes instead, as many as its list holds
+ * (roam_host.h RH_FE_NODES; the list below); the packages are drawn one
+ * after another, and sub_0050b430 lets go of the nodes after each. */
+#define FE_LIST      1024u                /* the renderer's own list: +0x110 the count, +0x114 entries (object, depth key) */
+#define FE_LIST_BIG  4096u                /* ...and ours past it */
+#define FE_NODES     FE_LIST_BIG
 void sub_0050b410_orig(CPU *c);
 void sub_0050b410(CPU *c){
     uint32_t gheap_alloc(int heap, uint32_t n, int zero);
@@ -823,6 +825,68 @@ void sub_0050b410(CPU *c){
     sub_0050b410_orig(c);
     if (!nodes) nodes = gheap_alloc(1, FE_NODES * 8u, 1);
     if (nodes){ MR32(0x00838494u) = nodes; MR32(0x0083848cu) = FE_NODES; }
+}
+
+/* --- sub_0051a970, sub_005114f0, sub_0050c2c0: the renderer's list of a package's objects, past 1024 ---
+ * The package loop (sub_00536520) gathers the objects to draw into the
+ * renderer's list (sub_0051a970, thiscall renderer (object, ...), ret 0xC:
+ * an object whose colour has any alpha at +0x114 + 8 * count, no bound),
+ * sorts it by depth (sub_005114f0, thiscall renderer + 0x110: a radix sort,
+ * four passes of a byte of the key at +4, low byte first, into the 0x2000
+ * bytes after the list and back) and draws it (sub_0050c2c0, thiscall
+ * (list, count), ret 8, the last first).  The list holds 1024; the fields
+ * past its sort's half (+0x4114 on) are the renderer's own, so more would
+ * garble it.  The world map's markers for everyone in free roam take more
+ * (roam_game.c), so past 1024 the objects go to a list of ours: each one is
+ * made in the list's last place, as the game makes it, and moved to ours;
+ * the sort takes both lists into ours, as the game's sort would, and the
+ * draw is handed ours.  Past FE_LIST_BIG an object is not drawn. */
+static struct { uint32_t r, e, n; } g_fel;            /* the renderer, our list (FE_LIST_BIG entries), the count sorted for its draw */
+static uint32_t g_fel_k[2][FE_LIST_BIG * 2];
+void sub_0051a970_orig(CPU *c);
+void sub_0051a970(CPU *c){
+    uint32_t gheap_alloc(int heap, uint32_t n, int zero);
+    uint32_t r = c->ecx, n = MR32(r + 0x110u);
+    if (n < FE_LIST){ sub_0051a970_orig(c); return; }
+    if (!g_fel.e) g_fel.e = gheap_alloc(1, FE_LIST_BIG * 8u, 1);
+    uint32_t last = r + 0x114u + (FE_LIST - 1u) * 8u, o = MR32(last), k = MR32(last + 4u);
+    MR32(r + 0x110u) = FE_LIST - 1u;
+    sub_0051a970_orig(c);
+    if (MR32(r + 0x110u) == FE_LIST && g_fel.e && n < FE_LIST_BIG){
+        MR32(g_fel.e + n * 8u) = MR32(last); MR32(g_fel.e + n * 8u + 4u) = MR32(last + 4u);
+        n++; g_fel.r = r;
+    }
+    MR32(last) = o; MR32(last + 4u) = k; MR32(r + 0x110u) = n;
+}
+void sub_005114f0_orig(CPU *c);
+void sub_005114f0(CPU *c){
+    uint32_t l = c->ecx, n = MR32(l);
+    g_fel.n = 0;
+    if (n <= FE_LIST || !g_fel.e || l != g_fel.r + 0x110u){ sub_005114f0_orig(c); return; }
+    uint32_t *a = g_fel_k[0], *b = g_fel_k[1];
+    for (uint32_t i = 0; i < n; i++){
+        uint32_t s = i < FE_LIST ? l + 4u + i * 8u : g_fel.e + i * 8u;
+        a[2 * i] = MR32(s); a[2 * i + 1] = MR32(s + 4u);
+    }
+    for (int sh = 0; sh < 32; sh += 8){                  /* (stable, as the game's) */
+        uint32_t at[257] = {0};
+        for (uint32_t i = 0; i < n; i++) at[(a[2 * i + 1] >> sh & 0xffu) + 1]++;
+        for (int j = 0; j < 256; j++) at[j + 1] += at[j];
+        for (uint32_t i = 0; i < n; i++){
+            uint32_t j = at[a[2 * i + 1] >> sh & 0xffu]++;
+            b[2 * j] = a[2 * i]; b[2 * j + 1] = a[2 * i + 1];
+        }
+        uint32_t *t = a; a = b; b = t;
+    }
+    for (uint32_t i = 0; i < n; i++){ MR32(g_fel.e + i * 8u) = a[2 * i]; MR32(g_fel.e + i * 8u + 4u) = a[2 * i + 1]; }
+    g_fel.n = n;
+    POP32(c->eip);
+}
+void sub_0050c2c0_orig(CPU *c);
+void sub_0050c2c0(CPU *c){
+    if (g_fel.n && MR32(c->esp + 4u) == g_fel.r + 0x114u && MR32(c->esp + 8u) == g_fel.n) MR32(c->esp + 4u) = g_fel.e;
+    g_fel.n = 0;
+    sub_0050c2c0_orig(c);
 }
 
 /* --- sub_004df9c0: a screen's list of the player's cars, a stock car of no type ---

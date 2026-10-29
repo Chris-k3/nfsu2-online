@@ -367,7 +367,8 @@ Good to know:
   nearest to them (fewer while it is busy, 8 at the least), and your game shows up to 32 of their cars at once: phones
   start at 16 and tablets at 24 (Settings, Online, more: Players' cars shown: 16, 20, 24, 28 or 32). Their names show
   over the cars within 100 m, and each gets an arrow on the minimap when it is near and a marker on the world map (M),
-  as the game's own opponents do; the world map shows where they were when you opened it. Its legend (the list on the
+  as the game's own opponents do. The world map also marks the other players in free roam, the nearest 2048 past those
+  32, and while it is open every marker moves to where its player is, once a second. Its legend (the list on the
   map's left) has two rows of ours after the game's: **Players** and **Players' races**. Pick one with Up or Down and
   Enter crosses it out, as with the game's own rows: the map then leaves out the other players' markers (a crew-mate's
   stays) or the players' race lobbies (yours stays) until you tick it again, and the game remembers it. A player in a

@@ -151,9 +151,14 @@ pub fn snap_moving(sender: u32, pos: [f64; 3], v: [f64; 3], heading: f64, status
     d
 }
 
-/// the world map's question (MAPREQ)
+/// the world map's question (MAPREQ), as a page before 2048 asks it (512 at most)
 pub fn mapreq(sender: u32, req: u16) -> Vec<u8> {
     dgram(10, sender, &req.to_le_bytes())
+}
+
+/// the world map's question (MAPREQ) for max players at most
+pub fn mapreq_max(sender: u32, req: u16, max: u16) -> Vec<u8> {
+    dgram(10, sender, &[req.to_le_bytes(), max.to_le_bytes()].concat())
 }
 
 /// a MAP datagram: (req, part, nparts, total, [(x, y, heading)])

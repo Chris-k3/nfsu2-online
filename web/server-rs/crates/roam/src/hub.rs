@@ -293,8 +293,8 @@ fn sanitize(o: RoamOptions) -> RoamOptions {
         look_ms: f(o.look_ms, d.look_ms),
         away_m: f(o.away_m, d.away_m),
         view_m: f(o.view_m, d.view_m),
-        // (one answer is three datagrams at most)
-        map_max: n(o.map_max, d.map_max).min(wire::MAP_PER * 3),
+        // (one answer is MAP_PARTS datagrams at most)
+        map_max: n(o.map_max, d.map_max).min(wire::MAP_PER * wire::MAP_PARTS),
         map_gap_ms: f(o.map_gap_ms, d.map_gap_ms),
         map_fresh_ms: f(o.map_fresh_ms, d.map_fresh_ms),
     }
@@ -791,7 +791,7 @@ impl Hub {
                     p.watch.reset();
                 }
             }
-            Msg::MapReq { req } if sender == p.id => ask = Some(req),
+            Msg::MapReq { req, max } if sender == p.id => ask = Some((req, max)),
             Msg::Lobby { op, to: 0, lobby, race, x, y, n, max, state, ids } if sender == p.id => {
                 match op {
                     wire::LOBBY_ADVERT => p.lobby = Some((HubLobby { id: lobby, race, x, y, n, max, state, ids }, now)),
@@ -844,8 +844,8 @@ impl Hub {
             results.add(now, by, r, &|id| self.who(id));
             self.results = results;
         }
-        if let Some(req) = ask {
-            self.map(slot, req, now);
+        if let Some((req, max)) = ask {
+            self.map(slot, req, max, now);
         }
     }
 
@@ -928,11 +928,11 @@ impl Hub {
 
     /// The world map's answer to the player in `slot` (roam_core.h RC_MSG_MAP): the players of its room in free roam
     /// (or paused there) with a position younger than map_fresh_ms, past itself and its links, nearest first (at one
-    /// distance in the order they came), map_max of them at most, in datagrams of MAP_PER; one answer to a browser (its
-    /// virtual address, whatever its endpoints) every map_gap_ms at most (a page asks again when an answer does not
-    /// come).
-    fn map(&mut self, slot: u32, req: u16, now: f64) {
-        let (gap, fresh, max) = (self.o.map_gap_ms, self.o.map_fresh_ms, self.o.map_max);
+    /// distance in the order they came), map_max of them at most (and the most it asks for), in datagrams of MAP_PER;
+    /// one answer to a browser (its virtual address, whatever its endpoints) every map_gap_ms at most (a page asks
+    /// again when an answer does not come).
+    fn map(&mut self, slot: u32, req: u16, most: u16, now: f64) {
+        let (gap, fresh, max) = (self.o.map_gap_ms, self.o.map_fresh_ms, self.o.map_max.min(most as usize));
         let Some(p) = self.player(slot) else { return };
         if self.map_at.get(&p.vip).is_some_and(|&t| now - t < gap) {
             return;

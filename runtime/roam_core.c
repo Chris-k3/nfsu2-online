@@ -435,7 +435,7 @@ int rc_encode(const rc_msg *m, uint8_t *out, int cap){
         if (m->u.duel.op < 1 || m->u.duel.op >= RC_DUEL__N || !m->u.duel.to || !m->u.duel.duel) return -1;
         rc_put8(&w, m->u.duel.op); rc_put8(&w, m->u.duel.arg); rc_put32(&w, m->u.duel.to); rc_put32(&w, m->u.duel.duel);
         break;
-    case RC_MSG_MAPREQ: rc_put16(&w, m->u.mapreq.req); break;
+    case RC_MSG_MAPREQ: rc_put16(&w, m->u.mapreq.req); rc_put16(&w, m->u.mapreq.max); break;
     case RC_MSG_MAP:
         if (m->u.map.nparts < 1 || m->u.map.nparts > RC_MAP_PARTS || m->u.map.part >= m->u.map.nparts || m->u.map.n > RC_MAP_PER) return -1;
         rc_put16(&w, m->u.map.req); rc_put8(&w, m->u.map.part); rc_put8(&w, m->u.map.nparts);
@@ -581,7 +581,10 @@ int rc_decode(const uint8_t *buf, int len, rc_msg *m){
         if (r.err) return RC_E_SHORT;
         if (m->u.duel.op < 1 || m->u.duel.op >= RC_DUEL__N || !m->u.duel.to || !m->u.duel.duel) return RC_E_FIELD;
         break;
-    case RC_MSG_MAPREQ: m->u.mapreq.req = (uint16_t)rc_get16(&r); break;
+    case RC_MSG_MAPREQ:
+        m->u.mapreq.req = (uint16_t)rc_get16(&r);
+        m->u.mapreq.max = !r.err && r.len - r.n >= 2 ? (uint16_t)rc_get16(&r) : RC_MAP_MAX_V1;   /* (a core before 2048: req only) */
+        break;
     case RC_MSG_MAP:
         m->u.map.req = (uint16_t)rc_get16(&r); m->u.map.part = (uint8_t)rc_get8(&r); m->u.map.nparts = (uint8_t)rc_get8(&r);
         m->u.map.total = (uint16_t)rc_get16(&r); m->u.map.n = (uint8_t)rc_get8(&r);
@@ -1042,10 +1045,11 @@ static void lobbies_from_hub(rc_session *s, const rc_msg *m){
     }
     s->lobbies_n = n; s->lobbies_gen++;
 }
-int rc_ask_map(rc_session *s, int64_t now){
+int rc_ask_map(rc_session *s, int64_t now, int max){
     if (s->closed || !s->conf.hub_ip || !s->hub_heard_us || !hub_mode(s, now)) return 0;
     rc_msg m; hdr(s, &m, RC_MSG_MAPREQ);
     m.u.mapreq.req = ++s->map_req;
+    m.u.mapreq.max = (uint16_t)(max < 0 ? 0 : max > RC_MAP_MAX ? RC_MAP_MAX : max);
     s->map_mask = 0; s->map_nparts = 0; s->map_asked_us = now;
     tx_to(s, s->conf.hub_ip, s->conf.hub_port, &m);
     return 1;
@@ -1058,7 +1062,7 @@ static void map_part(rc_session *s, const rc_msg *m){
     s->map_nparts = m->u.map.nparts; s->map_asm_total = m->u.map.total;
     memcpy(s->map_asm + (size_t)m->u.map.part * RC_MAP_PER * RC_MAP_ENTRY, m->u.map.data, (size_t)m->u.map.n * RC_MAP_ENTRY);
     s->map_part_n[m->u.map.part] = m->u.map.n;
-    s->map_mask |= (uint8_t)(1u << m->u.map.part);
+    s->map_mask |= (uint16_t)(1u << m->u.map.part);
     if (s->map_mask != (1u << s->map_nparts) - 1u) return;
     int n = 0;
     for (int j = 0; j < s->map_nparts; j++)
