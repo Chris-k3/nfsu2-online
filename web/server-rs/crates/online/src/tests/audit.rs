@@ -464,6 +464,7 @@ fn resu_avg(kind: u8, players: &[(u8, u8, f32, f32, bool)]) -> String {
         b[o + 2] = if *out { 0x0b } else { 1 };
         b[o + 8..o + 12].copy_from_slice(&time.to_be_bytes());
         b[o + 16..o + 20].copy_from_slice(&avg.to_be_bytes());
+        b[o + 20..o + 24].copy_from_slice(&(avg * 1.25).to_be_bytes());
         if *out {
             b[o + 32..o + 36].copy_from_slice(&(-1.0f32).to_be_bytes());
         }
@@ -493,15 +494,16 @@ fn a_race_no_racer_drives_is_a_cheat_line() {
     race_of(&mut w, "warp", "Honest", "Warp", &[(1, 1, 4.77, 13.58, false), (0, 2, 34.76, 29.36, true)]);
     assert_eq!(
         cheats(&w),
-        ["[cheat] 10.77.4.4 \"Warp\": won the online race \"warp\" (sprint) in 0:04.77, under the 20 s a sprint race takes \
-          at least, having driven 65 m, under half the 1021 m \"Honest\" drove: each by its own game"]
+        ["[cheat] 10.77.4.4 \"Warp\": won the online race \"warp\" (sprint, track 4102, 1 lap) in 0:04.77, under the 20 s a \
+          sprint race takes at least, having driven 65 m, under half the 1021 m \"Honest\" drove: each by its own game; \
+          its top speed 61 km/h"]
     );
     race_of(&mut w, "tele", "Honest2", "Tele", &[(1, 1, 25.0, 212.0, false), (0, 2, 55.0, 29.0, true)]);
     let l = cheats(&w);
     assert_eq!(
         l[1..],
-        ["[cheat] 10.77.4.4 \"Tele\": won the online race \"tele\" (sprint) in 0:25.00, 763 km/h on average, which no car \
-          does: by its own game"]
+        ["[cheat] 10.77.4.4 \"Tele\": won the online race \"tele\" (sprint, track 4102, 1 lap) in 0:25.00, 763 km/h on \
+          average, which no car does: by its own game; its top speed 954 km/h"]
     );
 }
 

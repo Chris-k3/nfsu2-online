@@ -599,7 +599,9 @@ the player left: `./nfsu2 ban c17 2w Cheating in races`. Free roam's lines get n
   In Online mode each racer is judged by its own game's figures (`won the online race …`, "by its own game"): a time
   under the shortest its race type takes (the result is not taken either), 350 km/h or more on average, or a way
   under half another racer's own (both by their own games: "each by its own game"); and a race won in under 40 % of
-  the next finisher's time, by the result. A drift race is won by points and is left out.
+  the next finisher's time, by the result. An Online line names the track and laps and the racer's own top speed;
+  the other racers' times are on that race's `[online]` lines (`grep -F '"<race name>"'`). A drift race is won by
+  points and is left out.
 - **In free roam**: a teleport (the car went 300 m or more farther than any car drives, in one jump or in short hops),
   a car over 450 km/h for 2 s, or a game whose clock runs 1.3 times as fast as the server's or more for a minute (a
   speed hack); a teleport's or a fast car's line names the players within 40 m of where it came to, and a race lobby

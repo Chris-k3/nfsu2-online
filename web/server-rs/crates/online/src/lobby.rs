@@ -341,7 +341,7 @@ pub struct Player {
     pub own: Option<Own>,
 }
 
-/// A racer's own figures (`race_cheats`): finished, its place, time (s) and average speed (m/s), and whether a
+/// A racer's own figures (`race_cheats`): finished, its place, time (s), average and top speed (m/s), and whether a
 /// `[cheat]` line told of it
 #[derive(Clone, Copy, Debug)]
 pub struct Own {
@@ -349,6 +349,7 @@ pub struct Own {
     pub place: u8,
     pub time: f64,
     pub avg: f64,
+    pub top: f64,
     pub told: bool,
 }
 
@@ -731,19 +732,23 @@ fn fit(fields: Fields, max: usize, drop: &[&str]) -> Fields {
 /// that ends its race at once: a test's racewin won a sprint in 4.77 s having driven 65 m, the other racer 1021 m by
 /// the race's end 30 s later; an honest finisher drives the whole way, and nobody twice as much before the race
 /// ends).  The way is looked at again at every report: the other racer's may come after the finisher's.  A drift race
-/// is won by points and is left out.
-fn race_cheats(game: &str, kind: u8, me: usize, mine: Option<&ReportPlayer>, players: &mut [Player]) -> Vec<String> {
+/// is won by points and is left out.  The line names the race's track and laps and the racer's top speed: the other
+/// finishers' times are on the race's `[online]` lines (often none yet: one who won in 30 s had the others give up).
+fn race_cheats(game: &str, r: &RaceReport, me: usize, mine: Option<&ReportPlayer>, players: &mut [Player]) -> Vec<String> {
+    let kind = r.kind;
     if kind == KIND_DRIFT {
         return Vec::new();
     }
     if let Some(p) = mine
         && players[me].own.is_none()
     {
-        let (time, avg) = (if p.time < 100_000.0 { p.time.max(0.0) } else { 0.0 }, if p.avg < 1000.0 { p.avg.max(0.0) } else { 0.0 });
+        let speed = |v: f64| if v < 1000.0 { v.max(0.0) } else { 0.0 };
+        let time = if p.time < 100_000.0 { p.time.max(0.0) } else { 0.0 };
         let finished = !p.dropped && p.place >= 1 && time > 0.0;
-        players[me].own = Some(Own { finished, place: p.place, time, avg, told: false });
+        players[me].own = Some(Own { finished, place: p.place, time, avg: speed(p.avg), top: speed(p.top), told: false });
     }
     let ty = REPORT_TYPES.get(kind as usize).copied().unwrap_or("race");
+    let laps = if r.laps > 0 { format!(", {} lap{}", r.laps, if r.laps == 1 { "" } else { "s" }) } else { String::new() };
     let mut lines = Vec::new();
     for i in 0..players.len() {
         let Some(o) = players[i].own.filter(|o| o.finished && !o.told) else { continue };
@@ -778,11 +783,14 @@ fn race_cheats(game: &str, kind: u8, me: usize, mine: Option<&ReportPlayer>, pla
         p.own = Some(Own { told: true, ..o });
         let place = if o.place == 1 { "won".to_string() } else { format!("finished {} in", o.place) };
         lines.push(format!(
-            "[cheat] {} \"{}\": {place} the online race \"{game}\" ({ty}) in {}, {}: {each}by its own game",
+            "[cheat] {} \"{}\": {place} the online race \"{game}\" ({ty}, track {}{laps}) in {}, {}: {each}by its own game; \
+             its top speed {:.0} km/h",
             vip_str(p.vip),
             p.name,
+            r.track,
             fmt_time(o.time),
-            why.join(", ")
+            why.join(", "),
+            o.top * 3.6
         ));
     }
     lines
@@ -1616,7 +1624,7 @@ impl Core {
             && why.is_empty()
         {
             let mine = r.players.iter().find(|p| lower(&names[p.index as usize]) == persona);
-            let lines = race_cheats(&gname, r.kind, me, mine, &mut self.lobby.game_mut(g).expect("held").players);
+            let lines = race_cheats(&gname, r, me, mine, &mut self.lobby.game_mut(g).expect("held").players);
             for line in lines {
                 self.llog(&line, s);
             }
