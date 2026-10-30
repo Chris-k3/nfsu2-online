@@ -299,7 +299,7 @@ let untrack: (() => void) | null = null;
  * and says that with it on the game waits in line for a place (and plays alone until then).  True: it was asked.
  * ASK_ROAM false: never asked, and free roam stays off until the player turns it on under Online.
  */
-const ASK_ROAM = true;
+const ASK_ROAM = false;
 async function askRoam(): Promise<boolean> {
   const r = resolved();
   if (!ASK_ROAM || r.source.NFSU2_ROAM || TEST_PARAMS.some(k => q.has(k)) || offline || /^(off|0|none)$/i.test(r.env.NFSU2_NET?.trim() ?? '')) return false;

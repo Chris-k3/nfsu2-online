@@ -388,7 +388,7 @@ export const TEMPLATE = `# NFSU2 settings, read at every launch.
 # Traffic, races and money stay your own.  Your name (above) is what they
 # see.  For these options a ';' or '#' after a blank starts a comment.
 # [NFSU2_ROAM]
-#roam = off
+#roam = on
 # Empty: you drive with everyone.  With a name, free roam shows only the
 # players who set the same name (capitals and spaces do not count).  Not
 # private: everyone on the server still sees your name.  [NFSU2_ROAM_ROOM]
@@ -467,6 +467,9 @@ export const DEFAULTS: ReadonlyMap<string, string> = (() => {
 export const APP_DEFAULTS: Readonly<Record<string, string>> = {
   ALARM: '0', FIXMAT: '0', FIXMAT_MODE: '3', NOMOVIES: '0', SNDSYNC: '0', GPUVS: '1',
   NFSU2_READONLY_DATA: '1',
+  // Free roam with other players enabled by default with collisions (solid cars)
+  NFSU2_ROAM: '1',
+  NFSU2_ROAM_COLLIDE: '1',
   // the browser's: play in the window unless settings.ini asks for full screen
   NFSFULL: '0',
   // no Discord in a browser (null stand-ins), said once so the log is explicit

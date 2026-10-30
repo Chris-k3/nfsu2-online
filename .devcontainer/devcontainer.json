@@ -1,0 +1,20 @@
+{
+  "name": "NFSU2 Web Multiplayer",
+  "image": "mcr.microsoft.com/devcontainers/universal:2",
+  "forwardPorts": [8080],
+  "portsAttributes": {
+    "8080": {
+      "label": "NFSU2 Web Game Server",
+      "onAutoForward": "openBrowser",
+      "visibility": "public"
+    }
+  },
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  }
+}
